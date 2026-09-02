@@ -1,0 +1,36 @@
+#pragma once
+
+#include <cstdint>
+#include <string>
+
+namespace veyra {
+
+struct FileIdentity {
+    std::wstring path;
+    uint64_t sizeBytes = 0;
+    std::string sha256Upper;        // 64 uppercase hex characters when computed
+    std::wstring fileVersion;       // "310.8.0.0" style, empty when absent
+    std::wstring productVersion;
+    bool signatureValid = false;
+    uint32_t winTrustError = 0;
+    std::wstring signerSubject;     // certificate subject when signature valid
+    bool signerIsNvidia = false;
+};
+
+enum class IdentityError : int32_t {
+    None = 0,
+    FileOpen = 1,
+    Read = 2,
+    Hash = 3,
+    VersionInfo = 4,
+    Signature = 5,
+};
+
+const char* identityErrorString(IdentityError error);
+
+// Computes size + SHA-256 + version strings + Authenticode status + signer
+// subject for one file. Returns false and fills `error` when a stage fails;
+// partial results remain in `out` for logging.
+bool computeFileIdentity(const std::wstring& path, FileIdentity& out, IdentityError& error);
+
+} // namespace veyra

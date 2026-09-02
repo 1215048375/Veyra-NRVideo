@@ -24,6 +24,18 @@ include(VeyraWarnings)
 # ---------------------------------------------------------------------------
 # Targets grow phase by phase; only what actually compiles is declared.
 # ---------------------------------------------------------------------------
+add_library(veyra_base STATIC
+  src/base/Log.cpp
+  src/base/NgxResult.cpp
+  src/base/FileIdentity.cpp
+)
+veyra_apply_warnings(veyra_base)
+target_compile_features(veyra_base PUBLIC cxx_std_20)
+target_compile_definitions(veyra_base PUBLIC
+  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_include_directories(veyra_base PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(veyra_base PUBLIC bcrypt wintrust crypt32 version)
+
 add_executable(veyra_runtime_probe
   tools/runtime_probe/main.cpp
 )
@@ -31,3 +43,4 @@ veyra_apply_warnings(veyra_runtime_probe)
 target_compile_features(veyra_runtime_probe PRIVATE cxx_std_20)
 target_compile_definitions(veyra_runtime_probe PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(veyra_runtime_probe PRIVATE veyra_base)

@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 4,
+    "completed": 5,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P0.5: implement veyra_base (structured logger, HRESULT/NGX result strings, file size/hash/signature checks) and verify with a real probe self-test.",
+  "currentTask": "P0.6: implement veyra_gfx D3D12DeviceContext (RTX adapter, device, direct queue, debug layer, 4-slot allocator/list/fence/event ring) and verify with probe --device-info on the real GPU.",
   "lastGate": {
     "name": "phase0",
     "status": "failed",
@@ -96,6 +96,6 @@
   "lastGoodCommit": null,
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Implement P0.5 veyra_base, then P0.6 gfx, P0.7 probe, P0.8 gate runs.",
-  "updatedAt": "2026-09-02T21:00:00+08:00"
+  "nextAction": "Implement P0.6 veyra_gfx, P0.7 probe DLL load/window/JSON, P0.8 gate runs.",
+  "updatedAt": "2026-09-02T21:40:00+08:00"
 }

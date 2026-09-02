@@ -142,6 +142,34 @@ Result:
 
 ---
 
+## Cycle 005 — P0.5 veyra_base：logger/result 字符串/文件身份
+
+### Before
+
+- Phase: 0
+- 唯一任务: 实现 veyra_base 静态库（结构化 logger、Status/HRESULT/NGX result 字符串、文件 size/SHA256/version/Authenticode 签名检查），probe 增加 --self-test 模式实测这些功能。
+- 可证伪假设: 若 SHA256/WinTrust/版本提取任一实现有误，--self-test 对 staged nvngx_dlssnr.dll 的固定身份（165840496/E16B…/Valid/NVIDIA）校验将失败并 exit 非零。
+- 预计修改文件: include/veyra/{Log.h,Result.h,NgxResult.h,FileIdentity.h}、src/base/{Log.cpp,NgxResult.cpp,FileIdentity.cpp}、CMakeLists.txt（+veyra_base target）、tools/runtime_probe/main.cpp（--self-test）。
+- 快速检查命令: `scripts/build.ps1 -Preset x64-debug` → 0；`veyra_runtime_probe.exe --self-test --runtime-dir <abs runtime_local/nvidia>` → 0。
+- 预期新增证据: self-test 真实输出 exe/DLL 的 SHA256、版本、签名链；staged DLL 与固定常量全匹配。
+
+### After
+
+- 实际修改: 新增 include/veyra/{Log.h,Result.h,NgxResult.h,FileIdentity.h}、src/base/{Log.cpp,NgxResult.cpp,FileIdentity.cpp}；CMakeLists 增加 veyra_base 静态库（bcrypt/wintrust/crypt32/version）；main.cpp 增加 --self-test。
+- 实际命令与 exit code:
+  - `scripts/build.ps1 -Preset x64-debug` → 前两次 exit 6：C4838（DXGI 字面量 unsigned→long 收缩）、WinVerifyTrust 形参需非 const GUID*、匿名命名空间内 log:: 未限定、wchar→char range 构造 C4244；逐一修复后 exit 0。
+  - `scripts/build.ps1 -Preset x64-release` → exit 0。
+  - `veyra_runtime_probe.exe --self-test --runtime-dir <abs>` → exit 0，输出：result-strings ok（S_OK / DXGI_ERROR_DEVICE_REMOVED / NVSDK_NGX_Result_Success）；exe 自身 identity（1235456 字节，sha256=75F9F06F…，签名 Invalid(2148204800)=TRUST_E_NOSIGNATURE，符合未签名自编程序预期）；staged DLL identity 全匹配（165840496 / E16B…FC8E / 310.8.0.0 / Valid / NVIDIA Corporation）。
+  - 教训记录：一次构建失败后误跑了旧 stub exe 并显示 exit 0——陈旧产物陷阱，phase0 gate 的 runId+exeSha256 契约正是为此设计。
+- 新证据/日志路径: self-test 控制台输出（已记录于上）；无新 capture。
+- 失败 fingerprint: phase0|build x64-debug|6|C4838/WinVerifyTrust const/log 未限定/C4244 —— 4 个不同编译错误在同一指纹序列内全部修复。
+- 本 fingerprint 第几次不同尝试: 每个错误独立修复；当前无遗留。
+- 是否有进展，依据: 是——veyra_base 的 hash/签名/版本/日志/字符串功能全部经真实运行验证，DLL 身份校验与 preflight 的 PowerShell 结果一致。
+- STATE/BACKLOG 更新: cycle.completed=5、currentTask 指向 P0.6；BACKLOG P0.5 → DONE。
+- 下一唯一动作: P0.6 veyra_gfx：D3D12DeviceContext（RTX adapter、device、direct queue、debug layer、4-slot allocator/list/fence/event ring）+ probe --device-info 实测。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名

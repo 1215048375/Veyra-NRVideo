@@ -8,7 +8,7 @@
 - [x] P0.2 确认 .gitignore 后按 LOOP_ENGINE 固定顺序初始化本地 Git；显式 staged allowlist、建立 baseline commit、切到 agent/veyra-v1-loop、写 baselineCommit 状态指针；验证两个二进制、runtime_local、third_party_local、reference_local、captures、logs 均未被跟踪。（2026-09-02：baseline=2086282，loop 指针提交=09abf5d，8/8 ignore 探针通过，17 文件 allowlist，Git 后 preflight 66/66。）
 - [x] P0.3 先创建 fail-closed 的 scripts/gates/phase0.ps1，编码 Playbook 的 Phase 0 门槛；此时因为工程/输出不存在必须失败。（2026-09-02：gate 建立并 AST-clean；负向运行 exit 1，5 项缺失输入全报；无项目变异。）
 - [x] P0.4 建立最小 CMake/C++20 Win32 x64 工程与 Debug/Release presets，不引入 FFmpeg/UI。（2026-09-02：Ninja presets 双配置构建 exit 0，stub 运行 exit 0，build.ps1 解析 vswhere/vcvars，presets 无机器路径。）
-- [ ] P0.5 实现结构化 logger、HRESULT/NGX result 字符串、文件 size/hash/signature 检查。
+- [x] P0.5 实现结构化 logger、HRESULT/NGX result 字符串、文件 size/hash/signature 检查。（2026-09-02：--self-test 实测 BCrypt SHA256、WinVerifyTrust、CryptQueryObject 签名者、版本提取；staged DLL 身份与固定契约全匹配；双 preset 构建 exit 0。）
 - [ ] P0.6 实现 D3D12DeviceContext：RTX adapter、device、direct queue、debug layer、4-slot command allocator/list/fence/event ring。
 - [ ] P0.7 实现 veyra_runtime_probe：受限绝对路径加载本地复制的 nvngx_dlssnr.dll，验证 required exports；不得加载 addon。
 - [ ] P0.8 Debug/Release 构建并实际运行 probe；D3D12 窗口循环 5 分钟无 device removed；记录命令、exit code、GPU/driver、hash/signature/exports、日志路径。
