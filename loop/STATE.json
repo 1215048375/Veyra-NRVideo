@@ -92,7 +92,7 @@
   },
   "lastFailureFingerprint": null,
   "failureLedger": [],
-  "baselineCommit": null,
+  "baselineCommit": "2086282478ae5d1e07e8162d47148633b59882fe",
   "lastGoodCommit": null,
   "openP0P1Findings": [],
   "blockers": [],
