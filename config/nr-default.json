@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "nr": {
+    "preset": 0,
+    "style": 0,
+    "intensity": 1.0,
+    "localToneStrength": 1.0,
+    "localStructureStrength": 1.0,
+    "skinStructureStrength": -1.0,
+    "useAutoMask": false,
+    "uiCorrection": false
+  }
+}

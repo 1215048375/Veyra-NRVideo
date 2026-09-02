@@ -304,6 +304,31 @@ Result:
 
 ---
 
+## Cycle 011 — P1.1 phase1 gate 与测试帧契约
+
+### Before
+
+- Phase: 1
+- 唯一任务: 创建 fail-closed 的 scripts/gates/phase1.ps1，编码 Playbook §16 Phase 1 全部门槛（Init_Ext/Create 成功、300/300 Evaluate、输出非黑非恒定无 NaN、两组 Style/Intensity 变体 hash 不同、GPU timestamp 非 0、Release/Shutdown 干净、Debug run 需 debug layer 开启且无 state error、capture 存在、runId/exeSha256 防陈旧、git ignore），并写 config/nr-default.json；验证当前无 harness 时 exit 1。
+- 可证伪假设: 若 gate 在 tools/nr_harness/shaders 不存在时 exit 0，则为假 gate；预期现在 exit 1。
+- 预计修改文件: scripts/gates/phase1.ps1、config/nr-default.json、loop/{JOURNAL,STATE,BACKLOG}。
+- 快速检查命令: `loop-gate.ps1 -Gate phase1` → 预期 exit 1（缺失 harness 输入）。
+- 预期新增证据: gate 存在、AST-clean、负向 exit 1、harness JSON 契约定稿。
+- 附注: NGX SDK 310.7 已从官方 GitHub clone 并按 Playbook 契约整理到 third_party_local/nvidia/DLSS_SDK_310.7.0/（include 16 头、x64/nvsdk_ngx_s.lib=36EAB292…、rel/nvngx_dlss.dll=BE6E434A…、nvngx_dlssg.dll=135EAF07…）；全部 ignored。
+
+### After
+
+- 实际修改: 新增 scripts/gates/phase1.ps1（约 240 行，编码 §16 Phase 1 全部门槛）与 config/nr-default.json（Playbook 9.4 nr 段固定默认值）。
+- 实际命令与 exit code: AST → AST-CLEAN；`loop-gate.ps1 -Gate phase1` → exit 1（input:GenerateTestPattern.hlsl、tools/nr_harness/main.cpp、src/ngx/NgxCoreHost.cpp、src/ngx/DlssNrRuntimeAdapter.cpp 四项缺失）。
+- 新证据/日志路径: harness JSON 契约定稿（gate 内解析字段：probe/runId/exeSha256/initExt/createFeature/evaluate{attempted,succeeded,failed}/output{meanLuma,minLuma,maxLuma,sha256,nanCount,allZero,constant}/variants[].sha256（≥2 个互异且异于 baseline）/gpu.timestampNonZero/release/deviceRemoved/debugLayer；capture frame0000_proxy.png+frame0000_raw.png）。
+- 失败 fingerprint: 预期 fail-closed，非缺陷。
+- 是否有进展，依据: 是——Phase 1 验收从文字变为机器检查并证明当前无法通过。
+- 附加: NGX SDK 310.7 整理完成（见 Before 附注）。
+- STATE/BACKLOG 更新: cycle.completed=11；BACKLOG P1.1 → DONE。
+- 下一唯一动作: P1.2 实现 veyra_ngx：NgxCoreHost（Init with ProjectID/参数块生命周期）、NgxParameters 强类型封装、DlssNrParameters 常量、DlssNrRuntimeAdapter（Feature 18 常量/受限加载/exports/caller-name 兼容层骨架）与严格逆序 RAII。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名
