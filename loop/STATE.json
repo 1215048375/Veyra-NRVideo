@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 17,
+    "completed": 18,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P2.1: create scripts/gates/phase2.ps1 (fail-closed) and the CPU golden tests for transfer/range/matrix/proxy encode/decode per Playbook section 9 with exact tolerances (Proxy <=1 code value, Final FP16 <=0.002).",
+  "currentTask": "P2.2/P2.3: implement shaders/ParityEncode.hlsl + ParityDecode.hlsl (16x16 groups, out-of-bounds return, Original FP16 -> Proxy RGBA8 -> Final FP16) and the harness --parity-compare mode with four-stage captures, GPU-vs-CPU statistics, and the neutral-baseline/addon-hash record.",
   "lastGate": {
     "name": "phase2",
     "status": "not_run",
