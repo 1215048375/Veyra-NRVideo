@@ -4,24 +4,24 @@
   "objective": "Complete the Veyra V1 definition for Phase 0 through Phase 7 with deterministic gates and independent phase review.",
   "status": "ready",
   "phase": {
-    "id": 0,
-    "name": "Runtime probe and D3D12 skeleton",
-    "state": "review_passed",
-    "gate": "phase0"
+    "id": 1,
+    "name": "Feature 18 native harness",
+    "state": "not_started",
+    "gate": "phase1"
   },
   "phases": [
     {
       "id": 0,
       "name": "Runtime probe and D3D12 skeleton",
-      "status": "review_passed",
+      "status": "passed",
       "gateEvidence": "loop/EVIDENCE.md#phase-0--phase0--2026-09-02t210909-0800",
       "reviewEvidence": "loop/EVIDENCE.md#phase-0--phase0--2026-09-02t210909-0800 (Reviewer PASS, independent rerun a55d5fb41b164abc88fc2760f0b635ec, zero P0/P1)",
-      "commit": null
+      "commit": "1fb7afa5779a6c6a0a585d4ecf18a640260a2fcf"
     },
     {
       "id": 1,
       "name": "Feature 18 native harness",
-      "status": "locked",
+      "status": "not_started",
       "gateEvidence": null,
       "reviewEvidence": null,
       "commit": null
@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 8,
+    "completed": 9,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P0.9: run the read-only Phase 0 Reviewer per loop/REVIEW_PROMPT.md, fix any P0/P1, then create the verified checkpoint commit and unlock Phase 1.",
+  "currentTask": "P1.0a: converge the ID3D12Fence timeline to a single owner before the Phase 1 Evaluate loop (Reviewer P2), then P1.1 phase1 gate + deterministic RGBA8 test frames.",
   "lastGate": {
     "name": "phase0",
     "status": "passed",
@@ -93,9 +93,9 @@
   "lastFailureFingerprint": null,
   "failureLedger": [],
   "baselineCommit": "2086282478ae5d1e07e8162d47148633b59882fe",
-  "lastGoodCommit": null,
+  "lastGoodCommit": "1fb7afa5779a6c6a0a585d4ecf18a640260a2fcf",
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Spawn read-only Phase 0 Reviewer with BASE_COMMIT=2086282478ae5d1e07e8162d47148633b59882fe; after PASS do checkpoint commit and unlock Phase 1.",
-  "updatedAt": "2026-09-02T21:15:00+08:00"
+  "nextAction": "Start Phase 1: P1.0a fence ownership hardening, then P1.1 phase1 gate; NGX SDK 310.7 acquisition per Playbook 3.2 into third_party_local (gitignored).",
+  "updatedAt": "2026-09-02T21:30:00+08:00"
 }
