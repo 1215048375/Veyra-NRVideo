@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 11,
+    "completed": 12,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P1.2: implement veyra_ngx (NgxCoreHost single-init lifecycle, typed parameter wrapper, DlssNrParameters constants, DlssNrRuntimeAdapter with Feature 18 constants + restricted load + exports + caller-name compatibility layer skeleton) with strict reverse-order RAII.",
+  "currentTask": "P1.3: implement the isolated, removable caller-name compatibility layer (PE import walk -> GetModuleFileNameW IAT slot -> single-owner shim install/restore) with the six boundary tests from Playbook 8.3.",
   "lastGate": {
     "name": "phase0",
     "status": "passed",
@@ -96,6 +96,6 @@
   "lastGoodCommit": "1fb7afa5779a6c6a0a585d4ecf18a640260a2fcf",
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Implement P1.2 veyra_ngx core host + NR runtime adapter, then P1.3 caller shim, P1.4 Create, P1.5 loop, P1.6 300 frames, P1.7 resets.",
-  "updatedAt": "2026-09-02T21:50:00+08:00"
+  "nextAction": "Implement P1.3 IAT caller shim + boundary tests, then P1.4 Feature 18 Create, P1.5 frame loop, P1.6 300 evaluates.",
+  "updatedAt": "2026-09-02T22:10:00+08:00"
 }

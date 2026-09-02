@@ -329,6 +329,31 @@ Result:
 
 ---
 
+## Cycle 012 — P1.2 veyra_ngx：core host/参数封装/NR adapter
+
+### Before
+
+- Phase: 1
+- 唯一任务: 实现 veyra_ngx 静态库（按官方 310.7 头文件签名）：NgxCoreHost（一进程一次 Init_with_ProjectID、参数块生命周期、Shutdown1，SEH 边界）、NgxParameters 强类型 Set 封装、DlssNrParameters 常量、DlssNrRuntimeAdapter（受限加载+5 exports 解析，Feature 18 常量/AppID 仅在此文件）；CMake 增加 VEYRA_ENABLE_EXPERIMENTAL_DLSSNR 门（缺 SDK 路径即 FATAL_ERROR）；harness stub --load-only 实测 core init→snippet load→exports→逆序释放。修正 NgxResult.cpp 的 Success=0x1（官方头）。
+- 可证伪假设: 若 core Init 或 snippet 加载在本机失败，--load-only 非零退出并带真实 result hex。
+- 预计修改文件: src/ngx/NgxCoreHost.{h,cpp}（h 在 include/veyra/ngx/）、include/veyra/ngx/{NgxParameters.h,DlssNrParameters.h,DlssNrRuntimeAdapter.h}、src/ngx/DlssNrRuntimeAdapter.cpp、src/base/NgxResult.cpp（修正）、tools/nr_harness/main.cpp（stub）、CMakeLists.txt、scripts/build.ps1（传 SDK 根/实验开关）。
+- 快速检查命令: `build.ps1 -Preset x64-debug` → 0；`veyra_nr_harness.exe --load-only --runtime-dir <abs>` → 0（core init success + exports 5/5 + 干净 shutdown）。
+- 预期新增证据: 真实 Init_with_ProjectID result（0x1=Success）、snippet exports、Shutdown result。
+
+### After
+
+- 实际修改: include/veyra/ngx/{NgxCoreHost.h,NgxParameters.h,DlssNrParameters.h,DlssNrRuntimeAdapter.h}、src/ngx/{NgxCoreHost.cpp,DlssNrRuntimeAdapter.cpp}、tools/nr_harness/main.cpp（--load-only）、CMakeLists（veyra_ngx 实验开关 + FATAL_ERROR + 按配置选 _dbg/_s 库 + 全工具静态 CRT）、scripts/build.ps1（自动传 SDK 根 + 实验开关）、src/base/NgxResult.cpp（按官方 310.7 头修正 Success=0x1 并补全 20 项 FAIL 表）、tools/runtime_probe/main.cpp 自测改用 0x1。
+- 实际命令与 exit code:
+  - `build.ps1 -Preset x64-debug -Clean` → 修复 3 轮（头文件需先 d3d12.h 再 nvsdk_ngx.h + 缺 <string>/<windows.h>；`Init_with_ProjectID` 大小写 D；NVIDIA 静态库是 MT 系 → 全工具 CMP0091 静态 CRT + 按配置选库）后 exit 0；x64-release exit 0。
+  - `veyra_nr_harness.exe --load-only --runtime-dir <abs>` Debug 与 Release 均 exit 0（PASS）。
+- 新证据/日志路径: harness 控制台——**Init_with_ProjectID result=0x1 (NVSDK_NGX_Result_Success)**（本工程首次真实 NGX Core 调用，使用自己的 projectId=8562ea46-…，SEH=0）；snippet 受限加载 exports 5/5；逆序释放：snippet FreeLibrary → core Shutdown1 result=0x1 → device shutdown 全干净。
+- 失败 fingerprint: 无遗留（3 个编译期缺陷逐一修复，每个有新证据）。
+- 是否有进展，依据: 是——P1.2 验收成立：core/参数封装/adapter/逆序 RAII 全部经真实运行验证。
+- STATE/BACKLOG 更新: cycle.completed=12；BACKLOG P1.2 → DONE。
+- 下一唯一动作: P1.3 caller-name 兼容层：PE import 表解析 → GetModuleFileNameW IAT slot 单 owner → VirtualProtect+InterlockedExchangePointer 安装 shim → 六项边界测试（nSize==0/过小/恰好 10/正常/nullptr/非 caller）→ 恢复验证。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名

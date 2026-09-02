@@ -53,6 +53,17 @@ if ($Clean -and (Test-Path -LiteralPath $buildDir -PathType Container)) {
     Remove-Item -LiteralPath $buildDir -Recurse -Force
 }
 
+# Local experimental DLSSNR support: enable when the staged official SDK tree
+# exists; the CMake configure itself fail-closes on missing paths.
+$configureExtra = ""
+$sdkRoot = Join-Path $Root "third_party_local\nvidia\DLSS_SDK_310.7.0"
+if (Test-Path -LiteralPath (Join-Path $sdkRoot "include\nvsdk_ngx.h") -PathType Leaf) {
+    $configureExtra = ' -DVEYRA_ENABLE_EXPERIMENTAL_DLSSNR=ON -DVEYRA_DLSS_SDK_ROOT="{0}"' -f $sdkRoot
+}
+else {
+    $configureExtra = " -DVEYRA_ENABLE_EXPERIMENTAL_DLSSNR=OFF"
+}
+
 # --- Configure + build inside one vcvars environment, from a temp batch file
 $batchDir = Join-Path $Root "out\build"
 New-Item -ItemType Directory -Force -Path $batchDir | Out-Null
@@ -63,7 +74,7 @@ $batchLines = @(
     ('call "{0}" >nul 2>&1' -f $vcvars),
     ('if errorlevel 1 exit /b 4' -f $null),
     ('cd /d "{0}"' -f $Root),
-    ('"{0}" --preset {1}' -f $cmakeExe, $Preset),
+    ('"{0}" --preset {1}{2}' -f $cmakeExe, $Preset, $configureExtra),
     'if errorlevel 1 exit /b 5',
     ('"{0}" --build --preset {1}' -f $cmakeExe, $Preset),
     'if errorlevel 1 exit /b 6',

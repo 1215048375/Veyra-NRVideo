@@ -55,11 +55,36 @@ const KnownHResult* findKnownHResult(uint32_t hr)
     return nullptr;
 }
 
-// The single NGX result code whose numeric value is verified against the
-// public NVIDIA NGX SDK headers at this stage. The full named table lands in
-// Phase 1 together with the pinned DLSS SDK 310.7 headers; unknown values
-// intentionally print hex-only instead of a guessed name.
-constexpr uint64_t kNgxResultSuccess = 0x300000ull;
+struct KnownNgxResult {
+    uint64_t value;
+    const char* name;
+};
+
+// Complete table from the pinned official NVIDIA DLSS SDK 310.7.0 header
+// (nvsdk_ngx_defs.h); NVSDK_NGX_Result_Success is 0x1, failures are
+// 0xBAD00000 | n. Unknown values print hex-only, never a guessed name.
+const KnownNgxResult kKnownNgxResults[] = {
+    {0x1ull, "NVSDK_NGX_Result_Success"},
+    {0xBAD00000ull, "NVSDK_NGX_Result_Fail"},
+    {0xBAD00001ull, "NVSDK_NGX_Result_FAIL_FeatureNotSupported"},
+    {0xBAD00002ull, "NVSDK_NGX_Result_FAIL_PlatformError"},
+    {0xBAD00003ull, "NVSDK_NGX_Result_FAIL_FeatureAlreadyExists"},
+    {0xBAD00004ull, "NVSDK_NGX_Result_FAIL_FeatureNotFound"},
+    {0xBAD00005ull, "NVSDK_NGX_Result_FAIL_InvalidParameter"},
+    {0xBAD00006ull, "NVSDK_NGX_Result_FAIL_ScratchBufferTooSmall"},
+    {0xBAD00007ull, "NVSDK_NGX_Result_FAIL_NotInitialized"},
+    {0xBAD00008ull, "NVSDK_NGX_Result_FAIL_UnsupportedInputFormat"},
+    {0xBAD00009ull, "NVSDK_NGX_Result_FAIL_RWFlagMissing"},
+    {0xBAD0000Aull, "NVSDK_NGX_Result_FAIL_MissingInput"},
+    {0xBAD0000Bull, "NVSDK_NGX_Result_FAIL_UnableToInitializeFeature"},
+    {0xBAD0000Cull, "NVSDK_NGX_Result_FAIL_OutOfDate"},
+    {0xBAD0000Dull, "NVSDK_NGX_Result_FAIL_OutOfGPUMemory"},
+    {0xBAD0000Eull, "NVSDK_NGX_Result_FAIL_UnsupportedFormat"},
+    {0xBAD0000Full, "NVSDK_NGX_Result_FAIL_UnableToWriteToAppDataPath"},
+    {0xBAD00010ull, "NVSDK_NGX_Result_FAIL_UnsupportedParameter"},
+    {0xBAD00011ull, "NVSDK_NGX_Result_FAIL_Denied"},
+    {0xBAD00012ull, "NVSDK_NGX_Result_FAIL_NotImplemented"},
+};
 
 } // namespace
 
@@ -75,8 +100,10 @@ std::string hresultString(long hr)
 
 std::string ngxResultString(uint64_t result)
 {
-    if (result == kNgxResultSuccess) {
-        return std::format("0x{:X} (NVSDK_NGX_Result_Success)", result);
+    for (const auto& entry : kKnownNgxResults) {
+        if (entry.value == result) {
+            return std::format("0x{:X} ({})", result, entry.name);
+        }
     }
     return std::format("0x{:X}", result);
 }

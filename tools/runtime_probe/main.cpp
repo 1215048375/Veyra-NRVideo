@@ -658,7 +658,7 @@ int runSelfTest(const std::wstring& runtimeDir)
     const std::string hrOk = veyra::hresultString(0);
     const std::string hrRemoved = veyra::hresultString(0x887A0005L);
     const std::string hrUnknown = veyra::hresultString(0x8000FFFFL);
-    const std::string ngxOk = veyra::ngxResultString(0x300000ull);
+    const std::string ngxOk = veyra::ngxResultString(0x1); // NVSDK_NGX_Result_Success per SDK 310.7 header
     if (hrOk.find("S_OK") == std::string::npos ||
         hrRemoved.find("DXGI_ERROR_DEVICE_REMOVED") == std::string::npos ||
         hrUnknown.find("0x8000FFFF") == std::string::npos ||
