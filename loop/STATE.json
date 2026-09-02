@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 13,
+    "completed": 14,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P1.4: create Feature 18 through the signed snippet with the exact Playbook 8.5 parameter names and types (all width/height variants, callback, node masks) and a non-null handle.",
+  "currentTask": "P1.5: implement Phase 1 GPU resources (Proxy/Neural RGBA8, ZeroMotion R16G16F, ZeroDepth R32F, Confidence R8), GenerateTestPattern.hlsl compiled at build time via DXC, the 8.6 Evaluate parameter set, and the per-frame Proxy->Feature18->Raw execution on the 4-slot ring.",
   "lastGate": {
     "name": "phase0",
     "status": "passed",
@@ -96,6 +96,6 @@
   "lastGoodCommit": "1fb7afa5779a6c6a0a585d4ecf18a640260a2fcf",
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Implement P1.4 Feature 18 Create (Playbook 8.4/8.5 order: core init -> load -> shim -> Init_Ext -> params -> CreateFeature), then P1.5 frame loop.",
-  "updatedAt": "2026-09-02T22:25:00+08:00"
+  "nextAction": "Implement P1.5 resources + test pattern shader + Evaluate loop, then P1.6 300-frame run with output statistics.",
+  "updatedAt": "2026-09-02T22:40:00+08:00"
 }

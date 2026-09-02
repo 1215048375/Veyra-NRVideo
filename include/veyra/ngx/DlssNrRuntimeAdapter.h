@@ -83,6 +83,20 @@ public:
     static DWORD WINAPI testShimGetModuleFileNameW(HMODULE module, LPWSTR filename, DWORD size);
     static HMODULE testCallerModule();
 
+    // --- SEH-guarded snippet calls (Playbook 7.2/8.4). Each writes the raw
+    // result and the SEH code (0 when none); returns false only on SEH.
+    bool snippetInitExt(ID3D12Device* device, const std::wstring& runtimeDir, uint64_t& result, uint32_t& sehCode);
+    bool snippetCreateFeature(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* parameters,
+        NVSDK_NGX_Handle** handle, uint64_t& result, uint32_t& sehCode);
+    bool snippetEvaluateFeature(ID3D12GraphicsCommandList* cmdList, const NVSDK_NGX_Handle* handle,
+        const NVSDK_NGX_Parameter* parameters, uint64_t& result, uint32_t& sehCode);
+    bool snippetReleaseFeature(NVSDK_NGX_Handle* handle, uint64_t& result, uint32_t& sehCode);
+    bool snippetShutdown1(ID3D12Device* device, uint64_t& result, uint32_t& sehCode);
+
+    // Feature-18 scaling ratio callback: sets DLSSNR.ScalingRatio to 1.0 and
+    // reports success (same-resolution, non-upscaling V1 contract).
+    static NVSDK_NGX_Result NVSDK_CONV scalingRatioCallback(NVSDK_NGX_Parameter* parameters);
+
 private:
     HMODULE module_ = nullptr;
     Exports exports_{};

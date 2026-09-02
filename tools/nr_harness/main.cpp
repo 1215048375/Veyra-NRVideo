@@ -15,9 +15,12 @@
 #include "veyra/Log.h"
 #include "veyra/NgxResult.h"
 #include "veyra/Result.h"
+#include "veyra/gfx/CommandSlotRing.h"
 #include "veyra/gfx/D3D12DeviceContext.h"
+#include "veyra/ngx/DlssNrParameters.h"
 #include "veyra/ngx/DlssNrRuntimeAdapter.h"
 #include "veyra/ngx/NgxCoreHost.h"
+#include "veyra/ngx/NgxParameters.h"
 
 namespace {
 
@@ -200,6 +203,174 @@ int runShimTest(const std::wstring& runtimeDir)
     return 0;
 }
 
+// P1.4: Feature 18 Create through the signed snippet, Playbook 8.4 order.
+int runCreateTest(const std::wstring& runtimeDir, uint32_t width, uint32_t height)
+{
+    const std::wstring dllPath = runtimeDir + L"\\nvngx_dlssnr.dll";
+    veyra::FileIdentity dllIdentity{};
+    veyra::IdentityError dllError = veyra::IdentityError::None;
+    if (!veyra::computeFileIdentity(dllPath, dllIdentity, dllError) ||
+        dllIdentity.sizeBytes != kExpectedDllSize ||
+        dllIdentity.sha256Upper != kExpectedDllSha256 ||
+        !dllIdentity.signatureValid ||
+        !dllIdentity.signerIsNvidia) {
+        veyra::log::error("harness", "create-test: staged runtime identity mismatch");
+        return 3;
+    }
+
+    // 1. Device context + slot ring (Create needs a real command list).
+#if defined(VEYRA_D3D12_DEBUG)
+    constexpr bool kDebugLayerByBuild = true;
+#else
+    constexpr bool kDebugLayerByBuild = false;
+#endif
+    veyra::gfx::D3D12DeviceContext context;
+    veyra::gfx::DeviceContextDesc contextDesc{};
+    contextDesc.enableDebugLayer = kDebugLayerByBuild;
+    contextDesc.commandSlotCount = 4;
+    veyra::Status status = veyra::Status::Ok;
+    if (!context.initialize(contextDesc, status)) {
+        return 6;
+    }
+    veyra::gfx::CommandSlotRing ring;
+    if (!ring.initialize(context.device(), context.directQueue(), context.fence(), context.fenceEvent(), 4, status)) {
+        context.shutdown();
+        return 7;
+    }
+
+    // 2. NGX core init with the local identity.
+    LocalIdentity identity{};
+    if (!loadLocalIdentity(runtimeDir, identity)) {
+        ring.shutdown();
+        context.shutdown();
+        return 7;
+    }
+    veyra::ngx::NgxCoreHost coreHost;
+    if (!coreHost.initialize(context.device(), runtimeDir, identity.projectId.c_str(), identity.engineVersion.c_str(), status)) {
+        veyra::log::error("harness", std::format("create-test: core init failed result={}", veyra::ngxResultString(coreHost.initResult())));
+        ring.shutdown();
+        context.shutdown();
+        return 8;
+    }
+
+    // 3. Snippet load + caller compatibility + Init_Ext.
+    veyra::ngx::DlssNrRuntimeAdapter adapter;
+    if (!adapter.load(runtimeDir, status) ||
+        !adapter.installCallerCompatibility(status)) {
+        veyra::log::error("harness", std::format("create-test: adapter load/shim failed status={}", veyra::statusString(status)));
+        adapter.unload();
+        coreHost.shutdown();
+        ring.shutdown();
+        context.shutdown();
+        return 9;
+    }
+
+    uint64_t result = 0;
+    uint32_t sehCode = 0;
+    if (!adapter.snippetInitExt(context.device(), runtimeDir, result, sehCode) ||
+        result != static_cast<uint64_t>(NVSDK_NGX_Result_Success)) {
+        veyra::log::error("harness", "create-test: snippet Init_Ext failed");
+        adapter.restoreCallerCompatibility();
+        adapter.unload();
+        coreHost.shutdown();
+        ring.shutdown();
+        context.shutdown();
+        return 10;
+    }
+
+    // 4. Create parameters, exactly the Playbook 8.5 table.
+    NVSDK_NGX_Parameter* rawParams = coreHost.allocateParameters(status);
+    if (rawParams == nullptr) {
+        veyra::log::error("harness", "create-test: AllocateParameters failed");
+        goto teardown_fail;
+    }
+    {
+        veyra::ngx::ParameterBlock params(rawParams);
+        namespace p = veyra::ngx::dlssnr;
+        params.setU32(p::kWidth, width);
+        params.setU32(p::kHeight, height);
+        params.setU32(p::kInputWidth, width);
+        params.setU32(p::kInputHeight, height);
+        params.setU32(p::kOutputWidth, width);
+        params.setU32(p::kOutputHeight, height);
+        params.setU32(p::kOutputDotWidth, width);
+        params.setU32(p::kOutputDotHeight, height);
+        params.setU32(p::kUpscaling, 0);
+        params.setF32(p::kScale, 1.0f);
+        params.setF32(p::kScalingRatio, 1.0f);
+        params.setVoid(p::kComputeScalingRatioCallback,
+            reinterpret_cast<void*>(&veyra::ngx::DlssNrRuntimeAdapter::scalingRatioCallback));
+        params.setI32(p::kHintRenderPreset, 0);
+        params.setU32(p::kStdWidth, width);
+        params.setU32(p::kStdHeight, height);
+        params.setI32(p::kPerfQualityValue, 1); // NVSDK_NGX_PerfQuality_Value_Balanced
+        params.setU32(p::kCreationNodeMask, 1);
+        params.setU32(p::kVisibilityNodeMask, 1);
+        veyra::log::info("harness", std::format("create-test: {} create parameters set for {}x{}",
+            18, width, height));
+    }
+
+    // 5. CreateFeature(18) on a real command list, then execute and wait once.
+    {
+        NVSDK_NGX_Handle* handle = nullptr;
+        ID3D12GraphicsCommandList* list = ring.acquire(0, status);
+        if (list == nullptr) {
+            goto teardown_fail;
+        }
+        if (!adapter.snippetCreateFeature(list, rawParams, &handle, result, sehCode)) {
+            veyra::log::error("harness", std::format("create-test: CreateFeature SEH={} result={}", sehCode, veyra::ngxResultString(result)));
+            goto teardown_fail;
+        }
+        if (!ring.submitAndSignal(0)) {
+            goto teardown_fail;
+        }
+        if (!ring.waitIdle()) {
+            goto teardown_fail;
+        }
+
+        const bool created = result == static_cast<uint64_t>(NVSDK_NGX_Result_Success) && handle != nullptr;
+        veyra::log::info("harness", std::format("create-test: CreateFeature result={} handle={}",
+            veyra::ngxResultString(result), handle != nullptr ? "non-null" : "null"));
+        if (!created) {
+            goto teardown_fail;
+        }
+
+        // 6. Reverse-order teardown (Playbook 8.8) and clean-exit report.
+        uint64_t releaseResult = 0;
+        uint32_t releaseSeh = 0;
+        (void)adapter.snippetReleaseFeature(handle, releaseResult, releaseSeh);
+        coreHost.destroyParameters(rawParams);
+        rawParams = nullptr;
+        uint64_t snippetShutdownResult = 0;
+        uint32_t snippetShutdownSeh = 0;
+        (void)adapter.snippetShutdown1(context.device(), snippetShutdownResult, snippetShutdownSeh);
+        adapter.restoreCallerCompatibility();
+        adapter.unload();
+        ring.shutdown();
+        coreHost.shutdown();
+        context.shutdown();
+
+        const bool clean = releaseResult == static_cast<uint64_t>(NVSDK_NGX_Result_Success) &&
+            snippetShutdownResult == static_cast<uint64_t>(NVSDK_NGX_Result_Success);
+        veyra::log::info("harness", std::format("create-test: teardown release={} snippetShutdown={}",
+            veyra::ngxResultString(releaseResult), veyra::ngxResultString(snippetShutdownResult)));
+        veyra::log::info("harness", clean ? "create-test: PASS" : "create-test: FAIL (teardown results)");
+        return clean ? 0 : 12;
+    }
+
+teardown_fail:
+    if (rawParams != nullptr) {
+        coreHost.destroyParameters(rawParams);
+    }
+    adapter.restoreCallerCompatibility();
+    adapter.unload();
+    ring.shutdown();
+    coreHost.shutdown();
+    context.shutdown();
+    veyra::log::error("harness", "create-test: FAIL");
+    return 11;
+}
+
 int runLoadOnly(const std::wstring& runtimeDir)
 {
     // 1. Device context (debug layer follows the build configuration).
@@ -276,6 +447,9 @@ int wmain(int argc, wchar_t** argv)
     std::wstring logFile;
     bool loadOnly = false;
     bool shimTest = false;
+    bool createTest = false;
+    uint32_t width = 1920;
+    uint32_t height = 1080;
     for (int i = 1; i < argc; ++i) {
         const std::wstring arg = argv[i];
         if (arg == L"--load-only") {
@@ -284,11 +458,20 @@ int wmain(int argc, wchar_t** argv)
         else if (arg == L"--shim-test") {
             shimTest = true;
         }
+        else if (arg == L"--create-test") {
+            createTest = true;
+        }
         else if (arg == L"--runtime-dir" && i + 1 < argc) {
             runtimeDir = argv[++i];
         }
         else if (arg == L"--log-file" && i + 1 < argc) {
             logFile = argv[++i];
+        }
+        else if (arg == L"--width" && i + 1 < argc) {
+            width = static_cast<uint32_t>(wcstoul(argv[++i], nullptr, 10));
+        }
+        else if (arg == L"--height" && i + 1 < argc) {
+            height = static_cast<uint32_t>(wcstoul(argv[++i], nullptr, 10));
         }
     }
 
@@ -300,11 +483,14 @@ int wmain(int argc, wchar_t** argv)
     if (shimTest && !runtimeDir.empty()) {
         exitCode = runShimTest(runtimeDir);
     }
+    else if (createTest && !runtimeDir.empty()) {
+        exitCode = runCreateTest(runtimeDir, width, height);
+    }
     else if (loadOnly && !runtimeDir.empty()) {
         exitCode = runLoadOnly(runtimeDir);
     }
     else {
-        veyra::log::info("harness", "no mode selected; use --load-only/--shim-test --runtime-dir <abs> (frame loop arrives in P1.4-P1.6)");
+        veyra::log::info("harness", "no mode selected; use --load-only/--shim-test/--create-test --runtime-dir <abs> (frame loop arrives in P1.5-P1.6)");
         exitCode = 1;
     }
 

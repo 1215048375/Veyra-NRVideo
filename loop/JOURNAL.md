@@ -377,6 +377,29 @@ Result:
 
 ---
 
+## Cycle 014 — P1.4 Feature 18 Create
+
+### Before
+
+- Phase: 1
+- 唯一任务: adapter 增加五个 snippet 调用的 SEH 包装（Init_Ext/CreateFeature/EvaluateFeature/ReleaseFeature/Shutdown1）；harness --create-test 按 Playbook 8.4 顺序（core Init→load→shim→Init_Ext(AppID 0x0876232C)→AllocateParameters→8.5 全部 Create 参数→CreateFeature(18)→执行并等待一次→handle 非空→逆序清理）；ScalingRatioCallback 固定 1.0。
+- 可证伪假设: 若任一参数名/类型/顺序错误，CreateFeature 返回非 Success（如 0xBAD00005 InvalidParameter）或 handle 为空——按 Playbook 18 逐项 dump 排查而不是随机删参数。
+- 预计修改文件: include/veyra/ngx/DlssNrRuntimeAdapter.h、src/ngx/DlssNrRuntimeAdapter.cpp、tools/nr_harness/main.cpp。
+- 快速检查命令: `build.ps1 -Preset x64-debug` → 0；`veyra_nr_harness.exe --create-test --runtime-dir <abs>` → 0 且 CreateFeature result=0x1、handle!=null。
+- 预期新增证据: Init_Ext/Create/Release/Shutdown 全链 result hex + handle 非空日志。
+
+### After
+
+- 实际修改: DlssNrRuntimeAdapter 五个 SEH 包装（Init_Ext/Create/Evaluate/Release/Shutdown1）+ scalingRatioCallback；harness --create-test 按 Playbook 8.4 顺序完整执行。
+- 实际命令与 exit code: `build.ps1 -Preset x64-debug` → 0（一轮过，无编译错误）；`--create-test` Debug 与 Release 均 exit 0（PASS）。
+- 新证据/日志路径: 关键链路——core Init 0x1 → shim 安装 → **snippet Init_Ext appId=0x876232C result=0x1** → 18 个 Create 参数（8.5 全表：8 个尺寸变体 + Upscaling=0 + Scale/ScalingRatio=1.0 + callback + Preset=0(int) + Width/Height(uint32) + PerfQualityValue=1(int,Balanced) + 两个 node mask(uint32)=1）→ **CreateFeature id=18 result=0x1 handle=non-null** → ReleaseFeature 0x1 → snippet Shutdown1 0x1 → restore shim → FreeLibrary → core Shutdown1 0x1。
+- 失败 fingerprint: 无（一次通过）。
+- 是否有进展，依据: 是——项目核心可行性在本工程内得到直接证明：signed snippet Feature 18 可用 Playbook 8.5 契约 Create 成功且完整释放。
+- STATE/BACKLOG 更新: cycle.completed=14；BACKLOG P1.4 → DONE。
+- 下一唯一动作: P1.5 实现 Proxy/Neural/ZeroMotion(R16G16F)/ZeroDepth(R32F)/Confidence(R8) 资源 + GenerateTestPattern.hlsl（DXC 构建期编译）+ 8.6 Evaluate 参数与 4-slot 逐帧执行。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名

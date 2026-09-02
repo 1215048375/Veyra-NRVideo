@@ -22,7 +22,7 @@ Phase 0 gate：以 Playbook 第 16 节 Phase 0 为准。未完成 P0.9 禁止开
 - [x] P1.1 先建立 phase1 gate 和确定性 RGBA8 测试帧/输出统计。（2026-09-02：phase1.ps1 fail-closed 建立并负向验证 exit 1；JSON 契约含输出统计/变体 hash/防陈旧字段；nr-default.json 就位；NGX SDK 310.7 已 staging。）
 - [x] P1.2 封装 NGX Core、parameter block、DLSSNR runtime 和严格逆序 RAII。（2026-09-02：Init_with_ProjectID result=0x1 真实成功；exports 5/5；逆序释放干净；harness --load-only 双配置 PASS。）
 - [x] P1.3 实现受隔离、可关闭的 caller-name 兼容层；禁止 patch DLL。（2026-09-02：IAT 单 owner shim + 8 项边界测试全过；DLL 文件从未被修改。）
-- [ ] P1.4 严格按 Playbook 参数名与类型 Create Feature 18。
+- [x] P1.4 严格按 Playbook 参数名与类型 Create Feature 18。（2026-09-02：CreateFeature id=18 result=0x1 handle=non-null，双配置 PASS；8.5 参数全表按名按类型设置。）
 - [ ] P1.5 实现 Proxy→Feature18→Raw 的 D3D12 资源、barrier、subrect 与异步 4-slot 执行。
 - [ ] P1.6 连续 300/300 Evaluate；验证输出非黑、非恒定、随输入/参数变化；记录 GPU timings/result/capture。
 - [ ] P1.7 重建/reset/释放测试。

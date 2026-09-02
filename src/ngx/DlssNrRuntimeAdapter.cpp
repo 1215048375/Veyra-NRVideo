@@ -140,6 +140,175 @@ HMODULE DlssNrRuntimeAdapter::testCallerModule()
     return g_callerModule;
 }
 
+// ---------------------------------------------------------------------------
+// SEH-guarded snippet calls. Each outer method is noexcept-friendly: no C++
+// objects with destructors inside the __try frame.
+// ---------------------------------------------------------------------------
+namespace {
+
+__declspec(noinline) NVSDK_NGX_Result CallSnippetInitExt(
+    DlssNrRuntimeAdapter::InitExtFn fn, unsigned long long appId, const wchar_t* runtimeDir,
+    ID3D12Device* device, NVSDK_NGX_Version version, const NVSDK_NGX_Parameter* parameters,
+    uint32_t& sehCode)
+{
+    sehCode = 0;
+    NVSDK_NGX_Result result = NVSDK_NGX_Result_Fail;
+    __try {
+        result = fn(appId, runtimeDir, device, version, parameters);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        sehCode = static_cast<uint32_t>(GetExceptionCode());
+        result = NVSDK_NGX_Result_FAIL_PlatformError;
+    }
+    return result;
+}
+
+__declspec(noinline) NVSDK_NGX_Result CallSnippetCreateFeature(
+    DlssNrRuntimeAdapter::CreateFeatureFn fn, ID3D12GraphicsCommandList* cmdList,
+    NVSDK_NGX_Feature feature, NVSDK_NGX_Parameter* parameters, NVSDK_NGX_Handle** handle,
+    uint32_t& sehCode)
+{
+    sehCode = 0;
+    NVSDK_NGX_Result result = NVSDK_NGX_Result_Fail;
+    __try {
+        result = fn(cmdList, feature, parameters, handle);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        sehCode = static_cast<uint32_t>(GetExceptionCode());
+        result = NVSDK_NGX_Result_FAIL_PlatformError;
+    }
+    return result;
+}
+
+__declspec(noinline) NVSDK_NGX_Result CallSnippetEvaluateFeature(
+    DlssNrRuntimeAdapter::EvaluateFeatureFn fn, ID3D12GraphicsCommandList* cmdList,
+    const NVSDK_NGX_Handle* handle, const NVSDK_NGX_Parameter* parameters,
+    PFN_NVSDK_NGX_ProgressCallback callback, uint32_t& sehCode)
+{
+    sehCode = 0;
+    NVSDK_NGX_Result result = NVSDK_NGX_Result_Fail;
+    __try {
+        result = fn(cmdList, handle, parameters, callback);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        sehCode = static_cast<uint32_t>(GetExceptionCode());
+        result = NVSDK_NGX_Result_FAIL_PlatformError;
+    }
+    return result;
+}
+
+__declspec(noinline) NVSDK_NGX_Result CallSnippetReleaseFeature(
+    DlssNrRuntimeAdapter::ReleaseFeatureFn fn, NVSDK_NGX_Handle* handle, uint32_t& sehCode)
+{
+    sehCode = 0;
+    NVSDK_NGX_Result result = NVSDK_NGX_Result_Fail;
+    __try {
+        result = fn(handle);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        sehCode = static_cast<uint32_t>(GetExceptionCode());
+        result = NVSDK_NGX_Result_FAIL_PlatformError;
+    }
+    return result;
+}
+
+__declspec(noinline) NVSDK_NGX_Result CallSnippetShutdown1(
+    DlssNrRuntimeAdapter::ShutdownFn fn, ID3D12Device* device, uint32_t& sehCode)
+{
+    sehCode = 0;
+    NVSDK_NGX_Result result = NVSDK_NGX_Result_Fail;
+    __try {
+        result = fn(device);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        sehCode = static_cast<uint32_t>(GetExceptionCode());
+        result = NVSDK_NGX_Result_FAIL_PlatformError;
+    }
+    return result;
+}
+
+} // namespace
+
+bool DlssNrRuntimeAdapter::snippetInitExt(ID3D12Device* device, const std::wstring& runtimeDir,
+    uint64_t& result, uint32_t& sehCode)
+{
+    result = 0;
+    sehCode = 0;
+    if (module_ == nullptr || exports_.initExt == nullptr) {
+        return false;
+    }
+    result = static_cast<uint64_t>(CallSnippetInitExt(exports_.initExt, kSignedSnippetAppId,
+        runtimeDir.c_str(), device, NVSDK_NGX_Version_API, nullptr, sehCode));
+    veyra::log::info("ngx", std::format("snippet Init_Ext appId=0x{:X} result={} seh={}",
+        kSignedSnippetAppId, veyra::ngxResultString(result), sehCode));
+    return sehCode == 0;
+}
+
+bool DlssNrRuntimeAdapter::snippetCreateFeature(ID3D12GraphicsCommandList* cmdList,
+    NVSDK_NGX_Parameter* parameters, NVSDK_NGX_Handle** handle, uint64_t& result, uint32_t& sehCode)
+{
+    result = 0;
+    sehCode = 0;
+    *handle = nullptr;
+    if (module_ == nullptr || exports_.createFeature == nullptr) {
+        return false;
+    }
+    result = static_cast<uint64_t>(CallSnippetCreateFeature(exports_.createFeature, cmdList,
+        kFeatureId, parameters, handle, sehCode));
+    veyra::log::info("ngx", std::format("snippet CreateFeature id={} result={} handle={} seh={}",
+        static_cast<uint32_t>(kFeatureId), veyra::ngxResultString(result),
+        *handle != nullptr ? "non-null" : "null", sehCode));
+    return sehCode == 0;
+}
+
+bool DlssNrRuntimeAdapter::snippetEvaluateFeature(ID3D12GraphicsCommandList* cmdList,
+    const NVSDK_NGX_Handle* handle, const NVSDK_NGX_Parameter* parameters,
+    uint64_t& result, uint32_t& sehCode)
+{
+    result = 0;
+    sehCode = 0;
+    if (module_ == nullptr || exports_.evaluateFeature == nullptr) {
+        return false;
+    }
+    result = static_cast<uint64_t>(CallSnippetEvaluateFeature(exports_.evaluateFeature, cmdList,
+        handle, parameters, nullptr, sehCode));
+    return sehCode == 0;
+}
+
+bool DlssNrRuntimeAdapter::snippetReleaseFeature(NVSDK_NGX_Handle* handle, uint64_t& result, uint32_t& sehCode)
+{
+    result = 0;
+    sehCode = 0;
+    if (module_ == nullptr || exports_.releaseFeature == nullptr) {
+        return false;
+    }
+    result = static_cast<uint64_t>(CallSnippetReleaseFeature(exports_.releaseFeature, handle, sehCode));
+    veyra::log::info("ngx", std::format("snippet ReleaseFeature result={} seh={}",
+        veyra::ngxResultString(result), sehCode));
+    return sehCode == 0;
+}
+
+bool DlssNrRuntimeAdapter::snippetShutdown1(ID3D12Device* device, uint64_t& result, uint32_t& sehCode)
+{
+    result = 0;
+    sehCode = 0;
+    if (module_ == nullptr || exports_.shutdown1 == nullptr) {
+        return false;
+    }
+    result = static_cast<uint64_t>(CallSnippetShutdown1(exports_.shutdown1, device, sehCode));
+    veyra::log::info("ngx", std::format("snippet Shutdown1 result={} seh={}",
+        veyra::ngxResultString(result), sehCode));
+    return sehCode == 0;
+}
+
+NVSDK_NGX_Result NVSDK_CONV DlssNrRuntimeAdapter::scalingRatioCallback(NVSDK_NGX_Parameter* parameters)
+{
+    if (parameters != nullptr) {
+        parameters->Set("DLSSNR.ScalingRatio", 1.0f);
+    }
+    return NVSDK_NGX_Result_Success;
+}
+
 DlssNrRuntimeAdapter::~DlssNrRuntimeAdapter()
 {
     unload();
