@@ -61,6 +61,33 @@ Result:
 
 ---
 
+## Cycle 002 — P0.2 本地 Git 初始化
+
+### Before
+
+- Phase: 0
+- 唯一任务: 按 LOOP_ENGINE §6 固定顺序初始化本地 Git：ignore 探针 → 显式 allowlist staging → baseline commit → agent/veyra-v1-loop 分支 → baselineCommit 状态指针。
+- 可证伪假设: 若任一敏感路径未被 ignore、staged 列表出现专有文件、或 preflight 的 state-git-links 检查失败，则 Git 初始化不合规并回退修正。
+- 预计修改文件: .git/（新建）、loop/STATE.json（baselineCommit 指针）、loop/JOURNAL.md、loop/BACKLOG.md。
+- 快速检查命令: `git check-ignore -v --no-index -- <8 个敏感路径>`；`git diff --cached --name-only`；`scripts/loop-gate.ps1 -Gate preflight`。
+- 预期新增证据: baselineCommit 真实 hash；preflight 通过且含 git-repository/state-git-links/git-sensitive-files/git-effective-ignore 全绿。
+
+### After
+
+- 实际修改: `git init -b main`；repo-local 身份 Veyra Goal Agent / veyra-agent@local.invalid（未动 global config）；显式 add 17 个控制面/状态文档文件；`chore: establish Veyra baseline` = 2086282478ae5d1e07e8162d47148633b59882fe；切 agent/veyra-v1-loop；`loop: record baseline commit` = 09abf5d451e11cf7c167a9599392b50152da8666；STATE.baselineCommit 已写入。
+- 实际命令与 exit code:
+  - `git check-ignore -v --no-index -- nvngx_dlssnr.dll renodx-dlss5-1.addon64 runtime_local/.veyra-ignore-probe third_party_local/.veyra-ignore-probe reference_local/.veyra-ignore-probe captures/.veyra-ignore-probe logs/.veyra-ignore-probe loop/STOP` → exit 0，8/8 全部命中 .gitignore 规则。
+  - `git diff --cached --name-only` → 恰好 17 个已审查文件，无任何专有二进制/local 目录。
+  - `scripts/loop-gate.ps1 -Gate preflight`（Git 就位后）→ exit 0，66/66 checks；新增 git-repository、state-git-links（baseline 为 HEAD 祖先）、git-sensitive-files=none tracked、8× git-effective-ignore、git-diff-check 全部通过。
+- 新证据/日志路径: Git 对象库（.git）；EVIDENCE 未新增 Phase 条目（preflight 非 Phase gate）。
+- 失败 fingerprint: 无（全部命令 exit 0）。
+- 本 fingerprint 第几次不同尝试: 不适用。
+- 是否有进展，依据: 是——仓库从"不存在"变为有真实 baseline 与 loop 分支，且所有专有文件被验证不可进入版本控制。
+- STATE/BACKLOG 更新: STATE.baselineCommit=2086282…、cycle.completed=2、currentTask/nextAction 指向 P0.3；BACKLOG P0.2 → DONE。
+- 下一唯一动作: P0.3 创建 fail-closed 的 scripts/gates/phase0.ps1，编码 Playbook Phase 0 门槛，并验证它在当前空工程状态下 exit 1。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名
