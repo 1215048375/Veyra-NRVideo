@@ -76,19 +76,19 @@
     }
   ],
   "cycle": {
-    "completed": 2,
+    "completed": 3,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P0.3: create fail-closed scripts/gates/phase0.ps1 encoding the Playbook Phase 0 acceptance thresholds; it must exit 1 while the project/outputs do not exist.",
+  "currentTask": "P0.4: create the minimal CMake/C++20 Win32 x64 project with Debug/Release presets (no FFmpeg, no UI): CMakeLists.txt, CMakePresets.json, scripts/build.ps1, scripts/stage-runtime.ps1, source skeleton.",
   "lastGate": {
-    "name": "preflight",
-    "status": "passed",
-    "exitCode": 0,
-    "evidence": "loop/EVIDENCE.md#goal-cycle-001--preflight--2026-09-02"
+    "name": "phase0",
+    "status": "failed",
+    "exitCode": 1,
+    "evidence": "loop/JOURNAL.md#cycle-003 (fail-closed proof: 5 missing project inputs reported)"
   },
   "lastFailureFingerprint": null,
   "failureLedger": [],
@@ -96,6 +96,6 @@
   "lastGoodCommit": null,
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Create scripts/gates/phase0.ps1 (fail-closed), verify it exits 1, then proceed to P0.4 CMake skeleton.",
-  "updatedAt": "2026-09-02T20:30:00+08:00"
+  "nextAction": "Implement P0.4 CMake skeleton (build.ps1/stage-runtime.ps1/presets/CMakeLists), then P0.5-P0.7 implementation, then P0.8 real runs.",
+  "updatedAt": "2026-09-02T20:45:00+08:00"
 }

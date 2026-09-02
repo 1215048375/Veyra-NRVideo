@@ -88,6 +88,32 @@ Result:
 
 ---
 
+## Cycle 003 — P0.3 fail-closed phase0 gate
+
+### Before
+
+- Phase: 0
+- 唯一任务: 创建 scripts/gates/phase0.ps1，把 Playbook §16 Phase 0 完成门槛（Debug/Release 构建、5 分钟窗口无 device removed、runtime hash/签名与 manifest 一致、proprietary ignored、真实 probe 输出解析）编码为确定性检查；验证它在当前无工程状态下 exit 1。
+- 可证伪假设: 若 gate 在 CMakeLists.txt/src/probe 不存在时 exit 0，则它是假 gate，必须重写；预期现在 exit 1。
+- 预计修改文件: scripts/gates/phase0.ps1（新增）、loop/JOURNAL.md、loop/STATE.json、loop/BACKLOG.md。
+- 快速检查命令: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate phase0` → 预期 exit 1 且首个失败项为缺失工程输入。
+- 预期新增证据: gate 脚本存在且 AST 可解析；负向 exit 1 记录。
+
+### After
+
+- 实际修改: 新增 scripts/gates/phase0.ps1（约 300 行，ASCII-only 避免 PS 5.1 代码页问题）。
+- 实际命令与 exit code:
+  - AST 解析 phase0.ps1 → 无错误（AST-CLEAN）。
+  - `scripts/loop-gate.ps1 -Gate phase0` → exit 1；phase-gate:phase0 exitCode=1，内部 5/5 检查失败：input:CMakeLists.txt、CMakePresets.json、scripts/build.ps1、scripts/stage-runtime.ps1、tools/runtime_probe/main.cpp 全部缺失；phase-gate-no-project-mutation 通过（未改任何非忽略文件）；phase-gate-current-state 通过（requested=0 current=0）。
+- 新证据/日志路径: gate 设计契约——解析 probe 输出的 JSON（runId/exeSha256/adapter/driver/featureLevel/commandSlots=4/runtime identity/5 exports/nvofapi/experimentalDlssnr/windowLoop≥299s 且 deviceRemoved=false）；Release 跑 300 秒窗口，Debug 跑 3 秒冒烟。
+- 失败 fingerprint: phase0|loop-gate -Gate phase0|1|missing project inputs —— 这是预期的 fail-closed 证明，不是待修复缺陷。
+- 本 fingerprint 第几次不同尝试: 不适用（负向验收）。
+- 是否有进展，依据: 是——Phase 0 门槛从"文字"变为"机器可验证的 fail-closed 检查"，且证明当前空工程无法通过。
+- STATE/BACKLOG 更新: cycle.completed=3、currentTask/nextAction 指向 P0.4；BACKLOG P0.3 → DONE。
+- 下一唯一动作: P0.4 建立最小 CMake/C++20 Win32 x64 工程（CMakeLists.txt、CMakePresets.json、scripts/build.ps1、scripts/stage-runtime.ps1、src 骨架），不含 FFmpeg/UI。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名
