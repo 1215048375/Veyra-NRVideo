@@ -6,7 +6,7 @@
   "phase": {
     "id": 2,
     "name": "RenoDX-equivalent parity codec",
-    "state": "not_started",
+    "state": "gate_passed",
     "gate": "phase2"
   },
   "phases": [
@@ -29,8 +29,8 @@
     {
       "id": 2,
       "name": "RenoDX-equivalent parity codec",
-      "status": "not_started",
-      "gateEvidence": null,
+      "status": "gate_passed",
+      "gateEvidence": "loop/EVIDENCE.md#phase-2--phase2--2026-09-02t230500-0800",
       "reviewEvidence": null,
       "commit": null
     },
@@ -76,19 +76,19 @@
     }
   ],
   "cycle": {
-    "completed": 18,
+    "completed": 19,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P2.2/P2.3: implement shaders/ParityEncode.hlsl + ParityDecode.hlsl (16x16 groups, out-of-bounds return, Original FP16 -> Proxy RGBA8 -> Final FP16) and the harness --parity-compare mode with four-stage captures, GPU-vs-CPU statistics, and the neutral-baseline/addon-hash record.",
+  "currentTask": "P2.6: run the read-only Phase 2 Reviewer (BASE_COMMIT=1dcf834f56986d334a2a6256b196fa1d878ad9b1, phase 1 checkpoint), fix any P0/P1, then checkpoint and unlock Phase 3.",
   "lastGate": {
     "name": "phase2",
-    "status": "not_run",
-    "exitCode": null,
-    "evidence": null
+    "status": "passed",
+    "exitCode": 0,
+    "evidence": "loop/EVIDENCE.md#phase-2--phase2--2026-09-02t230500-0800"
   },
   "lastFailureFingerprint": null,
   "failureLedger": [],
@@ -96,6 +96,6 @@
   "lastGoodCommit": "1dcf834f56986d334a2a6256b196fa1d878ad9b1",
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Write ParityEncode/ParityDecode shaders + harness --parity-compare (P2.2/P2.3), then P2.4 tolerances and P2.5 captures.",
-  "updatedAt": "2026-09-02T23:20:00+08:00"
+  "nextAction": "Spawn read-only Phase 2 Reviewer; after PASS do checkpoint and unlock Phase 3 (FFmpeg pipeline).",
+  "updatedAt": "2026-09-02T23:10:00+08:00"
 }

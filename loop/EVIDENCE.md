@@ -2,6 +2,21 @@
 
 这里只登记真实存在的门禁证据。格式固定：
 
+## Phase 2 / phase2 / 2026-09-02T23:05:00+08:00
+
+- Commit: 验证内容 checkpoint 待 Reviewer 后登记；gate 运行于 220d6ba+f477948 之后的工作树
+- Command: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate phase2`
+- Exit code: 0（外层 70；内部 phase2.ps1 35/35，run-id 32fb351bb11b49d2b718027bbfdb33f4，5.0s）
+- Build configuration: x64-debug + x64-release 均真实构建；CPU 黄金测试双配置 12/12 0 failures；Release parity run 真实执行 16 帧 Evaluate
+- Hardware/runtime identity: RTX 5070 / Feature 18 via signed snippet（Init_Ext/Create 0x1）；debug run 附带 ID3D12InfoQueue 零错误
+- Logs/captures: logs/phase2/32fb351bb11b49d2b718027bbfdb33f4/；captures/phase2/32fb351bb11b49d2b718027bbfdb33f4/（七文件：00_original.rgba16f.bin+json、01_proxy.png、02_raw_dlssnr.png、03_final.rgba16f.bin+preview.png+json）
+- Quantitative result: **GPU vs CPU encode maxCodeDelta=1（≤1）**；**GPU vs CPU decode maxAbsError=0.001953125（≤0.002，恰为 FP16 在 4.0 的 1 ulp，期望已先量化 FP16）、nanInf=0**；中性 baseline paperWhiteScale/transferStrength/colorStrength=1.0/1.0/1.0 且 addon SHA-256 实测匹配（addon 从未被加载）；rawDlssnr=6EE7EDEE… ≠ final=D2588673…；画面抽验 meanLuma proxy 0.543 / raw 0.546 / final 0.567（无系统性洗白/压黑）
+- Reviewer: not run yet（gate 首次通过后立即安排）
+- Open P0/P1: none known
+- Conclusion: Playbook §16 Phase 2 全部门槛（CPU golden、≤1 code、≤0.002、四阶段真实捕获、中性 baseline+addon hash 记录、raw/final 可区分）机器验证通过
+
+调试记录：5 个缺陷由 debug layer infoQueue 定位——SRV MipLevels=0 触发 RemoveDevice；UAV range 双重偏移越界；NGX 后共享资源 DATA_STATIC bind 冲突（DESCRIPTORS_VOLATILE+前置 barrier）；decode 容差含 FP16 量化（期望量化后比较）。CPU 黄金数学零改动。
+
 ## Phase 1 / phase1 / 2026-09-02T22:20:00+08:00
 
 - Commit: 验证内容 checkpoint 在 Reviewer 通过后登记于 STATE.phases[1].commit；gate 运行时工作树为 a8feb21 + 用户安装 Graphics Tools 的环境变化

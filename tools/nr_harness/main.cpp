@@ -23,6 +23,7 @@
 #include "veyra/ngx/NgxParameters.h"
 
 #include "frame_loop.h"
+#include "parity_compare.h"
 
 namespace {
 
@@ -460,6 +461,7 @@ int wmain(int argc, wchar_t** argv)
     bool shimTest = false;
     bool createTest = false;
     bool frameLoop = false;
+    bool parityCompare = false;
     for (int i = 1; i < argc; ++i) {
         const std::wstring arg = argv[i];
         if (arg == L"--load-only") {
@@ -470,6 +472,9 @@ int wmain(int argc, wchar_t** argv)
         }
         else if (arg == L"--create-test") {
             createTest = true;
+        }
+        else if (arg == L"--parity-compare") {
+            parityCompare = true;
         }
         else if (arg == L"--frames" && i + 1 < argc) {
             frames = static_cast<uint32_t>(wcstoul(argv[++i], nullptr, 10));
@@ -520,6 +525,17 @@ int wmain(int argc, wchar_t** argv)
     int exitCode = 0;
     if (shimTest && !runtimeDir.empty()) {
         exitCode = runShimTest(runtimeDir);
+    }
+    else if (parityCompare && !runtimeDir.empty()) {
+        veyra::harness::FrameLoopArgs loopArgs{};
+        loopArgs.runtimeDir = runtimeDir;
+        loopArgs.width = width;
+        loopArgs.height = height;
+        loopArgs.frames = frames;
+        loopArgs.runId = runId;
+        loopArgs.jsonFile = jsonFile;
+        loopArgs.captureDir = captureDir;
+        exitCode = veyra::harness::runParityCompare(loopArgs);
     }
     else if (createTest && !runtimeDir.empty()) {
         exitCode = runCreateTest(runtimeDir, width, height);

@@ -89,17 +89,22 @@ target_link_libraries(veyra_runtime_probe PRIVATE veyra_gfx)
 
 if(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR)
   veyra_add_compute_shader(veyra_shader_test_pattern GenerateTestPattern)
+  veyra_add_compute_shader(veyra_shader_parity_encode ParityEncode)
+  veyra_add_compute_shader(veyra_shader_parity_decode ParityDecode)
   add_executable(veyra_nr_harness
     tools/nr_harness/main.cpp
     tools/nr_harness/frame_loop.cpp
+    tools/nr_harness/harness_util.cpp
+    tools/nr_harness/parity_compare.cpp
   )
   veyra_apply_warnings(veyra_nr_harness)
   target_compile_features(veyra_nr_harness PRIVATE cxx_std_20)
   target_compile_definitions(veyra_nr_harness PRIVATE
     UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
     VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
-  target_link_libraries(veyra_nr_harness PRIVATE veyra_gfx veyra_ngx)
-  add_dependencies(veyra_nr_harness veyra_shader_test_pattern)
+  target_link_libraries(veyra_nr_harness PRIVATE veyra_gfx veyra_ngx veyra_parity)
+  add_dependencies(veyra_nr_harness veyra_shader_test_pattern
+    veyra_shader_parity_encode veyra_shader_parity_decode)
 endif()
 
 # ---------------------------------------------------------------------------

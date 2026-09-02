@@ -31,10 +31,10 @@ Phase 0 gate：以 Playbook 第 16 节 Phase 0 为准。未完成 P0.9 禁止开
 ## Phase 2 — RenoDX-equivalent parity codec（锁定）
 
 - [x] P2.1 为 transfer/range/matrix/proxy encode/decode 建 CPU golden tests 和 phase2 gate。（2026-09-02：12/12 双配置 0 failures；gate fail-closed 验证 exit 1；亮度保持误差 0.000000。）
-- [ ] P2.2 实现 Original→Parity Encode shader，显式定义输入/输出色域、transfer、range 和资源格式。
-- [ ] P2.3 实现 Parity Decode 与 Raw/bypass 对照；记录三个 1.0 中性 codec baseline、来源说明、addon hash 和 capture hash。当前没有 preset；不得加载 addon 取值。
-- [ ] P2.4 CPU/GPU golden、identity/bypass、灰阶/色卡/高光测试达到 Playbook 容差。
-- [ ] P2.5 完整 Original→Encode→Feature18→Decode capture；不得以主观好看作为 gate。
+- [x] P2.2 实现 Original→Parity Encode shader，显式定义输入/输出色域、transfer、range 和资源格式。（2026-09-02：ParityEncode.hlsl，GPU vs CPU ≤1 code。）
+- [x] P2.3 实现 Parity Decode 与 Raw/bypass 对照；记录三个 1.0 中性 codec baseline、来源说明、addon hash 和 capture hash。当前没有 preset；不得加载 addon 取值。（2026-09-02：ParityDecode.hlsl；JSON 记录 1.0/1.0/1.0+addon 实测 hash+raw/final hash；addon 从未加载。）
+- [x] P2.4 CPU/GPU golden、identity/bypass、灰阶/色卡/高光测试达到 Playbook 容差。（2026-09-02：encode≤1 code、decode≤0.002、CPU 12/12。）
+- [x] P2.5 完整 Original→Encode→Feature18→Decode capture；不得以主观好看作为 gate。（2026-09-02：四阶段七文件捕获，raw≠final hash，量化统计非主观。）
 - [ ] P2.6 gate、只读 Reviewer、P0/P1 修复、checkpoint。
 
 ## Phase 3 — Minimal video pipeline（锁定）

@@ -505,6 +505,31 @@ Result:
 
 ---
 
+## Cycle 019 — P2.2–P2.5 parity 全链与 phase2 gate
+
+### Before
+
+- Phase: 2
+- 唯一任务: 实现 shaders/Parity{Encode,Decode}.hlsl（DXC 构建期编译）+ harness --parity-compare（Original FP16 上传→Encode→16 帧 Evaluate→Decode→Final；GPU/CPU 对比统计；四阶段捕获；中性 baseline/addon hash 记录）；跑 phase2 gate 全绿。
+- 可证伪假设: GPU/CPU encode 差 >1 code 或 decode 差 >0.002 则 FAIL；debug layer 报错则 FAIL。
+- 预计修改文件: shaders/Parity{Encode,Decode}.hlsl、tools/nr_harness/{parity_compare.h,parity_compare.cpp,harness_util.h,harness_util.cpp}、frame_loop.cpp（改用共享 util）、main.cpp、CMakeLists。
+- 快速检查命令: `--parity-compare --frames 16` → 0；`loop-gate -Gate phase2` → 0。
+- 预期新增证据: maxCodeDelta≤1、maxAbsError≤0.002、四阶段捕获、raw≠final hash。
+
+### After
+
+- 实际命令与 exit code:
+  - 调试历程（debug layer + infoQueue 实战立功）：①HLSL `linear` 是保留字+向量三目需 select()；②SRV desc `Texture2D.MipLevels=0` 非法→debug layer 直接 RemoveDevice（id=31/232）；③UAV range `OffsetInDescriptorsFromTableStart=4` 与绑定时 +4 堆偏移双重叠加越过 8 槽堆尾（id=646/1023）；④NGX Evaluate 后共享资源状态与 DATA_STATIC bind 校验冲突（id=538/527）→ DESCRIPTORS_VOLATILE + decode 前置 barrier 小提交；⑤decode 差异主成分是 FP16 在 ≥4.0 区间的存储量化（1 ulp=0.0039）→ CPU 期望先量化 FP16 再比较（测得 0.001953125=恰 1 ulp）。
+  - Debug --parity-compare → **P2_EXIT=0：encode maxCodeDelta=1、decode maxAbsError=0.001953125、nanInf=0、infoQueue 0 错误、四阶段捕获 written=true、parity: PASS**。
+  - `loop-gate -Gate phase2` → **exit 0：35/35 checks**（run-id 32fb351bb11b49d2b718027bbfdb33f4，5.0s）。
+- 新证据/日志路径: logs/phase2/32fb351bb11b49d2b718027bbfdb33f4/；captures/phase2/<runId>/ 七文件（00_original.rgba16f.bin 16588800B+json、01_proxy.png、02_raw_dlssnr.png、03_final.rgba16f.bin+preview+json）；raw=6EE7EDEE… ≠ final=D2588673…；画面抽验 meanLuma：proxy 0.543→raw 0.546→final 0.567（高光恢复，无洗白/压黑）。
+- 失败 fingerprint: 无遗留（5 个缺陷全部由 debug layer 证据定位修复）。
+- 是否有进展，依据: 是——Playbook §16 Phase 2 全部门槛机器验证通过。
+- STATE/BACKLOG 更新: cycle.completed=19；P2.2–P2.5 → DONE；STATE gate_passed 待 Reviewer。
+- 下一唯一动作: P2.6 只读 Reviewer（BASE_COMMIT=1dcf834…）→ PASS 则 checkpoint 解锁 Phase 3。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名
