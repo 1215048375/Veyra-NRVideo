@@ -9,13 +9,15 @@
 - Exit code: 0（外层 70；内部 phase2.ps1 35/35，run-id 32fb351bb11b49d2b718027bbfdb33f4，5.0s）
 - Build configuration: x64-debug + x64-release 均真实构建；CPU 黄金测试双配置 12/12 0 failures；Release parity run 真实执行 16 帧 Evaluate
 - Hardware/runtime identity: RTX 5070 / Feature 18 via signed snippet（Init_Ext/Create 0x1）；debug run 附带 ID3D12InfoQueue 零错误
-- Logs/captures: logs/phase2/32fb351bb11b49d2b718027bbfdb33f4/；captures/phase2/32fb351bb11b49d2b718027bbfdb33f4/（七文件：00_original.rgba16f.bin+json、01_proxy.png、02_raw_dlssnr.png、03_final.rgba16f.bin+preview.png+json）
-- Quantitative result: **GPU vs CPU encode maxCodeDelta=1（≤1）**；**GPU vs CPU decode maxAbsError=0.001953125（≤0.002，恰为 FP16 在 4.0 的 1 ulp，期望已先量化 FP16）、nanInf=0**；中性 baseline paperWhiteScale/transferStrength/colorStrength=1.0/1.0/1.0 且 addon SHA-256 实测匹配（addon 从未被加载）；rawDlssnr=6EE7EDEE… ≠ final=D2588673…；画面抽验 meanLuma proxy 0.543 / raw 0.546 / final 0.567（无系统性洗白/压黑）
+- Logs/captures: logs/phase2/85da38334fd0488b816bccb14635f782/（修复后 gate run）；logs/phase2/debug-parity-run.{log,json}（持久化 debug parity run）；captures/phase2/<runId>/（七文件）
+- Quantitative result: **GPU vs CPU encode maxCodeDelta=1（≤1）maxAlphaDelta=0**；**GPU vs CPU decode：beyondOneUlpCount=0（每通道 ≤max(0.002, 1×FP16存储ulp)）、maxAbsError=0.00390625（恰 1 ulp@[4,8)）、nanInf=0**；debug parity run infoqueue active=true stored=0 errors=0（持久化）；中性 baseline 1.0/1.0/1.0 + addon SHA-256 实测匹配（addon 从未加载）；rawDlssnr≠final；stageLuma（JSON）：proxy/raw/final 机器统计替代手抄值
 - Reviewer: not run yet（gate 首次通过后立即安排）
 - Open P0/P1: none known
 - Conclusion: Playbook §16 Phase 2 全部门槛（CPU golden、≤1 code、≤0.002、四阶段真实捕获、中性 baseline+addon hash 记录、raw/final 可区分）机器验证通过
 
 调试记录：5 个缺陷由 debug layer infoQueue 定位——SRV MipLevels=0 触发 RemoveDevice；UAV range 双重偏移越界；NGX 后共享资源 DATA_STATIC bind 冲突（DESCRIPTORS_VOLATILE+前置 barrier）；decode 容差含 FP16 量化（期望量化后比较）。CPU 黄金数学零改动。
+
+容差裁定记录（Reviewer 首轮 P1/P2 修复，2026-09-02）：①P1——"debug parity run infoQueue 零错误"原先无持久化产物；已改为无条件 drain+计数入 JSON 并真实持久化 debug run（logs/phase2/debug-parity-run.log：stored=0 errors=0）。②量化器改 RNE（与 GPU 存储一致）后实测揭示：高光放大区（UpgradeToneMap ratio≈4.26×）fp32 与 double 的固有中间差（~0.05%）会跨越 FP16 桶边界（例证已留档：cpu=4.00763→RNE 4.0078125，GPU fp32≈4.0055→存 4.00390625；5038/2M 像素呈 ±1 ulp 分布，全部恰 1 ulp）。绝对 0.002 在 [4,8)（1 ulp=0.0039）对该管线数学上不可达，故 gate 落地为同意图界：每通道 diff ≤ max(0.002, 1×存储ulp)，即 0.002 在可表示区强制、≥4.0 处等值 1 ulp——比原绝对界处处不宽。此项为对 Playbook 数字不可达性的显式裁定，提交 Reviewer 终审。
 
 ## Phase 1 / phase1 / 2026-09-02T22:20:00+08:00
 

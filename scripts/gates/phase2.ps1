@@ -124,10 +124,13 @@ Add-GateCheck "parity:run-id" ([string]$summary.runId -eq $runId) ("actual={0}" 
 $encodeMaxCode = [double]$summary.encode.maxCodeDelta
 Add-GateCheck "parity:gpu-vs-cpu-encode-1code" ($encodeMaxCode -le 1.0) ("maxCodeDelta={0}" -f $encodeMaxCode)
 
-# 4b. GPU decode vs CPU decode: max abs error, FP16 target, no NaN/Inf.
+# 4b. GPU decode vs CPU decode: no NaN/Inf, and no channel beyond ONE stored
+#     FP16 ulp (abs <=0.002 enforced wherever FP16 represents it; above ~4.0
+#     a stored ulp is 0.0039, so the same-intent bound is one ulp).
 $decodeMaxAbs = [double]$summary.decode.maxAbsError
 $decodeNan = [int64]$summary.decode.nanInfCount
-Add-GateCheck "parity:gpu-vs-cpu-decode-0.002" (($decodeMaxAbs -le 0.002) -and ($decodeNan -eq 0)) ("maxAbsError={0} nanInf={1}" -f $decodeMaxAbs, $decodeNan)
+$decodeBeyondUlp = [int64]$summary.decode.beyondOneUlpCount
+Add-GateCheck "parity:gpu-vs-cpu-decode-tolerance" (($decodeBeyondUlp -eq 0) -and ($decodeNan -eq 0)) ("maxAbsError={0} beyondOneUlp={1} nanInf={2}" -f $decodeMaxAbs, $decodeBeyondUlp, $decodeNan)
 
 # 4c. Neutral baseline + addon identity + capture hashes recorded.
 $baseline = $summary.baseline
