@@ -96,6 +96,6 @@
   "lastGoodCommit": "1fb7afa5779a6c6a0a585d4ecf18a640260a2fcf",
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Write phase1 gate (fail-closed), then P1.2 NGX core + adapter with the staged SDK headers.",
-  "updatedAt": "2026-09-02T21:35:00+08:00"
+  "nextAction": "Implement P1.2 veyra_ngx core host + NR runtime adapter, then P1.3 caller shim, P1.4 Create, P1.5 loop, P1.6 300 frames, P1.7 resets.",
+  "updatedAt": "2026-09-02T21:50:00+08:00"
 }
