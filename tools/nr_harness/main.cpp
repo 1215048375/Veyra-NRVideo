@@ -89,6 +89,117 @@ bool loadLocalIdentity(const std::wstring& runtimeDir, LocalIdentity& identity)
     return true;
 }
 
+// P1.3 caller-compatibility boundary battery (Playbook 8.3). Runs against the
+// installed shim without needing a D3D12 device or NGX core session.
+int runShimTest(const std::wstring& runtimeDir)
+{
+    const std::wstring dllPath = runtimeDir + L"\\nvngx_dlssnr.dll";
+    veyra::FileIdentity dllIdentity{};
+    veyra::IdentityError dllError = veyra::IdentityError::None;
+    if (!veyra::computeFileIdentity(dllPath, dllIdentity, dllError) ||
+        dllIdentity.sizeBytes != kExpectedDllSize ||
+        dllIdentity.sha256Upper != kExpectedDllSha256) {
+        veyra::log::error("harness", "shim-test: staged runtime identity mismatch");
+        return 3;
+    }
+
+    veyra::ngx::DlssNrRuntimeAdapter adapter;
+    veyra::Status status = veyra::Status::Ok;
+    if (!adapter.load(runtimeDir, status)) {
+        veyra::log::error("harness", std::format("shim-test: adapter load failed status={}", veyra::statusString(status)));
+        return 9;
+    }
+    if (!adapter.installCallerCompatibility(status)) {
+        veyra::log::error("harness", std::format("shim-test: shim install failed status={}", veyra::statusString(status)));
+        adapter.unload();
+        return 10;
+    }
+
+    constexpr DWORD kSentinelError = 0x1234;
+    int failures = 0;
+    const auto check = [&failures](const char* name, bool ok, const std::string& detail) {
+        veyra::log::info("harness", std::format("shim-test[{}] {} {}", ok ? "PASS" : "FAIL", name, detail));
+        if (!ok) {
+            ++failures;
+        }
+    };
+
+    HMODULE caller = veyra::ngx::DlssNrRuntimeAdapter::testCallerModule();
+    check("caller-module-resolved", caller != nullptr, std::format("module=0x{:016X}", reinterpret_cast<uintptr_t>(caller)));
+
+    // 1. size == 0: return 0, buffer untouched, last-error unchanged.
+    {
+        wchar_t buffer[16]{};
+        wmemset(buffer, 0xABCD, 16);
+        SetLastError(kSentinelError);
+        const DWORD ret = veyra::ngx::DlssNrRuntimeAdapter::testShimGetModuleFileNameW(caller, buffer, 0);
+        check("zero-size", ret == 0 && buffer[0] == static_cast<wchar_t>(0xABCD) && GetLastError() == kSentinelError,
+            std::format("ret={} buffer0=0x{:04X} lastError=0x{:X}", ret, static_cast<unsigned>(buffer[0]), GetLastError()));
+    }
+
+    // 2. too-small buffer (size 5): truncate, NUL at [size-1], return size,
+    //    last-error ERROR_INSUFFICIENT_BUFFER.
+    {
+        wchar_t buffer[8]{};
+        SetLastError(kSentinelError);
+        const DWORD ret = veyra::ngx::DlssNrRuntimeAdapter::testShimGetModuleFileNameW(caller, buffer, 5);
+        const bool ok = ret == 5 && wcsncmp(buffer, L"nvng", 4) == 0 && buffer[4] == L'\0' &&
+            GetLastError() == ERROR_INSUFFICIENT_BUFFER;
+        check("too-small-truncates", ok,
+            std::format("ret={} buffer={} lastError=0x{:X} expectedError=0x{:X}", ret, narrow(buffer), GetLastError(), ERROR_INSUFFICIENT_BUFFER));
+    }
+
+    // 3. exact fit (10 wchar = 9 chars + NUL): return 9, full name, no error change.
+    {
+        wchar_t buffer[16]{};
+        SetLastError(kSentinelError);
+        const DWORD ret = veyra::ngx::DlssNrRuntimeAdapter::testShimGetModuleFileNameW(caller, buffer, 10);
+        check("exact-10-wchars", ret == 9 && wcscmp(buffer, L"nvngx.dll") == 0 && GetLastError() == kSentinelError,
+            std::format("ret={} buffer={} lastError=0x{:X}", ret, narrow(buffer), GetLastError()));
+    }
+
+    // 4. roomy buffer (64): same as exact fit.
+    {
+        wchar_t buffer[64]{};
+        SetLastError(kSentinelError);
+        const DWORD ret = veyra::ngx::DlssNrRuntimeAdapter::testShimGetModuleFileNameW(caller, buffer, 64);
+        check("roomy-64", ret == 9 && wcscmp(buffer, L"nvngx.dll") == 0,
+            std::format("ret={} buffer={}", ret, narrow(buffer)));
+    }
+
+    // 5. nullptr module forwards to the real API (current executable path).
+    {
+        wchar_t buffer[MAX_PATH]{};
+        SetLastError(kSentinelError);
+        const DWORD ret = veyra::ngx::DlssNrRuntimeAdapter::testShimGetModuleFileNameW(nullptr, buffer, MAX_PATH);
+        check("null-module-forwards", ret > 0 && ret < MAX_PATH && wcscmp(buffer, L"nvngx.dll") != 0,
+            std::format("ret={} path={}", ret, narrow(buffer)));
+    }
+
+    // 6. non-caller module (kernel32) forwards to the real API.
+    {
+        wchar_t buffer[MAX_PATH]{};
+        const HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+        const DWORD ret = veyra::ngx::DlssNrRuntimeAdapter::testShimGetModuleFileNameW(kernel32, buffer, MAX_PATH);
+        check("other-module-forwards", kernel32 != nullptr && ret > 0 && wcsstr(buffer, L"KERNEL32") != nullptr,
+            std::format("ret={} path={}", ret, narrow(buffer)));
+    }
+
+    // 7. restore must clear the installed flag (unload verifies the slot again).
+    adapter.restoreCallerCompatibility();
+    check("restore-reported-clean", !adapter.callerCompatibilityInstalled(), "flag cleared");
+
+    // Reverse teardown (unload restores the IAT again as defense in depth).
+    adapter.unload();
+
+    if (failures != 0) {
+        veyra::log::error("harness", std::format("shim-test: FAIL ({} failing checks)", failures));
+        return 11;
+    }
+    veyra::log::info("harness", "shim-test: PASS (all boundary checks)");
+    return 0;
+}
+
 int runLoadOnly(const std::wstring& runtimeDir)
 {
     // 1. Device context (debug layer follows the build configuration).
@@ -164,10 +275,14 @@ int wmain(int argc, wchar_t** argv)
     std::wstring runtimeDir;
     std::wstring logFile;
     bool loadOnly = false;
+    bool shimTest = false;
     for (int i = 1; i < argc; ++i) {
         const std::wstring arg = argv[i];
         if (arg == L"--load-only") {
             loadOnly = true;
+        }
+        else if (arg == L"--shim-test") {
+            shimTest = true;
         }
         else if (arg == L"--runtime-dir" && i + 1 < argc) {
             runtimeDir = argv[++i];
@@ -182,11 +297,14 @@ int wmain(int argc, wchar_t** argv)
     }
 
     int exitCode = 0;
-    if (loadOnly && !runtimeDir.empty()) {
+    if (shimTest && !runtimeDir.empty()) {
+        exitCode = runShimTest(runtimeDir);
+    }
+    else if (loadOnly && !runtimeDir.empty()) {
         exitCode = runLoadOnly(runtimeDir);
     }
     else {
-        veyra::log::info("harness", "no mode selected; use --load-only --runtime-dir <abs> (frame loop arrives in P1.4-P1.6)");
+        veyra::log::info("harness", "no mode selected; use --load-only/--shim-test --runtime-dir <abs> (frame loop arrives in P1.4-P1.6)");
         exitCode = 1;
     }
 

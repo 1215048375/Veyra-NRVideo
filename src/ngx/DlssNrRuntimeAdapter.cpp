@@ -19,7 +19,126 @@ constexpr const char* kExportNames[] = {
     "NVSDK_NGX_D3D12_Shutdown1",
 };
 
+// ---------------------------------------------------------------------------
+// Caller-name compatibility shim (Playbook 8.3). The signed snippet queries
+// the calling module's file name via GetModuleFileNameW; when asked about the
+// Veyra caller module it must observe the literal L"nvngx.dll". The shim is
+// installed on the snippet's own IAT slot only - never a global Kernel32
+// hook - and only one adapter session may own the slot.
+// ---------------------------------------------------------------------------
+using GetModuleFileNameWFn = DWORD(WINAPI*)(HMODULE, LPWSTR, DWORD);
+
+GetModuleFileNameWFn g_realGetModuleFileNameW = nullptr;
+HMODULE g_callerModule = nullptr;
+bool g_shimOwnerActive = false;
+
+// 9 characters + NUL, matching what the snippet expects to observe.
+constexpr wchar_t kShimModuleName[] = L"nvngx.dll";
+constexpr DWORD kShimModuleNameChars = 9;
+
+__declspec(noinline) DWORD WINAPI SnippetGetModuleFileNameW(HMODULE module, LPWSTR filename, DWORD size)
+{
+    if (g_callerModule == nullptr) {
+        // Resolve the Veyra caller module from this shim function's own
+        // address; never guess by executable file name.
+        HMODULE caller = nullptr;
+        if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&SnippetGetModuleFileNameW), &caller) != FALSE) {
+            g_callerModule = caller;
+        }
+    }
+
+    if (module == g_callerModule) {
+        if (size == 0) {
+            // No buffer access, no last-error change, return 0.
+            return 0;
+        }
+        if (size <= kShimModuleNameChars) {
+            // Too small: copy size-1 characters, NUL at [size-1], return size
+            // and set ERROR_INSUFFICIENT_BUFFER (real API semantics).
+            for (DWORD i = 0; i + 1 < size; ++i) {
+                filename[i] = kShimModuleName[i];
+            }
+            filename[size - 1] = L'\0';
+            SetLastError(ERROR_INSUFFICIENT_BUFFER);
+            return size;
+        }
+        for (DWORD i = 0; i <= kShimModuleNameChars; ++i) {
+            filename[i] = kShimModuleName[i];
+        }
+        return kShimModuleNameChars;
+    }
+
+    // Everything else (nullptr, other modules) forwards to the saved real
+    // function pointer with untouched semantics.
+    if (g_realGetModuleFileNameW == nullptr) {
+        SetLastError(ERROR_INVALID_FUNCTION);
+        return 0;
+    }
+    return g_realGetModuleFileNameW(module, filename, size);
+}
+
+// Walks the in-memory PE import table of `module` and returns the IAT slot
+// (address of the thunk function pointer) importing `functionName` from a
+// KERNEL32 or API-set DLL. Returns nullptr when no such import exists.
+void** FindImportedFunctionSlot(HMODULE module, const char* functionName)
+{
+    auto* base = reinterpret_cast<uint8_t*>(module);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
+        return nullptr;
+    }
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) {
+        return nullptr;
+    }
+    const IMAGE_DATA_DIRECTORY& directory = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (directory.VirtualAddress == 0) {
+        return nullptr;
+    }
+
+    const auto* descriptor = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(base + directory.VirtualAddress);
+    for (; descriptor->Name != 0; ++descriptor) {
+        const char* dllName = reinterpret_cast<const char*>(base + descriptor->Name);
+        const bool isKernel32 = _stricmp(dllName, "kernel32.dll") == 0;
+        const bool isApiSet = _strnicmp(dllName, "api-ms-", 7) == 0 || _strnicmp(dllName, "ext-ms-", 7) == 0;
+        if (!isKernel32 && !isApiSet) {
+            continue;
+        }
+
+        const ULONGLONG lookupRva = descriptor->OriginalFirstThunk != 0 ? descriptor->OriginalFirstThunk : descriptor->FirstThunk;
+        if (lookupRva == 0) {
+            continue;
+        }
+        const auto* lookup = reinterpret_cast<const ULONGLONG*>(base + lookupRva);
+        auto* iat = reinterpret_cast<IMAGE_THUNK_DATA*>(base + descriptor->FirstThunk);
+        for (size_t i = 0; lookup[i] != 0; ++i) {
+            if (IMAGE_SNAP_BY_ORDINAL64(lookup[i])) {
+                continue;
+            }
+            const auto* byName = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(base + static_cast<size_t>(lookup[i]));
+            if (strcmp(reinterpret_cast<const char*>(byName->Name), functionName) == 0) {
+                return reinterpret_cast<void**>(&iat[i].u1.Function);
+            }
+        }
+    }
+    return nullptr;
+}
+
 } // namespace
+
+DWORD WINAPI DlssNrRuntimeAdapter::testShimGetModuleFileNameW(HMODULE module, LPWSTR filename, DWORD size)
+{
+    return SnippetGetModuleFileNameW(module, filename, size);
+}
+
+HMODULE DlssNrRuntimeAdapter::testCallerModule()
+{
+    if (g_callerModule == nullptr) {
+        (void)SnippetGetModuleFileNameW(nullptr, nullptr, 0); // force lazy resolution
+    }
+    return g_callerModule;
+}
 
 DlssNrRuntimeAdapter::~DlssNrRuntimeAdapter()
 {
@@ -84,15 +203,94 @@ bool DlssNrRuntimeAdapter::load(const std::wstring& runtimeDir, Status& status)
 
 bool DlssNrRuntimeAdapter::installCallerCompatibility(Status& status)
 {
-    // Implemented in P1.3 together with its boundary test battery.
-    (void)status;
-    veyra::log::error("ngx", "nr-adapter: caller compatibility shim not implemented yet (P1.3)");
-    return false;
+    if (module_ == nullptr) {
+        status = Status::InvalidArgument;
+        veyra::log::error("ngx", "caller-compat: snippet not loaded");
+        return false;
+    }
+    if (shimInstalled_) {
+        status = Status::InvalidArgument;
+        veyra::log::error("ngx", "caller-compat: shim already installed by this session");
+        return false;
+    }
+    if (g_shimOwnerActive) {
+        status = Status::InvalidArgument;
+        veyra::log::error("ngx", "caller-compat: another adapter session already owns the IAT slot");
+        return false;
+    }
+
+    void** slot = FindImportedFunctionSlot(module_, "GetModuleFileNameW");
+    if (slot == nullptr) {
+        status = Status::MissingExport;
+        veyra::log::error("ngx", "caller-compat: no GetModuleFileNameW import slot found in snippet IAT; refusing wider hooks");
+        return false;
+    }
+
+    originalGetModuleFileNameW_ = *slot;
+    if (originalGetModuleFileNameW_ == nullptr) {
+        status = Status::MissingExport;
+        veyra::log::error("ngx", "caller-compat: IAT slot is null before install");
+        return false;
+    }
+
+    g_realGetModuleFileNameW = reinterpret_cast<GetModuleFileNameWFn>(originalGetModuleFileNameW_);
+    g_callerModule = nullptr;
+    g_shimOwnerActive = true;
+    iatSlot_ = slot;
+
+    DWORD oldProtect = 0;
+    if (VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &oldProtect) == FALSE) {
+        status = Status::DeviceFailure;
+        veyra::log::error("ngx", std::format("caller-compat: VirtualProtect failed lastError={}", GetLastError()));
+        g_shimOwnerActive = false;
+        iatSlot_ = nullptr;
+        return false;
+    }
+
+    InterlockedExchangePointer(slot, reinterpret_cast<void*>(&SnippetGetModuleFileNameW));
+
+    DWORD restoredProtect = 0;
+    if (VirtualProtect(slot, sizeof(void*), oldProtect, &restoredProtect) == FALSE) {
+        status = Status::DeviceFailure;
+        veyra::log::error("ngx", std::format("caller-compat: VirtualProtect restore failed lastError={}", GetLastError()));
+    }
+    FlushInstructionCache(GetCurrentProcess(), slot, sizeof(void*));
+
+    shimInstalled_ = true;
+    veyra::log::info("ngx", std::format("caller-compat: shim installed slot=0x{:016X} original=0x{:016X} (LOCAL EXPERIMENTAL ONLY)",
+        reinterpret_cast<uintptr_t>(iatSlot_), reinterpret_cast<uintptr_t>(originalGetModuleFileNameW_)));
+    return true;
 }
 
 void DlssNrRuntimeAdapter::restoreCallerCompatibility()
 {
-    // Nothing to restore until P1.3 installs the shim.
+    if (!shimInstalled_ || iatSlot_ == nullptr) {
+        return;
+    }
+
+    DWORD oldProtect = 0;
+    if (VirtualProtect(iatSlot_, sizeof(void*), PAGE_READWRITE, &oldProtect) != FALSE) {
+        InterlockedExchangePointer(iatSlot_, originalGetModuleFileNameW_);
+        DWORD restoredProtect = 0;
+        (void)VirtualProtect(iatSlot_, sizeof(void*), oldProtect, &restoredProtect);
+        FlushInstructionCache(GetCurrentProcess(), iatSlot_, sizeof(void*));
+    }
+
+    const bool restoredCorrectly = *iatSlot_ == originalGetModuleFileNameW_;
+    if (!restoredCorrectly) {
+        veyra::log::error("ngx", std::format("caller-compat: IAT slot not restored to original actual=0x{:016X} expected=0x{:016X}",
+            reinterpret_cast<uintptr_t>(*iatSlot_), reinterpret_cast<uintptr_t>(originalGetModuleFileNameW_)));
+    }
+    else {
+        veyra::log::info("ngx", "caller-compat: IAT slot restored to original function");
+    }
+
+    g_shimOwnerActive = false;
+    g_callerModule = nullptr;
+    g_realGetModuleFileNameW = nullptr;
+    iatSlot_ = nullptr;
+    originalGetModuleFileNameW_ = nullptr;
+    shimInstalled_ = false;
 }
 
 void DlssNrRuntimeAdapter::unload()

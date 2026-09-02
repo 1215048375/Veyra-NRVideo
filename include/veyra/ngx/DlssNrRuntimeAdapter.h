@@ -78,6 +78,11 @@ public:
     HMODULE module() const { return module_; }
     const std::wstring& dllPath() const { return dllPath_; }
 
+    // Test hooks for the --shim-test battery (P1.3). Callers must install the
+    // shim first; the hooks invoke the installed shim function directly.
+    static DWORD WINAPI testShimGetModuleFileNameW(HMODULE module, LPWSTR filename, DWORD size);
+    static HMODULE testCallerModule();
+
 private:
     HMODULE module_ = nullptr;
     Exports exports_{};

@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 12,
+    "completed": 13,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P1.3: implement the isolated, removable caller-name compatibility layer (PE import walk -> GetModuleFileNameW IAT slot -> single-owner shim install/restore) with the six boundary tests from Playbook 8.3.",
+  "currentTask": "P1.4: create Feature 18 through the signed snippet with the exact Playbook 8.5 parameter names and types (all width/height variants, callback, node masks) and a non-null handle.",
   "lastGate": {
     "name": "phase0",
     "status": "passed",
@@ -96,6 +96,6 @@
   "lastGoodCommit": "1fb7afa5779a6c6a0a585d4ecf18a640260a2fcf",
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Implement P1.3 IAT caller shim + boundary tests, then P1.4 Feature 18 Create, P1.5 frame loop, P1.6 300 evaluates.",
-  "updatedAt": "2026-09-02T22:10:00+08:00"
+  "nextAction": "Implement P1.4 Feature 18 Create (Playbook 8.4/8.5 order: core init -> load -> shim -> Init_Ext -> params -> CreateFeature), then P1.5 frame loop.",
+  "updatedAt": "2026-09-02T22:25:00+08:00"
 }

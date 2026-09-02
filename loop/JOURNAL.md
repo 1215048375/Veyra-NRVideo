@@ -354,6 +354,29 @@ Result:
 
 ---
 
+## Cycle 013 — P1.3 caller-name 兼容层与边界测试
+
+### Before
+
+- Phase: 1
+- 唯一任务: 实现 DlssNrRuntimeAdapter 的隔离兼容层：解析已加载 snippet 的 PE import 表定位 KERNEL32/API-set 的 GetModuleFileNameW IAT slot（全局单 owner）→ VirtualProtect+InterlockedExchangePointer 安装 shim（仅对本 caller module 返回字面量 L"nvngx.dll"，完整模拟 buffer/return/error 语义；其余全部转发原函数）→ 恢复并 FlushInstructionCache；harness 增加 --shim-test 六项边界测试（nSize==0 / 过小 / 恰好 10 wchar / 正常 / nullptr module / 非 caller module，含 sentinel last-error）。
+- 可证伪假设: 若 IAT 定位失败、shim 语义错误或恢复不完整，--shim-test 非零退出。
+- 预计修改文件: src/ngx/DlssNrRuntimeAdapter.cpp、include/veyra/ngx/DlssNrRuntimeAdapter.h、tools/nr_harness/main.cpp。
+- 快速检查命令: `build.ps1 -Preset x64-debug` → 0；`veyra_nr_harness.exe --shim-test --runtime-dir <abs>` → 0（六项全过 + 恢复验证）。
+- 预期新增证据: IAT slot 地址、原指针、安装/恢复日志、六项边界测试结果。
+
+### After
+
+- 实际修改: src/ngx/DlssNrRuntimeAdapter.cpp（PE import 表解析 FindImportedFunctionSlot、SnippetGetModuleFileNameW shim、install/restore 单 owner 逻辑）、头文件 test hooks、tools/nr_harness/main.cpp（--shim-test）。
+- 实际命令与 exit code: `build.ps1 -Preset x64-debug` → 0；`--shim-test` Debug 与 Release 均 exit 0，8 项全 PASS。
+- 新证据/日志路径: 真实定位 snippet IAT slot=0x00007FF9091DC080，original=0x00007FF9DD79BC00（KERNEL32）；shim-test[PASS] ×8：caller-module-resolved（0x7FF6407D0000）、zero-size（ret=0、buffer 未动、lastError 保持 0x1234）、too-small-truncates（ret=5、"nvng"、lastError=0x7A=ERROR_INSUFFICIENT_BUFFER）、exact-10-wchars（ret=9、"nvngx.dll"、lastError 不变）、roomy-64、null-module-forwards（真实 exe 路径 85 字符）、other-module-forwards（KERNEL32.DLL）、restore-reported-clean + 卸载后"IAT slot restored to original function"。
+- 失败 fingerprint: 无。
+- 是否有进展，依据: 是——Playbook 8.3 的 10 步实现与全部边界语义经真实 snippet 验证；shim 只影响 snippet 自身 IAT、单 owner、可完全恢复、编译开关可整体移除（VEYRA_ENABLE_EXPERIMENTAL_DLSSNR）。
+- STATE/BACKLOG 更新: cycle.completed=13；BACKLOG P1.3 → DONE。
+- 下一唯一动作: P1.4 严格按 Playbook 8.5 参数名/类型实现 Create Feature 18（含 ScalingRatioCallback、全部 width/height 变体、node mask），并验证 handle 非空。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名
