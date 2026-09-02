@@ -543,7 +543,12 @@ Result:
 
 ### After
 
-（vcpkg 克隆/引导后台进行中；FFmpeg 首次构建预计数十分钟，完成后填写并继续 P3.2。）
+- 关键事实：**项目路径含空格（"Veyra DLSS Video Player"）触发 FFmpeg portfile 硬拒绝**（"ffmpeg will not build with spaces in the path"），首次在 third_party_local/vcpkg 构建失败（issue_body.md 留档）。
+- 环境适配（不改变产品边界）：在无空格路径 `C:\veyra-deps\` 建立第二份固定基线 vcpkg（同 commit 30ef65ca…，downloads 复制复用），以 `--x-manifest-root=<项目>` `--x-install-root=C:\veyra-deps\installed` 重跑 FFmpeg 构建（后台）。third_party_local/vcpkg 保留作 Playbook 契约的仓内基线副本。
+- phase3 gate 已建立（AST-CLEAN）并负向验证 exit 1（缺 src/media、tools/media_probe、YuvToLinearRgb.hlsl 输入）；gate 编码 §16 Phase 3 全部门槛（PTS 单调、零回读、有界队列、D3D12VA 共享 device/pixfmt、10 次 seek 无 stale、debug infoqueue）。
+- vcpkg.json 修正为与 Playbook 3.4 逐字一致（去掉我误加的 avfilter）。
+- 失败 fingerprint: ffmpeg|vcpkg install|1|spaces-in-path → 换构建根修复中。
+- 下一唯一动作: FFmpeg 构建完成后 P3.2（veyra_media 软件 decode 基线 + media_probe + 测试片生成）。
 
 ---
 
