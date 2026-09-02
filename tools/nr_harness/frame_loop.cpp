@@ -2,6 +2,7 @@
 
 #include <windows.h>
 #include <d3d12.h>
+#include <d3d12sdklayers.h>
 #include <dxgi1_6.h>
 #include <nvsdk_ngx.h>
 
@@ -337,6 +338,25 @@ int runFrameLoop(const FrameLoopArgs& args)
     if (!context.initialize(contextDesc, status)) {
         return 6;
     }
+
+    // Real debug-layer observability (Reviewer P1 fix): capture the D3D12
+    // info queue so "no state errors" is an assertion over retrieved
+    // messages, not an empty grep. Debug builds only.
+    gfx::ComPtr<ID3D12InfoQueue> infoQueue;
+    bool infoQueueActive = false;
+    uint64_t infoQueueStored = 0;
+    uint64_t infoQueueErrors = 0;
+#if defined(VEYRA_D3D12_DEBUG)
+    if (SUCCEEDED(context.device()->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
+        infoQueue->SetMuteDebugOutput(false);
+        infoQueue->ClearStoredMessages();
+        infoQueueActive = true;
+        log::info("harness", "frame-loop: ID3D12InfoQueue attached and recording");
+    }
+    else {
+        log::error("harness", "frame-loop: ID3D12InfoQuery unavailable while debug layer is expected");
+    }
+#endif
     gfx::CommandSlotRing ring;
     if (!ring.initialize(context.device(), context.directQueue(), context.fence(), context.fenceEvent(), 4, status)) {
         context.shutdown();
@@ -1007,6 +1027,37 @@ int runFrameLoop(const FrameLoopArgs& args)
         deviceRemoved = !context.checkDeviceAlive(removedReason);
         deviceRemovedReason = removedReason;
 
+        // Drain the debug info queue into the log/JSON (Reviewer P1 fix).
+        if (infoQueue != nullptr) {
+            infoQueueStored = infoQueue->GetNumStoredMessages();
+            uint64_t reported = 0;
+            for (uint64_t i = 0; i < infoQueueStored && reported < 200; ++i) {
+                SIZE_T length = 0;
+                if (FAILED(infoQueue->GetMessage(i, nullptr, &length)) || length == 0) {
+                    continue;
+                }
+                std::vector<uint8_t> buffer(length);
+                auto* message = reinterpret_cast<D3D12_MESSAGE*>(buffer.data());
+                if (FAILED(infoQueue->GetMessage(i, message, &length))) {
+                    continue;
+                }
+                ++reported;
+                const int severity = static_cast<int>(message->Severity);
+                if (message->Severity == D3D12_MESSAGE_SEVERITY_ERROR ||
+                    message->Severity == D3D12_MESSAGE_SEVERITY_CORRUPTION) {
+                    ++infoQueueErrors;
+                    log::error("harness", std::format("D3D12 infoqueue[{}] id={} desc={}",
+                        severity, static_cast<unsigned>(message->ID), message->pDescription));
+                }
+                else {
+                    log::warn("harness", std::format("D3D12 infoqueue[{}] id={} desc={}",
+                        severity, static_cast<unsigned>(message->ID), message->pDescription));
+                }
+            }
+            log::info("harness", std::format("frame-loop: infoqueue stored={} reported={} errors={}",
+                infoQueueStored, reported, infoQueueErrors));
+        }
+
         log::info("harness", std::format("frame-loop: done attempted={} succeeded={} failed={} deviceRemoved={}",
             evaluateAttempted, evaluateSucceeded, evaluateFailed, deviceRemoved));
         log::info("harness", std::format("frame-loop: output stats meanLuma={:.5} minLuma={:.5} maxLuma={:.5} stddev={:.5} allZero={} constant={} sha256={}",
@@ -1060,10 +1111,12 @@ int runFrameLoop(const FrameLoopArgs& args)
             createResult, createResult == 1ull ? "true" : "false", handleNonNull ? "true" : "false");
         json += std::format("  \"evaluate\": {{\"attempted\": {}, \"succeeded\": {}, \"failed\": {}}},\n",
             evaluateAttempted, evaluateSucceeded, evaluateFailed);
-        json += std::format("  \"output\": {{\"meanLuma\": {:.6}, \"minLuma\": {:.6}, \"maxLuma\": {:.6}, \"stddev\": {:.6}, \"sha256\": \"{}\", \"nanCount\": 0, \"allZero\": {}, \"constant\": {}}},\n",
+        json += std::format("  \"output\": {{\"meanLuma\": {:.6}, \"minLuma\": {:.6}, \"maxLuma\": {:.6}, \"stddev\": {:.6}, \"sha256\": \"{}\", \"allZero\": {}, \"constant\": {}}},\n",
             finalStats.meanLuma, finalStats.minLuma, finalStats.maxLuma, finalStats.stddev,
             jsonEscape(finalStats.sha256), finalStats.allZero ? "true" : "false",
             finalStats.constant ? "true" : "false");
+        json += std::format("  \"debugInfoQueue\": {{\"active\": {}, \"storedMessages\": {}, \"errorMessages\": {}}},\n",
+            infoQueueActive ? "true" : "false", infoQueueStored, infoQueueErrors);
         json += "  \"variants\": [\n";
         json += std::format("    {{\"name\": \"style1\", \"sha256\": \"{}\"}},\n", jsonEscape(variantStyleSha));
         json += std::format("    {{\"name\": \"intensity05\", \"sha256\": \"{}\"}}\n", jsonEscape(variantIntensitySha));

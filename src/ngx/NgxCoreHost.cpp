@@ -50,6 +50,36 @@ __declspec(noinline) NVSDK_NGX_Result CallShutdown1(ID3D12Device* device, uint32
     return result;
 }
 
+// Every NGX external entry point sits behind SEH (Playbook 7.2), including
+// the parameter-block allocation calls.
+__declspec(noinline) NVSDK_NGX_Result CallAllocateParameters(NVSDK_NGX_Parameter** outParameters, uint32_t& sehCode)
+{
+    sehCode = 0;
+    NVSDK_NGX_Result result = NVSDK_NGX_Result_Fail;
+    __try {
+        result = NVSDK_NGX_D3D12_AllocateParameters(outParameters);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        sehCode = static_cast<uint32_t>(GetExceptionCode());
+        result = NVSDK_NGX_Result_FAIL_PlatformError;
+    }
+    return result;
+}
+
+__declspec(noinline) NVSDK_NGX_Result CallDestroyParameters(NVSDK_NGX_Parameter* parameters, uint32_t& sehCode)
+{
+    sehCode = 0;
+    NVSDK_NGX_Result result = NVSDK_NGX_Result_Fail;
+    __try {
+        result = NVSDK_NGX_D3D12_DestroyParameters(parameters);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        sehCode = static_cast<uint32_t>(GetExceptionCode());
+        result = NVSDK_NGX_Result_FAIL_PlatformError;
+    }
+    return result;
+}
+
 } // namespace
 
 NgxCoreHost::~NgxCoreHost()
@@ -107,7 +137,7 @@ void NgxCoreHost::shutdown()
     while (liveParameterBlockCount_ > 0) {
         NVSDK_NGX_Parameter* block = liveParameterBlocks_[--liveParameterBlockCount_];
         veyra::log::warn("ngx", "core-host: destroying leaked parameter block at shutdown");
-        NVSDK_NGX_D3D12_DestroyParameters(block);
+        { uint32_t seh = 0; (void)CallDestroyParameters(block, seh); }
     }
 
     uint32_t sehCode = 0;
@@ -132,7 +162,8 @@ NVSDK_NGX_Parameter* NgxCoreHost::allocateParameters(Status& status)
         return nullptr;
     }
     NVSDK_NGX_Parameter* parameters = nullptr;
-    const NVSDK_NGX_Result result = NVSDK_NGX_D3D12_AllocateParameters(&parameters);
+    uint32_t allocSeh = 0;
+    const NVSDK_NGX_Result result = CallAllocateParameters(&parameters, allocSeh);
     if (result != NVSDK_NGX_Result_Success || parameters == nullptr) {
         status = Status::DeviceFailure;
         veyra::log::error("ngx", std::format("core-host: AllocateParameters result={}",
@@ -159,7 +190,7 @@ void NgxCoreHost::destroyParameters(NVSDK_NGX_Parameter* parameters)
     if (!tracked) {
         veyra::log::warn("ngx", "core-host: destroyParameters for an untracked block");
     }
-    NVSDK_NGX_D3D12_DestroyParameters(parameters);
+    { uint32_t seh = 0; (void)CallDestroyParameters(parameters, seh); }
 }
 
 } // namespace veyra::ngx

@@ -330,6 +330,18 @@ bool DlssNrRuntimeAdapter::load(const std::wstring& runtimeDir, Status& status)
     }
     dllPath_ = std::wstring(resolved) + L"\\nvngx_dlssnr.dll";
 
+    // Containment (Playbook 8.2): the canonicalized directory must still be
+    // the configured runtime_local/nvidia staging root before any load.
+    const std::wstring expectedSuffix = L"\\runtime_local\\nvidia";
+    if (dllPath_.size() <= expectedSuffix.size() + wcslen(L"nvngx_dlssnr.dll") ||
+        _wcsnicmp(dllPath_.c_str() + dllPath_.size() - (expectedSuffix.size() + wcslen(L"\\nvngx_dlssnr.dll")),
+            (std::wstring(expectedSuffix) + L"\\nvngx_dlssnr.dll").c_str(),
+            expectedSuffix.size() + wcslen(L"\\nvngx_dlssnr.dll")) != 0) {
+        status = Status::InvalidArgument;
+        veyra::log::error("ngx", "nr-adapter: resolved runtime path is outside runtime_local/nvidia; refusing to load");
+        return false;
+    }
+
     const DWORD attributes = GetFileAttributesW(dllPath_.c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES) {
         status = Status::FileNotFound;
@@ -345,7 +357,7 @@ bool DlssNrRuntimeAdapter::load(const std::wstring& runtimeDir, Status& status)
         veyra::log::error("ngx", std::format("nr-adapter: LoadLibraryExW failed lastError={}", lastError));
         return false;
     }
-    veyra::log::info("ngx", "nr-adapter: snippet loaded with restricted search flags (LOCAL EXPERIMENTAL ONLY)");
+    veyra::log::info("ngx", "EXPERIMENTAL LOCAL-ONLY DLSSNR ADAPTER ENABLED");
 
     void* addresses[5] = {};
     for (size_t i = 0; i < 5; ++i) {

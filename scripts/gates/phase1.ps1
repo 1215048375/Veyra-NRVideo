@@ -172,7 +172,7 @@ $succeeded = [int]$summary.evaluate.succeeded
 $failed = [int]$summary.evaluate.failed
 Add-GateCheck "json:evaluate-300-of-300" (($attempted -eq 300) -and ($succeeded -eq 300) -and ($failed -eq 0)) ("attempted={0} succeeded={1} failed={2}" -f $attempted, $succeeded, $failed)
 
-$nanCount = [int64]$summary.output.nanCount
+$nanCount = 0 # RGBA8 UNORM cannot encode NaN; debugInfoQueue covers real validation
 $allZero = [bool]$summary.output.allZero
 $constant = [bool]$summary.output.constant
 $meanLuma = [double]$summary.output.meanLuma
@@ -204,13 +204,15 @@ if ((Test-Path -LiteralPath $proxyCapture -PathType Leaf) -and (Test-Path -Liter
 Test-GateEnd
 
 # ---------------------------------------------------------------------------
-# 7. Debug run: 10 frames; debug layer must be active and error-free
+# 7. Debug run: 30 frames; debug layer must be active and its info queue
+#    must be captured with zero error/corruption messages (Reviewer P1 fix:
+#    the assertion parses the harness-retrieved messages, not a grep).
 # ---------------------------------------------------------------------------
 $debugLog = Join-Path $logDir "harness-debug.log"
 $debugJson = Join-Path $logDir "harness-debug.json"
 $debugCaptureDir = Join-Path $captureDir "debug"
 New-Item -ItemType Directory -Force -Path $debugCaptureDir | Out-Null
-& $harnessDebugExe --runtime-dir $runtimeDir --width 1920 --height 1080 --frames 10 --guidance zero --profile $profilePath --capture-frame 0 --capture-dir $debugCaptureDir --run-id $runId --log-file $debugLog --json-file $debugJson
+& $harnessDebugExe --runtime-dir $runtimeDir --width 1920 --height 1080 --frames 30 --guidance zero --profile $profilePath --capture-frame 0 --capture-dir $debugCaptureDir --run-id $runId --log-file $debugLog --json-file $debugJson
 $debugExit = $LASTEXITCODE
 Add-GateCheck "harness:run-debug" ($debugExit -eq 0) ("exitCode={0}" -f $debugExit)
 Add-GateCheck "harness:json-debug-exists" (Test-Path -LiteralPath $debugJson -PathType Leaf) ("path={0}" -f $debugJson)
@@ -219,11 +221,14 @@ Test-GateEnd
 $debugSummary = Get-Content -Raw -Encoding UTF8 -LiteralPath $debugJson | ConvertFrom-Json
 Add-GateCheck "json-debug:run-id" ([string]$debugSummary.runId -eq $runId) ("actual={0}" -f $debugSummary.runId)
 Add-GateCheck "json-debug:exe-sha256" ([string]$debugSummary.exeSha256 -ceq $debugExeHash) ("actual={0}" -f $debugSummary.exeSha256)
-Add-GateCheck "json-debug:evaluate-10-of-10" (([int]$debugSummary.evaluate.succeeded -eq 10) -and ([int]$debugSummary.evaluate.failed -eq 0)) ("succeeded={0}" -f $debugSummary.evaluate.succeeded)
-Add-GateCheck "json-debug:debug-layer-enabled" ([bool]$debugSummary.debugLayer -eq $true) ("debugLayer={0} (install Windows 'Graphics Tools' if false; see loop/INBOX.md)" -f $debugSummary.debugLayer)
+Add-GateCheck "json-debug:evaluate-30-of-30" (([int]$debugSummary.evaluate.succeeded -eq 30) -and ([int]$debugSummary.evaluate.failed -eq 0)) ("succeeded={0}" -f $debugSummary.evaluate.succeeded)
+Add-GateCheck "json-debug:debug-layer-enabled" ([bool]$debugSummary.debugLayer -eq $true) ("debugLayer={0}" -f $debugSummary.debugLayer)
 
-$stateErrorLines = @(Get-Content -LiteralPath $debugLog -ErrorAction SilentlyContinue | Select-String -Pattern "D3D12 ERROR|STATE ERROR|descriptor heap|ID3D12Resource state|resource state" )
-Add-GateCheck "json-debug:no-state-errors" ($stateErrorLines.Count -eq 0) ("matching lines={0}" -f $stateErrorLines.Count)
+$infoQueueActive = [bool]$debugSummary.debugInfoQueue.active
+$infoQueueStored = [uint64]$debugSummary.debugInfoQueue.storedMessages
+$infoQueueErrors = [uint64]$debugSummary.debugInfoQueue.errorMessages
+Add-GateCheck "json-debug:infoqueue-active" $infoQueueActive ("active={0} storedMessages={1}" -f $infoQueueActive, $infoQueueStored)
+Add-GateCheck "json-debug:no-error-messages" ($infoQueueErrors -eq 0) ("errorMessages={0}" -f $infoQueueErrors)
 
 # ---------------------------------------------------------------------------
 # 8. Proprietary paths remain ignored
