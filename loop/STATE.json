@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "engineVersion": "veyra-loop-v1",
+  "objective": "Complete the Veyra V1 definition for Phase 0 through Phase 7 with deterministic gates and independent phase review.",
+  "status": "ready",
+  "phase": {
+    "id": 0,
+    "name": "Runtime probe and D3D12 skeleton",
+    "state": "in_progress",
+    "gate": "phase0"
+  },
+  "phases": [
+    {
+      "id": 0,
+      "name": "Runtime probe and D3D12 skeleton",
+      "status": "in_progress",
+      "gateEvidence": null,
+      "reviewEvidence": null,
+      "commit": null
+    },
+    {
+      "id": 1,
+      "name": "Feature 18 native harness",
+      "status": "locked",
+      "gateEvidence": null,
+      "reviewEvidence": null,
+      "commit": null
+    },
+    {
+      "id": 2,
+      "name": "RenoDX-equivalent parity codec",
+      "status": "locked",
+      "gateEvidence": null,
+      "reviewEvidence": null,
+      "commit": null
+    },
+    {
+      "id": 3,
+      "name": "Minimal video pipeline",
+      "status": "locked",
+      "gateEvidence": null,
+      "reviewEvidence": null,
+      "commit": null
+    },
+    {
+      "id": 4,
+      "name": "DLSS SR",
+      "status": "locked",
+      "gateEvidence": null,
+      "reviewEvidence": null,
+      "commit": null
+    },
+    {
+      "id": 5,
+      "name": "NVOF guidance",
+      "status": "locked",
+      "gateEvidence": null,
+      "reviewEvidence": null,
+      "commit": null
+    },
+    {
+      "id": 6,
+      "name": "DLSSG 2X",
+      "status": "locked",
+      "gateEvidence": null,
+      "reviewEvidence": null,
+      "commit": null
+    },
+    {
+      "id": 7,
+      "name": "Audio and minimum UI",
+      "status": "locked",
+      "gateEvidence": null,
+      "reviewEvidence": null,
+      "commit": null
+    }
+  ],
+  "cycle": {
+    "completed": 1,
+    "maximum": 80,
+    "sameFailureAttempts": 0,
+    "maximumSameFailureAttempts": 3,
+    "noProgressCycles": 0,
+    "maximumNoProgressCycles": 5
+  },
+  "currentTask": "P0.2: initialize local Git per LOOP_ENGINE fixed order (ignore probes, explicit allowlist staging, baseline commit, agent/veyra-v1-loop branch, baselineCommit pointer).",
+  "lastGate": {
+    "name": "preflight",
+    "status": "passed",
+    "exitCode": 0,
+    "evidence": "loop/EVIDENCE.md#goal-cycle-001--preflight--2026-09-02"
+  },
+  "lastFailureFingerprint": null,
+  "failureLedger": [],
+  "baselineCommit": null,
+  "lastGoodCommit": null,
+  "openP0P1Findings": [],
+  "blockers": [],
+  "nextAction": "Execute P0.2 Git initialization in the LOOP_ENGINE fixed order, then continue P0.3 phase0 gate creation.",
+  "updatedAt": "2026-09-02T20:23:27+08:00"
+}

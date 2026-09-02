@@ -1,0 +1,26 @@
+# Proprietary and local-only inputs
+/nvngx_dlssnr.dll
+/renodx-dlss5-1.addon64
+/runtime_local/
+/third_party_local/
+/reference_local/
+
+# Build outputs and local presets
+/out/
+/build/
+/.vs/
+/vcpkg_installed/
+CMakeUserPresets.json
+
+# Diagnostics and captures
+/captures/
+/logs/
+*.pdb
+*.ilk
+*.dmp
+*.etl
+
+# Unattended loop local control and scratch
+/loop/STOP
+/loop/tmp/
+/loop/local/
