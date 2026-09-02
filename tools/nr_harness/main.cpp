@@ -535,6 +535,7 @@ int wmain(int argc, wchar_t** argv)
         loopArgs.captureDir = captureDir;
         loopArgs.styleOverride = styleOverride;
         loopArgs.intensityOverride = intensityOverride;
+        loopArgs.jsonFile = jsonFile;
         exitCode = veyra::harness::runFrameLoop(loopArgs);
     }
     else if (loadOnly && !runtimeDir.empty()) {

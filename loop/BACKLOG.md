@@ -24,8 +24,8 @@ Phase 0 gate：以 Playbook 第 16 节 Phase 0 为准。未完成 P0.9 禁止开
 - [x] P1.3 实现受隔离、可关闭的 caller-name 兼容层；禁止 patch DLL。（2026-09-02：IAT 单 owner shim + 8 项边界测试全过；DLL 文件从未被修改。）
 - [x] P1.4 严格按 Playbook 参数名与类型 Create Feature 18。（2026-09-02：CreateFeature id=18 result=0x1 handle=non-null，双配置 PASS；8.5 参数全表按名按类型设置。）
 - [x] P1.5 实现 Proxy→Feature18→Raw 的 D3D12 资源、barrier、subrect 与异步 4-slot 执行。（2026-09-02：5 帧全过，输出非黑非恒定，PNG 捕获有效；零初始化用 upload-copy 实现。）
-- [ ] P1.6 连续 300/300 Evaluate；验证输出非黑、非恒定、随输入/参数变化；记录 GPU timings/result/capture。
-- [ ] P1.7 重建/reset/释放测试。
+- [x] P1.6 连续 300/300 Evaluate；验证输出非黑、非恒定、随输入/参数变化；记录 GPU timings/result/capture。（2026-09-02：Debug+Release 双双 300/300；三 hash 互异；ts avgMs=6.32；PNG/JSON 齐。）
+- [x] P1.7 重建/reset/释放测试。（2026-09-02：连续两轮完整 Create/Evaluate(Reset)/Release + create-test + shim-test 4/4 PASS，无残留/无 device removed。）
 - [ ] P1.8 gate、只读 Reviewer、P0/P1 修复、checkpoint。
 
 ## Phase 2 — RenoDX-equivalent parity codec（锁定）

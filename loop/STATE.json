@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 15,
+    "completed": 16,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P1.6: run the full 300/300 Evaluate matrix with two Style/Intensity variants (distinct output hashes), GPU timestamps, and the JSON summary matching the phase1 gate contract.",
+  "currentTask": "P1.8: run the phase1 gate. Expected single red check: json-debug:debug-layer-enabled (D3D12 debug layer unavailable until the user installs Windows Graphics Tools, loop/INBOX.md). All other checks should pass; record and hold until then.",
   "lastGate": {
     "name": "phase0",
     "status": "passed",
@@ -96,6 +96,6 @@
   "lastGoodCommit": "1fb7afa5779a6c6a0a585d4ecf18a640260a2fcf",
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Extend frame loop with variants + JSON + timestamps (P1.6), then P1.7 resets, then the phase1 gate (blocked on Graphics Tools for the debug-layer criterion).",
-  "updatedAt": "2026-09-02T23:05:00+08:00"
+  "nextAction": "Run loop-gate -Gate phase1 to confirm the expected single debug-layer failure; everything else green means Phase 1 waits only on the user installing Graphics Tools.",
+  "updatedAt": "2026-09-02T23:20:00+08:00"
 }

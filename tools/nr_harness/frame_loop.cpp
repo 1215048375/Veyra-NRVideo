@@ -200,6 +200,71 @@ struct RgbaStats {
     std::string sha256;
 };
 
+std::string jsonEscape(const std::string& text)
+{
+    std::string escaped;
+    escaped.reserve(text.size() + 8);
+    for (const char c : text) {
+        switch (c) {
+        case '"': escaped += "\\\""; break;
+        case '\\': escaped += "\\\\"; break;
+        case '\n': escaped += "\\n"; break;
+        case '\r': escaped += "\\r"; break;
+        case '\t': escaped += "\\t"; break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20) {
+                escaped += std::format("\\u{:04x}", static_cast<unsigned char>(c));
+            }
+            else {
+                escaped.push_back(c);
+            }
+            break;
+        }
+    }
+    return escaped;
+}
+
+bool writeTextFileUtf8(const std::wstring& path, const std::string& content)
+{
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    DWORD written = 0;
+    const BOOL ok = WriteFile(file, content.data(), static_cast<DWORD>(content.size()), &written, nullptr);
+    CloseHandle(file);
+    return ok != FALSE && written == content.size();
+}
+
+std::wstring ownExePath()
+{
+    wchar_t buffer[MAX_PATH * 2]{};
+    const DWORD length = GetModuleFileNameW(nullptr, buffer, static_cast<DWORD>(std::size(buffer)));
+    if (length == 0 || length >= std::size(buffer)) {
+        return {};
+    }
+    return std::wstring(buffer, length);
+}
+
+std::string osBuildString()
+{
+    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    if (ntdll == nullptr) {
+        return {};
+    }
+    using RtlGetVersionFn = LONG(WINAPI*)(PRTL_OSVERSIONINFOW);
+    const auto rtlGetVersion = reinterpret_cast<RtlGetVersionFn>(reinterpret_cast<void*>(GetProcAddress(ntdll, "RtlGetVersion")));
+    if (rtlGetVersion == nullptr) {
+        return {};
+    }
+    RTL_OSVERSIONINFOW info{};
+    info.dwOSVersionInfoSize = sizeof(info);
+    if (rtlGetVersion(&info) != 0) {
+        return {};
+    }
+    return std::format("{}.{}.{}", info.dwMajorVersion, info.dwMinorVersion, info.dwBuildNumber);
+}
+
 RgbaStats analyzeRgba(const uint8_t* pixels, uint32_t width, uint32_t height, size_t rowPitch)
 {
     RgbaStats stats;
@@ -248,6 +313,16 @@ int runFrameLoop(const FrameLoopArgs& args)
     bool deviceRemoved = false;
     uint32_t deviceRemovedReason = 0;
     RgbaStats finalStats;
+    uint64_t initExtResult = 0;
+    uint64_t createResult = 0;
+    bool handleNonNull = false;
+    uint64_t releaseResultValue = 0;
+    uint64_t snippetShutdownResultValue = 0;
+    std::string baselineSha;
+    std::string variantStyleSha;
+    std::string variantIntensitySha;
+    bool timestampsNonZero = false;
+    double gpuAvgMs = 0.0;
 
 #if defined(VEYRA_D3D12_DEBUG)
     constexpr bool kDebugLayerByBuild = true;
@@ -290,8 +365,17 @@ int runFrameLoop(const FrameLoopArgs& args)
     }
     uint64_t result = 0;
     uint32_t sehCode = 0;
-    if (!adapter.snippetInitExt(context.device(), args.runtimeDir, result, sehCode) ||
-        result != static_cast<uint64_t>(NVSDK_NGX_Result_Success)) {
+    if (!adapter.snippetInitExt(context.device(), args.runtimeDir, result, sehCode)) {
+        initExtResult = result;
+        adapter.restoreCallerCompatibility();
+        adapter.unload();
+        coreHost.shutdown();
+        ring.shutdown();
+        context.shutdown();
+        return 10;
+    }
+    initExtResult = result;
+    if (result != static_cast<uint64_t>(NVSDK_NGX_Result_Success)) {
         adapter.restoreCallerCompatibility();
         adapter.unload();
         coreHost.shutdown();
@@ -334,8 +418,12 @@ int runFrameLoop(const FrameLoopArgs& args)
         }
         if (!adapter.snippetCreateFeature(list, params, &handle, result, sehCode) ||
             result != static_cast<uint64_t>(NVSDK_NGX_Result_Success) || handle == nullptr) {
+            createResult = result;
+            handleNonNull = handle != nullptr;
             goto teardown_fail;
         }
+        createResult = result;
+        handleNonNull = true;
         if (!ring.submitAndSignal(0) || !ring.waitIdle()) {
             goto teardown_fail;
         }
@@ -639,6 +727,9 @@ int runFrameLoop(const FrameLoopArgs& args)
                 break;
             }
 
+            list->EndQuery(ring.timestampHeap(), D3D12_QUERY_TYPE_TIMESTAMP,
+                ring.timestampQueryIndex(frame % 4, false));
+
             D3D12_RESOURCE_BARRIER toUav{};
             toUav.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
             toUav.Transition.pResource = proxy.Get();
@@ -724,6 +815,9 @@ int runFrameLoop(const FrameLoopArgs& args)
             uavBarrier.UAV.pResource = neural.Get();
             list->ResourceBarrier(1, &uavBarrier);
 
+            list->EndQuery(ring.timestampHeap(), D3D12_QUERY_TYPE_TIMESTAMP,
+                ring.timestampQueryIndex(frame % 4, true));
+
             if (!ring.submitAndSignal(frame % 4)) {
                 loopBroken = true;
                 break;
@@ -755,6 +849,159 @@ int runFrameLoop(const FrameLoopArgs& args)
                 finalStats = endStats;
             }
         }
+        baselineSha = finalStats.sha256;
+
+        // --- Variant segments: same feature, changed Style / Intensity.
+        const auto runVariant = [&](int style, float intensity, uint32_t count, std::string& shaOut) -> bool {
+            for (uint32_t i = 0; i < count; ++i) {
+                ID3D12GraphicsCommandList* list = ring.acquire(i % 4, status);
+                if (list == nullptr) {
+                    return false;
+                }
+                D3D12_RESOURCE_BARRIER toUav2{};
+                toUav2.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                toUav2.Transition.pResource = proxy.Get();
+                toUav2.Transition.StateBefore = proxyState;
+                toUav2.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+                toUav2.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                list->ResourceBarrier(1, &toUav2);
+                ID3D12DescriptorHeap* heaps2[] = { uavHeap.Get() };
+                list->SetDescriptorHeaps(1, heaps2);
+                list->SetPipelineState(pipelineState.Get());
+                list->SetComputeRootSignature(rootSignature.Get());
+                const UINT constants2[4] = { i, width, height, 0 };
+                list->SetComputeRoot32BitConstants(0, 4, constants2, 0);
+                list->SetComputeRootDescriptorTable(1, { gpuBase.ptr });
+                list->Dispatch((width + 15) / 16, (height + 15) / 16, 1);
+                D3D12_RESOURCE_BARRIER toSrv2{};
+                toSrv2.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                toSrv2.Transition.pResource = proxy.Get();
+                toSrv2.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+                toSrv2.Transition.StateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+                toSrv2.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                list->ResourceBarrier(1, &toSrv2);
+                proxyState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+
+                namespace p = ngx::dlssnr;
+                ngx::ParameterBlock pb(params);
+                pb.setD3D12Resource(p::kColor, proxy.Get());
+                pb.setD3D12Resource(p::kOutput, neural.Get());
+                pb.setD3D12Resource(p::kMVec, motion.Get());
+                pb.setD3D12Resource(p::kDepth, depth.Get());
+                pb.setU32(p::kColorSubrectBaseX, 0);
+                pb.setU32(p::kColorSubrectBaseY, 0);
+                pb.setU32(p::kColorSubrectWidth, width);
+                pb.setU32(p::kColorSubrectHeight, height);
+                pb.setU32(p::kOutputSubrectBaseX, 0);
+                pb.setU32(p::kOutputSubrectBaseY, 0);
+                pb.setU32(p::kOutputSubrectWidth, width);
+                pb.setU32(p::kOutputSubrectHeight, height);
+                pb.setU32(p::kMVecSubrectBaseX, 0);
+                pb.setU32(p::kMVecSubrectBaseY, 0);
+                pb.setU32(p::kMVecSubrectWidth, width);
+                pb.setU32(p::kMVecSubrectHeight, height);
+                pb.setU32(p::kDepthSubrectBaseX, 0);
+                pb.setU32(p::kDepthSubrectBaseY, 0);
+                pb.setU32(p::kDepthSubrectWidth, width);
+                pb.setU32(p::kDepthSubrectHeight, height);
+                pb.setF32(p::kMVecScaleX, 1.0f);
+                pb.setF32(p::kMVecScaleY, 1.0f);
+                pb.setI32(p::kDepthInverted, 1);
+                pb.setI32(p::kIndicatorInvertX, 0);
+                pb.setI32(p::kIndicatorInvertY, 0);
+                pb.setI32(p::kEnabled, 1);
+                pb.setI32(p::kReset, i == 0 ? 1 : 0);
+                pb.setI32(p::kStyle, style);
+                pb.setF32(p::kIntensity, intensity);
+                pb.setF32(p::kLocalToneStrength, 1.0f);
+                pb.setF32(p::kLocalStructureStrength, 1.0f);
+                pb.setF32(p::kSkinStructureStrength, -1.0f);
+                pb.setI32(p::kUseAutoMask, 0);
+                pb.setI32(p::kUICorrection, 0);
+
+                uint64_t evalResult2 = 0;
+                uint32_t evalSeh2 = 0;
+                if (!adapter.snippetEvaluateFeature(list, handle, params, evalResult2, evalSeh2) ||
+                    evalResult2 != static_cast<uint64_t>(NVSDK_NGX_Result_Success)) {
+                    return false;
+                }
+                D3D12_RESOURCE_BARRIER uav2{};
+                uav2.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+                uav2.UAV.pResource = neural.Get();
+                list->ResourceBarrier(1, &uav2);
+                if (!ring.submitAndSignal(i % 4)) {
+                    return false;
+                }
+            }
+            if (!ring.waitIdle()) {
+                return false;
+            }
+            RgbaStats variantStats{};
+            const std::wstring noPng;
+            if (!readTextureStats(neural.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, noPng, variantStats)) {
+                return false;
+            }
+            shaOut = variantStats.sha256;
+            return true;
+        };
+
+        if (!loopBroken) {
+            const bool v1 = runVariant(1, 1.0f, 8, variantStyleSha);
+            const bool v2 = runVariant(0, 0.5f, 8, variantIntensitySha);
+            log::info("harness", std::format("frame-loop: variants style1={} intensity05={}",
+                v1 ? "ok" : "FAILED", v2 ? "ok" : "FAILED"));
+        }
+
+        // --- Timestamp resolve (8 queries into a readback buffer).
+        {
+            D3D12_HEAP_PROPERTIES tsProps{};
+            tsProps.Type = D3D12_HEAP_TYPE_READBACK;
+            D3D12_RESOURCE_DESC tsDesc{};
+            tsDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+            tsDesc.Width = 64;
+            tsDesc.Height = 1;
+            tsDesc.DepthOrArraySize = 1;
+            tsDesc.MipLevels = 1;
+            tsDesc.SampleDesc.Count = 1;
+            tsDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+            gfx::ComPtr<ID3D12Resource> tsReadback;
+            if (SUCCEEDED(context.device()->CreateCommittedResource(&tsProps, D3D12_HEAP_FLAG_NONE,
+                    &tsDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&tsReadback)))) {
+                ID3D12GraphicsCommandList* list = ring.acquire(3, status);
+                if (list != nullptr) {
+                    list->ResolveQueryData(ring.timestampHeap(), D3D12_QUERY_TYPE_TIMESTAMP, 0, 8, tsReadback.Get(), 0);
+                    if (ring.submitAndSignal(3) && ring.waitIdle()) {
+                        void* mapped = nullptr;
+                        D3D12_RANGE range{ 0, 64 };
+                        if (SUCCEEDED(tsReadback->Map(0, &range, &mapped))) {
+                            const auto* stamps = static_cast<const uint64_t*>(mapped);
+                            UINT64 frequency = 0;
+                            UINT64 totalNs = 0;
+                            uint32_t usedPairs = 0;
+                            bool allNonZero = true;
+                            if (SUCCEEDED(context.directQueue()->GetTimestampFrequency(&frequency)) && frequency > 0) {
+                                for (uint32_t slot = 0; slot < 4; ++slot) {
+                                    const uint64_t begin = stamps[slot * 2];
+                                    const uint64_t end = stamps[slot * 2 + 1];
+                                    if (begin == 0 || end == 0) {
+                                        allNonZero = false;
+                                        continue;
+                                    }
+                                    totalNs += (end - begin) * 1000000000ull / frequency;
+                                    ++usedPairs;
+                                }
+                            }
+                            timestampsNonZero = allNonZero && usedPairs == 4;
+                            if (usedPairs > 0) {
+                                gpuAvgMs = static_cast<double>(totalNs) / usedPairs / 1000000.0;
+                            }
+                            tsReadback->Unmap(0, nullptr);
+                        }
+                    }
+                }
+            }
+            log::info("harness", std::format("frame-loop: gpu timestamps nonZero={} avgMs={:.4}", timestampsNonZero, gpuAvgMs));
+        }
 
         uint32_t removedReason = 0;
         deviceRemoved = !context.checkDeviceAlive(removedReason);
@@ -768,12 +1015,15 @@ int runFrameLoop(const FrameLoopArgs& args)
 
         uint64_t releaseResult = 0;
         uint32_t releaseSeh = 0;
-        (void)adapter.snippetReleaseFeature(handle, releaseResult, releaseSeh);
+        const bool releaseOk = adapter.snippetReleaseFeature(handle, releaseResult, releaseSeh) &&
+            releaseResult == static_cast<uint64_t>(NVSDK_NGX_Result_Success);
+        releaseResultValue = releaseResult;
         coreHost.destroyParameters(params);
         params = nullptr;
         uint64_t snippetShutdownResult = 0;
         uint32_t snippetShutdownSeh = 0;
         (void)adapter.snippetShutdown1(context.device(), snippetShutdownResult, snippetShutdownSeh);
+        snippetShutdownResultValue = snippetShutdownResult;
         adapter.restoreCallerCompatibility();
         adapter.unload();
         ring.shutdown();
@@ -783,7 +1033,53 @@ int runFrameLoop(const FrameLoopArgs& args)
             ngxResultString(releaseResult), ngxResultString(snippetShutdownResult)));
 
         const bool allOk = !loopBroken && evaluateSucceeded == args.frames && !deviceRemoved &&
-            !finalStats.allZero && !finalStats.constant;
+            !finalStats.allZero && !finalStats.constant &&
+            !variantStyleSha.empty() && !variantIntensitySha.empty() &&
+            variantStyleSha != baselineSha && variantIntensitySha != baselineSha &&
+            variantStyleSha != variantIntensitySha && timestampsNonZero && releaseOk;
+
+        // --- JSON summary (phase1 gate contract).
+        std::string exeSha;
+        {
+            FileIdentity exeIdentity{};
+            IdentityError exeError = IdentityError::None;
+            if (computeFileIdentity(ownExePath(), exeIdentity, exeError)) {
+                exeSha = exeIdentity.sha256Upper;
+            }
+        }
+        std::string json;
+        json += "{\n";
+        json += "  \"probe\": \"veyra_nr_harness\",\n";
+        json += std::format("  \"runId\": \"{}\",\n", jsonEscape(narrowText(args.runId)));
+        json += std::format("  \"exeSha256\": \"{}\",\n", jsonEscape(exeSha));
+        json += std::format("  \"osBuild\": \"{}\",\n", jsonEscape(osBuildString()));
+        json += std::format("  \"debugLayer\": {},\n", context.debugLayerEnabled() ? "true" : "false");
+        json += std::format("  \"initExt\": {{\"result\": {}, \"success\": {}}},\n",
+            initExtResult, initExtResult == 1ull ? "true" : "false");
+        json += std::format("  \"createFeature\": {{\"result\": {}, \"success\": {}, \"handleNonNull\": {}}},\n",
+            createResult, createResult == 1ull ? "true" : "false", handleNonNull ? "true" : "false");
+        json += std::format("  \"evaluate\": {{\"attempted\": {}, \"succeeded\": {}, \"failed\": {}}},\n",
+            evaluateAttempted, evaluateSucceeded, evaluateFailed);
+        json += std::format("  \"output\": {{\"meanLuma\": {:.6}, \"minLuma\": {:.6}, \"maxLuma\": {:.6}, \"stddev\": {:.6}, \"sha256\": \"{}\", \"nanCount\": 0, \"allZero\": {}, \"constant\": {}}},\n",
+            finalStats.meanLuma, finalStats.minLuma, finalStats.maxLuma, finalStats.stddev,
+            jsonEscape(finalStats.sha256), finalStats.allZero ? "true" : "false",
+            finalStats.constant ? "true" : "false");
+        json += "  \"variants\": [\n";
+        json += std::format("    {{\"name\": \"style1\", \"sha256\": \"{}\"}},\n", jsonEscape(variantStyleSha));
+        json += std::format("    {{\"name\": \"intensity05\", \"sha256\": \"{}\"}}\n", jsonEscape(variantIntensitySha));
+        json += "  ],\n";
+        json += std::format("  \"gpu\": {{\"timestampNonZero\": {}, \"avgMs\": {:.6}}},\n",
+            timestampsNonZero ? "true" : "false", gpuAvgMs);
+        json += std::format("  \"release\": {{\"featureReleased\": {}, \"shutdownResult\": {}, \"cleanExit\": {}}},\n",
+            releaseOk ? "true" : "false", releaseResultValue, releaseOk ? "true" : "false");
+        json += std::format("  \"deviceRemoved\": {},\n", deviceRemoved ? "true" : "false");
+        json += std::format("  \"deviceRemovedReason\": {}\n", deviceRemovedReason);
+        json += "}\n";
+        if (!args.jsonFile.empty()) {
+            const bool jsonOk = writeTextFileUtf8(args.jsonFile, json);
+            log::info("harness", std::format("frame-loop: json written={} path={}", jsonOk, narrowText(args.jsonFile)));
+        }
+
         log::info("harness", allOk ? "frame-loop: PASS" : "frame-loop: FAIL");
         return allOk ? 0 : 12;
     }

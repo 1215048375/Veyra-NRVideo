@@ -13,6 +13,7 @@ struct FrameLoopArgs {
     uint32_t height = 1080;
     uint32_t frames = 300;
     std::wstring runId;
+    std::wstring jsonFile;
     uint32_t captureFrame = 0;
     std::wstring captureDir;
     int styleOverride = 0;

@@ -59,6 +59,9 @@ public:
     // Two timestamp query indices per slot (begin at 2*slot, end at 2*slot+1).
     uint32_t timestampQueryIndex(uint32_t slot, bool end) const;
 
+    // Query heap for D3D12_QUERY_TYPE_TIMESTAMP entries (two per slot).
+    ID3D12QueryHeap* timestampHeap() const { return timestampHeap_.Get(); }
+
 private:
     struct Slot {
         ComPtr<ID3D12CommandAllocator> allocator;
