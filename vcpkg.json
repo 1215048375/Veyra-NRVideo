@@ -9,7 +9,6 @@
       "features": [
         "avcodec",
         "avformat",
-        "avfilter",
         "swresample",
         "swscale"
       ]
