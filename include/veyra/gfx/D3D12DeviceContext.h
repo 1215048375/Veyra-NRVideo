@@ -1,0 +1,93 @@
+#pragma once
+
+#include <d3d12.h>
+#include <dxgi1_6.h>
+#include <wrl/client.h>
+
+#include <cstdint>
+#include <string>
+
+#include "veyra/Result.h"
+
+namespace veyra::gfx {
+
+template <typename T>
+using ComPtr = Microsoft::WRL::ComPtr<T>;
+
+struct AdapterInfo {
+    std::wstring description;
+    uint32_t vendorId = 0;
+    std::string vendorIdHex;             // "0x10DE"
+    std::string luidString;              // "0xHigh:0xLow"
+    uint64_t dedicatedVideoMemoryBytes = 0;
+    bool isNvidia = false;
+    bool isSoftware = false;
+    std::wstring driverVersion;          // registry DisplayVersion when found
+    std::wstring driverVersionSource;    // "registry" or "dxgi-raw"
+};
+
+struct DeviceContextDesc {
+    bool enableDebugLayer = false;
+    uint32_t commandSlotCount = 4;
+};
+
+// One DXGI adapter + one ID3D12Device + one direct command queue + one fence
+// timeline with a rotating command-slot ring (Playbook sections 6.1/6.2).
+class D3D12DeviceContext {
+public:
+    D3D12DeviceContext() = default;
+    ~D3D12DeviceContext();
+
+    D3D12DeviceContext(const D3D12DeviceContext&) = delete;
+    D3D12DeviceContext& operator=(const D3D12DeviceContext&) = delete;
+
+    // Initialization order: optional debug layer -> factory -> NVIDIA adapter
+    // (vendor 0x10DE, non-software) -> device at >= 12_0 -> direct queue ->
+    // fence/event -> command slot ring. Every step logs its real result.
+    bool initialize(const DeviceContextDesc& desc, Status& status);
+    void shutdown(); // reverse-order teardown
+
+    bool initialized() const { return initialized_; }
+    bool debugLayerEnabled() const { return debugLayerEnabled_; }
+
+    ID3D12Device* device() const { return device_.Get(); }
+    ID3D12CommandQueue* directQueue() const { return queue_.Get(); }
+    ID3D12Fence* fence() const { return fence_.Get(); }
+    HANDLE fenceEvent() const { return fenceEvent_; }
+    uint64_t fenceCompletedValue() const { return fence_->GetCompletedValue(); }
+    uint64_t nextFenceValue() const { return nextFenceValue_; }
+    uint64_t signalNextFenceValue(); // Signal(queue) with ++nextFenceValue_
+
+    const AdapterInfo& adapter() const { return adapterInfo_; }
+    const std::string& featureLevelString() const { return featureLevel_; }
+    uint32_t commandSlotCount() const { return commandSlotCount_; }
+
+    // CPU wait until `value` completes; returns false on wait timeout/failure.
+    bool waitForFenceValue(uint64_t value, uint32_t timeoutMs = 10000);
+
+    // GetDeviceRemovedReason; returns true when the device is still alive.
+    bool checkDeviceAlive(uint32_t& removedReason) const;
+
+    // Exercises the full slot ring: acquire (wait+reset), empty command list
+    // with timestamp begin/end markers, execute, signal, wait idle. Phase 0
+    // skeleton proof that allocator/list/fence plumbing works end to end.
+    bool exerciseSlotRing();
+
+private:
+    bool initialized_ = false;
+    bool debugLayerEnabled_ = false;
+    uint32_t commandSlotCount_ = 0;
+
+    ComPtr<IDXGIFactory6> factory_;
+    ComPtr<IDXGIAdapter1> adapter_;
+    ComPtr<ID3D12Device> device_;
+    ComPtr<ID3D12CommandQueue> queue_;
+    ComPtr<ID3D12Fence> fence_;
+    HANDLE fenceEvent_ = nullptr;
+    uint64_t nextFenceValue_ = 1;
+
+    AdapterInfo adapterInfo_{};
+    std::string featureLevel_;
+};
+
+} // namespace veyra::gfx

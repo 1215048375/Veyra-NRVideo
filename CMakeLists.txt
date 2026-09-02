@@ -36,6 +36,14 @@ target_compile_definitions(veyra_base PUBLIC
 target_include_directories(veyra_base PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(veyra_base PUBLIC bcrypt wintrust crypt32 version)
 
+add_library(veyra_gfx STATIC
+  src/gfx/D3D12DeviceContext.cpp
+  src/gfx/CommandSlotRing.cpp
+)
+veyra_apply_warnings(veyra_gfx)
+target_compile_features(veyra_gfx PUBLIC cxx_std_20)
+target_link_libraries(veyra_gfx PUBLIC veyra_base d3d12 dxgi dxguid)
+
 add_executable(veyra_runtime_probe
   tools/runtime_probe/main.cpp
 )
@@ -43,4 +51,4 @@ veyra_apply_warnings(veyra_runtime_probe)
 target_compile_features(veyra_runtime_probe PRIVATE cxx_std_20)
 target_compile_definitions(veyra_runtime_probe PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(veyra_runtime_probe PRIVATE veyra_base)
+target_link_libraries(veyra_runtime_probe PRIVATE veyra_gfx)

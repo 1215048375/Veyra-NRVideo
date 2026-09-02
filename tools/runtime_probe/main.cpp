@@ -12,6 +12,7 @@
 #include "veyra/Log.h"
 #include "veyra/NgxResult.h"
 #include "veyra/Result.h"
+#include "veyra/gfx/D3D12DeviceContext.h"
 
 namespace {
 
@@ -111,16 +112,62 @@ int runSelfTest(const std::wstring& runtimeDir)
     return 0;
 }
 
+int runDeviceInfo(bool debugLayer)
+{
+    veyra::gfx::D3D12DeviceContext context;
+    veyra::gfx::DeviceContextDesc desc{};
+    desc.enableDebugLayer = debugLayer;
+    desc.commandSlotCount = 4;
+
+    veyra::Status status = veyra::Status::Ok;
+    if (!context.initialize(desc, status)) {
+        veyra::log::error("probe", std::format("device-info: initialize failed status={}", veyra::statusString(status)));
+        return 6;
+    }
+
+    const veyra::gfx::AdapterInfo& adapter = context.adapter();
+    veyra::log::info("probe", std::format("device-info: adapter={} vendor={} nvidia={} luid={} vramMiB={} driver={} ({})",
+        narrow(adapter.description), adapter.vendorIdHex, adapter.isNvidia, adapter.luidString,
+        adapter.dedicatedVideoMemoryBytes / (1024 * 1024),
+        narrow(adapter.driverVersion.empty() ? std::wstring(L"<none>") : adapter.driverVersion),
+        narrow(adapter.driverVersionSource)));
+    veyra::log::info("probe", std::format("device-info: featureLevel={} debugLayer={} slots={}",
+        context.featureLevelString(), context.debugLayerEnabled(), context.commandSlotCount()));
+
+    if (!context.exerciseSlotRing()) {
+        veyra::log::error("probe", "device-info: slot ring exercise failed");
+        return 7;
+    }
+
+    uint32_t removedReason = 0;
+    const bool alive = context.checkDeviceAlive(removedReason);
+    context.shutdown();
+    if (!alive) {
+        veyra::log::error("probe", std::format("device-info: device removed reason={}", veyra::hresultString(static_cast<long>(removedReason))));
+        return 8;
+    }
+    veyra::log::info("probe", "device-info: PASS");
+    return 0;
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t** argv)
 {
     std::wstring runtimeDir;
     bool selfTest = false;
+    bool deviceInfo = false;
+    bool debugLayer = false;
     for (int i = 1; i < argc; ++i) {
         const std::wstring arg = argv[i];
         if (arg == L"--self-test") {
             selfTest = true;
+        }
+        else if (arg == L"--device-info") {
+            deviceInfo = true;
+        }
+        else if (arg == L"--debug-layer") {
+            debugLayer = true;
         }
         else if (arg == L"--runtime-dir" && i + 1 < argc) {
             runtimeDir = argv[++i];
@@ -130,7 +177,10 @@ int wmain(int argc, wchar_t** argv)
     if (selfTest) {
         return runSelfTest(runtimeDir);
     }
+    if (deviceInfo) {
+        return runDeviceInfo(debugLayer);
+    }
 
-    veyra::log::info("probe", "no mode selected; use --self-test (full probe arrives in P0.6/P0.7)");
+    veyra::log::info("probe", "no mode selected; use --self-test or --device-info (full probe arrives in P0.7)");
     return 0;
 }

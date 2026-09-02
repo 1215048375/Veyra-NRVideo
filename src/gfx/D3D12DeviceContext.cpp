@@ -1,0 +1,314 @@
+#include "veyra/gfx/D3D12DeviceContext.h"
+
+#include <windows.h>
+
+#include <format>
+#include <string>
+#include <vector>
+
+#include "veyra/Log.h"
+#include "veyra/NgxResult.h"
+#include "veyra/gfx/CommandSlotRing.h"
+
+namespace veyra::gfx {
+
+namespace {
+
+std::string narrow(const std::wstring& text)
+{
+    if (text.empty()) {
+        return {};
+    }
+    const int length = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+    if (length <= 0) {
+        return {};
+    }
+    std::string converted(static_cast<size_t>(length), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), converted.data(), length, nullptr, nullptr);
+    return converted;
+}
+
+// Driver version from the kernel service key: first the friendly
+// DisplayVersion string when present, otherwise the file version of the
+// nvlddmkm.sys image the ImagePath value points at.
+std::wstring queryNvidiaDriverVersion()
+{
+    HKEY key = nullptr;
+    const LONG openResult = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\nvlddmkm",
+        0, KEY_QUERY_VALUE, &key);
+    if (openResult != ERROR_SUCCESS) {
+        return {};
+    }
+
+    wchar_t display[64]{};
+    DWORD displaySize = sizeof(display);
+    if (RegQueryValueExW(key, L"DisplayVersion", nullptr, nullptr, reinterpret_cast<LPBYTE>(display), &displaySize) == ERROR_SUCCESS &&
+        displaySize >= sizeof(wchar_t) && display[0] != L'\0') {
+        RegCloseKey(key);
+        return std::wstring(display);
+    }
+
+    wchar_t imagePath[512]{};
+    DWORD imagePathSize = sizeof(imagePath);
+    if (RegQueryValueExW(key, L"ImagePath", nullptr, nullptr, reinterpret_cast<LPBYTE>(imagePath), &imagePathSize) != ERROR_SUCCESS ||
+        imagePathSize < sizeof(wchar_t) || imagePath[0] == L'\0') {
+        RegCloseKey(key);
+        return {};
+    }
+    RegCloseKey(key);
+
+    // ImagePath uses the kernel form "\SystemRoot\..."; ExpandEnvironmentStrings
+    // only handles %%-references, so translate the prefix manually.
+    std::wstring driverFile(imagePath);
+    const wchar_t* systemRootPrefix = L"\\SystemRoot";
+    const size_t prefixLength = 11; // wcslen(L"\\SystemRoot")
+    if (_wcsnicmp(driverFile.c_str(), systemRootPrefix, prefixLength) == 0) {
+        wchar_t windowsDir[MAX_PATH]{};
+        const UINT windowsLength = GetWindowsDirectoryW(windowsDir, MAX_PATH);
+        if (windowsLength == 0 || windowsLength >= MAX_PATH) {
+            return {};
+        }
+        driverFile = std::wstring(windowsDir) + driverFile.substr(prefixLength);
+    }
+
+    DWORD handle = 0;
+    const DWORD versionSize = GetFileVersionInfoSizeW(driverFile.c_str(), &handle);
+    if (versionSize == 0) {
+        return {};
+    }
+    std::vector<unsigned char> buffer(versionSize);
+    if (!GetFileVersionInfoW(driverFile.c_str(), 0, versionSize, buffer.data())) {
+        return {};
+    }
+    VS_FIXEDFILEINFO* fixedInfo = nullptr;
+    UINT length = 0;
+    if (VerQueryValueW(buffer.data(), L"\\", reinterpret_cast<void**>(&fixedInfo), &length) && length >= sizeof(VS_FIXEDFILEINFO)) {
+        return std::format(L"{}.{}.{}.{}",
+            HIWORD(fixedInfo->dwFileVersionMS), LOWORD(fixedInfo->dwFileVersionMS),
+            HIWORD(fixedInfo->dwFileVersionLS), LOWORD(fixedInfo->dwFileVersionLS));
+    }
+    return {};
+}
+
+bool fillAdapterInfo(const DXGI_ADAPTER_DESC1& desc, AdapterInfo& info)
+{
+    info.description = desc.Description;
+    info.vendorId = desc.VendorId;
+    info.vendorIdHex = std::format("0x{:04X}", desc.VendorId);
+    info.luidString = std::format("0x{:08X}:0x{:016X}",
+        static_cast<uint32_t>(desc.AdapterLuid.HighPart),
+        static_cast<uint64_t>(desc.AdapterLuid.LowPart));
+    info.dedicatedVideoMemoryBytes = desc.DedicatedVideoMemory;
+    info.isNvidia = desc.VendorId == 0x10DE;
+    info.isSoftware = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+    info.driverVersion = queryNvidiaDriverVersion();
+    info.driverVersionSource = info.driverVersion.empty() ? L"unavailable" : L"registry";
+    return info.isNvidia && !info.isSoftware;
+}
+
+} // namespace
+
+D3D12DeviceContext::~D3D12DeviceContext()
+{
+    shutdown();
+}
+
+bool D3D12DeviceContext::initialize(const DeviceContextDesc& desc, Status& status)
+{
+    if (initialized_) {
+        shutdown();
+    }
+
+    // 1. Optional debug layer.
+    if (desc.enableDebugLayer) {
+        ComPtr<ID3D12Debug> debug;
+        HRESULT result = D3D12GetDebugInterface(IID_PPV_ARGS(&debug));
+        if (SUCCEEDED(result)) {
+            debug->EnableDebugLayer();
+            debugLayerEnabled_ = true;
+            veyra::log::info("gfx", "d3d12 debug layer enabled");
+        }
+        else {
+            veyra::log::warn("gfx", std::format("d3d12 debug layer unavailable hr={}; continuing without it", veyra::hresultString(result)));
+        }
+    }
+
+    // 2. DXGI factory.
+    const UINT factoryFlags = debugLayerEnabled_ ? DXGI_CREATE_FACTORY_DEBUG : 0;
+    HRESULT result = CreateDXGIFactory2(factoryFlags, IID_PPV_ARGS(&factory_));
+    if (FAILED(result)) {
+        status = Status::DeviceFailure;
+        veyra::log::error("gfx", std::format("CreateDXGIFactory2 failed hr={}", veyra::hresultString(result)));
+        return false;
+    }
+
+    // 3. Highest-performance NVIDIA adapter (vendor 0x10DE, non-software).
+    DXGI_ADAPTER_DESC1 chosenDesc{};
+    bool chosen = false;
+    for (UINT index = 0;; ++index) {
+        ComPtr<IDXGIAdapter1> candidate;
+        const HRESULT enumResult = factory_->EnumAdapterByGpuPreference(
+            index, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&candidate));
+        if (enumResult == DXGI_ERROR_NOT_FOUND) {
+            break;
+        }
+        if (FAILED(enumResult)) {
+            status = Status::DeviceFailure;
+            veyra::log::error("gfx", std::format("EnumAdapterByGpuPreference index={} failed hr={}", index, veyra::hresultString(enumResult)));
+            return false;
+        }
+
+        DXGI_ADAPTER_DESC1 candidateDesc{};
+        result = candidate->GetDesc1(&candidateDesc);
+        if (FAILED(result)) {
+            status = Status::DeviceFailure;
+            veyra::log::error("gfx", std::format("adapter GetDesc1 index={} failed hr={}", index, veyra::hresultString(result)));
+            return false;
+        }
+
+        const bool isSoftware = (candidateDesc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+        veyra::log::info("gfx", std::format("adapter[{}] vendorId=0x{:04X} software={} dedicatedVideoMiB={} desc={}",
+            index, candidateDesc.VendorId, isSoftware,
+            candidateDesc.DedicatedVideoMemory / (1024 * 1024),
+            narrow(candidateDesc.Description)));
+
+        if (candidateDesc.VendorId == 0x10DE && !isSoftware) {
+            adapter_ = candidate;
+            chosenDesc = candidateDesc;
+            chosen = true;
+            break;
+        }
+    }
+
+    if (!chosen) {
+        status = Status::DeviceFailure;
+        veyra::log::error("gfx", "no NVIDIA (vendor 0x10DE) hardware adapter found; refusing WARP fallback");
+        return false;
+    }
+    fillAdapterInfo(chosenDesc, adapterInfo_);
+
+    // 4. Device at minimum feature level 12_0, reporting the highest level.
+    result = D3D12CreateDevice(adapter_.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&device_));
+    if (FAILED(result)) {
+        status = Status::DeviceFailure;
+        veyra::log::error("gfx", std::format("D3D12CreateDevice failed hr={}", veyra::hresultString(result)));
+        return false;
+    }
+
+    const D3D_FEATURE_LEVEL requested[] = { D3D_FEATURE_LEVEL_12_2, D3D_FEATURE_LEVEL_12_1, D3D_FEATURE_LEVEL_12_0 };
+    D3D12_FEATURE_DATA_FEATURE_LEVELS featureLevels{};
+    featureLevels.pFeatureLevelsRequested = requested;
+    featureLevels.NumFeatureLevels = static_cast<UINT>(std::size(requested));
+    const HRESULT flResult = device_->CheckFeatureSupport(D3D12_FEATURE_FEATURE_LEVELS, &featureLevels, sizeof(featureLevels));
+    if (SUCCEEDED(flResult)) {
+        const uint32_t packed = static_cast<uint32_t>(featureLevels.MaxSupportedFeatureLevel);
+        featureLevel_ = std::format("{}_{}", packed >> 12, (packed >> 8) & 0xF);
+    }
+    else {
+        featureLevel_ = "12_0";
+    }
+    veyra::log::info("gfx", std::format("device created featureLevelMax={} checkHr={}", featureLevel_, veyra::hresultString(flResult)));
+
+    // 5. Direct command queue.
+    D3D12_COMMAND_QUEUE_DESC queueDesc{};
+    queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    queueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
+    queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+    queueDesc.NodeMask = 0;
+    result = device_->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&queue_));
+    if (FAILED(result)) {
+        status = Status::DeviceFailure;
+        veyra::log::error("gfx", std::format("CreateCommandQueue failed hr={}", veyra::hresultString(result)));
+        return false;
+    }
+
+    // 6. Fence + event.
+    result = device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_));
+    if (FAILED(result)) {
+        status = Status::DeviceFailure;
+        veyra::log::error("gfx", std::format("CreateFence failed hr={}", veyra::hresultString(result)));
+        return false;
+    }
+    fenceEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (fenceEvent_ == nullptr) {
+        status = Status::DeviceFailure;
+        veyra::log::error("gfx", std::format("CreateEventW failed lastError={}", GetLastError()));
+        return false;
+    }
+
+    commandSlotCount_ = desc.commandSlotCount;
+    initialized_ = true;
+    veyra::log::info("gfx", std::format("device context initialized adapter={} vendor={} luid={} driver={} ({}) featureLevel={} slots={}",
+        narrow(adapterInfo_.description), adapterInfo_.vendorIdHex, adapterInfo_.luidString,
+        narrow(adapterInfo_.driverVersion.empty() ? std::wstring(L"<none>") : adapterInfo_.driverVersion),
+        narrow(adapterInfo_.driverVersionSource),
+        featureLevel_, commandSlotCount_));
+    return true;
+}
+
+void D3D12DeviceContext::shutdown()
+{
+    if (!initialized_) {
+        return;
+    }
+    if (fence_ != nullptr && fenceEvent_ != nullptr) {
+        (void)waitForFenceValue(nextFenceValue_ - 1, 5000);
+    }
+    if (fenceEvent_ != nullptr) {
+        CloseHandle(fenceEvent_);
+        fenceEvent_ = nullptr;
+    }
+    queue_.Reset();
+    device_.Reset();
+    adapter_.Reset();
+    factory_.Reset();
+    initialized_ = false;
+    veyra::log::info("gfx", "device context shutdown complete");
+}
+
+uint64_t D3D12DeviceContext::signalNextFenceValue()
+{
+    const uint64_t value = nextFenceValue_++;
+    const HRESULT result = queue_->Signal(fence_.Get(), value);
+    if (FAILED(result)) {
+        veyra::log::error("gfx", std::format("fence signal failed hr={}", veyra::hresultString(result)));
+    }
+    return value;
+}
+
+bool D3D12DeviceContext::waitForFenceValue(uint64_t value, uint32_t timeoutMs)
+{
+    if (fence_->GetCompletedValue() >= value) {
+        return true;
+    }
+    const HRESULT result = fence_->SetEventOnCompletion(value, fenceEvent_);
+    if (FAILED(result)) {
+        veyra::log::error("gfx", std::format("SetEventOnCompletion failed hr={} value={}", veyra::hresultString(result), value));
+        return false;
+    }
+    return WaitForSingleObject(fenceEvent_, timeoutMs) == WAIT_OBJECT_0;
+}
+
+bool D3D12DeviceContext::checkDeviceAlive(uint32_t& removedReason) const
+{
+    const HRESULT reason = device_->GetDeviceRemovedReason();
+    removedReason = static_cast<uint32_t>(reason);
+    return SUCCEEDED(reason);
+}
+
+bool D3D12DeviceContext::exerciseSlotRing()
+{
+    CommandSlotRing ring;
+    Status status = Status::Ok;
+    if (!ring.initialize(device_.Get(), queue_.Get(), fence_.Get(), fenceEvent_, commandSlotCount_, status)) {
+        veyra::log::error("gfx", std::format("exerciseSlotRing: ring init failed status={}", veyra::statusString(status)));
+        return false;
+    }
+    if (!ring.exerciseAll()) {
+        return false;
+    }
+    ring.shutdown();
+    return true;
+}
+
+} // namespace veyra::gfx

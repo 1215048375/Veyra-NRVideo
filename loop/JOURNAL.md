@@ -170,6 +170,33 @@ Result:
 
 ---
 
+## Cycle 006 — P0.6 veyra_gfx D3D12DeviceContext
+
+### Before
+
+- Phase: 0
+- 唯一任务: 实现 veyra_gfx（RTX adapter 枚举/筛选、D3D12 device ≥12_0、direct queue、fence/event、4-slot allocator+list ring + timestamp query heap），probe 增加 --device-info 在真实 GPU 上实测并 exercise ring。
+- 可证伪假设: 若 adapter 筛选、FL、queue/fence 或 slot ring 有误，--device-info 将失败或报告非 NVIDIA adapter；成功时日志必须显示 RTX 5070/0x10DE/12_x/4 slots。
+- 预计修改文件: include/veyra/gfx/{D3D12DeviceContext.h,CommandSlotRing.h}、src/gfx/{D3D12DeviceContext.cpp,CommandSlotRing.cpp}、CMakeLists.txt（+veyra_gfx）、tools/runtime_probe/main.cpp（--device-info）。
+- 快速检查命令: `scripts/build.ps1 -Preset x64-debug` → 0；`veyra_runtime_probe.exe --device-info` → 0 且日志含 NVIDIA adapter 与 slot ring exercise。
+- 预期新增证据: 真实 D3D12 device 初始化日志（adapter/driver/FL/LUID/VRAM、debug layer 状态、fence signal/wait）。
+
+### After
+
+- 实际修改: 新增 include/veyra/gfx/{D3D12DeviceContext.h,CommandSlotRing.h}、src/gfx/{D3D12DeviceContext.cpp,CommandSlotRing.cpp}；CMakeLists 增加 veyra_gfx（d3d12/dxgi/dxguid）；main.cpp 增加 --device-info/--debug-layer。
+- 实际命令与 exit code:
+  - `scripts/build.ps1 -Preset x64-debug/-release` → 修复 3 轮编译错误（adapter_ 成员重名/ComPtr 冲突、DXGI_ADAPTER_DESC3 不在 IDXGIAdapter1 上、queue_->Signal 需 .Get()）后双双 exit 0。
+  - `veyra_runtime_probe.exe --device-info [--debug-layer]` → exit 0（PASS）。
+- 新证据/日志路径: probe 输出：adapter[0] NVIDIA GeForce RTX 5070 vendorId=0x10DE software=false dedicatedVideoMiB=11943；featureLevelMax=12_2；device context driver=32.0.16.1656 (registry/nvlddmkm.sys)；4-slot ring acquire→timestamp pair→submit→signal(fenceValue 1..4)→waitIdle 全通过；timestamp heap 8 indices，frequency=1000000000 Hz。
+- 失败 fingerprint: 无遗留。调试期三个修正：DXGI adapter desc 无 Version 字段（改用注册表 ImagePath→DriverStore nvlddmkm.sys 文件版本）；`\SystemRoot` 前缀不被 ExpandEnvironmentStringsW 展开（手动替换）；DisplayVersion 值本驱动不存在。
+- 本 fingerprint 第几次不同尝试: 不适用。
+- 是否有进展，依据: 是——真实 RTX 5070 上完成 device/queue/fence/4-slot ring 的创建、提交、timestamp query 与同步，全部有日志。
+- 附加发现: D3D12 debug layer 未安装（0x887A002D，需 Windows Graphics Tools 可选功能），已记 INBOX；不阻塞 Phase 0。
+- STATE/BACKLOG 更新: cycle.completed=6、currentTask 指向 P0.7；BACKLOG P0.6 → DONE。
+- 下一唯一动作: P0.7 完整 probe：受限绝对路径 LoadLibraryExW 加载 staged DLL、5 exports 验证、System32 nvofapi64 探测、Win32 窗口+flip swapchain 循环、JSON+log 输出。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名
