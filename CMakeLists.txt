@@ -101,3 +101,23 @@ if(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR)
   target_link_libraries(veyra_nr_harness PRIVATE veyra_gfx veyra_ngx)
   add_dependencies(veyra_nr_harness veyra_shader_test_pattern)
 endif()
+
+# ---------------------------------------------------------------------------
+# veyra_parity: RenoDX-equivalent codec reference (CPU golden + shaders later).
+# The CPU reference has no D3D12 dependency, so it builds unconditionally.
+# ---------------------------------------------------------------------------
+add_library(veyra_parity STATIC
+  src/parity/RenoDxParityCodec.cpp
+)
+veyra_apply_warnings(veyra_parity)
+target_compile_features(veyra_parity PUBLIC cxx_std_20)
+target_link_libraries(veyra_parity PUBLIC veyra_base)
+
+add_executable(veyra_parity_tests
+  tests/unit/ParityCpuReference.cpp
+)
+veyra_apply_warnings(veyra_parity_tests)
+target_compile_features(veyra_parity_tests PRIVATE cxx_std_20)
+target_compile_definitions(veyra_parity_tests PRIVATE
+  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(veyra_parity_tests PRIVATE veyra_parity)

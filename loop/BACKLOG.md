@@ -30,7 +30,7 @@ Phase 0 gate：以 Playbook 第 16 节 Phase 0 为准。未完成 P0.9 禁止开
 
 ## Phase 2 — RenoDX-equivalent parity codec（锁定）
 
-- [ ] P2.1 为 transfer/range/matrix/proxy encode/decode 建 CPU golden tests 和 phase2 gate。
+- [x] P2.1 为 transfer/range/matrix/proxy encode/decode 建 CPU golden tests 和 phase2 gate。（2026-09-02：12/12 双配置 0 failures；gate fail-closed 验证 exit 1；亮度保持误差 0.000000。）
 - [ ] P2.2 实现 Original→Parity Encode shader，显式定义输入/输出色域、transfer、range 和资源格式。
 - [ ] P2.3 实现 Parity Decode 与 Raw/bypass 对照；记录三个 1.0 中性 codec baseline、来源说明、addon hash 和 capture hash。当前没有 preset；不得加载 addon 取值。
 - [ ] P2.4 CPU/GPU golden、identity/bypass、灰阶/色卡/高光测试达到 Playbook 容差。

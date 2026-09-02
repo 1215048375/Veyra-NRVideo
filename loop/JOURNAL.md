@@ -479,6 +479,32 @@ Result:
 
 ---
 
+## Cycle 018 — P2.1 parity CPU 黄金参考与 phase2 gate
+
+### Before
+
+- Phase: 2
+- 唯一任务: 按 Playbook §9 的精确数学（shoulder 0.75/5.7780、标准 sRGB、OkLab/AP1 全矩阵、signed cbrt、UpgradeToneMap、luminance-only）实现 src/parity CPU 参考（RenoDxParityCodec）；tests/unit/ParityCpuReference 覆盖 9.5 全部场景（黑/白/18% 灰、0.7499/0.75/0.7501、高光 1/2/4/8、RGB 基色、肤色、负分量/alpha、64×64 图案）；创建 fail-closed 的 scripts/gates/phase2.ps1（编码 §16 Phase 2 全部门槛）；验证 gate 现在因缺 shader/捕获而 exit 1 且 CPU tests 真实 exit 0。
+- 可证伪假设: 若数学实现错（矩阵转置/阈值/符号），golden tests 将以真实容差失败。
+- 预计修改文件: src/parity/{RenoDxParityCodec.h,RenoDxParityCodec.cpp}、tests/unit/ParityCpuReference.cpp、CMakeLists（veyra_parity + veyra_parity_tests）、scripts/gates/phase2.ps1。
+- 快速检查命令: `build.ps1 -Preset x64-debug` → 0；`veyra_parity_tests.exe` → 0；`loop-gate -Gate phase2` → 1（缺 GPU 侧产物）。
+- 预期新增证据: CPU golden 全过（含阈值连续性、中性 baseline 恒等、高光恢复、无 NaN）。
+
+### After
+
+- 实际修改: include/veyra/parity/RenoDxParityCodec.h、src/parity/RenoDxParityCodec.cpp（§9 精确数学：shoulder 0.75/5.7780、sRGB、OkLab/AP1 全矩阵 mul(matrix,vector) 方向、signed cbrt、HueOkLab、UpgradeToneMap 双段、luminance-only、PaperWhiteScale）、tests/unit/ParityCpuReference.cpp（12 项 golden）、config/parity-default.json（1.0 中性 baseline）、scripts/gates/phase2.ps1（§16 Phase 2 全门槛）、CMakeLists（veyra_parity + veyra_parity_tests）。
+- 实际命令与 exit code:
+  - `build.ps1 -Preset x64-debug/-release` → 双 0（修一处缺 <algorithm>）。
+  - `veyra_parity_tests.exe` Debug 与 Release → **12/12 checks, 0 failures, exit 0**。
+  - `loop-gate -Gate phase2` → exit 1（input:ParityEncode.hlsl、ParityDecode.hlsl 缺失）——fail-closed 成立。
+- 新证据/日志路径: 控制台输出：srgb 往返 worst≈0；shoulder 连续性 gap≈5e-5/7.5e-5；高光 1/2/4/8 有序压缩；18% 灰 code=118 与理论一致；OkLab 往返 <1e-6；中性 bypass 恒等 worst=0.001424；高光重建 finalY=3.995（original 4.0）；**shoulder 区亮度保持误差 0.000000**；量化界 losslessWorst=0.005559 < 0.0076（1-code 线性界）；quantize-within-1-code 0.499 code。
+- 失败 fingerprint: 无遗留。首轮 3 项测试期望错误（肤色含 >0.75 通道应走 shoulder；矩阵 10 位截断往返 ~1e-7；彩色高光 bypass 亮度保持而非逐通道恒等——worst 0.057 来自 shoulder 有损设计的 (1,0.5,0.25) 类像素）均已按规格数学修正，codec 数学本身零改动。
+- 是否有进展，依据: 是——P2.1 验收成立：CPU 黄金全绿 + phase2 gate fail-closed。
+- STATE/BACKLOG 更新: cycle.completed=18；BACKLOG P2.1 → DONE。
+- 下一唯一动作: P2.2/P2.3 实现 shaders/Parity{Encode,Decode}.hlsl（16x16 组、越界 return、FP16/UNORM 资源合同）与 harness --parity-compare 模式（四阶段 capture + GPU/CPU 对比统计 + 中性 baseline/addon hash 记录）。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名

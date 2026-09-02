@@ -96,6 +96,6 @@
   "lastGoodCommit": "1dcf834f56986d334a2a6256b196fa1d878ad9b1",
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Write phase2 gate + CPU reference; then shaders ParityEncode/ParityDecode; then Original->Encode->Feature18->Decode captures.",
-  "updatedAt": "2026-09-02T22:50:00+08:00"
+  "nextAction": "Write ParityEncode/ParityDecode shaders + harness --parity-compare (P2.2/P2.3), then P2.4 tolerances and P2.5 captures.",
+  "updatedAt": "2026-09-02T23:20:00+08:00"
 }
