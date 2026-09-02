@@ -2,7 +2,20 @@
 
 这里只登记真实存在的门禁证据。格式固定：
 
-## Phase N / Gate name / timestamp
+## Phase 1 / phase1 / 2026-09-02T22:20:00+08:00
+
+- Commit: 验证内容 checkpoint 在 Reviewer 通过后登记于 STATE.phases[1].commit；gate 运行时工作树为 a8feb21 + 用户安装 Graphics Tools 的环境变化
+- Command: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate phase1`
+- Exit code: 0（外层 70 checks；内部 phase1.ps1 55/55，run-id 7a535572145b4d73b25da192adf847ee，9.1s）
+- Build configuration: x64-debug（带 D3D12 debug layer，实跑 10 帧零 state error）+ x64-release（300 帧）均经 build.ps1 真实构建
+- Hardware/runtime identity: RTX 5070 / 0x10DE / driver 32.0.16.1656 / FL 12_2；staged nvngx_dlssnr.dll 165840496 / E16B…FC8E / Valid / NVIDIA；NGX SDK 310.7 官方 GitHub clone
+- Logs/captures: logs/phase1/7a535572145b4d73b25da192adf847ee/（harness-release.{log,json}、harness-debug.{log,json}、captures/）
+- Quantitative result: **Release 300/300 Evaluate 成功 0 失败**；output meanLuma=0.49425 min=0.05098 max=0.94397 stddev≈0.327 allZero=false constant=false；baseline=1BD84180… style1=B5294CB6… intensity05=8A621726…（三 hash 互异）；GPU timestamps nonZero=true avgMs=6.32；teardown release=0x1 snippetShutdown=0x1；deviceRemoved=false；**Debug run debugLayer=true 且日志 0 条 state/descriptor 错误**
+- Reviewer: not run yet（gate 首次全绿后立即安排）
+- Open P0/P1: none known
+- Conclusion: Playbook §16 Phase 1 全部门槛（Init_Ext/Create 成功、300/300、非黑非恒定、参数可变 hash、GPU 计时、干净释放、debug layer 无 state error、capture 存在）机器验证通过
+
+迭代记录：2026-09-02T21:56 首次运行 54/55（唯一红项 debug-layer-enabled，本机未装 Graphics Tools）；用户安装 Windows 图形工具后本 run 55/55。前期过程证据见 JOURNAL Cycle 016 与 WORKLOG Phase 1 条目。## Phase N / Gate name / timestamp
 
 - Commit:
 - Command:
