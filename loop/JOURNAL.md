@@ -530,6 +530,23 @@ Result:
 
 ---
 
+## Cycle 021 — P3.1 vcpkg/FFmpeg 依赖获取
+
+### Before
+
+- Phase: 3
+- 唯一任务: 克隆 vcpkg 到 third_party_local 并 checkout 固定基线 30ef65ca…、bootstrap（-disableMetrics）；项目根写 vcpkg.json（Playbook 3.4：ffmpeg 9.0.1#1 最小 features、无 gpl/nonfree/x264/x265/fdk-aac）；创建 fail-closed scripts/gates/phase3.ps1。
+- 可证伪假设: 若依赖不可获得或构建失败，Phase 3 gate 保持红。
+- 预计修改文件: third_party_local/vcpkg（ignored）、vcpkg.json、scripts/gates/phase3.ps1、loop 状态文件。
+- 快速检查命令: vcpkg/bootstrap 成功；`loop-gate -Gate phase3` → 预期 exit 1（尚无 media 管线）。
+- 预期新增证据: vcpkg 基线 commit、FFmpeg 可用。
+
+### After
+
+（vcpkg 克隆/引导后台进行中；FFmpeg 首次构建预计数十分钟，完成后填写并继续 P3.2。）
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名

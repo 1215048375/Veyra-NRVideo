@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 19,
+    "completed": 21,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P3.1: acquire the pinned vcpkg baseline (30ef65cad98f08e7197c9a1656fbd871bcb72f2d) + FFmpeg 9.0.1/imgui into third_party_local, add vcpkg.json, and create the fail-closed phase3 gate.",
+  "currentTask": "P3.1 (in progress): vcpkg pinned-baseline clone+bootstrap running in background; vcpkg.json written; next: first FFmpeg dependency build, then the fail-closed phase3 gate.",
   "lastGate": {
     "name": "phase2",
     "status": "passed",
