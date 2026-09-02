@@ -400,6 +400,33 @@ Result:
 
 ---
 
+## Cycle 015 — P1.5 Proxy→Feature18→Raw 执行链
+
+### Before
+
+- Phase: 1
+- 唯一任务: 实现 shaders/GenerateTestPattern.hlsl（确定性 gradient/checker/硬边/RGB bars，随 frameId 平移；cs_6_0，DXC 构建期编译进 out/）；Phase 1 资源（Proxy/Neural RGBA8 UAV、ZeroMotion R16G16F、ZeroDepth R32F、Confidence R8，均 1920x1080）；zero 纹理一次性 UAV clear；compute root signature + descriptor heap；8.6 全部 Evaluate 参数（4 资源 + 16 subrect + 控制项，首帧 Reset=1）；4-slot 逐帧：acquire→pattern dispatch→barriers→Evaluate→UAV barrier→submit；harness 主模式接 --frames N（先小 N 验证）。
+- 可证伪假设: 若资源格式/state/subrect/参数类型错误，Evaluate 返回非 0x1（0xBAD00005 等）或 debug 输出 state error——按 Playbook 18 表排查。
+- 预计修改文件: shaders/GenerateTestPattern.hlsl、cmake/VeyraShaders.cmake、CMakeLists.txt、tools/nr_harness/main.cpp（主循环 + PNG writer + stats）。
+- 快速检查命令: `build.ps1` → 0（含 DXC 编译）；`veyra_nr_harness.exe --runtime-dir <abs> --frames 5` → evaluate 成功 5/5。
+- 预期新增证据: 每帧 Evaluate result hex、GPU timestamp、帧数计数。
+
+### After
+
+- 实际修改: shaders/GenerateTestPattern.hlsl（四象限确定性图案，root constant frameId）、cmake/VeyraShaders.cmake（DXC 查找+构建期编译）、tools/nr_harness/frame_loop.{h,cpp}（完整主循环：资源/UAV heap/root signature/PSO/零初始化/逐帧 Evaluate/捕获/统计/最小 PNG writer）、main.cpp 接线、FileIdentity 增加内存 sha256Hex。
+- 实际命令与 exit code:
+  - `build.ps1 -Preset x64-debug` → 修复 3 轮（DXC genex 引号问题→按 CMAKE_BUILD_TYPE 分支；D3D12_TEXTURE_COPY_LOCATION union 不能聚合多初始化器；**ClearUnorderedAccessViewFloat 段错误**→对照实验证实与纹理格式无关后改为 upload-buffer 复制零初始化）后 exit 0。
+  - `veyra_nr_harness.exe --runtime-dir <abs> --frames 5 --capture-frame 0 --capture-dir captures/tmp` → **REAL_EXIT=0，frame-loop: PASS**。
+- 新证据/日志路径: logs/tmp/p15e.out、captures/tmp/frame0000_{proxy,raw}.png（8.3MB/张，System.Drawing 验证 1920x1080）。关键数字——**Evaluate 5/5 成功 0 失败**；输出 meanLuma=0.52437、minLuma=0.05043、maxLuma=1.0、stddev=0.34352、allZero=false、constant=false、rawSha=4C3248C8…（≠proxySha=46522DAB…，证明 Feature 18 真实处理）；teardown release/snippetShutdown 双 0x1；deviceRemoved=false。
+- 失败 fingerprint: phase1|frame-loop zero-init|139|ClearUnorderedAccessViewFloat crash → 换实现路径修复（upload copy），fingerprint 关闭。
+- 本 fingerprint 第几次不同尝试: 2 次（SetDescriptorHeaps 补绑后仍崩 → 换路径成功）。
+- 是否有进展，依据: 是——Playbook 8.7 完整帧链（pattern→barriers→全部 8.6 参数→Evaluate→UAV barrier→4-slot 提交→捕获统计）真实运行成功。
+- 已知偏差记录: ClearUnorderedAccessViewFloat 在本机（无 debug layer）段错误原因未定（机制问题非格式问题），已用等效 upload-copy 路径替代；待用户装 Graphics Tools 后可复查（记入 INBOX 附注候选）。
+- STATE/BACKLOG 更新: cycle.completed=15；BACKLOG P1.5 → DONE。
+- 下一唯一动作: P1.6 300/300 连续 Evaluate + 两组 Style/Intensity 变体 hash + GPU timestamp + JSON 输出，对齐 phase1 gate 契约。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名

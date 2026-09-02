@@ -22,6 +22,8 @@
 #include "veyra/ngx/NgxCoreHost.h"
 #include "veyra/ngx/NgxParameters.h"
 
+#include "frame_loop.h"
+
 namespace {
 
 constexpr uint64_t kExpectedDllSize = 165840496ull;
@@ -445,11 +447,19 @@ int wmain(int argc, wchar_t** argv)
 {
     std::wstring runtimeDir;
     std::wstring logFile;
+    std::wstring runId;
+    std::wstring jsonFile;
+    std::wstring captureDir;
+    uint32_t width = 1920;
+    uint32_t height = 1080;
+    uint32_t frames = 300;
+    uint32_t captureFrame = 0;
+    int styleOverride = 0;
+    float intensityOverride = 1.0f;
     bool loadOnly = false;
     bool shimTest = false;
     bool createTest = false;
-    uint32_t width = 1920;
-    uint32_t height = 1080;
+    bool frameLoop = false;
     for (int i = 1; i < argc; ++i) {
         const std::wstring arg = argv[i];
         if (arg == L"--load-only") {
@@ -460,6 +470,34 @@ int wmain(int argc, wchar_t** argv)
         }
         else if (arg == L"--create-test") {
             createTest = true;
+        }
+        else if (arg == L"--frames" && i + 1 < argc) {
+            frames = static_cast<uint32_t>(wcstoul(argv[++i], nullptr, 10));
+            frameLoop = true;
+        }
+        else if (arg == L"--guidance" && i + 1 < argc) {
+            ++i; // zero is the only Phase 1 provider; accepted for CLI parity
+        }
+        else if (arg == L"--profile" && i + 1 < argc) {
+            ++i; // baseline values are compiled in for Phase 1 (P1.6 wires profiles)
+        }
+        else if (arg == L"--capture-frame" && i + 1 < argc) {
+            captureFrame = static_cast<uint32_t>(wcstoul(argv[++i], nullptr, 10));
+        }
+        else if (arg == L"--capture-dir" && i + 1 < argc) {
+            captureDir = argv[++i];
+        }
+        else if (arg == L"--run-id" && i + 1 < argc) {
+            runId = argv[++i];
+        }
+        else if (arg == L"--json-file" && i + 1 < argc) {
+            jsonFile = argv[++i];
+        }
+        else if (arg == L"--style" && i + 1 < argc) {
+            styleOverride = static_cast<int>(wcstol(argv[++i], nullptr, 10));
+        }
+        else if (arg == L"--intensity" && i + 1 < argc) {
+            intensityOverride = wcstof(argv[++i], nullptr);
         }
         else if (arg == L"--runtime-dir" && i + 1 < argc) {
             runtimeDir = argv[++i];
@@ -486,11 +524,24 @@ int wmain(int argc, wchar_t** argv)
     else if (createTest && !runtimeDir.empty()) {
         exitCode = runCreateTest(runtimeDir, width, height);
     }
+    else if ((frameLoop || !jsonFile.empty()) && !runtimeDir.empty()) {
+        veyra::harness::FrameLoopArgs loopArgs{};
+        loopArgs.runtimeDir = runtimeDir;
+        loopArgs.width = width;
+        loopArgs.height = height;
+        loopArgs.frames = frames;
+        loopArgs.runId = runId;
+        loopArgs.captureFrame = captureFrame;
+        loopArgs.captureDir = captureDir;
+        loopArgs.styleOverride = styleOverride;
+        loopArgs.intensityOverride = intensityOverride;
+        exitCode = veyra::harness::runFrameLoop(loopArgs);
+    }
     else if (loadOnly && !runtimeDir.empty()) {
         exitCode = runLoadOnly(runtimeDir);
     }
     else {
-        veyra::log::info("harness", "no mode selected; use --load-only/--shim-test/--create-test --runtime-dir <abs> (frame loop arrives in P1.5-P1.6)");
+        veyra::log::info("harness", "no mode selected; use --load-only/--shim-test/--create-test or --frames N --runtime-dir <abs>");
         exitCode = 1;
     }
 

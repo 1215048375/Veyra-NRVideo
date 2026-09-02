@@ -20,6 +20,7 @@ option(VEYRA_ENABLE_D3D12_DEBUG "Enable D3D12 debug layer" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(VeyraWarnings)
+include(VeyraShaders)
 
 # NVIDIA's static NGX core shim (nvsdk_ngx_s*.lib) is built against the
 # static CRT (MT/MTd); match it for the diagnostic tools that link it.
@@ -87,12 +88,16 @@ target_compile_definitions(veyra_runtime_probe PRIVATE
 target_link_libraries(veyra_runtime_probe PRIVATE veyra_gfx)
 
 if(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR)
+  veyra_add_compute_shader(veyra_shader_test_pattern GenerateTestPattern)
   add_executable(veyra_nr_harness
     tools/nr_harness/main.cpp
+    tools/nr_harness/frame_loop.cpp
   )
   veyra_apply_warnings(veyra_nr_harness)
   target_compile_features(veyra_nr_harness PRIVATE cxx_std_20)
   target_compile_definitions(veyra_nr_harness PRIVATE
-    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+    VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
   target_link_libraries(veyra_nr_harness PRIVATE veyra_gfx veyra_ngx)
+  add_dependencies(veyra_nr_harness veyra_shader_test_pattern)
 endif()

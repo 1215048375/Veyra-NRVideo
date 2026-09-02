@@ -264,4 +264,29 @@ bool computeFileIdentity(const std::wstring& path, FileIdentity& out, IdentityEr
     return true;
 }
 
+std::string sha256Hex(const uint8_t* data, size_t size)
+{
+    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    NTSTATUS status = BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0);
+    if (!BCRYPT_SUCCESS(status)) {
+        return {};
+    }
+    BCRYPT_HASH_HANDLE hash = nullptr;
+    status = BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0);
+    if (!BCRYPT_SUCCESS(status)) {
+        BCryptCloseAlgorithmProvider(algorithm, 0);
+        return {};
+    }
+    std::string hex;
+    if (BCRYPT_SUCCESS(BCryptHashData(hash, const_cast<unsigned char*>(data), static_cast<ULONG>(size), 0))) {
+        std::array<unsigned char, 32> digest{};
+        if (BCRYPT_SUCCESS(BCryptFinishHash(hash, digest.data(), static_cast<ULONG>(digest.size()), 0))) {
+            hex = bytesToHexUpper(digest);
+        }
+    }
+    BCryptDestroyHash(hash);
+    BCryptCloseAlgorithmProvider(algorithm, 0);
+    return hex;
+}
+
 } // namespace veyra

@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 14,
+    "completed": 15,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P1.5: implement Phase 1 GPU resources (Proxy/Neural RGBA8, ZeroMotion R16G16F, ZeroDepth R32F, Confidence R8), GenerateTestPattern.hlsl compiled at build time via DXC, the 8.6 Evaluate parameter set, and the per-frame Proxy->Feature18->Raw execution on the 4-slot ring.",
+  "currentTask": "P1.6: run the full 300/300 Evaluate matrix with two Style/Intensity variants (distinct output hashes), GPU timestamps, and the JSON summary matching the phase1 gate contract.",
   "lastGate": {
     "name": "phase0",
     "status": "passed",
@@ -96,6 +96,6 @@
   "lastGoodCommit": "1fb7afa5779a6c6a0a585d4ecf18a640260a2fcf",
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Implement P1.5 resources + test pattern shader + Evaluate loop, then P1.6 300-frame run with output statistics.",
-  "updatedAt": "2026-09-02T22:40:00+08:00"
+  "nextAction": "Extend frame loop with variants + JSON + timestamps (P1.6), then P1.7 resets, then the phase1 gate (blocked on Graphics Tools for the debug-layer criterion).",
+  "updatedAt": "2026-09-02T23:05:00+08:00"
 }

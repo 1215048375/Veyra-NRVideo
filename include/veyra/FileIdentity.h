@@ -33,4 +33,7 @@ const char* identityErrorString(IdentityError error);
 // partial results remain in `out` for logging.
 bool computeFileIdentity(const std::wstring& path, FileIdentity& out, IdentityError& error);
 
+// Uppercase hex SHA-256 over an in-memory buffer (diagnostics/statistics).
+std::string sha256Hex(const uint8_t* data, size_t size);
+
 } // namespace veyra
