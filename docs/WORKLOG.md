@@ -1,5 +1,46 @@
 # Veyra Worklog
 
+## 2026-09-02 Phase 1 — Feature 18 native harness (gate 54/55, one user-action item)
+
+Goal:
+
+Build the Feature 18 harness end to end: NGX core host, isolated caller-name compatibility layer, signed-snippet Create/Evaluate, deterministic test-pattern Proxy, 300-frame runs with statistics/captures/variants, and the phase1 gate.
+
+Changed:
+
+- include/veyra/ngx + src/ngx: NgxCoreHost (single Init/Shutdown, parameter-block lifecycle, SEH), ParameterBlock typed setters, DlssNrParameters constants, DlssNrRuntimeAdapter (restricted load, 5 exports, PE-import IAT shim with single-owner install/restore, SEH-wrapped snippet calls, scaling-ratio callback).
+- shaders/GenerateTestPattern.hlsl + cmake/VeyraShaders.cmake: build-time DXC compile (deterministic quadrant pattern with frameId shift).
+- tools/nr_harness: --load-only/--shim-test/--create-test and the full frame loop (Proxy->Feature18->Raw, zero guidance via upload-copy, 4-slot execution, PNG captures, statistics, variant segments, GPU timestamps, gate-contract JSON).
+- NgxResult: full official 310.7 result table (Success=0x1 — corrected from an earlier wrong assumption).
+
+Commands actually run (key evidence):
+
+- Core Init_with_ProjectID result=0x1; snippet Init_Ext (AppID 0x0876232C) result=0x1; CreateFeature id=18 result=0x1 handle non-null; Release/Shutdown results all 0x1.
+- Shim boundary battery: 8/8 PASS (zero-size, truncation with ERROR_INSUFFICIENT_BUFFER, exact 10-wchar, roomy, nullptr/other-module forwarding, restore verified).
+- 300/300 Evaluate succeeded in BOTH Debug and Release (0 failures), output meanLuma≈0.494 stddev≈0.327 non-black non-constant; three distinct hashes (baseline / style=1 / intensity=0.5); GPU timestamps non-zero, avg ≈6.3 ms/frame at 1080p.
+- Lifecycle: two consecutive full runs + create-test + shim-test 4/4 PASS.
+- loop-gate -Gate phase1: **54/55 checks PASS; the single FAIL is json-debug:debug-layer-enabled (debugLayer=False)**.
+
+Artifacts/logs:
+
+- logs/phase1/824a66eca2bd4ebfb23a28950eecbc8f/ (gate runs), logs/tmp/p16*.json/out, captures (gitignored).
+- third_party_local/nvidia/DLSS_SDK_310.7.0 staged from the official GitHub repo clone (headers + nvsdk_ngx_s[_dbg].lib + rel DLLs; nvngx_dlss.dll BE6E434A…, nvngx_dlssg.dll 135EAF07…).
+
+Failures and exact codes:
+
+- ClearUnorderedAccessViewFloat crashed (139) during zero-init even after binding heaps; replaced with an upload-buffer copy path (equally deterministic). Root cause unverifiable without the debug layer; noted for re-check after Graphics Tools is installed.
+- Compile iterations: SDK header include order (d3d12.h before nvsdk_ngx.h), Init_with_ProjectID casing (capital D), NVIDIA static libs are MT-flavored (switched tools to static CRT via CMP0091 + per-config _dbg lib), DXC argument quoting via generator expressions (switched to CMAKE_BUILD_TYPE branch), union aggregate init.
+
+Decision:
+
+- NGX result table and all signatures come from the staged official 310.7 headers, never memory.
+- Zero-init via upload copy; JSON debugLayer reports the actual runtime state.
+
+Next single task (user action required):
+
+Install Windows "Graphics Tools" (see loop/INBOX.md: DISM /Online /Add-Capability /CapabilityName:Tools.Graphics.DirectX~~~~0.0.1.0), then rerun loop-gate -Gate phase1 (expected 55/55) and proceed to the P1.8 read-only reviewer.
+
+
 ## 2026-09-02 Phase 0 — Runtime probe + D3D12 skeleton
 
 Goal:

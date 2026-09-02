@@ -6,7 +6,7 @@
   "phase": {
     "id": 1,
     "name": "Feature 18 native harness",
-    "state": "not_started",
+    "state": "in_progress",
     "gate": "phase1"
   },
   "phases": [
@@ -21,7 +21,7 @@
     {
       "id": 1,
       "name": "Feature 18 native harness",
-      "status": "not_started",
+      "status": "in_progress",
       "gateEvidence": null,
       "reviewEvidence": null,
       "commit": null
@@ -83,19 +83,21 @@
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P1.8: run the phase1 gate. Expected single red check: json-debug:debug-layer-enabled (D3D12 debug layer unavailable until the user installs Windows Graphics Tools, loop/INBOX.md). All other checks should pass; record and hold until then.",
+  "currentTask": "P1.8 BLOCKED ON USER: phase1 gate is 54/55; the single failing check (json-debug:debug-layer-enabled) requires the user to install Windows 'Graphics Tools' (loop/INBOX.md). After installation: rerun loop-gate -Gate phase1 (expect 55/55), then the read-only Phase 1 reviewer.",
   "lastGate": {
-    "name": "phase0",
-    "status": "passed",
-    "exitCode": 0,
-    "evidence": "loop/EVIDENCE.md#phase-0--phase0--2026-09-02t210909-0800"
+    "name": "phase1",
+    "status": "failed",
+    "exitCode": 1,
+    "evidence": "logs/phase1/824a66eca2bd4ebfb23a28950eecbc8f (54/55 checks; only debug-layer-enabled fails)"
   },
   "lastFailureFingerprint": null,
   "failureLedger": [],
   "baselineCommit": "2086282478ae5d1e07e8162d47148633b59882fe",
   "lastGoodCommit": "1fb7afa5779a6c6a0a585d4ecf18a640260a2fcf",
   "openP0P1Findings": [],
-  "blockers": [],
-  "nextAction": "Run loop-gate -Gate phase1 to confirm the expected single debug-layer failure; everything else green means Phase 1 waits only on the user installing Graphics Tools.",
-  "updatedAt": "2026-09-02T23:20:00+08:00"
+  "blockers": [
+    "Phase 1 gate needs D3D12 debug layer active for the debug run; the machine lacks the Windows 'Graphics Tools' optional feature (D3D12GetDebugInterface -> 0x887A002D). Installing an OS optional capability is a system change requiring user authorization (see loop/INBOX.md)."
+  ],
+  "nextAction": "USER ACTION: install Graphics Tools, then rerun phase1 gate (expect 55/55) and launch the Phase 1 read-only reviewer; then Phase 2 unlocks.",
+  "updatedAt": "2026-09-02T23:35:00+08:00"
 }
