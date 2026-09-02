@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 3,
+    "completed": 4,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P0.4: create the minimal CMake/C++20 Win32 x64 project with Debug/Release presets (no FFmpeg, no UI): CMakeLists.txt, CMakePresets.json, scripts/build.ps1, scripts/stage-runtime.ps1, source skeleton.",
+  "currentTask": "P0.5: implement veyra_base (structured logger, HRESULT/NGX result strings, file size/hash/signature checks) and verify with a real probe self-test.",
   "lastGate": {
     "name": "phase0",
     "status": "failed",
@@ -96,6 +96,6 @@
   "lastGoodCommit": null,
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Implement P0.4 CMake skeleton (build.ps1/stage-runtime.ps1/presets/CMakeLists), then P0.5-P0.7 implementation, then P0.8 real runs.",
-  "updatedAt": "2026-09-02T20:45:00+08:00"
+  "nextAction": "Implement P0.5 veyra_base, then P0.6 gfx, P0.7 probe, P0.8 gate runs.",
+  "updatedAt": "2026-09-02T21:00:00+08:00"
 }

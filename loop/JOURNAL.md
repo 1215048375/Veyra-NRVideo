@@ -114,6 +114,34 @@ Result:
 
 ---
 
+## Cycle 004 — P0.4 最小 CMake/C++20 工程
+
+### Before
+
+- Phase: 0
+- 唯一任务: 建立最小 CMake/C++20 Win32 x64 工程与 Debug/Release presets（Ninja 生成器、out/build 二进制目录），scripts/build.ps1（vswhere/vcvars 解析机器路径，避免提交绝对路径）与 scripts/stage-runtime.ps1（复制 DLL + 写 manifest + 持久 ngx-local.json）；probe 以最小 stub main 验证可构建可运行。
+- 可证伪假设: 若 presets 含机器绝对路径、或 Debug/Release 任一配置失败、或 build.ps1 在普通 shell（无 VS env）不可用，则工程骨架不合规。
+- 预计修改文件: CMakeLists.txt、CMakePresets.json、cmake/VeyraWarnings.cmake、scripts/build.ps1、scripts/stage-runtime.ps1、tools/runtime_probe/main.cpp。
+- 快速检查命令: `powershell -File scripts/build.ps1 -Preset x64-debug` 与 `-Preset x64-release` 均 exit 0；`out/build/x64-*/veyra_runtime_probe.exe` 可运行；`scripts/stage-runtime.ps1` 后 runtime_local/nvidia DLL+manifest 就位。
+- 预期新增证据: 两 preset 构建成功 + stub 运行 exit 0 + staged runtime 与 manifest。
+
+### After
+
+- 实际修改: 新增 CMakeLists.txt（C++20、MSVC-only 校验、按阶段增长的 target）、CMakePresets.json（Ninja、binaryDir=out/build/x64-*、debug 层 debug=ON/release=OFF、无机器路径）、cmake/VeyraWarnings.cmake（/W4 /permissive- /Zc:__cplusplus /WX 仅本项目 target）、scripts/build.ps1（vswhere→vcvars64→cmake preset，批处理写在 ignored out/ 下）、scripts/stage-runtime.ps1（固定身份校验后复制 DLL、写 manifest、一次性持久 ngx-local.json GUID）、tools/runtime_probe/main.cpp（stub）。
+- 实际命令与 exit code:
+  - `scripts/stage-runtime.ps1` → exit 0：DLL 复制至 runtime_local/nvidia、runtime-manifest.json 写入、持久 ngx-local.json 创建。
+  - `scripts/build.ps1 -Preset x64-debug` → exit 0（[2/2] 编译+链接 veyra_runtime_probe.exe）。
+  - `scripts/build.ps1 -Preset x64-release` → exit 0。
+  - `out/build/x64-debug/veyra_runtime_probe.exe --self-check` → exit 0（stub 输出 argc/argv）。
+- 新证据/日志路径: out/build/x64-{debug,release}/（ignored）；runtime_local/nvidia/{nvngx_dlssnr.dll,runtime-manifest.json}（ignored）。
+- 失败 fingerprint: 无。
+- 本 fingerprint 第几次不同尝试: 不适用。
+- 是否有进展，依据: 是——工程从零变为 Debug/Release 双配置可构建可运行的最小骨架，且专有 runtime 已按 Playbook 4.3/4.4 staging。
+- STATE/BACKLOG 更新: cycle.completed=4、currentTask/nextAction 指向 P0.5；BACKLOG P0.4 → DONE。
+- 下一唯一动作: P0.5 实现 veyra_base：结构化 logger、HRESULT/NGX result 字符串、文件 size/hash/signature 检查，并用 probe --self-test 实测。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名
