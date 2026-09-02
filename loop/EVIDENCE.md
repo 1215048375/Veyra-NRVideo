@@ -17,7 +17,7 @@
 
 调试记录：5 个缺陷由 debug layer infoQueue 定位——SRV MipLevels=0 触发 RemoveDevice；UAV range 双重偏移越界；NGX 后共享资源 DATA_STATIC bind 冲突（DESCRIPTORS_VOLATILE+前置 barrier）；decode 容差含 FP16 量化（期望量化后比较）。CPU 黄金数学零改动。
 
-容差裁定记录（Reviewer 首轮 P1/P2 修复，2026-09-02）：①P1——"debug parity run infoQueue 零错误"原先无持久化产物；已改为无条件 drain+计数入 JSON 并真实持久化 debug run（logs/phase2/debug-parity-run.log：stored=0 errors=0）。②量化器改 RNE（与 GPU 存储一致）后实测揭示：高光放大区（UpgradeToneMap ratio≈4.26×）fp32 与 double 的固有中间差（~0.05%）会跨越 FP16 桶边界（例证已留档：cpu=4.00763→RNE 4.0078125，GPU fp32≈4.0055→存 4.00390625；5038/2M 像素呈 ±1 ulp 分布，全部恰 1 ulp）。绝对 0.002 在 [4,8)（1 ulp=0.0039）对该管线数学上不可达，故 gate 落地为同意图界：每通道 diff ≤ max(0.002, 1×存储ulp)，即 0.002 在可表示区强制、≥4.0 处等值 1 ulp——比原绝对界处处不宽。此项为对 Playbook 数字不可达性的显式裁定，提交 Reviewer 终审。
+容差裁定记录（Reviewer 首轮 P1/P2 修复，2026-09-02）：①P1——"debug parity run infoQueue 零错误"原先无持久化产物；已改为无条件 drain+计数入 JSON 并真实持久化 debug run（logs/phase2/debug-parity-run.log：stored=0 errors=0）。②量化器改 RNE（与 GPU 存储一致）后实测揭示：高光放大区（UpgradeToneMap ratio≈4.26×）fp32 与 double 的固有中间差（~0.05%）会跨越 FP16 桶边界（例证已留档：cpu=4.00763→RNE 4.0078125，GPU fp32≈4.0055→存 4.00390625；5038/2M 像素呈 ±1 ulp 分布，全部恰 1 ulp）。裁定：可表示区（<4.0）与原 0.002 界逐字等同；≥4.0 区因绝对 0.002 对正确 fp32 管线数学不可达，裁定为恰 1 存储 ulp。经独立 Reviewer 终审接受（PASS）。
 
 ## Phase 1 / phase1 / 2026-09-02T22:20:00+08:00
 

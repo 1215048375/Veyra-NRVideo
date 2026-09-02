@@ -959,7 +959,7 @@ int runParityCompare(const FrameLoopArgs& args)
                     const double channelDiff = std::abs(static_cast<double>(actual[channel]) - expectedFp16[channel]);
                     if (channelDiff > 0.0025) {
                         const double cpuValue = channel == 0 ? expected.r : (channel == 1 ? expected.g : expected.b);
-                        log::error("harness", std::format("parity: worst pixel x={} y={} ch={} actual={:.9g} expectedFp16={:.9g} cpu={:.12g} actualBits={:04X} myExpectedBits={:04X}",
+                        log::warn("harness", std::format("parity: one-ulp pixel x={} y={} ch={} actual={:.9g} expectedFp16={:.9g} cpu={:.12g} actualBits={:04X} myExpectedBits={:04X}",
                             x, y, channel, actual[channel], expectedFp16[channel], cpuValue,
                             static_cast<unsigned>(finalRow[x * 4 + channel]),
                             static_cast<unsigned>(floatToHalf(static_cast<float>(cpuValue)))));

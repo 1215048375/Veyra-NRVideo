@@ -120,9 +120,11 @@ catch {
 
 Add-GateCheck "parity:run-id" ([string]$summary.runId -eq $runId) ("actual={0}" -f $summary.runId)
 
-# 4a. GPU encode vs CPU encode: max channel delta in 8-bit code values.
+# 4a. GPU encode vs CPU encode: max channel delta in 8-bit code values
+#     (RGB and the pass-through alpha alike).
 $encodeMaxCode = [double]$summary.encode.maxCodeDelta
-Add-GateCheck "parity:gpu-vs-cpu-encode-1code" ($encodeMaxCode -le 1.0) ("maxCodeDelta={0}" -f $encodeMaxCode)
+$encodeMaxAlpha = [double]$summary.encode.maxAlphaDelta
+Add-GateCheck "parity:gpu-vs-cpu-encode-1code" (($encodeMaxCode -le 1.0) -and ($encodeMaxAlpha -le 1.0)) ("maxCodeDelta={0} maxAlphaDelta={1}" -f $encodeMaxCode, $encodeMaxAlpha)
 
 # 4b. GPU decode vs CPU decode: no NaN/Inf, and no channel beyond ONE stored
 #     FP16 ulp (abs <=0.002 enforced wherever FP16 represents it; above ~4.0

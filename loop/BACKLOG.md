@@ -35,7 +35,7 @@ Phase 0 gate：以 Playbook 第 16 节 Phase 0 为准。未完成 P0.9 禁止开
 - [x] P2.3 实现 Parity Decode 与 Raw/bypass 对照；记录三个 1.0 中性 codec baseline、来源说明、addon hash 和 capture hash。当前没有 preset；不得加载 addon 取值。（2026-09-02：ParityDecode.hlsl；JSON 记录 1.0/1.0/1.0+addon 实测 hash+raw/final hash；addon 从未加载。）
 - [x] P2.4 CPU/GPU golden、identity/bypass、灰阶/色卡/高光测试达到 Playbook 容差。（2026-09-02：encode≤1 code、decode≤0.002、CPU 12/12。）
 - [x] P2.5 完整 Original→Encode→Feature18→Decode capture；不得以主观好看作为 gate。（2026-09-02：四阶段七文件捕获，raw≠final hash，量化统计非主观。）
-- [ ] P2.6 gate、只读 Reviewer、P0/P1 修复、checkpoint。
+- [x] P2.6 gate、只读 Reviewer、P0/P1 修复、checkpoint。（2026-09-02：首轮 FAIL 抓出 P1 空证据→修复后终判 PASS；ulp 容差裁定经裁决接受；checkpoint 见 STATE.phases[2].commit。）
 
 ## Phase 3 — Minimal video pipeline（锁定）
 

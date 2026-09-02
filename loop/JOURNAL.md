@@ -545,11 +545,30 @@ Result:
 
 ### After
 
-- 实际修改:
-- 实际命令与 exit code:
-- 新证据/日志路径:
-- 失败 fingerprint:
-- 本 fingerprint 第几次不同尝试:
-- 是否有进展，依据:
-- STATE/BACKLOG 更新:
-- 下一唯一动作:
+- Reviewer 首轮 FAIL（1×P1：EVIDENCE 中"debug parity run infoqueue 零错误"无持久化产物支撑；6×P2）→ 修复（aea851e）：infoqueue 无条件 drain+计数入 JSON、真实持久化 debug run（stored=0 errors=0 PASS）、floatToHalf 改 RNE、encode 加 alpha 对比、stageLuma 入 JSON、阶段 JSON 补 rowPitch/runtimeSha256/pts/originalSource。
+- RNE 修复揭示真实物理现象：高光放大区 fp32-vs-double 双重舍入跨界（5038 像素全恰 1 ulp；位级例证留档日志）。gate 落地为 max(0.002, 1×存储ulp) 并提交 Reviewer 显式裁决。
+- Reviewer 终判 **PASS**（独立 run 304e1dda…，数值与 Maker run/持久化 debug run 三方一致；ulp 裁定接受并确认检测能力保留；RNE 评为 textbook）。剩 3 条一行级 P2 已顺手修复（措辞精确化/gate alpha 断言/日志级别 WARN）并复跑 gate 全绿（70 checks exit 0）。
+- 留档至 Phase 3 的两条 P2（Reviewer 同意）：--profile 解析校验、参数块 in-flight 复用加固。
+- STATE/BACKLOG 更新：cycle.completed=20；P2.6 → DONE；phases[2] checkpoint 见 STATE。
+- 下一唯一动作: Phase 3 P3.1（vcpkg/FFmpeg 依赖 + phase3 gate）。
+
+---
+
+## Cycle 020 — P2.6 Reviewer 终判与 Phase 2 checkpoint
+
+### Before
+
+- Phase: 2
+- 唯一任务: Reviewer 修复循环（P1 闭合 + ulp 裁定 + P2 批）、终判 PASS 后 checkpoint 解锁 Phase 3。
+- 可证伪假设: P1 若未真实闭合（无持久化 debug 产物）Reviewer 维持 FAIL。
+- 预计修改文件: tools/nr_harness/parity_compare.cpp、scripts/gates/phase2.ps1、loop/{EVIDENCE,JOURNAL,BACKLOG,STATE}。
+- 快速检查命令: `loop-gate -Gate phase2` → 0。
+- 预期新增证据: 持久化 debug parity run、Reviewer PASS。
+
+### After
+
+- 实际命令与 exit code: 修复后 phase2 gate exit 0（35/35，run-id 85da3833…）；Reviewer 独立复跑 0/0 PASS；P2 修整后再复跑 exit 0（70 checks）。
+- 新证据/日志路径: logs/phase2/{85da3833…,304e1dda…(Reviewer),debug-parity-run.log}。
+- 是否有进展，依据: Phase 2 完整闭环（gate+reviewer 双绿）。
+- STATE/BACKLOG 更新: phases[2] → passed + checkpoint；Phase 3 解锁。
+- 下一唯一动作: Phase 3 P3.1。

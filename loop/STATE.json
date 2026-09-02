@@ -6,7 +6,7 @@
   "phase": {
     "id": 2,
     "name": "RenoDX-equivalent parity codec",
-    "state": "gate_passed",
+    "state": "review_passed",
     "gate": "phase2"
   },
   "phases": [
@@ -29,9 +29,9 @@
     {
       "id": 2,
       "name": "RenoDX-equivalent parity codec",
-      "status": "gate_passed",
+      "status": "review_passed",
       "gateEvidence": "loop/EVIDENCE.md#phase-2--phase2--2026-09-02t230500-0800",
-      "reviewEvidence": null,
+      "reviewEvidence": "loop/EVIDENCE.md#phase-2--phase2--2026-09-02t230500-0800 (Reviewer PASS after P1 fix; independent run 304e1dda07784fa2b7c024ee5110289c; ulp ruling accepted)",
       "commit": null
     },
     {

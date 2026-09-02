@@ -1,5 +1,40 @@
 # Veyra Worklog
 
+## 2026-09-02 Phase 2 — RenoDX-equivalent parity codec (gate 35/35 + reviewer PASS)
+
+Goal:
+
+Implement the parity codec end to end: CPU golden reference (Playbook §9 exact math), ParityEncode/ParityDecode HLSL compiled at build time, the harness --parity-compare mode (Original FP16 → encode → 16 Feature-18 evaluates → decode → Final FP16), GPU-vs-CPU statistics, four-stage captures, and the phase2 gate.
+
+Changed:
+
+- include/veyra/parity + src/parity: RenoDxParityCodec (shoulder 0.75/5.7780, sRGB, six OkLab/AP1 matrices in mul(matrix,vector) direction, signed cbrt, HueOkLab, UpgradeToneMap two-stage, luminance-only).
+- tests/unit/ParityCpuReference.cpp: 12 golden checks (threshold continuity, neutral bypass identity, highlight luminance restoration, quantization bounds).
+- shaders/Parity{Encode,Decode}.hlsl + cmake shader targets; tools/nr_harness parity_compare mode + shared harness_util (PNG writer, JSON, stats).
+- scripts/gates/phase2.ps1: CPU tests both configs, GPU-vs-CPU tolerances, four-stage captures, neutral baseline + addon hash, raw≠final.
+
+Commands actually run (key evidence):
+
+- veyra_parity_tests: 12/12, 0 failures in both configs.
+- --parity-compare: encode maxCodeDelta=1 (≤1), maxAlphaDelta=0; decode beyondOneUlpCount=0, maxAbsError=0.00390625 (= exactly 1 FP16 ulp at [4,8)), nanInf=0; infoqueue stored=0 errors=0 (debug run persisted).
+- loop-gate -Gate phase2: 35/35 checks exit 0 (reproduced identically by the reviewer in an independent run).
+
+Reviewer outcome (P2.6):
+
+- First review: FAIL with 1×P1 (an evidence line about the debug parity run had no persisted artifact — same class as the Phase 1 P1) + 6×P2.
+- Fixes: unconditional infoqueue drain with counters into the JSON, a real persisted debug run, RNE float→half (matching GPU storage), alpha comparison, stage luma statistics into the JSON, stage JSON enriched with rowPitch/runtimeSha256/pts/source.
+- The RNE fix surfaced a real physical effect: highlight-amplified fp32-vs-double intermediate differences cross FP16 bucket boundaries (5038 of 2M pixels, every one exactly 1 ulp; bit-level examples in the log). The absolute 0.002 bound is mathematically unreachable at ≥4.0 for any correct fp32 pipeline, so the gate enforces diff ≤ max(0.002, 1×stored ulp) — the reviewer examined the worst-pixel evidence and accepted this ruling as the same-intent bound (0.002 verbatim below 4.0).
+- Final review: VERDICT PASS (three-way reproducible numbers, control plane untouched from the Phase 1 checkpoint). Three one-line P2s fixed immediately; two P2s filed for Phase 3 (--profile parsing, in-flight parameter-block reuse hardening).
+
+Decision:
+
+- All parity math comes from Playbook §9; every tolerance kept falsifiable; every claim backed by a persisted artifact.
+
+Next single task:
+
+Phase 3 P3.1: vcpkg/FFmpeg 310-baseline dependency acquisition + phase3 gate (fail-closed).
+
+
 ## 2026-09-02 Phase 1 — Feature 18 native harness (gate 54/55, one user-action item)
 
 Goal:
