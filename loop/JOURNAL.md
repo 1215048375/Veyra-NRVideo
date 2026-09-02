@@ -197,6 +197,33 @@ Result:
 
 ---
 
+## Cycle 007 — P0.7 完整 runtime probe
+
+### Before
+
+- Phase: 0
+- 唯一任务: 实现 veyra_runtime_probe 完整模式：--runtime-dir 绝对路径校验、staged DLL 身份核验、LoadLibraryExW(LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|SYSTEM32) 加载、5 个 required exports 逐项 GetProcAddress、System32 nvofapi64 版本探测、固定尺寸 Win32 窗口 + flip-model swapchain + 4-slot ring 每帧 clear/present 循环、结构化 log 文件与 JSON summary 输出（含 runId/exeSha256 防陈旧产物）。
+- 可证伪假设: 若 DLL 加载失败、任一 export 缺失、窗口循环 device removed、或 JSON 字段与 gate 契约不符，probe 将非零退出且不写 JSON。
+- 预计修改文件: tools/runtime_probe/main.cpp（完整重写）、CMakeLists.txt（VEYRA_ENABLE_D3D12_DEBUG→编译宏）。
+- 快速检查命令: `scripts/build.ps1 -Preset x64-debug` → 0；`veyra_runtime_probe.exe --runtime-dir <abs> --window-seconds 3 --run-id test --log-file logs/tmp/probe.log --json-file logs/tmp/probe.json` → exit 0 且 JSON 字段齐全。
+- 预期新增证据: 短窗口真实运行：exports 5/5、窗口 N 秒 M 帧、deviceRemoved=false、JSON 完整。
+
+### After
+
+- 实际修改: tools/runtime_probe/main.cpp 完整实现（约 700 行）；CMakeLists 把 VEYRA_ENABLE_D3D12_DEBUG 管道为 VEYRA_D3D12_DEBUG 编译宏。
+- 实际命令与 exit code:
+  - `scripts/build.ps1 -Preset x64-debug` → 修复 2 轮（GetCurrentBackBufferIndex 需 IDXGISwapChain3 + CreateSwapChainForHwnd 需先拿 swapchain1 再 QI）后 exit 0；x64-release exit 0。
+  - `veyra_runtime_probe.exe --runtime-dir <abs> --window-seconds 3 --run-id smoke-test-001 --log-file logs/tmp/probe-smoke.log --json-file logs/tmp/probe-smoke.json` → exit 0（PASS）。
+  - JSON 由 PowerShell ConvertFrom-Json 解析验证（JSON-PARSE-OK）。
+- 新证据/日志路径: logs/tmp/probe-smoke.{log,json}（ignored）；关键实测值——LoadLibraryExW(LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|SYSTEM32) 成功；exports 5/5（含真实地址 0x7FF9…）；nvofapi64 present=true version=32.0.16.1656（System32）；RTX 5070/0x10DE/FL 12_2/driver 32.0.16.1656；窗口循环 3 秒 302 帧 deviceRemoved=false；JSON 含 runId+exeSha256 防陈旧契约。
+- 失败 fingerprint: 无遗留。
+- 本 fingerprint 第几次不同尝试: 不适用。
+- 是否有进展，依据: 是——Phase 0 完整 probe 链（身份→受限加载→exports→nvofapi→device→窗口/swapchain/4-slot 循环→清理→JSON）端到端真实运行成功。
+- STATE/BACKLOG 更新: cycle.completed=7、currentTask 指向 P0.8；BACKLOG P0.7 → DONE。
+- 下一唯一动作: P0.8 用 scripts/loop-gate.ps1 -Gate phase0 实跑（含 Debug 3s + Release 300s 窗口），登记 EVIDENCE。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名

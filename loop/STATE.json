@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 6,
+    "completed": 7,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P0.7: implement the full veyra_runtime_probe (restricted LoadLibraryExW of the staged DLL, five required exports, System32 nvofapi64 probe, Win32 window + flip-model swapchain loop, structured log + JSON summary output).",
+  "currentTask": "P0.8: run the phase0 gate for real (Debug 3s smoke + Release 300s window loop) and register the evidence.",
   "lastGate": {
     "name": "phase0",
     "status": "failed",
@@ -96,6 +96,6 @@
   "lastGoodCommit": null,
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Implement P0.7 full probe, then P0.8 real gate runs (Debug 3s + Release 300s window).",
-  "updatedAt": "2026-09-02T21:50:00+08:00"
+  "nextAction": "Run phase0 gate via loop-gate.ps1 (Release 300s window), register EVIDENCE, then P0.9 reviewer.",
+  "updatedAt": "2026-09-02T22:00:00+08:00"
 }

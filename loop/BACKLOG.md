@@ -10,7 +10,7 @@
 - [x] P0.4 建立最小 CMake/C++20 Win32 x64 工程与 Debug/Release presets，不引入 FFmpeg/UI。（2026-09-02：Ninja presets 双配置构建 exit 0，stub 运行 exit 0，build.ps1 解析 vswhere/vcvars，presets 无机器路径。）
 - [x] P0.5 实现结构化 logger、HRESULT/NGX result 字符串、文件 size/hash/signature 检查。（2026-09-02：--self-test 实测 BCrypt SHA256、WinVerifyTrust、CryptQueryObject 签名者、版本提取；staged DLL 身份与固定契约全匹配；双 preset 构建 exit 0。）
 - [x] P0.6 实现 D3D12DeviceContext：RTX adapter、device、direct queue、debug layer、4-slot command allocator/list/fence/event ring。（2026-09-02：--device-info 实测 RTX 5070/0x10DE/FL 12_2/4-slot ring + timestamp query 全通过；debug layer 缺失记 INBOX。）
-- [ ] P0.7 实现 veyra_runtime_probe：受限绝对路径加载本地复制的 nvngx_dlssnr.dll，验证 required exports；不得加载 addon。
+- [x] P0.7 实现 veyra_runtime_probe：受限绝对路径加载本地复制的 nvngx_dlssnr.dll，验证 required exports；不得加载 addon。（2026-09-02：LoadLibraryExW 受限 flags 成功，exports 5/5 实测，3s 冒烟 PASS；addon 从未被加载。）
 - [ ] P0.8 Debug/Release 构建并实际运行 probe；D3D12 窗口循环 5 分钟无 device removed；记录命令、exit code、GPU/driver、hash/signature/exports、日志路径。
 - [ ] P0.9 当前 gate 通过、只读 Reviewer 通过、修完 P0/P1、写 checkpoint。
 

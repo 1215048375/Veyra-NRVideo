@@ -43,6 +43,9 @@ add_library(veyra_gfx STATIC
 veyra_apply_warnings(veyra_gfx)
 target_compile_features(veyra_gfx PUBLIC cxx_std_20)
 target_link_libraries(veyra_gfx PUBLIC veyra_base d3d12 dxgi dxguid)
+if(VEYRA_ENABLE_D3D12_DEBUG)
+  target_compile_definitions(veyra_gfx PUBLIC VEYRA_D3D12_DEBUG=1)
+endif()
 
 add_executable(veyra_runtime_probe
   tools/runtime_probe/main.cpp
