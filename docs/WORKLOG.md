@@ -43,9 +43,14 @@ Decision:
 
 - Keep machine-specific paths out of tracked files (build.ps1 resolves them); gate verifies staged state rather than staging itself; probe JSON embeds runId + exe SHA-256 so stale artifacts cannot pass.
 
+Reviewer outcome (P0.9):
+
+- Independent read-only sub-agent reran preflight (exit 0) and phase0 (exit 0, its own run-id a55d5fb41b164abc88fc2760f0b635ec, 300 s / 30003 frames), verified BASE_COMMIT, the full diff (control plane untouched), anti-stale runId/exeSha256 mechanics, and reverse-order cleanup. VERDICT PASS, zero P0/P1.
+- Four P2 hardening notes recorded in loop/JOURNAL.md Cycle 009; the fence-timeline ownership item is queued as BACKLOG P1.0a; D3D12 debug-layer absence remains in loop/INBOX.md for the user before Phase 1's debug-layer criterion.
+
 Next single task:
 
-P0.9: independent read-only Reviewer for Phase 0, then checkpoint commit and Phase 1 unlock.
+Phase 1 P1.1: phase1 gate + deterministic RGBA8 test frames/output statistics (after P1.0a fence ownership hardening).
 
 
 ## 2026-09-01 Handoff baseline

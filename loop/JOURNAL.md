@@ -252,6 +252,35 @@ Result:
 
 ---
 
+## Cycle 009 — P0.9 只读 Reviewer 与 Phase 0 checkpoint
+
+### Before
+
+- Phase: 0
+- 唯一任务: 按 REVIEW_PROMPT 启动新上下文只读 Reviewer（N=0、BASE_COMMIT=2086282…、GATE_EVIDENCE=loop/EVIDENCE.md#phase-0--phase0--2026-09-02t210909-0800）；修复全部 P0/P1；做验证内容 checkpoint commit 并解锁 Phase 1。
+- 可证伪假设: 若 Reviewer 独立重跑 gate 失败、发现 P0/P1、或工作树指纹被 Reviewer 改变，则 Phase 0 不能关账。
+- 预计修改文件: loop/{JOURNAL,EVIDENCE,STATE,BACKLOG}.md、docs/WORKLOG.md、Git 提交。
+- 快速检查命令: Reviewer 输出 GATE_EXIT 0/0 且 VERDICT PASS；`git status --porcelain` 在 Reviewer 前后一致。
+- 预期新增证据: Reviewer 独立 run-id 与结论；phase-N checkpoint 真实 hash 写入 STATE。
+
+### After
+
+- 实际修改: 本 Journal/EVIDENCE/BACKLOG/WORKLOG/STATE 更新 + 两个 checkpoint 提交。
+- 实际命令与 exit code: Reviewer（Explore 子 Agent，只读）独立执行 preflight（exit 0，66 checks）、phase0（exit 0，外层 70/内层 61，自建 run-id a55d5fb41b164abc88fc2760f0b635ec，308.3s，300s/30003 帧）、BASE_COMMIT cat-file 验证、diff 审查、git status；输出 VERDICT PASS。
+- 新证据/日志路径: logs/phase0/a55d5fb41b164abc88fc2760f0b635ec/（Reviewer run）；工作树指纹 Reviewer 前后均为 e69de29b（未变异）。
+- 失败 fingerprint: 无。
+- 本 fingerprint 第几次不同尝试: 不适用。
+- Reviewer P2 结论（不阻塞，按 LOOP_ENGINE 处理）:
+  1. D3D12DeviceContext::nextFenceValue_ 与 CommandSlotRing::nextFenceValue_ 双计数器并存——Phase 0 无冲突（仅 ring 发 Signal），Phase 1 Evaluate 循环前必须收敛为单一 owner → 已加入 BACKLOG Phase 1 子任务 P1.2a。
+  2. phase0 gate 的 windowLoop 未设帧率下限（建议 frames ≥ duration×30）→ 记录在案；Phase 0 已关账，若未来重跑该 gate 再加固。
+  3. gate 构建为增量构建，从未 clean 构建（两次独立 run exe hash 一致证明可复现）→ 记录在案。
+  4. D3D12 debug layer 缺失（已在 INBOX，Phase 1 前置）。
+- 是否有进展，依据: 是——Phase 0 通过 gate + 独立复核，完成本 Goal 第一个完整阶段闭环。
+- STATE/BACKLOG 更新: phases[0] → review_passed（随后 checkpoint 后 → passed + commit hash）；phase.id → 1 解锁；BACKLOG P0.9 → DONE + 新增 P1.2a（不降低门槛的加固子任务）。
+- 下一唯一动作: Phase 1 P1.1——建立 scripts/gates/phase1.ps1 与确定性 RGBA8 测试帧/输出统计。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名

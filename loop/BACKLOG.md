@@ -12,12 +12,13 @@
 - [x] P0.6 实现 D3D12DeviceContext：RTX adapter、device、direct queue、debug layer、4-slot command allocator/list/fence/event ring。（2026-09-02：--device-info 实测 RTX 5070/0x10DE/FL 12_2/4-slot ring + timestamp query 全通过；debug layer 缺失记 INBOX。）
 - [x] P0.7 实现 veyra_runtime_probe：受限绝对路径加载本地复制的 nvngx_dlssnr.dll，验证 required exports；不得加载 addon。（2026-09-02：LoadLibraryExW 受限 flags 成功，exports 5/5 实测，3s 冒烟 PASS；addon 从未被加载。）
 - [x] P0.8 Debug/Release 构建并实际运行 probe；D3D12 窗口循环 5 分钟无 device removed；记录命令、exit code、GPU/driver、hash/signature/exports、日志路径。（2026-09-02：phase0 gate exit 0/70 checks；run-id a5fd6348…；Release 300s/30002 帧 deviceRemoved=false；证据见 loop/EVIDENCE.md。）
-- [ ] P0.9 当前 gate 通过、只读 Reviewer 通过、修完 P0/P1、写 checkpoint。
+- [x] P0.9 当前 gate 通过、只读 Reviewer 通过、修完 P0/P1、写 checkpoint。（2026-09-02：Reviewer PASS，GATE_EXIT 0/0，无 P0/P1；4 条 P2 已记录并按协议处理。）
 
 Phase 0 gate：以 Playbook 第 16 节 Phase 0 为准。未完成 P0.9 禁止开始 Phase 1。
 
 ## Phase 1 — Feature 18 native harness（锁定）
 
+- [ ] P1.0a（Reviewer P2 加固项，不降低任何门槛）: 在接入 Evaluate 循环前把 ID3D12Fence 时间线计数器收敛为单一 owner（ring 从 device context 派生 fence 值或明确所有权注释），避免 Phase 1 起重复/非单调 fence 值。
 - [ ] P1.1 先建立 phase1 gate 和确定性 RGBA8 测试帧/输出统计。
 - [ ] P1.2 封装 NGX Core、parameter block、DLSSNR runtime 和严格逆序 RAII。
 - [ ] P1.3 实现受隔离、可关闭的 caller-name 兼容层；禁止 patch DLL。

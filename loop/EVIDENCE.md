@@ -56,9 +56,9 @@
 - Hardware/runtime identity: NVIDIA GeForce RTX 5070 / vendor 0x10DE / LUID 0x00000000:0x000000005D5F2320 / dedicatedVideoMiB 11943 / driver 32.0.16.1656（注册表 nvlddmkm.sys）/ featureLevel 12_2 / OS 10.0.26200；staged nvngx_dlssnr.dll 165840496 / E16B…FC8E / 310.8.0.0 / Valid / NVIDIA Corporation；System32 nvofapi64.dll 32.0.16.1656
 - Logs/captures: logs/phase0/a5fd6348b3084b44857b1f1ffc96a449/（probe-debug.log/json、probe-release.log/json）
 - Quantitative result: exports 5/5；Debug 窗口 3s/303 帧；**Release 窗口 300s/30002 帧，deviceRemoved=false，reason=0x00000000**；git ignore 7/7 探针通过；git-sensitive-files none tracked；D3D12 debug layer 在本机不可用（0x887A002D，INBOX 已记录，非 Phase 0 门禁项）
-- Reviewer: not run yet（gate 首次通过后立即安排，见 STATE）
-- Open P0/P1: none known
-- Conclusion: Playbook §16 Phase 0 全部门槛（Debug/Release 构建、5 分钟窗口无 device removed、runtime hash/签名与 manifest 一致、proprietary ignored、真实命令记录）机器验证通过；等待独立 Reviewer
+- Reviewer: PASS（2026-09-02，新上下文只读子 Agent；独立重跑 preflight exit 0 / phase0 exit 0，自建 run-id a55d5fb41b164abc88fc2760f0b635ec，300s/30003 帧；BASE_COMMIT 2086282 经 cat-file 验证；控制面九文件 diff 为零；runId/exeSha256 防陈旧机制验证有效；4 条 P2 加固建议、无 P0/P1；工作树指纹前后一致 e69de29b）
+- Open P0/P1: none
+- Conclusion: Playbook §16 Phase 0 全部门槛机器验证通过且经独立 Reviewer 复核；Phase 0 关闭，进入 Phase 1
 
 迭代记录：第 1 次运行 exit 1（runtime:fileversion 区域逗号格式）；第 2 次 exit 1（-Clean:$false 的 SwitchParameter 字符串转换）；第 3 次 exit 1（不存在目录的 ignore 匹配）；第 4 次 exit 0。三次修复均未降低任何阈值。
 

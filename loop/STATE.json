@@ -6,16 +6,16 @@
   "phase": {
     "id": 0,
     "name": "Runtime probe and D3D12 skeleton",
-    "state": "gate_passed",
+    "state": "review_passed",
     "gate": "phase0"
   },
   "phases": [
     {
       "id": 0,
       "name": "Runtime probe and D3D12 skeleton",
-      "status": "gate_passed",
+      "status": "review_passed",
       "gateEvidence": "loop/EVIDENCE.md#phase-0--phase0--2026-09-02t210909-0800",
-      "reviewEvidence": null,
+      "reviewEvidence": "loop/EVIDENCE.md#phase-0--phase0--2026-09-02t210909-0800 (Reviewer PASS, independent rerun a55d5fb41b164abc88fc2760f0b635ec, zero P0/P1)",
       "commit": null
     },
     {
