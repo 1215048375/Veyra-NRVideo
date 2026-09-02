@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 9,
+    "completed": 10,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P1.0a: converge the ID3D12Fence timeline to a single owner before the Phase 1 Evaluate loop (Reviewer P2), then P1.1 phase1 gate + deterministic RGBA8 test frames.",
+  "currentTask": "P1.1: create fail-closed scripts/gates/phase1.ps1 encoding the Phase 1 thresholds (Create success, 300/300 evaluates, non-black/non-constant output, parameter-hash variation, release/shutdown stability) plus the deterministic RGBA8 test-frame contract; NGX SDK 310.7 downloading in background.",
   "lastGate": {
     "name": "phase0",
     "status": "passed",
@@ -96,6 +96,6 @@
   "lastGoodCommit": "1fb7afa5779a6c6a0a585d4ecf18a640260a2fcf",
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Start Phase 1: P1.0a fence ownership hardening, then P1.1 phase1 gate; NGX SDK 310.7 acquisition per Playbook 3.2 into third_party_local (gitignored).",
-  "updatedAt": "2026-09-02T21:30:00+08:00"
+  "nextAction": "Write phase1 gate (fail-closed), then P1.2 NGX core + adapter with the staged SDK headers.",
+  "updatedAt": "2026-09-02T21:35:00+08:00"
 }

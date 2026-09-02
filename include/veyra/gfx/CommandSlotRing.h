@@ -17,6 +17,10 @@ using ComPtr = Microsoft::WRL::ComPtr<T>;
 // command allocator, recycled command list, fence value and two timestamp
 // query indices. A frame only ever waits on the fence of the slot it is about
 // to reuse, never on the frame it just submitted.
+//
+// Fence ownership: this ring is the ONLY signaler on the shared fence
+// timeline handed in via initialize(); the device context waits but never
+// signals, so fence values stay strictly monotonic.
 class CommandSlotRing {
 public:
     CommandSlotRing() = default;

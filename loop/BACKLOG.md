@@ -18,7 +18,7 @@ Phase 0 gate：以 Playbook 第 16 节 Phase 0 为准。未完成 P0.9 禁止开
 
 ## Phase 1 — Feature 18 native harness（锁定）
 
-- [ ] P1.0a（Reviewer P2 加固项，不降低任何门槛）: 在接入 Evaluate 循环前把 ID3D12Fence 时间线计数器收敛为单一 owner（ring 从 device context 派生 fence 值或明确所有权注释），避免 Phase 1 起重复/非单调 fence 值。
+- [x] P1.0a（Reviewer P2 加固项，不降低任何门槛）: 在接入 Evaluate 循环前把 ID3D12Fence 时间线计数器收敛为单一 owner（ring 从 device context 派生 fence 值或明确所有权注释），避免 Phase 1 起重复/非单调 fence 值。（2026-09-02：移除 context 冗余计数器，ring 为唯一 signaler，双 preset+device-info 回归通过。）
 - [ ] P1.1 先建立 phase1 gate 和确定性 RGBA8 测试帧/输出统计。
 - [ ] P1.2 封装 NGX Core、parameter block、DLSSNR runtime 和严格逆序 RAII。
 - [ ] P1.3 实现受隔离、可关闭的 caller-name 兼容层；禁止 patch DLL。

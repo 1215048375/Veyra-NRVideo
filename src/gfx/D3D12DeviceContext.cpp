@@ -251,9 +251,8 @@ void D3D12DeviceContext::shutdown()
     if (!initialized_) {
         return;
     }
-    if (fence_ != nullptr && fenceEvent_ != nullptr) {
-        (void)waitForFenceValue(nextFenceValue_ - 1, 5000);
-    }
+    // Slot work is drained by CommandSlotRing::shutdown(); the context only
+    // owns the fence/event lifetime (ring is the sole signaler).
     if (fenceEvent_ != nullptr) {
         CloseHandle(fenceEvent_);
         fenceEvent_ = nullptr;
@@ -264,16 +263,6 @@ void D3D12DeviceContext::shutdown()
     factory_.Reset();
     initialized_ = false;
     veyra::log::info("gfx", "device context shutdown complete");
-}
-
-uint64_t D3D12DeviceContext::signalNextFenceValue()
-{
-    const uint64_t value = nextFenceValue_++;
-    const HRESULT result = queue_->Signal(fence_.Get(), value);
-    if (FAILED(result)) {
-        veyra::log::error("gfx", std::format("fence signal failed hr={}", veyra::hresultString(result)));
-    }
-    return value;
 }
 
 bool D3D12DeviceContext::waitForFenceValue(uint64_t value, uint32_t timeoutMs)

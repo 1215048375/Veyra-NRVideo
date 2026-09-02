@@ -55,9 +55,11 @@ public:
     ID3D12Fence* fence() const { return fence_.Get(); }
     HANDLE fenceEvent() const { return fenceEvent_; }
     uint64_t fenceCompletedValue() const { return fence_->GetCompletedValue(); }
-    uint64_t nextFenceValue() const { return nextFenceValue_; }
-    uint64_t signalNextFenceValue(); // Signal(queue) with ++nextFenceValue_
 
+    // Fence-timeline ownership: CommandSlotRing is the ONLY component allowed
+    // to Signal this fence. The device context provides the fence/event and
+    // waits; a second independent counter here previously risked duplicate or
+    // non-monotonic values once Evaluate loops arrive (Phase 1 Reviewer P2).
     const AdapterInfo& adapter() const { return adapterInfo_; }
     const std::string& featureLevelString() const { return featureLevel_; }
     uint32_t commandSlotCount() const { return commandSlotCount_; }
@@ -84,7 +86,6 @@ private:
     ComPtr<ID3D12CommandQueue> queue_;
     ComPtr<ID3D12Fence> fence_;
     HANDLE fenceEvent_ = nullptr;
-    uint64_t nextFenceValue_ = 1;
 
     AdapterInfo adapterInfo_{};
     std::string featureLevel_;

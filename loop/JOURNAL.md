@@ -281,6 +281,29 @@ Result:
 
 ---
 
+## Cycle 010 — P1.0a fence 时间线单一 owner
+
+### Before
+
+- Phase: 1
+- 唯一任务: 落实 Reviewer P2：移除 D3D12DeviceContext 中未使用的 nextFenceValue_/signalNextFenceValue（与 CommandSlotRing 各自从 1 起算的双计数器），在两处头文件明确 CommandSlotRing 是该 fence 时间线的唯一 signaler；重建并回归 device-info。
+- 可证伪假设: 若移除影响现有行为，device-info/构建将失败。
+- 预计修改文件: include/veyra/gfx/{D3D12DeviceContext.h,CommandSlotRing.h}、src/gfx/D3D12DeviceContext.cpp。
+- 快速检查命令: `scripts/build.ps1 -Preset x64-debug` → 0；`veyra_runtime_probe.exe --device-info` → 0。
+- 预期新增证据: 双 preset 构建 + device-info 回归通过，fence 计数器只剩 ring 一处。
+
+### After
+
+- 实际修改: D3D12DeviceContext.h 移除 nextFenceValue_/nextFenceValue()/signalNextFenceValue()；两处头文件注明 CommandSlotRing 是共享 fence 时间线唯一 signaler；shutdown 不再依赖已删除计数器（slot 排空由 ring.shutdown 负责）。
+- 实际命令与 exit code: `build.ps1 -Preset x64-debug` → 0；`--device-info` → PASS；`-Preset x64-release` → 0。
+- 新证据/日志路径: 回归输出（上）。
+- 失败 fingerprint: 无。
+- 是否有进展，依据: 是——Reviewer P2 落实，fence 计数器唯一化，行为无回归。
+- STATE/BACKLOG 更新: cycle.completed=10；BACKLOG P1.0a → DONE。
+- 下一唯一动作: P1.1 创建 fail-closed scripts/gates/phase1.ps1 + 确定性 RGBA8 测试帧契约；并行下载 NGX SDK 310.7。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名
