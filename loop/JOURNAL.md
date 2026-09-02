@@ -427,6 +427,32 @@ Result:
 
 ---
 
+## Cycle 016 — P1.6 300/300 + 变体/时间戳/JSON；P1.7 生命周期
+
+### Before
+
+- Phase: 1
+- 唯一任务: frame loop 增加 GPU timestamp（4-slot begin/end 对 + ResolveQueryData→avgMs）、变体段（style=1 / intensity=0.5）、gate 契约 JSON（debugLayer 报运行时实际状态）；Debug 与 Release 各跑 300 帧；P1.7 连续生命周期序列验证重建/释放。
+- 可证伪假设: 若 300 帧中断、变体 hash 与 baseline 相同、时间戳为 0 或 JSON 字段缺失，则 FAIL。
+- 预计修改文件: tools/nr_harness/frame_loop.{h,cpp}、main.cpp、include/veyra/gfx/CommandSlotRing.h。
+- 快速检查命令: `--frames 300` 双配置 exit 0；PowerShell 解析 JSON 全字段。
+- 预期新增证据: 300/300 计数、三互异 hash、avgMs、PNG/JSON 产物、4/4 生命周期。
+
+### After
+
+- 实际命令与 exit code:
+  - Debug 300 帧（p16-full）→ exit 0：**300/300 成功 0 失败**；meanLuma=0.49425 stddev=0.32734 allZero=false constant=false sha=1BD84180…；variants style1=B5294CB6…、intensity05=8A621726…（三互异）；timestamps nonZero=true avgMs=6.32；json written=true。
+  - Release 300 帧（p16-rel）→ exit 0：300/300，PASS。
+  - P1.7 序列（Debug）：两轮 10 帧 loop + create-test + shim-test → **4/4 PASS**（连续 Create/Reset/Release/重建稳定，无 device removed）。
+- 新证据/日志路径: logs/tmp/{p16.json,p16.log,p16rel.out,p17a-d.out}；captures/tmp/p16/frame0000_{proxy,raw}.png。
+- 失败 fingerprint: 无。
+- 是否有进展，依据: 是——Phase 1 Playbook §16 核心门槛全部真实达成。
+- 附加修正: JSON debugLayer 字段从编译期意图改为运行时实际状态（诚实报告本机 debug layer 未启用）。
+- STATE/BACKLOG 更新: cycle.completed=16；P1.6/P1.7 → DONE；currentTask → P1.8 gate。
+- 下一唯一动作: 运行 phase1 gate——预期唯一红项 json-debug:debug-layer-enabled（等用户装 Graphics Tools，见 INBOX），其余应全绿。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名
