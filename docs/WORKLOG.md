@@ -38,7 +38,15 @@ Decision:
 
 Next single task (user action required):
 
-Install Windows "Graphics Tools" (see loop/INBOX.md: DISM /Online /Add-Capability /CapabilityName:Tools.Graphics.DirectX~~~~0.0.1.0), then rerun loop-gate -Gate phase1 (expected 55/55) and proceed to the P1.8 read-only reviewer.
+~~Install Windows "Graphics Tools"~~ (user installed 2026-09-02; probe verified "d3d12 debug layer enabled").
+
+Reviewer outcome (P1.8, 2026-09-02):
+
+- First review: VERDICT FAIL with 1×P1 — the gate's no-state-errors grep was vacuous because no component captured the debug layer's OutputDebugString stream; plus 5×P2 (literal log line, path containment, SEH on parameter calls, hardcoded nanCount, 10-frame debug matrix).
+- Fixes landed (commit ff98e37): real ID3D12InfoQueue capture in debug builds (attach after device creation, drain after the full loop into the log and a debugInfoQueue JSON block), gate now asserts infoqueue-active and no-error-messages (both falsifiable), debug run raised to 30 frames, exact Playbook 8.1 literal, runtime_local/nvidia containment check, SEH wrappers for Allocate/DestroyParameters, nanCount removed.
+- Final review: VERDICT PASS (independent fresh-build run: release 300/300, debug 30/30 with infoQueue active and 0 error messages; three parameter-variant hashes identical across four independent runs; anti-stale runId/exeSha256 verified; control plane untouched from the Phase 0 checkpoint). Three non-blocking P2 residuals recorded in the journal (teardown-time infoqueue drain, suffix vs prefix containment, 200-message drain cap).
+
+Phase 1 conclusion: gate 56/56 + reviewer PASS. Phase 2 unlocked.
 
 
 ## 2026-09-02 Phase 0 — Runtime probe + D3D12 skeleton

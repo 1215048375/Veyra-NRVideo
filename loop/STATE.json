@@ -6,7 +6,7 @@
   "phase": {
     "id": 1,
     "name": "Feature 18 native harness",
-    "state": "gate_passed",
+    "state": "review_passed",
     "gate": "phase1"
   },
   "phases": [
@@ -21,9 +21,9 @@
     {
       "id": 1,
       "name": "Feature 18 native harness",
-      "status": "gate_passed",
+      "status": "review_passed",
       "gateEvidence": "loop/EVIDENCE.md#phase-1--phase1--2026-09-02t222000-0800",
-      "reviewEvidence": null,
+      "reviewEvidence": "loop/EVIDENCE.md#phase-1--phase1--2026-09-02t222000-0800 (Reviewer PASS after P1 fix, independent rerun 0ede6908f036462f99ced2ccfe48f169, zero P0/P1)",
       "commit": null
     },
     {
@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 16,
+    "completed": 17,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P1.8: run the read-only Phase 1 Reviewer (BASE_COMMIT=1fb7afa5779a6c6a0a585d4ecf18a640260a2fcf, phase 0 checkpoint), fix any P0/P1, then create the verified checkpoint and unlock Phase 2.",
+  "currentTask": "Create the Phase 1 verified checkpoint commit, record STATE pointers, unlock Phase 2, then start P2.1 (phase2 gate + CPU golden tests for the parity codec).",
   "lastGate": {
     "name": "phase1",
     "status": "passed",

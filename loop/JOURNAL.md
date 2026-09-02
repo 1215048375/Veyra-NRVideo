@@ -453,6 +453,32 @@ Result:
 
 ---
 
+## Cycle 017 — P1.8 修复 Reviewer P1（infoqueue 接入）+ P2 批
+
+### Before
+
+- Phase: 1
+- 唯一任务: 落实 Reviewer 修复条件——debug 构建下 D3D12CreateDevice 后 QueryInterface ID3D12InfoQueue、SetMuteDebugOutput(false)、帧循环结束 GetNumStoredMessages/GetMessage 逐条入日志并在 JSON 报 storedMessages/errorMessages；gate 的 no-state-errors 改为解析该 JSON 字段（active==true 且 errorMessages==0），debug 帧数 10→30，删除误导性硬编码 nanCount；同时修 P2：8.1 精确字面量日志、adapter 路径 containment、AllocateParameters/DestroyParameters SEH 包裹。
+- 可证伪假设: 若 debug layer 在 30 帧+捕获回读中报 error 级消息，新 gate 将真实失败。
+- 预计修改文件: tools/nr_harness/frame_loop.cpp、src/ngx/DlssNrRuntimeAdapter.cpp、src/ngx/NgxCoreHost.cpp、scripts/gates/phase1.ps1。
+- 快速检查命令: `build.ps1` 双配置 → 0；`loop-gate -Gate phase1` → 0（infoQueue active 且 0 error）。
+- 预期新增证据: JSON debugInfoQueue 字段与日志中真实检索的 infoqueue 消息数。
+
+### After
+
+- 实际修改: frame_loop.cpp（ID3D12InfoQueue attach/clear/检索入日志+JSON、d3d12sdklayers.h、删 nanCount）、phase1.ps1（删空转 grep → infoqueue-active + no-error-messages 两项真实断言、debug 10→30 帧）、DlssNrRuntimeAdapter.cpp（8.1 精确字面量、\runtime_local\nvidia\nvngx_dlssnr.dll 后缀 containment）、NgxCoreHost.cpp（Allocate/DestroyParameters SEH 包裹）。
+- 实际命令与 exit code:
+  - `build.ps1 -Preset x64-debug/-release` → 双 0。
+  - Debug 30 帧直跑 → exit 0：日志含 "EXPERIMENTAL LOCAL-ONLY DLSSNR ADAPTER ENABLED"、"ID3D12InfoQueue attached and recording"、"infoqueue stored=0 reported=0 errors=0"；JSON debugInfoQueue{active=true,stored=0,errors=0}。
+  - `loop-gate -Gate phase1` → **exit 0，56/56**（run-id 0106547878964354a751ab7ae5ec5f38）：新增 json-debug:infoqueue-active 与 no-error-messages 均 PASS，evaluate-30-of-30 PASS，Release 300/300 仍 PASS。
+- 新证据/日志路径: logs/phase1/0106547878964354a751ab7ae5ec5f38/。
+- 失败 fingerprint: 无（P1 修复一次通过）。
+- 是否有进展，依据: 是——"debug layer 无 state error" 从空转 grep 变为对真实检索消息的断言，检查现在可失败；全部 5 项 P2 同步修复。
+- STATE/BACKLOG 更新: 待 Reviewer 终判后一并写入（P1.8 完成时）。
+- 下一唯一动作: 等 Reviewer 终判 → PASS 则 checkpoint + 解锁 Phase 2；新 P0/P1 则继续修复循环。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名

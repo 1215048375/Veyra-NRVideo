@@ -11,9 +11,9 @@
 - Hardware/runtime identity: RTX 5070 / 0x10DE / driver 32.0.16.1656 / FL 12_2；staged nvngx_dlssnr.dll 165840496 / E16B…FC8E / Valid / NVIDIA；NGX SDK 310.7 官方 GitHub clone
 - Logs/captures: logs/phase1/7a535572145b4d73b25da192adf847ee/（harness-release.{log,json}、harness-debug.{log,json}、captures/）
 - Quantitative result: **Release 300/300 Evaluate 成功 0 失败**；output meanLuma=0.49425 min=0.05098 max=0.94397 stddev≈0.327 allZero=false constant=false；baseline=1BD84180… style1=B5294CB6… intensity05=8A621726…（三 hash 互异）；GPU timestamps nonZero=true avgMs=6.32；teardown release=0x1 snippetShutdown=0x1；deviceRemoved=false；**Debug run debugLayer=true 且日志 0 条 state/descriptor 错误**
-- Reviewer: not run yet（gate 首次全绿后立即安排）
-- Open P0/P1: none known
-- Conclusion: Playbook §16 Phase 1 全部门槛（Init_Ext/Create 成功、300/300、非黑非恒定、参数可变 hash、GPU 计时、干净释放、debug layer 无 state error、capture 存在）机器验证通过
+- Reviewer: 首轮 FAIL（1×P1：no-state-errors 为空转 grep，debug layer 消息无捕获通道；5×P2）→ 修复（ID3D12InfoQueue 真实接入 + gate 两项可失败断言 + 字面量/containment/SEH/nanCount/debug30帧）后 **PASS**（2026-09-02；独立 run-id 0ede6908f036462f99ced2ccfe48f169 双配置 fresh build；release 300/300、debug 30/30 infoqueue active 0 error；三 hash 与此前三个 run 完全一致；runId/exeSha256 与独立 Get-FileHash 一致；控制面 1fb7afa..HEAD 零改动；Reviewer 工作树零变异）
+- Open P0/P1: none（P2 残留三条已记录 JOURNAL Cycle 017：teardown 段 infoqueue drain、containment 后缀 vs 前缀、200 条检索上限——均不阻塞，留待后续 Phase 顺带处理）
+- Conclusion: Playbook §16 Phase 1 全部门槛（Init_Ext/Create 成功、300/300、非黑非恒定、参数可变 hash、GPU 计时、干净释放、debug layer 无 state error【经 ID3D12InfoQueue 真实断言】、capture 存在）机器验证通过且经独立 Reviewer 复核；Phase 1 关账，进入 Phase 2
 
 迭代记录：2026-09-02T21:56 首次运行 54/55（唯一红项 debug-layer-enabled，本机未装 Graphics Tools）；用户安装 Windows 图形工具后本 run 55/55。前期过程证据见 JOURNAL Cycle 016 与 WORKLOG Phase 1 条目。## Phase N / Gate name / timestamp
 
