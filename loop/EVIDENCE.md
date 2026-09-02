@@ -47,6 +47,21 @@
 
 反向证据：`phase0` exit 1（Git 与 phase0 gate 缺失）；`phase1` exit 1（并命中 requested=1/current=0）；`cycle.completed=80,status=ready` exit 1（state-loop-bounds）；提前解锁 Phase 1 exit 1（state-phase-sequence）。两次临时 STATE 修改均已恢复，随后再次执行正向 preflight。
 
+## Phase 0 / phase0 / 2026-09-02T21:09:09+08:00
+
+- Commit: gate 运行于 639fd48d 工作树之上（含 gate 修复，未提交时运行）；验证内容 checkpoint 在 Reviewer 通过后登记于 STATE.phases[0].commit
+- Command: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate phase0`
+- Exit code: 0（外层 70 checks；内部 phase0.ps1 61 checks 全过，run-id a5fd6348b3084b44857b1f1ffc96a449，总 308.3s）
+- Build configuration: x64-debug（VEYRA_ENABLE_D3D12_DEBUG=ON）与 x64-release（OFF）均通过 scripts/build.ps1 真实 configure+build；probe exe sha256 debug=E75D22D04A9DCAADC31451FD6CA14A90CC86B5D1C2C736016BD2A47FE9EA683F，release=0C1AB463E94588998D8BD1E4E11CAC5DBE6C44A9B97CD05308D6146401C9ED2C（JSON 自报与 gate 独立计算一致）
+- Hardware/runtime identity: NVIDIA GeForce RTX 5070 / vendor 0x10DE / LUID 0x00000000:0x000000005D5F2320 / dedicatedVideoMiB 11943 / driver 32.0.16.1656（注册表 nvlddmkm.sys）/ featureLevel 12_2 / OS 10.0.26200；staged nvngx_dlssnr.dll 165840496 / E16B…FC8E / 310.8.0.0 / Valid / NVIDIA Corporation；System32 nvofapi64.dll 32.0.16.1656
+- Logs/captures: logs/phase0/a5fd6348b3084b44857b1f1ffc96a449/（probe-debug.log/json、probe-release.log/json）
+- Quantitative result: exports 5/5；Debug 窗口 3s/303 帧；**Release 窗口 300s/30002 帧，deviceRemoved=false，reason=0x00000000**；git ignore 7/7 探针通过；git-sensitive-files none tracked；D3D12 debug layer 在本机不可用（0x887A002D，INBOX 已记录，非 Phase 0 门禁项）
+- Reviewer: not run yet（gate 首次通过后立即安排，见 STATE）
+- Open P0/P1: none known
+- Conclusion: Playbook §16 Phase 0 全部门槛（Debug/Release 构建、5 分钟窗口无 device removed、runtime hash/签名与 manifest 一致、proprietary ignored、真实命令记录）机器验证通过；等待独立 Reviewer
+
+迭代记录：第 1 次运行 exit 1（runtime:fileversion 区域逗号格式）；第 2 次 exit 1（-Clean:$false 的 SwitchParameter 字符串转换）；第 3 次 exit 1（不存在目录的 ignore 匹配）；第 4 次 exit 0。三次修复均未降低任何阈值。
+
 ## Goal Cycle 001 / preflight / 2026-09-02T20:23:27+08:00
 
 - Commit: not available（本地 Git 尚未初始化，属 P0.2 范围）

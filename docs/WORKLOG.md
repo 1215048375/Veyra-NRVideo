@@ -1,5 +1,53 @@
 # Veyra Worklog
 
+## 2026-09-02 Phase 0 — Runtime probe + D3D12 skeleton
+
+Goal:
+
+Complete Phase 0 per the Playbook: fail-closed phase0 gate, minimal CMake/C++20 project, veyra_base (logger/result strings/file identity), veyra_gfx (D3D12DeviceContext + 4-slot ring), full veyra_runtime_probe, and the real gate run including the 5-minute window loop.
+
+Changed:
+
+- Initialized local Git per LOOP_ENGINE fixed order (baseline 2086282, branch agent/veyra-v1-loop, loop pointer commit 09abf5d).
+- Added scripts/gates/phase0.ps1 (fail-closed, verified failing before the project existed).
+- Added CMakeLists.txt/CMakePresets.json/cmake/VeyraWarnings.cmake (Ninja x64 debug/release, /W4 /permissive- /WX).
+- Added scripts/build.ps1 (vswhere/vcvars resolution; no machine paths in presets) and scripts/stage-runtime.ps1 (pinned-identity copy + manifest + persistent ngx-local.json).
+- Added include/veyra + src/base (Logger, Status/HRESULT/NGX strings, BCrypt SHA-256 + WinVerifyTrust + signer extraction) and src/gfx (D3D12DeviceContext, CommandSlotRing with timestamp heap).
+- Implemented tools/runtime_probe/main.cpp: --self-test, --device-info, full mode (restricted LoadLibraryExW, 5 exports, nvofapi64 probe, fixed-size window + flip swapchain + 4-slot loop, JSON summary with runId/exeSha256).
+
+Commands actually run:
+
+- preflight (54 checks then 66 after Git): exit 0 both times.
+- Toolchain/GPU probes: RTX 5070 / 616.56 / 12227 MiB / compute 12.0; nvofapi64 32.0.16.1656; MSVC 14.44.35207; CMake 3.31.6; Ninja 1.12.1; DXC 1.8; Git 2.53.
+- scripts/build.ps1 -Preset x64-debug / x64-release: exit 0 (multiple times).
+- veyra_runtime_probe --self-test / --device-info / full smoke: exit 0 each.
+- loop-gate.ps1 -Gate phase0: three honest failures (locale version format; SwitchParameter binding via -File; ignore probe on non-existent dirs), each fixed without lowering thresholds, then **exit 0: VEYRA GATE PASSED: phase0 (70 checks)**.
+
+Results:
+
+- Gate run-id a5fd6348b3084b44857b1f1ffc96a449 (308.3 s): exports 5/5; Debug window 3 s / 303 frames; Release window **300 s / 30002 frames, deviceRemoved=false**; staged runtime identity matches the pinned contract; git ignore 7/7; no sensitive files tracked.
+- Driver version resolves via registry nvlddmkm.sys file version (32.0.16.1656); DisplayVersion value absent on this driver.
+- D3D12 debug layer unavailable on this machine (0x887A002D, Windows "Graphics Tools" optional feature missing); recorded in loop/INBOX.md for user action before Phase 1.
+
+Artifacts/logs:
+
+- logs/phase0/a5fd6348b3084b44857b1f1ffc96a449/ (probe logs + JSON, gitignored)
+- runtime_local/nvidia/{nvngx_dlssnr.dll, runtime-manifest.json}, runtime_local/config/ngx-local.json (gitignored)
+
+Failures and exact codes:
+
+- Gate iterations: runtime:fileversion "310,8,0,0" != "310.8.0.0" (locale) → FileVersionRaw; build exit 1 via ParameterArgumentTransformationError ("-Clean:$false" as string) → omit switch; git check-ignore exit 1 for non-existent trailing-slash dirs → in-directory probe files.
+- Compile iterations: C4838 (DXGI literals), WinVerifyTrust const GUID*, namespace log::, wchar→char C4244, IDXGIAdapter1 vs DESC3, ComPtr .Get() for Signal, GetCurrentBackBufferIndex needs IDXGISwapChain3. All fixed; no warnings remain (/WX).
+
+Decision:
+
+- Keep machine-specific paths out of tracked files (build.ps1 resolves them); gate verifies staged state rather than staging itself; probe JSON embeds runId + exe SHA-256 so stale artifacts cannot pass.
+
+Next single task:
+
+P0.9: independent read-only Reviewer for Phase 0, then checkpoint commit and Phase 1 unlock.
+
+
 ## 2026-09-01 Handoff baseline
 
 Goal:

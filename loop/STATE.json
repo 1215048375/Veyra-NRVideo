@@ -6,15 +6,15 @@
   "phase": {
     "id": 0,
     "name": "Runtime probe and D3D12 skeleton",
-    "state": "in_progress",
+    "state": "gate_passed",
     "gate": "phase0"
   },
   "phases": [
     {
       "id": 0,
       "name": "Runtime probe and D3D12 skeleton",
-      "status": "in_progress",
-      "gateEvidence": null,
+      "status": "gate_passed",
+      "gateEvidence": "loop/EVIDENCE.md#phase-0--phase0--2026-09-02t210909-0800",
       "reviewEvidence": null,
       "commit": null
     },
@@ -76,19 +76,19 @@
     }
   ],
   "cycle": {
-    "completed": 7,
+    "completed": 8,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P0.8: run the phase0 gate for real (Debug 3s smoke + Release 300s window loop) and register the evidence.",
+  "currentTask": "P0.9: run the read-only Phase 0 Reviewer per loop/REVIEW_PROMPT.md, fix any P0/P1, then create the verified checkpoint commit and unlock Phase 1.",
   "lastGate": {
     "name": "phase0",
-    "status": "failed",
-    "exitCode": 1,
-    "evidence": "loop/JOURNAL.md#cycle-003 (fail-closed proof: 5 missing project inputs reported)"
+    "status": "passed",
+    "exitCode": 0,
+    "evidence": "loop/EVIDENCE.md#phase-0--phase0--2026-09-02t210909-0800"
   },
   "lastFailureFingerprint": null,
   "failureLedger": [],
@@ -96,6 +96,6 @@
   "lastGoodCommit": null,
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Run phase0 gate via loop-gate.ps1 (Release 300s window), register EVIDENCE, then P0.9 reviewer.",
-  "updatedAt": "2026-09-02T22:00:00+08:00"
+  "nextAction": "Spawn read-only Phase 0 Reviewer with BASE_COMMIT=2086282478ae5d1e07e8162d47148633b59882fe; after PASS do checkpoint commit and unlock Phase 1.",
+  "updatedAt": "2026-09-02T21:15:00+08:00"
 }

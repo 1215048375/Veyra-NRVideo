@@ -148,7 +148,9 @@ if ($dllStaged) {
     $signer = ""
     if ($null -ne $sig.SignerCertificate) { $signer = [string]$sig.SignerCertificate.Subject }
     Add-GateCheck "runtime:signer" ($signer -like "*NVIDIA*") $("subject={0}" -f $signer)
-    $fileVersion = [string]$item.VersionInfo.FileVersion
+    # FileVersionRaw keeps the dotted quad; the locale-aware FileVersion
+    # property renders commas on some systems and must not be compared.
+    $fileVersion = [string]$item.VersionInfo.FileVersionRaw
     Add-GateCheck "runtime:fileversion" ($fileVersion -eq $expectedFileVersion) $("actual={0} expected={1}" -f $fileVersion, $expectedFileVersion)
 }
 
@@ -185,11 +187,13 @@ if ($failures.Count -gt 0) {
 $buildScript = Join-Path $Root "scripts\build.ps1"
 $shell = (Get-Process -Id $PID).Path
 
-& $shell -NoProfile -ExecutionPolicy Bypass -File $buildScript -Root $Root -Preset x64-debug -Clean:$false
+# Note: -File passes arguments as strings, so a switch parameter cannot be
+# given an explicit :$false here; omitting -Clean means "no clean rebuild".
+& $shell -NoProfile -ExecutionPolicy Bypass -File $buildScript -Root $Root -Preset x64-debug
 $debugBuildExit = $LASTEXITCODE
 Add-GateCheck "build:x64-debug" ($debugBuildExit -eq 0) ("exitCode={0}" -f $debugBuildExit)
 
-& $shell -NoProfile -ExecutionPolicy Bypass -File $buildScript -Root $Root -Preset x64-release -Clean:$false
+& $shell -NoProfile -ExecutionPolicy Bypass -File $buildScript -Root $Root -Preset x64-release
 $releaseBuildExit = $LASTEXITCODE
 Add-GateCheck "build:x64-release" ($releaseBuildExit -eq 0) ("exitCode={0}" -f $releaseBuildExit)
 
@@ -348,14 +352,16 @@ Test-ProbeJson -Label "release" -JsonPath $releaseJson -ExpectedRunId $runId -Ex
 # ---------------------------------------------------------------------------
 # 8. Proprietary paths remain ignored
 # ---------------------------------------------------------------------------
+# Trailing-slash directory patterns only match directories git can see, so
+# probe a path INSIDE each directory (mirrors loop-gate.ps1's own probes).
 $ignoreTargets = @(
     "nvngx_dlssnr.dll",
     "renodx-dlss5-1.addon64",
-    "runtime_local",
-    "third_party_local",
-    "reference_local",
-    "captures",
-    "logs"
+    "runtime_local/.veyra-ignore-probe",
+    "third_party_local/.veyra-ignore-probe",
+    "reference_local/.veyra-ignore-probe",
+    "captures/.veyra-ignore-probe",
+    "logs/.veyra-ignore-probe"
 )
 foreach ($target in $ignoreTargets) {
     & git -C $Root check-ignore -q --no-index -- $target

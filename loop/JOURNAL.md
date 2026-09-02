@@ -224,6 +224,34 @@ Result:
 
 ---
 
+## Cycle 008 — P0.8 phase0 gate 实跑
+
+### Before
+
+- Phase: 0
+- 唯一任务: 通过统一入口 `scripts/loop-gate.ps1 -Gate phase0` 实跑 P0.3 建立的门禁：双 preset 重建 + Debug probe（3s 窗口）+ Release probe（300s 窗口）+ 全部阈值解析 + Git ignore 检查；exit 0 后把证据登记 EVIDENCE。
+- 可证伪假设: 若任一阈值不达标（窗口不足 299s、framesPresented=0、身份不匹配、exports 缺失、git 跟踪了敏感文件），gate exit 1。
+- 预计修改文件: loop/JOURNAL.md、loop/EVIDENCE.md、loop/STATE.json、loop/BACKLOG.md。
+- 快速检查命令: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate phase0` → 预期 exit 0。
+- 预期新增证据: gate 全绿输出 + logs/phase0/<runId>/ 四个 artifact（debug/release 的 log+json）。
+
+### After
+
+- 实际修改: scripts/gates/phase0.ps1 三处修复（FileVersionRaw 取代区域敏感 FileVersion；`-File` 调用下移除 `-Clean:$false` 字符串转换问题；目录 ignore 探测改为目录内探针文件）+ 本 Journal/EVIDENCE/WORKLOG/STATE/BACKLOG 更新。
+- 实际命令与 exit code:
+  - 第 1 次 `loop-gate.ps1 -Gate phase0` → exit 1：gate 内 19 项中 runtime:fileversion 失败（PowerShell 区域格式返回 "310,8,0,0"）。
+  - 第 2 次 → exit 1：build:x64-debug/release 双失败——`-File` 下 `-Clean:$false` 以字符串 "$false" 传给 SwitchParameter 无法转换。
+  - 第 3 次 → exit 1：构建与双 probe 全过，但 git-ignore:third_party_local/reference_local/captures 失败——目录尚不存在时带斜杠目录模式对裸路径不匹配。
+  - 第 4 次 → **exit 0：VEYRA GATE PASSED: phase0 (70 checks)**，内部 gate 61 检查全过，run-id a5fd6348b3084b44857b1f1ffc96a449，总耗时 308.3s。
+- 新证据/日志路径: logs/phase0/a5fd6348b3084b44857b1f1ffc96a449/{probe-debug.log,probe-debug.json,probe-release.log,probe-release.json}。关键数字——Debug：3 秒 303 帧；Release：**300 秒 30002 帧，deviceRemoved=false，reason=0x00000000**；exports 5/5；exe sha256 debug=E75D22D0…、release=0C1AB463…。
+- 失败 fingerprint: phase0|loop-gate -Gate phase0|1|区域格式/SwitchParameter 转换/不存在目录的 ignore 匹配——3 个不同缺陷依次修复，每个都有新证据。
+- 本 fingerprint 第几次不同尝试: 第 4 次运行通过；3 次失败原因互不相同（未触发同指纹 3 次上限）。
+- 是否有进展，依据: 是——Phase 0 的机器验收门禁首次真实 exit 0，包含 5 分钟窗口循环无 device removed。
+- STATE/BACKLOG 更新: phases[0]=gate_passed + gateEvidence；cycle.completed=8；BACKLOG P0.8 → DONE。
+- 下一唯一动作: P0.9 记录 Reviewer 前指纹，按 REVIEW_PROMPT 启动只读 Reviewer 子 Agent。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名
