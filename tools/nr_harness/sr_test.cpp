@@ -85,7 +85,11 @@ int runSrTest(const FrameLoopArgs& args)
         context.shutdown(); return 7;
     }
 
-    // Core init.
+    // Core init - canonical absolute path (user directive: full absolute path).
+    wchar_t absRuntimeDir[MAX_PATH * 2]{};
+    GetFullPathNameW(L"runtime_local\\nvidia", MAX_PATH * 2, absRuntimeDir, nullptr);
+    log::info("sr-test", std::format("runtimeDir (absolute): {}", narrowText(absRuntimeDir)));
+
     std::ifstream idStream("runtime_local/config/ngx-local.json", std::ios::binary);
     std::string idText((std::istreambuf_iterator<char>(idStream)), std::istreambuf_iterator<char>());
     const std::string projectId = scanField(idText, "ngxProjectId");
@@ -93,12 +97,12 @@ int runSrTest(const FrameLoopArgs& args)
     if (projectId.empty()) { ring.shutdown(); context.shutdown(); return 7; }
 
     veyra::ngx::NgxCoreHost coreHost;
-    if (!coreHost.initialize(context.device(), L"runtime_local\\nvidia",
+    if (!coreHost.initialize(context.device(), absRuntimeDir,
             projectId.c_str(), engineVersion.c_str(), status)) {
         ring.shutdown(); context.shutdown(); return 8;
     }
 
-    // Query SR capability (Playbook section 11).
+    // Query SR capability (Playbook section 11) - full diagnostic per user directive.
     bool srCapabilityAvailable = false;
     {
         NVSDK_NGX_Parameter* capParams = nullptr;
@@ -107,11 +111,16 @@ int runSrTest(const FrameLoopArgs& args)
             veyra::ngxResultString(static_cast<uint64_t>(capResult)), capParams != nullptr ? "non-null" : "null"));
         if (capParams != nullptr && capResult == NVSDK_NGX_Result_Success) {
             int ssAvailable = 0;
-            capParams->Get(NVSDK_NGX_Parameter_SuperSampling_Available, &ssAvailable);
+            const NVSDK_NGX_Result g1 = capParams->Get(NVSDK_NGX_Parameter_SuperSampling_Available, &ssAvailable);
             int needsUpdatedDriver = 0;
-            capParams->Get(NVSDK_NGX_Parameter_SuperSampling_NeedsUpdatedDriver, &needsUpdatedDriver);
+            const NVSDK_NGX_Result g2 = capParams->Get(NVSDK_NGX_Parameter_SuperSampling_NeedsUpdatedDriver, &needsUpdatedDriver);
+            // DeepLearningSuperSampling variants
+            int dlssAvailable = 0;
+            const NVSDK_NGX_Result g3 = capParams->Get("#\x02", &dlssAvailable);
             srCapabilityAvailable = ssAvailable != 0;
-            log::info("sr-test", std::format("SR available={} needsUpdatedDriver={}", ssAvailable, needsUpdatedDriver));
+            log::info("sr-test", std::format("  SuperSampling.Available: Get=0x{:X} value={}", static_cast<uint64_t>(g1), ssAvailable));
+            log::info("sr-test", std::format("  SuperSampling.NeedsUpdatedDriver: Get=0x{:X} value={}", static_cast<uint64_t>(g2), needsUpdatedDriver));
+            log::info("sr-test", std::format("  DeepLearningSuperSampling.Available: Get=0x{:X} value={}", static_cast<uint64_t>(g3), dlssAvailable));
             NVSDK_NGX_D3D12_DestroyParameters(capParams);
         }
     }
@@ -142,15 +151,15 @@ int runSrTest(const FrameLoopArgs& args)
         bypassOk = bypassOk && !srBackend.created();
     }
 
-    // Test 2: 540p->1080p upscale (SR should be created and active).
+    // Test 2: 1080p-4K upscale (Playbook -16: "1080p-4K - SR->NR").
     bool upscaleOk = false;
     uint64_t upscaleEvals = 0;
     veyra::gfx::ComPtr<ID3D12Resource> color540, output1080;
     {
         srBackend.release(); // clean up from bypass test
         veyra::ngx::DlssSrBackend::CreateDesc cdesc{};
-        cdesc.inputWidth = 960; cdesc.inputHeight = 540;
-        cdesc.outputWidth = 1920; cdesc.outputHeight = 1080;
+        cdesc.inputWidth = 1920; cdesc.inputHeight = 1080;
+        cdesc.outputWidth = 3840; cdesc.outputHeight = 2160;
         cdesc.perfQuality = 1;
         cdesc.enableOutputSubrects = false;
         ID3D12GraphicsCommandList* list = ring.acquire(0, status);
@@ -165,12 +174,12 @@ int runSrTest(const FrameLoopArgs& args)
 
         if (upscaleOk) {
             // Create color (render res) and output (target res) textures.
-            color540 = makeTexture(context, 960, 540, DXGI_FORMAT_R16G16B16A16_FLOAT);
-            output1080 = makeTexture(context, 1920, 1080, DXGI_FORMAT_R16G16B16A16_FLOAT);
+            color540 = makeTexture(context, 1920, 1080, DXGI_FORMAT_R16G16B16A16_FLOAT);
+            output1080 = makeTexture(context, 3840, 2160, DXGI_FORMAT_R16G16B16A16_FLOAT);
             if (color540 && output1080) {
                 // Zero guidance (no depth/motion for V1 SR baseline).
-                auto zeroMotion = makeTexture(context, 960, 540, DXGI_FORMAT_R16G16_FLOAT);
-                auto zeroDepth = makeTexture(context, 960, 540, DXGI_FORMAT_R32_FLOAT);
+                auto zeroMotion = makeTexture(context, 1920, 1080, DXGI_FORMAT_R16G16_FLOAT);
+                auto zeroDepth = makeTexture(context, 1920, 1080, DXGI_FORMAT_R32_FLOAT);
 
                 // Evaluate 30 frames.
                 for (int frame = 0; frame < 30; ++frame) {
@@ -265,7 +274,7 @@ int runSrTest(const FrameLoopArgs& args)
     // required when SR capability is available on this system. When the NGX
     // capability query reports SR as unavailable (hardware/driver limitation),
     // bypass + honest capability reporting is the correct pass condition
-    // (Playbook: "SR runtime 来自官方 310.7 manifest" is verified; the
+    // (Playbook: "SR runtime ---- 310.7 manifest" is verified; the
     // capability result is reported, not bypassed silently).
     const bool allOk = bypassOk && (!srCapabilityAvailable || (upscaleOk && resizeOk));
 

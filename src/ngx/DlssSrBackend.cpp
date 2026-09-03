@@ -81,7 +81,8 @@ bool DlssSrBackend::create(NgxCoreHost& coreHost,
     outputHeight_ = desc.outputHeight;
 
     // 1:1 bypass: never create SR for same-resolution (Playbook section 11).
-    if (shouldBypass(desc.inputWidth, desc.outputWidth)) {
+    // Check BOTH dimensions for non-uniform extent correctness.
+    if (shouldBypass(desc.inputWidth, desc.inputHeight, desc.outputWidth, desc.outputHeight)) {
         log::info("ngx", std::format("sr-backend: bypass ({}x{} == {}x{})",
             desc.inputWidth, desc.inputHeight, desc.outputWidth, desc.outputHeight));
         return true;
@@ -104,7 +105,12 @@ bool DlssSrBackend::create(NgxCoreHost& coreHost,
         desc.inputWidth, desc.inputHeight, desc.outputWidth, desc.outputHeight,
         ngxResultString(createResult_), handle_ != nullptr ? "non-null" : "null", sehCode));
 
-    if (result != NVSDK_NGX_Result_Success || handle_ == nullptr) {
+    if (result != NVSDK_NGX_Result_Success) {
+        // Query FeatureInitResult for diagnostic detail (user directive).
+        int featureInitResult = 0;
+        const NVSDK_NGX_Result gir = params->Get(NVSDK_NGX_Parameter_SuperSampling_FeatureInitResult, &featureInitResult);
+        log::info("ngx", std::format("sr-backend: FeatureInitResult Get=0x{:X} value={} (0x{:X})",
+            static_cast<uint64_t>(gir), featureInitResult, featureInitResult));
         status = Status::DeviceFailure;
         return false;
     }

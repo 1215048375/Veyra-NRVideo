@@ -77,15 +77,10 @@ Add-GateCheck "sr:bypass-1to1" ([bool]$sr.bypass11 -eq $true) "bypass11=$($sr.by
 $srCap = [bool]$sr.srCapabilityAvailable
 Add-GateCheck "sr:capability-reported" ($null -ne $sr.srCapabilityAvailable) "srCapabilityAvailable=$srCap"
 
-# 6. Upscale + resize only when capability is available.
-if ($srCap) {
-    Add-GateCheck "sr:upscale" ([bool]$sr.upscale540to1080 -eq $true) "upscale=$($sr.upscale540to1080)"
-    Add-GateCheck "sr:upscale-evaluates" ([int64]$sr.upsscaleEvaluates -ge 30) "evaluates=$($sr.upscaleEvaluates)"
-    Add-GateCheck "sr:resize-recreate" ([bool]$sr.resizeRecreate -eq $true) "resize=$($sr.resizeRecreate)"
-}
-else {
-    Write-Host "[INFO] sr:capability-unavailable :: SR not available on this system (capability query); bypass is the only testable path"
-}
+# 6. Upscale + resize required (fail-closed: SR must actually work).
+Add-GateCheck "sr:upscale" ([bool]$sr.upscale540to1080 -eq $true) "upscale=$($sr.upscale540to1080)"
+Add-GateCheck "sr:upscale-evaluates" ([int64]$sr.upscaleEvaluates -ge 30) "evaluates=$($sr.upscaleEvaluates)"
+Add-GateCheck "sr:resize-recreate" ([bool]$sr.resizeRecreate -eq $true) "resize=$($sr.resizeRecreate)"
 
 # 7. Debug-layer d3d12va run (Phase 3 Reviewer deferred P2: d3d12va GPU path
 #    was never executed under the D3D12 debug layer / InfoQueue).

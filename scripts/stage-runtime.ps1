@@ -58,24 +58,34 @@ else {
     }
 }
 
-$manifestPath = Join-Path $runtimeDir "runtime-manifest.json"
-$manifestJson = @'
-{
-  "schema": 1,
-  "mode": "local-experimental-only",
-  "files": [
-    {
-      "name": "nvngx_dlssnr.dll",
-      "size": 165840496,
-      "sha256": "E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E",
-      "fileVersion": "310.8.0.0",
-      "authenticode": "Valid",
-      "source": "user-provided workspace file",
-      "redistributable": false
+# Stage the official DLSS SR DLL from the SDK (Playbook section 3.2).
+$sdkRel = Join-Path $Root "third_party_local\nvidia\DLSS_SDK_310.7.0\lib\Windows_x86_64\rel\nvngx_dlss.dll"
+$srDll = Join-Path $runtimeDir "nvngx_dlss.dll"
+if (Test-Path -LiteralPath $sdkRel -PathType Leaf) {
+    if (-not (Test-Path -LiteralPath $srDll -PathType Leaf)) {
+        Copy-Item -LiteralPath $sdkRel -Destination $srDll
+        Write-Host "stage-runtime.ps1: copied nvngx_dlss.dll from SDK rel/"
     }
-  ]
+    else {
+        $sdkHash = (Get-FileHash -LiteralPath $sdkRel -Algorithm SHA256).Hash.ToUpperInvariant()
+        $stagedSrHash = (Get-FileHash -LiteralPath $srDll -Algorithm SHA256).Hash.ToUpperInvariant()
+        if ($sdkHash -ne $stagedSrHash) {
+            Copy-Item -LiteralPath $sdkRel -Destination $srDll -Force
+            Write-Host "stage-runtime.ps1: staged nvngx_dlss.dll drifted; replaced from SDK"
+        }
+    }
 }
-'@
+
+$manifestPath = Join-Path $runtimeDir "runtime-manifest.json"
+$srManifestEntry = ""
+if (Test-Path -LiteralPath $srDll -PathType Leaf) {
+    $srItem = Get-Item -LiteralPath $srDll
+    $srHash = (Get-FileHash -LiteralPath $srDll -Algorithm SHA256).Hash.ToUpperInvariant()
+    $srSig = Get-AuthenticodeSignature -LiteralPath $srDll
+    $srVersion = [string]$srItem.VersionInfo.FileVersion
+    $srManifestEntry = ",`n    {`n      `"name`": `"nvngx_dlss.dll`",`n      `"size`": $($srItem.Length),`n      `"sha256`": `"$srHash`",`n      `"fileVersion`": `"$srVersion`",`n      `"authenticode`": `"$([string]$srSig.Status)`",`n      `"source`": `"official DLSS SDK 310.7.0 rel`",`n      `"redistributable`": false`n    }"
+}
+$manifestJson = "@'`n{`n  `"schema`": 1,`n  `"mode`": `"local-experimental-only`",`n  `"files`": [`n    {`n      `"name`": `"nvngx_dlssnr.dll`",`n      `"size`": 165840496,`n      `"sha256`": `"E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E`",`n      `"fileVersion`": `"310.8.0.0`",`n      `"authenticode`": `"Valid`",`n      `"source`": `"user-provided workspace file`",`n      `"redistributable`": false`n    }$srManifestEntry`n  ]`n}`n'@"
 Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding utf8
 Write-Host "stage-runtime.ps1: runtime-manifest.json written"
 

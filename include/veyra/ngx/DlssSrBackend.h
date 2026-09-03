@@ -67,11 +67,13 @@ public:
     bool isBypass() const; // true when input == output extent
 
     // 1:1 bypass: the entire SR backend is skipped (Playbook section 11).
-    bool shouldBypass(uint32_t inputWidth, uint32_t outputWidth) const {
-        return inputWidth == outputWidth;
-    }
+    // Checks BOTH dimensions to handle non-uniform extents correctly.
     bool shouldBypass(uint32_t inW, uint32_t inH, uint32_t outW, uint32_t outH) const {
         return inW == outW && inH == outH;
+    }
+    // Convenience overload for width-only check (backward compat).
+    bool shouldBypass(uint32_t inputWidth, uint32_t outputWidth) const {
+        return inputWidth == outputWidth;
     }
 
 private:
