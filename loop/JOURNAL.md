@@ -576,6 +576,32 @@ Result:
 
 ---
 
+## Cycle 023 — P3.4 YUV→RGB GPU 管线集成
+
+### Before
+
+- Phase: 3
+- 唯一任务: 在 media_probe 的 d3d12va 模式中，从 AVD3D12VAFrame 取 NV12 texture/subresource_index，创建 plane 0（R8 luma）+ plane 1（R8G8 chroma）SRV，加载 YuvToLinearRgb.dxil 构建管线（root constants + 双 SRV 表 + UAV 表），逐帧 dispatch（16x16 组），输出 linear RGB FP16 纹理。GPU queue Wait 帧同步 fence。零 CPU 像素回读。
+- 可证伪假设: 若 SRV 的 plane/array-slice 映射错误，debug layer infoQueue 报错；若 dispatch 后输出全零，说明 shader 或 barrier 链有误。
+- 预计修改文件: tools/media_probe/main.cpp（d3d12va 模式扩展）。
+- 快速检查命令: `--mode d3d12va --frames 30` → 0（含 shader dispatch 计数>0）。
+- 预期新增证据: 每帧 shader dispatch 计数、infoQueue 0 错误、gpuReadbackCount=0。
+
+### After
+
+- 实际修改: media_probe d3d12va 模式扩展（YuvToRgbPipeline 结构、createYuvToRgbPipeline、dispatchYuvToRgb 逐帧 shader dispatch）；CMakeLists YuvToLinearRgb shader 移出 DLSSNR 块并加 media_probe 依赖。
+- 实际命令与 exit code:
+  - Debug 30 帧 → exit 0：frames=30 shaderDispatches=30，dispatch 失败=0。
+  - Debug 300 帧 → exit 0：**frames=300 shaderDispatches=300 gpuQueueWaits=300**。
+  - `loop-gate -Gate phase3` → exit 0（70/70）。
+- 调试: E_INVALIDARG on Close() 的根因是 `SetDescriptorHeaps(2, ...)` 传了两个 CBV_SRV_UAV 堆（D3D12 仅允许一个）→ 合并为单堆（SRV 槽 0-1 + UAV 槽 2）。附带修复：NV12 纹理实际为非数组（depth=1），SRV 用 Texture2D 而非 Texture2DArray。
+- 新证据/日志路径: logs/tmp/p34full.{log,json,out}。
+- 是否有进展，依据: 是——YUV→RGB GPU shader 真实 dispatch 300/300，零 CPU 回读，正常路径零失败。
+- STATE/BACKLOG 更新: P3.4 → DONE。
+- 下一唯一动作: P3.7 30 分钟耐力测试（后台运行）。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名

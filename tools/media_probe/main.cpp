@@ -23,12 +23,254 @@
 #include "veyra/gfx/D3D12DeviceContext.h"
 #include "veyra/media/FFmpegDemuxer.h"
 #include "veyra/media/FFmpegVideoDecoder.h"
+#include "veyra/gfx/CommandSlotRing.h"
 
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/avutil.h>
+#include <libavutil/hwcontext_d3d12va.h>
 }
+
+namespace {
+// --- YUV→RGB GPU pipeline resources (P3.4) ---
+struct YuvToRgbPipeline {
+    veyra::gfx::ComPtr<ID3D12RootSignature> rootSignature;
+    veyra::gfx::ComPtr<ID3D12PipelineState> pipelineState;
+    veyra::gfx::ComPtr<ID3D12DescriptorHeap> srvHeap;
+    veyra::gfx::ComPtr<ID3D12DescriptorHeap> uavHeap;
+    veyra::gfx::ComPtr<ID3D12Resource> outputTexture; // linear RGB FP16
+    UINT srvIncrement = 0;
+    UINT uavIncrement = 0;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint64_t dispatchCount = 0;
+};
+
+bool createYuvToRgbPipeline(veyra::gfx::D3D12DeviceContext& context, uint32_t width, uint32_t height,
+    YuvToRgbPipeline& pipeline)
+{
+    pipeline.width = width;
+    pipeline.height = height;
+
+    // Load the build-time compiled shader.
+    const std::string shaderPath = VEYRA_SHADER_DIR "/YuvToLinearRgb.dxil";
+    HANDLE shaderFile = CreateFileA(shaderPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (shaderFile == INVALID_HANDLE_VALUE) {
+        veyra::log::error("media-probe", std::format("d3d12va: shader missing path={}", shaderPath));
+        return false;
+    }
+    LARGE_INTEGER shaderSize{};
+    GetFileSizeEx(shaderFile, &shaderSize);
+    std::vector<uint8_t> shaderBytes(static_cast<size_t>(shaderSize.QuadPart));
+    DWORD shaderRead = 0;
+    ReadFile(shaderFile, shaderBytes.data(), static_cast<DWORD>(shaderBytes.size()), &shaderRead, nullptr);
+    CloseHandle(shaderFile);
+    if (shaderBytes.empty()) {
+        return false;
+    }
+
+    // Root signature: b0 (8 constants) + SRV table (3) + UAV table (1).
+    D3D12_DESCRIPTOR_RANGE1 srvRange{};
+    srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    srvRange.NumDescriptors = 3;
+    srvRange.BaseShaderRegister = 0;
+    srvRange.RegisterSpace = 0;
+    srvRange.OffsetInDescriptorsFromTableStart = 0;
+    srvRange.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
+    D3D12_DESCRIPTOR_RANGE1 uavRange{};
+    uavRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    uavRange.NumDescriptors = 1;
+    uavRange.BaseShaderRegister = 0;
+    uavRange.RegisterSpace = 0;
+    uavRange.OffsetInDescriptorsFromTableStart = 0;
+    uavRange.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
+    D3D12_ROOT_PARAMETER1 rootParams[3]{};
+    rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    rootParams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    rootParams[0].Constants.ShaderRegister = 0;
+    rootParams[0].Constants.RegisterSpace = 0;
+    rootParams[0].Constants.Num32BitValues = 8;
+    rootParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    rootParams[1].DescriptorTable.NumDescriptorRanges = 1;
+    rootParams[1].DescriptorTable.pDescriptorRanges = &srvRange;
+    rootParams[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    rootParams[2].DescriptorTable.NumDescriptorRanges = 1;
+    rootParams[2].DescriptorTable.pDescriptorRanges = &uavRange;
+    D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootDesc{};
+    rootDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
+    rootDesc.Desc_1_1.NumParameters = 3;
+    rootDesc.Desc_1_1.pParameters = rootParams;
+    veyra::gfx::ComPtr<ID3DBlob> signature;
+    veyra::gfx::ComPtr<ID3DBlob> signatureError;
+    if (FAILED(D3D12SerializeVersionedRootSignature(&rootDesc, &signature, &signatureError))) {
+        return false;
+    }
+    if (FAILED(context.device()->CreateRootSignature(0, signature->GetBufferPointer(),
+            signature->GetBufferSize(), IID_PPV_ARGS(&pipeline.rootSignature)))) {
+        return false;
+    }
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{};
+    psoDesc.pRootSignature = pipeline.rootSignature.Get();
+    psoDesc.CS.pShaderBytecode = shaderBytes.data();
+    psoDesc.CS.BytecodeLength = shaderBytes.size();
+    if (FAILED(context.device()->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipeline.pipelineState)))) {
+        veyra::log::error("media-probe", "d3d12va: YuvToLinearRgb PSO creation failed");
+        return false;
+    }
+
+    // Single heap: SRV slots 0-1 (luma+chroma), UAV slot 2 (output).
+    // D3D12 allows exactly ONE CBV/SRV/UAV heap per command list.
+    D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
+    heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    heapDesc.NumDescriptors = 8;
+    heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    if (FAILED(context.device()->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&pipeline.srvHeap)))) {
+        return false;
+    }
+    pipeline.srvIncrement = context.device()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    // Output texture: linear RGB FP16.
+    D3D12_HEAP_PROPERTIES heapProps{};
+    heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12_RESOURCE_DESC outputDesc{};
+    outputDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    outputDesc.Width = width;
+    outputDesc.Height = height;
+    outputDesc.DepthOrArraySize = 1;
+    outputDesc.MipLevels = 1;
+    outputDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    outputDesc.SampleDesc.Count = 1;
+    outputDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    if (FAILED(context.device()->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE,
+            &outputDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&pipeline.outputTexture)))) {
+        return false;
+    }
+
+    // UAV for the output (slot 2 in the single heap).
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+    uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    uavDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    D3D12_CPU_DESCRIPTOR_HANDLE uavCpu = { pipeline.srvHeap->GetCPUDescriptorHandleForHeapStart().ptr + 2ull * pipeline.srvIncrement };
+    context.device()->CreateUnorderedAccessView(pipeline.outputTexture.Get(), nullptr, &uavDesc, uavCpu);
+
+    veyra::log::info("media-probe", std::format("d3d12va: YuvToLinearRgb pipeline created ({}x{})", width, height));
+    return true;
+}
+
+// Dispatch the YUV→RGB shader for one D3D12VA frame (NV12 texture).
+bool dispatchYuvToRgb(veyra::gfx::D3D12DeviceContext& context,
+    veyra::gfx::CommandSlotRing& ring,
+    YuvToRgbPipeline& pipeline,
+    ID3D12Resource* nv12Texture, int subresourceIndex,
+    int slotIndex, veyra::Status& status)
+{
+    ID3D12GraphicsCommandList* list = ring.acquire(slotIndex, status);
+    if (list == nullptr) {
+        return false;
+    }
+
+    // Create per-frame SRVs for the NV12 planes (luma R8 + chroma R8G8).
+    // Query the texture description to pick the correct SRV dimension
+    // (texture array vs single 2D) and log what FFmpeg gave us.
+    D3D12_RESOURCE_DESC texDesc = nv12Texture->GetDesc();
+    const bool isArray = texDesc.DepthOrArraySize > 1;
+    veyra::log::info("media-probe", std::format("d3d12va: NV12 tex desc {}x{} array={} depth={} fmt={} planes={}",
+        texDesc.Width, texDesc.Height, isArray, texDesc.DepthOrArraySize,
+        static_cast<int>(texDesc.Format), static_cast<int>(texDesc.Layout)));
+
+    D3D12_CPU_DESCRIPTOR_HANDLE srvBase = pipeline.srvHeap->GetCPUDescriptorHandleForHeapStart();
+    D3D12_SHADER_RESOURCE_VIEW_DESC lumaSrv{};
+    lumaSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    lumaSrv.Format = DXGI_FORMAT_R8_UNORM;
+    if (isArray) {
+        lumaSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+        lumaSrv.Texture2DArray.MostDetailedMip = 0;
+        lumaSrv.Texture2DArray.MipLevels = 1;
+        lumaSrv.Texture2DArray.FirstArraySlice = subresourceIndex;
+        lumaSrv.Texture2DArray.ArraySize = 1;
+        lumaSrv.Texture2DArray.PlaneSlice = 0;
+    }
+    else {
+        lumaSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        lumaSrv.Texture2D.MostDetailedMip = 0;
+        lumaSrv.Texture2D.MipLevels = 1;
+        lumaSrv.Texture2D.PlaneSlice = 0;
+    }
+    context.device()->CreateShaderResourceView(nv12Texture, &lumaSrv, srvBase);
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC chromaSrv{};
+    chromaSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    chromaSrv.Format = DXGI_FORMAT_R8G8_UNORM;
+    if (isArray) {
+        chromaSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+        chromaSrv.Texture2DArray.MostDetailedMip = 0;
+        chromaSrv.Texture2DArray.MipLevels = 1;
+        chromaSrv.Texture2DArray.FirstArraySlice = subresourceIndex;
+        chromaSrv.Texture2DArray.ArraySize = 1;
+        chromaSrv.Texture2DArray.PlaneSlice = 1;
+    }
+    else {
+        chromaSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        chromaSrv.Texture2D.MostDetailedMip = 0;
+        chromaSrv.Texture2D.MipLevels = 1;
+        chromaSrv.Texture2D.PlaneSlice = 1;
+    }
+    context.device()->CreateShaderResourceView(nv12Texture, &chromaSrv, { srvBase.ptr + pipeline.srvIncrement });
+
+    // Resource barriers: NV12 -> NON_PIXEL_SHADER_RESOURCE, output -> UAV.
+    D3D12_RESOURCE_BARRIER barriers[2]{};
+    barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barriers[0].Transition.pResource = nv12Texture;
+    barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+    barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    barriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barriers[1].Transition.pResource = pipeline.outputTexture.Get();
+    barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    barriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    barriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    // Only transition the NV12 (output stays UAV between frames).
+    list->ResourceBarrier(1, barriers);
+
+    // Bind and dispatch (single heap for both SRV and UAV tables).
+    ID3D12DescriptorHeap* heaps[] = { pipeline.srvHeap.Get() };
+    list->SetDescriptorHeaps(1, heaps);
+    list->SetPipelineState(pipeline.pipelineState.Get());
+    list->SetComputeRootSignature(pipeline.rootSignature.Get());
+    // colorParams: limitedRange=1, matrix709=1, transferSRGB=1, padding
+    const float colorParams[4] = { 1.0f, 1.0f, 1.0f, 0.0f };
+    const uint32_t dims[4] = { pipeline.width, pipeline.height, 0, 0 };
+    const float constants[8] = { colorParams[0], colorParams[1], colorParams[2], colorParams[3],
+        static_cast<float>(dims[0]), static_cast<float>(dims[1]), 0.0f, 0.0f };
+    list->SetComputeRoot32BitConstants(0, 8, constants, 0);
+    list->SetComputeRootDescriptorTable(1, pipeline.srvHeap->GetGPUDescriptorHandleForHeapStart());
+    // UAV table at slot 2 in the same heap.
+    D3D12_GPU_DESCRIPTOR_HANDLE uavGpu = { pipeline.srvHeap->GetGPUDescriptorHandleForHeapStart().ptr + 2ull * pipeline.srvIncrement };
+    list->SetComputeRootDescriptorTable(2, uavGpu);
+    list->Dispatch((pipeline.width + 15) / 16, (pipeline.height + 15) / 16, 1);
+
+    // Barrier NV12 back to COMMON (for FFmpeg's next decode use).
+    D3D12_RESOURCE_BARRIER back{};
+    back.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    back.Transition.pResource = nv12Texture;
+    back.Transition.StateBefore = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    back.Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
+    back.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    list->ResourceBarrier(1, &back);
+
+    if (!ring.submitAndSignal(slotIndex)) {
+        return false;
+    }
+    ++pipeline.dispatchCount;
+    return true;
+}
+
+} // namespace
 
 #include "../nr_harness/harness_util.h"
 
@@ -58,6 +300,8 @@ void drainInfoQueue(veyra::gfx::D3D12DeviceContext& context)
             if (message->Severity == D3D12_MESSAGE_SEVERITY_ERROR ||
                 message->Severity == D3D12_MESSAGE_SEVERITY_CORRUPTION) {
                 ++g_infoQueueErrors;
+                veyra::log::error("media-probe", std::format("infoqueue id={} desc={}",
+                    static_cast<unsigned>(message->ID), message->pDescription));
             }
             ++g_infoQueueStored;
         }
@@ -189,12 +433,23 @@ int runD3d12VADecode(const std::wstring& input, uint32_t frames, const std::stri
         return 8;
     }
 
+    // P3.4: YUV→RGB GPU pipeline (shader dispatch per frame, zero readback).
+    veyra::gfx::CommandSlotRing ring;
+    if (!ring.initialize(context.device(), context.directQueue(), context.fence(), context.fenceEvent(), 4, status)) {
+        context.shutdown();
+        return 7;
+    }
+    YuvToRgbPipeline yuvPipeline;
+    bool yuvPipelineReady = false;
+    uint32_t frameSlot = 0;
+
     uint64_t framesDecoded = 0;
     bool endOfFile = false;
     while (framesDecoded < frames && !endOfFile) {
         bool eof = false;
         if (demuxer.readVideoPacket(eof)) {
             if (!decoder.sendPacket(demuxer.currentPacket())) {
+                ring.shutdown();
                 context.shutdown();
                 return 9;
             }
@@ -204,21 +459,50 @@ int runD3d12VADecode(const std::wstring& input, uint32_t frames, const std::stri
             (void)decoder.sendPacket(nullptr);
         }
         else {
+            ring.shutdown();
             context.shutdown();
             return 9;
         }
-        while (decoder.receiveFrame() != nullptr) {
+        while (const AVFrame* avFrame = decoder.receiveFrame()) {
             ++framesDecoded;
+            // P3.4: dispatch YUV→RGB shader for each D3D12VA frame.
+            if (avFrame->format == AV_PIX_FMT_D3D12) {
+                auto* d3dFrame = reinterpret_cast<AVD3D12VAFrame*>(avFrame->data[0]);
+                if (d3dFrame != nullptr && d3dFrame->texture != nullptr) {
+                    if (!yuvPipelineReady) {
+                        yuvPipelineReady = createYuvToRgbPipeline(context,
+                            decoder.width() > 0 ? static_cast<uint32_t>(decoder.width()) : 1920,
+                            decoder.height() > 0 ? static_cast<uint32_t>(decoder.height()) : 1080,
+                            yuvPipeline);
+                        if (yuvPipelineReady) {
+                            veyra::log::info("media-probe", std::format("d3d12va: YuvToRgb pipeline ready (subresource={})",
+                                d3dFrame->subresource_index));
+                        }
+                    }
+                    if (yuvPipelineReady) {
+                        if (!dispatchYuvToRgb(context, ring, yuvPipeline,
+                                d3dFrame->texture, d3dFrame->subresource_index,
+                                static_cast<int>(frameSlot % 4), status)) {
+                            veyra::log::warn("media-probe", std::format("d3d12va: YuvToRgb dispatch failed slot={} status={}",
+                                frameSlot % 4, veyra::statusString(status)));
+                        }
+                        ++frameSlot;
+                    }
+                }
+            }
         }
     }
+    (void)ring.waitIdle();
 
     const bool usedD3D12Frames = decoder.lastFrameFormat() == AV_PIX_FMT_D3D12;
     const auto& ds = decoder.stats();
+    const uint64_t shaderDispatches = yuvPipeline.dispatchCount;
     drainInfoQueue(context);
+    ring.shutdown();
     context.shutdown();
 
-    veyra::log::info("media-probe", std::format("d3d12va: frames={} format={} sharedDevice=true gpuQueueWaits={}",
-        framesDecoded, decoder.lastFrameFormat(), decoder.gpuQueueWaitCount()));
+    veyra::log::info("media-probe", std::format("d3d12va: frames={} format={} sharedDevice=true gpuQueueWaits={} shaderDispatches={}",
+        framesDecoded, decoder.lastFrameFormat(), decoder.gpuQueueWaitCount(), shaderDispatches));
 
     std::string json;
     json += "{\n";
@@ -227,7 +511,8 @@ int runD3d12VADecode(const std::wstring& input, uint32_t frames, const std::stri
     json += std::format("  \"frames\": {},\n", framesDecoded);
     json += std::format("  \"decode\": {{\"framesDecoded\": {}, \"ptsNonMonotonicCount\": {}}},\n",
         ds.framesDecoded, ds.ptsNonMonotonicCount);
-    json += std::format("  \"pipeline\": {{\"gpuReadbackCount\": 0, \"maxDecodeQueueDepth\": 4, \"maxProcessQueueDepth\": 0}},\n");
+    json += std::format("  \"pipeline\": {{\"gpuReadbackCount\": 0, \"maxDecodeQueueDepth\": 4, \"maxProcessQueueDepth\": 0, \"shaderDispatches\": {}}},\n",
+        shaderDispatches);
     json += std::format("  \"hwaccel\": {{\"sharedVeyraDevice\": {}, \"pixelFormat\": \"{}\"}},\n",
         "true", usedD3D12Frames ? "AV_PIX_FMT_D3D12" : "software-fallback");
     json += std::format("  \"debugInfoQueue\": {{\"active\": {}, \"storedMessages\": {}, \"errorMessages\": {}}}\n",

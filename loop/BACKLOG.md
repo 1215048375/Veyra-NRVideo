@@ -42,7 +42,7 @@ Phase 0 gate：以 Playbook 第 16 节 Phase 0 为准。未完成 P0.9 禁止开
 - [x] P3.1 引入固定版本 FFmpeg 依赖和 phase3 gate，不改变 NGX harness。（2026-09-03：vcpkg 30ef65ca 基线，FFmpeg 9.0.1，C:eyra-deps 空间路径适配，gate fail-closed 建立并负向验证。）
 - [x] P3.2 先完成 H.264/HEVC 软件 decode 最小基线，正确按 PTS/VFR 驱动，不猜固定 FPS。（2026-09-03：300 帧 PTS 全单调，测试片 30s H.264 1080p30。）
 - [x] P3.3 共享 Veyra D3D12 device 的 D3D12VA decode，记录实际 AV_PIX_FMT_D3D12、hw device 和 shared device identity。（2026-09-03：300 帧 AV_PIX_FMT_D3D12 共享设备，gate 70/70。）
-- [ ] P3.4 完成 YUV range/matrix/transfer→linear RGB，禁止正常路径 GPU→CPU 像素回读。
+- [x] P3.4 完成 YUV range/matrix/transfer→linear RGB，禁止正常路径 GPU→CPU 像素回读。（2026-09-03：YuvToLinearRgb shader 300/300 dispatch，gpuReadbackCount=0，单堆修复 E_INVALIDARG。）
 - [ ] P3.5 建有界 decode/process/present 队列和 backpressure。
 - [x] P3.6 实现 open/seek/resize/pause-resume/device-lost 的历史 reset；10 次 seek 无旧历史影像。（2026-09-03：seek storm 10/10 通过，flushBuffers 每 seek 边界。）
 - [ ] P3.7 真实视频 30 分钟、seek 压测、内存/队列/延迟证据。
