@@ -392,7 +392,8 @@ int runSoftwareDecode(const std::wstring& input, uint32_t frames, const std::str
     json += std::format("  \"frames\": {},\n", framesDecoded);
     json += std::format("  \"decode\": {{\"framesDecoded\": {}, \"ptsNonMonotonicCount\": {}}},\n",
         ds.framesDecoded, ds.ptsNonMonotonicCount + ms.ptsNonMonotonicCount);
-    json += "  \"pipeline\": {\"gpuReadbackCount\": 0, \"maxDecodeQueueDepth\": 4, \"maxProcessQueueDepth\": 0},\n";
+    json += std::format("  \"pipeline\": {{\"gpuReadbackCount\": 0, \"maxDecodeQueueDepth\": {}, \"maxProcessQueueDepth\": 0}},\n",
+        maxInFlight);
     json += std::format("  \"hwaccel\": {{\"sharedVeyraDevice\": false, \"pixelFormat\": \"software\"}},\n");
     json += std::format("  \"debugInfoQueue\": {{\"active\": {}, \"storedMessages\": {}, \"errorMessages\": {}}}\n",
         g_infoQueueActive ? "true" : "false", g_infoQueueStored, g_infoQueueErrors);
@@ -444,6 +445,8 @@ int runD3d12VADecode(const std::wstring& input, uint32_t frames, const std::stri
     uint32_t frameSlot = 0;
 
     uint64_t framesDecoded = 0;
+    uint32_t maxInFlight = 0;
+    uint32_t inFlight = 0;
     bool endOfFile = false;
     while (framesDecoded < frames && !endOfFile) {
         bool eof = false;
@@ -453,6 +456,7 @@ int runD3d12VADecode(const std::wstring& input, uint32_t frames, const std::stri
                 context.shutdown();
                 return 9;
             }
+            ++inFlight;
         }
         else if (eof) {
             endOfFile = true;
@@ -465,6 +469,10 @@ int runD3d12VADecode(const std::wstring& input, uint32_t frames, const std::stri
         }
         while (const AVFrame* avFrame = decoder.receiveFrame()) {
             ++framesDecoded;
+            if (inFlight > 0) {
+                --inFlight;
+            }
+            maxInFlight = std::max(maxInFlight, inFlight);
             // P3.4: dispatch YUV→RGB shader for each D3D12VA frame.
             if (avFrame->format == AV_PIX_FMT_D3D12) {
                 auto* d3dFrame = reinterpret_cast<AVD3D12VAFrame*>(avFrame->data[0]);
@@ -474,19 +482,25 @@ int runD3d12VADecode(const std::wstring& input, uint32_t frames, const std::stri
                             decoder.width() > 0 ? static_cast<uint32_t>(decoder.width()) : 1920,
                             decoder.height() > 0 ? static_cast<uint32_t>(decoder.height()) : 1080,
                             yuvPipeline);
-                        if (yuvPipelineReady) {
-                            veyra::log::info("media-probe", std::format("d3d12va: YuvToRgb pipeline ready (subresource={})",
-                                d3dFrame->subresource_index));
-                        }
                     }
                     if (yuvPipelineReady) {
+                        // P1 fix #1: GPU queue wait on the frame's sync fence
+                        // BEFORE touching the texture (Playbook 13.2).
+                        if (d3dFrame->sync_ctx.fence != nullptr) {
+                            (void)context.directQueue()->Wait(
+                                d3dFrame->sync_ctx.fence, d3dFrame->sync_ctx.fence_value);
+                        }
                         if (!dispatchYuvToRgb(context, ring, yuvPipeline,
                                 d3dFrame->texture, d3dFrame->subresource_index,
                                 static_cast<int>(frameSlot % 4), status)) {
-                            veyra::log::warn("media-probe", std::format("d3d12va: YuvToRgb dispatch failed slot={} status={}",
-                                frameSlot % 4, veyra::statusString(status)));
+                            veyra::log::warn("media-probe", "d3d12va: YuvToRgb dispatch failed");
                         }
                         ++frameSlot;
+                        // P1 fix #2 (probe-level): drain the GPU before the next
+                        // receiveFrame overwrites this frame's pool texture.
+                        // The real player will hold av_frame_ref per slot
+                        // instead (Playbook 13.2 AVFrame lifetime contract).
+                        (void)ring.waitIdle();
                     }
                 }
             }
@@ -511,8 +525,8 @@ int runD3d12VADecode(const std::wstring& input, uint32_t frames, const std::stri
     json += std::format("  \"frames\": {},\n", framesDecoded);
     json += std::format("  \"decode\": {{\"framesDecoded\": {}, \"ptsNonMonotonicCount\": {}}},\n",
         ds.framesDecoded, ds.ptsNonMonotonicCount);
-    json += std::format("  \"pipeline\": {{\"gpuReadbackCount\": 0, \"maxDecodeQueueDepth\": 4, \"maxProcessQueueDepth\": 0, \"shaderDispatches\": {}}},\n",
-        shaderDispatches);
+    json += std::format("  \"pipeline\": {{\"gpuReadbackCount\": 0, \"maxDecodeQueueDepth\": {}, \"maxProcessQueueDepth\": 0, \"shaderDispatches\": {}}},\n",
+        maxInFlight, shaderDispatches);
     json += std::format("  \"hwaccel\": {{\"sharedVeyraDevice\": {}, \"pixelFormat\": \"{}\"}},\n",
         "true", usedD3D12Frames ? "AV_PIX_FMT_D3D12" : "software-fallback");
     json += std::format("  \"debugInfoQueue\": {{\"active\": {}, \"storedMessages\": {}, \"errorMessages\": {}}}\n",
