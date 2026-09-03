@@ -155,6 +155,23 @@ target_compile_definitions(veyra_scene_tests PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_include_directories(veyra_scene_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# Standalone scene analyzer tool (phase5 gate expects veyra_scene_analyzer.exe).
+if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avformat.h")
+  add_executable(veyra_scene_analyzer
+    tools/scene_analyzer/main.cpp
+    src/core/SceneCadenceAnalyzer.cpp
+  )
+  veyra_apply_warnings(veyra_scene_analyzer)
+  target_compile_options(veyra_scene_analyzer PRIVATE /WX-)
+  target_compile_features(veyra_scene_analyzer PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_scene_analyzer PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_include_directories(veyra_scene_analyzer PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include ${FFMPEG_INCLUDE_DIRS})
+  target_link_directories(veyra_scene_analyzer PRIVATE ${FFMPEG_LIBRARY_DIRS})
+  target_link_libraries(veyra_scene_analyzer PRIVATE ${FFMPEG_LIBRARIES} veyra_base)
+endif()
+
 # ---------------------------------------------------------------------------
 # veyra_media: FFmpeg demux/decode (Phase 3). Links only the Playbook 3.4
 # dependency set from the pinned vcpkg install.
