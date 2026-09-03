@@ -145,6 +145,8 @@ $hw = Get-Content -Raw -Encoding UTF8 -LiteralPath $hwJson | ConvertFrom-Json
 Add-GateCheck "json:hw-shared-device" ([bool]$hw.hwaccel.sharedVeyraDevice -eq $true) ("shared={0} pixFmt={1}" -f $hw.hwaccel.sharedVeyraDevice, $hw.hwaccel.pixelFormat)
 Add-GateCheck "json:hw-pixfmt-d3d12" ([string]$hw.hwaccel.pixelFormat -eq "AV_PIX_FMT_D3D12") ("actual={0}" -f $hw.hwaccel.pixelFormat)
 Add-GateCheck "json:hw-no-readback" ([int64]$hw.pipeline.gpuReadbackCount -eq 0) ("readbacks={0}" -f $hw.pipeline.gpuReadbackCount)
+$nrCount = [int64]$hw.pipeline.nrEvaluateCount
+Add-GateCheck "json:nr-per-frame" ($nrCount -ge 300) ("nrEvaluateCount={0}" -f $nrCount)
 Test-GateEnd
 
 # ---------------------------------------------------------------------------

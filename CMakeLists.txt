@@ -165,7 +165,7 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_compile_definitions(veyra_media_probe PRIVATE
     UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
     VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
-  target_link_libraries(veyra_media_probe PRIVATE veyra_media)
+  target_link_libraries(veyra_media_probe PRIVATE veyra_media veyra_gfx veyra_ngx veyra_parity)
   add_dependencies(veyra_media_probe veyra_shader_yuv_to_rgb)
 endif()
 

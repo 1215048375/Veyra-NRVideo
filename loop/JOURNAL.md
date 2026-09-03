@@ -602,6 +602,23 @@ Result:
 
 ---
 
+## Cycle 024 — P1 #4 NR per real frame（媒体管线接入 Feature 18）
+
+### Before
+
+- Phase: 3
+- 唯一任务: 在 media_probe 的 d3d12va 模式中串联完整管线：D3D12VA 解码 → YUV→RGB → ParityEncode（写 Proxy）→ Feature 18 Evaluate → ParityDecode → Final。每 real frame 的 NR Evaluate 计数入 JSON，gate 断言 nrEvaluateCount == framesDecoded。
+- 可证伪假设: 若 Evaluate 失败或计数不匹配帧数，JSON/gate FAIL。
+- 预计修改文件: tools/media_probe/main.cpp（d3d12va 模式扩展 NR 链）、CMakeLists（media_probe 链 veyra_ngx+veyra_parity）。
+- 快速检查命令: `--mode d3d12va --frames 30` → 0 且 nrEvaluateCount==30。
+- 预期新增证据: 全管线计数（decode=yuv=encode=evaluate=decode_parity=frameCount）。
+
+### After
+
+（待填）
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名
