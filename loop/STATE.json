@@ -53,9 +53,9 @@
     {
       "id": 5,
       "name": "Unified guidance and quality core",
-      "status": "gate_passed",
-      "gateEvidence": "logs/phase5/947de3a7b3b9412d96d7b522c6a6e053 (30/30; NVOF execute+endurance 1080p60+4K60)",
-      "reviewEvidence": null,
+      "status": "passed",
+      "gateEvidence": "logs/phase5/884d098ded3b48d5a07c19a7cb91f6ca (30/30; NVOF readback 6863 nonzero, endurance 1080p60+second-pass)",
+      "reviewEvidence": "Reviewer PASS (2nd round); independent rerun 5ab85b90; all P0/P1 fixed",
       "commit": null
     },
     {
