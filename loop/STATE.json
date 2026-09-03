@@ -6,7 +6,7 @@
   "phase": {
     "id": 5,
     "name": "Unified guidance and quality core",
-    "state": "in_progress",
+    "state": "gate_passed",
     "gate": "phase5"
   },
   "phases": [
@@ -53,8 +53,8 @@
     {
       "id": 5,
       "name": "Unified guidance and quality core",
-      "status": "in_progress",
-      "gateEvidence": null,
+      "status": "gate_passed",
+      "gateEvidence": "logs/phase5/947de3a7b3b9412d96d7b522c6a6e053 (30/30; NVOF execute+endurance 1080p60+4K60)",
       "reviewEvidence": null,
       "commit": null
     },
