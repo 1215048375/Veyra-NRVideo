@@ -4,10 +4,10 @@
   "objective": "Ship Launch V1, not an MVP: one shared engine, native 4K SDR capture/player/export, Feature 18, DLSSG 2X, bounded live lookahead, D3D12 NVENC H.264/HEVC, and product recovery/diagnostics.",
   "status": "ready",
   "phase": {
-    "id": 5,
-    "name": "Unified guidance and quality core",
+    "id": 6,
+    "name": "DLSSG 2X",
     "state": "gate_passed",
-    "gate": "phase5"
+    "gate": "phase6"
   },
   "phases": [
     {
@@ -51,12 +51,12 @@
       "commit": "8cdf1ea2f9b0bb1331f9219a2305cef5efd3c8d8"
     },
     {
-      "id": 5,
-      "name": "Unified guidance and quality core",
+      "id": 6,
+      "name": "DLSSG 2X",
       "status": "passed",
       "gateEvidence": "logs/phase5/884d098ded3b48d5a07c19a7cb91f6ca (30/30; NVOF readback 6863 nonzero, endurance 1080p60+second-pass)",
       "reviewEvidence": "Reviewer PASS (2nd round); independent rerun 5ab85b90; all P0/P1 fixed",
-      "commit": null
+      "commit": "c4ee3f351c02451b0c773d982b38ffeff1deab93"
     },
     {
       "id": 6,
@@ -64,7 +64,7 @@
       "status": "locked",
       "gateEvidence": null,
       "reviewEvidence": null,
-      "commit": null
+      "commit": "c4ee3f351c02451b0c773d982b38ffeff1deab93"
     },
     {
       "id": 7,
@@ -72,7 +72,7 @@
       "status": "locked",
       "gateEvidence": null,
       "reviewEvidence": null,
-      "commit": null
+      "commit": "c4ee3f351c02451b0c773d982b38ffeff1deab93"
     }
   ],
   "cycle": {
