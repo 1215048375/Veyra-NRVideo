@@ -83,7 +83,7 @@
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "EULA intent recorded: user authorizes official Optical Flow and Video Codec SDK use, but both local SDK packages remain absent. Continue at P5.1; do not wait for them until the first task that actually requires them.",
+  "currentTask": "P5.5 BLOCKED (NVOF SDK absent) + P5.8 BLOCKED (DAV2 model absent). P5.1-P5.4,P5.7 done. Phase 5 gate cannot pass until SDKs provided by user.",
   "lastGate": {
     "name": "preflight",
     "status": "passed",
