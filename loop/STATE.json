@@ -6,7 +6,7 @@
   "phase": {
     "id": 4,
     "name": "DLSS SR",
-    "state": "not_started",
+    "state": "gate_passed",
     "gate": "phase4"
   },
   "phases": [
@@ -45,8 +45,8 @@
     {
       "id": 4,
       "name": "DLSS SR",
-      "status": "not_started",
-      "gateEvidence": null,
+      "status": "gate_passed",
+      "gateEvidence": "logs/phase4/35f05b714ba140198a468f56fa5ba4eb (16/16; bypass 1:1 + capability-aware)",
       "reviewEvidence": null,
       "commit": null
     },
