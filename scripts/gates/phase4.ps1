@@ -87,7 +87,32 @@ else {
     Write-Host "[INFO] sr:capability-unavailable :: SR not available on this system (capability query); bypass is the only testable path"
 }
 
-# 7. Proprietary paths remain ignored.
+# 7. Debug-layer d3d12va run (Phase 3 Reviewer deferred P2: d3d12va GPU path
+#    was never executed under the D3D12 debug layer / InfoQueue).
+$mediaProbe = Join-Path $Root "out\build\x64-debug\veyra_media_probe.exe"
+if (Test-Path -LiteralPath $mediaProbe -PathType Leaf) {
+    $ffmpegBin = "C:\veyra-deps\installed\x64-windows\bin"
+    if (Test-Path -LiteralPath $ffmpegBin -PathType Container) {
+        $env:PATH = "$ffmpegBin;" + $env:PATH
+    }
+    $testClip = Join-Path $Root "validation\fixed_clips\test_h264_1080p.mp4"
+    $dbgJson = Join-Path $logDir "d3d12va-debug.json"
+    & $mediaProbe --input $testClip --frames 60 --mode d3d12va --run-id $runId --json-file $dbgJson
+    $dbgExit = $LASTEXITCODE
+    Add-GateCheck "d3d12va-debug:run" ($dbgExit -eq 0) "exitCode=$dbgExit"
+    if (Test-Path -LiteralPath $dbgJson -PathType Leaf) {
+        $dbg = Get-Content -Raw -Encoding UTF8 -LiteralPath $dbgJson | ConvertFrom-Json
+        Add-GateCheck "d3d12va-debug:infoqueue" ([bool]$dbg.debugInfoQueue.active -eq $true -and [uint64]$dbg.debugInfoQueue.errorMessages -eq 0) "active=$($dbg.debugInfoQueue.active) errors=$($dbg.debugInfoQueue.errorMessages)"
+    }
+    else {
+        Add-GateCheck "d3d12va-debug:infoqueue" $false "json missing"
+    }
+}
+else {
+    Write-Host "[INFO] d3d12va-debug: media_probe not found (skipped)"
+}
+
+# 8. Proprietary paths remain ignored.
 $ignoreTargets = @("nvngx_dlssnr.dll", "renodx-dlss5-1.addon64",
     "runtime_local/.veyra-ignore-probe", "third_party_local/.veyra-ignore-probe",
     "captures/.veyra-ignore-probe", "logs/.veyra-ignore-probe")

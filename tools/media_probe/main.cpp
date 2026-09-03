@@ -763,7 +763,9 @@ int runD3d12VADecode(const std::wstring& input, uint32_t frames, const std::stri
         b2.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
         b2.Transition.pResource = proxyTexture.Get();
         b2.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-        b2.Transition.StateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        // Leave in UAV: evaluateNR's first barrier expects UAV as the "before"
+        // state for its UAV->SRV transition (debug-layer state tracking).
+        b2.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
         b2.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
         lst->ResourceBarrier(1, &b2);
         return ring.submitAndSignal(1) && ring.waitIdle();
