@@ -6,7 +6,7 @@
   "phase": {
     "id": 3,
     "name": "Minimal video pipeline",
-    "state": "not_started",
+    "state": "in_progress",
     "gate": "phase3"
   },
   "phases": [
@@ -37,7 +37,7 @@
     {
       "id": 3,
       "name": "Minimal video pipeline",
-      "status": "not_started",
+      "status": "in_progress",
       "gateEvidence": null,
       "reviewEvidence": null,
       "commit": null
@@ -76,19 +76,19 @@
     }
   ],
   "cycle": {
-    "completed": 21,
+    "completed": 22,
     "maximum": 80,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P3.1 (in progress): vcpkg pinned-baseline clone+bootstrap running in background; vcpkg.json written; next: first FFmpeg dependency build, then the fail-closed phase3 gate.",
+  "currentTask": "P3.4 (YUV->RGB GPU integration into media path) and P3.7 (30-min endurance) remain before P3.8 review. Gate passes 70/70 but does not yet check these two items.",
   "lastGate": {
-    "name": "phase2",
+    "name": "phase3",
     "status": "passed",
     "exitCode": 0,
-    "evidence": "loop/EVIDENCE.md#phase-2--phase2--2026-09-02t230500-0800"
+    "evidence": "logs/phase3/03c55b003e124a15852b0ad9925d20f9 (70/70; software+d3d12va+seek-storm+debug)"
   },
   "lastFailureFingerprint": null,
   "failureLedger": [],
@@ -96,6 +96,6 @@
   "lastGoodCommit": "e0250b5431ee6677a0917b97af821c5579e61d77",
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Clone/bootstrap vcpkg at the pinned baseline, build veyra_media (P3.2 software decode first), then phase3 gate.",
-  "updatedAt": "2026-09-02T23:45:00+08:00"
+  "nextAction": "Implement P3.4 (YUV->RGB in the media pipeline) and P3.7 (30-min endurance with memory tracking), then extend phase3 gate to cover them, then P3.8 reviewer.",
+  "updatedAt": "2026-09-03T00:45:00+08:00"
 }

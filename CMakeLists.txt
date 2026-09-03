@@ -10,6 +10,8 @@ project(veyra VERSION 0.1.0 LANGUAGES CXX)
 set(VEYRA_DLSS_SDK_ROOT "" CACHE PATH "NVIDIA DLSS SDK root")
 set(VEYRA_NVOF_SDK_ROOT "" CACHE PATH "NVIDIA Optical Flow SDK root")
 set(VEYRA_RUNTIME_ROOT "" CACHE PATH "Local NVIDIA runtime root")
+set(VEYRA_FFMPEG_ROOT "" CACHE PATH "vcpkg-installed x64-windows root with FFmpeg (player deps)")
+set(VEYRA_CLIP_TOOLS_ROOT "" CACHE PATH "vcpkg-installed x64-windows root with openh264-enabled FFmpeg (clip tooling only)")
 
 option(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR
   "Enable local-only experimental Feature 18 adapter" OFF)
@@ -91,6 +93,7 @@ if(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR)
   veyra_add_compute_shader(veyra_shader_test_pattern GenerateTestPattern)
   veyra_add_compute_shader(veyra_shader_parity_encode ParityEncode)
   veyra_add_compute_shader(veyra_shader_parity_decode ParityDecode)
+  veyra_add_compute_shader(veyra_shader_yuv_to_rgb YuvToLinearRgb)
   add_executable(veyra_nr_harness
     tools/nr_harness/main.cpp
     tools/nr_harness/frame_loop.cpp
@@ -126,3 +129,54 @@ target_compile_features(veyra_parity_tests PRIVATE cxx_std_20)
 target_compile_definitions(veyra_parity_tests PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(veyra_parity_tests PRIVATE veyra_parity)
+
+# ---------------------------------------------------------------------------
+# veyra_media: FFmpeg demux/decode (Phase 3). Links only the Playbook 3.4
+# dependency set from the pinned vcpkg install.
+# ---------------------------------------------------------------------------
+if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avformat.h")
+  # vcpkg ships FindFFMPEG.cmake under share/ffmpeg; the vcpkg toolchain
+  # normally injects it, so point the module path here explicitly.
+  list(APPEND CMAKE_MODULE_PATH "${VEYRA_FFMPEG_ROOT}/share/ffmpeg")
+  find_package(FFMPEG REQUIRED)
+  add_library(veyra_media STATIC
+    src/media/FFmpegDemuxer.cpp
+    src/media/FFmpegVideoDecoder.cpp
+  )
+  veyra_apply_warnings(veyra_media)
+  # FFmpeg headers are third-party; /WX stays off for this target
+  # (Playbook 5.3: never let third-party headers block the build).
+  target_compile_options(veyra_media PRIVATE /WX-)
+  target_compile_features(veyra_media PUBLIC cxx_std_20)
+  target_link_libraries(veyra_media PUBLIC veyra_base veyra_gfx)
+  target_include_directories(veyra_media PUBLIC ${FFMPEG_INCLUDE_DIRS})
+  target_link_directories(veyra_media PUBLIC ${FFMPEG_LIBRARY_DIRS})
+  target_link_libraries(veyra_media PUBLIC ${FFMPEG_LIBRARIES})
+
+  add_executable(veyra_media_probe
+    tools/media_probe/main.cpp
+    tools/nr_harness/harness_util.cpp
+  )
+  veyra_apply_warnings(veyra_media_probe)
+  target_compile_options(veyra_media_probe PRIVATE /WX-)
+  target_compile_features(veyra_media_probe PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_media_probe PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_link_libraries(veyra_media_probe PRIVATE veyra_media)
+endif()
+
+# Clip generator: links the openh264-enabled toolchain FFmpeg ONLY.
+if(VEYRA_CLIP_TOOLS_ROOT AND EXISTS "${VEYRA_CLIP_TOOLS_ROOT}/include/libavcodec/avcodec.h")
+  add_executable(veyra_clip_gen tools/clip_generator/main.cpp)
+  veyra_apply_warnings(veyra_clip_gen)
+  target_compile_options(veyra_clip_gen PRIVATE /WX-)
+  target_compile_features(veyra_clip_gen PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_clip_gen PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_include_directories(veyra_clip_gen PRIVATE "${VEYRA_CLIP_TOOLS_ROOT}/include")
+  target_link_directories(veyra_clip_gen PRIVATE "${VEYRA_CLIP_TOOLS_ROOT}/lib")
+  target_link_libraries(veyra_clip_gen PRIVATE
+    "${VEYRA_CLIP_TOOLS_ROOT}/lib/avcodec.lib"
+    "${VEYRA_CLIP_TOOLS_ROOT}/lib/avformat.lib"
+    "${VEYRA_CLIP_TOOLS_ROOT}/lib/avutil.lib")
+endif()

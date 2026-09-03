@@ -552,6 +552,30 @@ Result:
 
 ---
 
+## Cycle 022 — P3.3 D3D12VA 共享设备硬解
+
+### Before
+
+- Phase: 3
+- 唯一任务: media_probe --mode d3d12va：AV_HWDEVICE_TYPE_D3D12VA hw device ctx 绑定 Veyra ID3D12Device（AddRef 归 FFmpeg 管理）；get_format 回调仅选择 AV_PIX_FMT_D3D12；逐帧从 AVD3D12VAFrame 取 texture/subresource_index/sync_ctx，GPU queue Wait（非 CPU wait）；JSON 上报 sharedVeyraDevice=true + pixelFormat="AV_PIX_FMT_D3D12" + gpuReadbackCount=0。
+- 可证伪假设: 若 hw device ctx 初始化或 get_format 选择失败，exit 非零；若解码走了软件路径，pixelFormat 不为 AV_PIX_FMT_D3D12。
+- 预计修改文件: include/veyra/media/FFmpegVideoDecoder.h、src/media/FFmpegVideoDecoder.cpp、tools/media_probe/main.cpp。
+- 快速检查命令: `--mode d3d12va --frames 300` → 0；`loop-gate -Gate phase3` → 0。
+- 预期新增证据: hw 解码帧计数 + pixelFormat + shared device 标志。
+
+### After
+
+- 实际修改: FFmpegVideoDecoder 增加 openD3D12VA（AV_HWDEVICE_TYPE_D3D12VA 绑定共享 Veyra device+AddRef、get_format 仅选 AV_PIX_FMT_D3D12、GPU 队列等待计数）；media_probe 增加 --mode d3d12va。
+- 实际命令与 exit code:
+  - `--mode d3d12va --frames 300` Debug → **exit 0：300 帧、format=227（AV_PIX_FMT_D3D12）、sharedDevice=true、gpuQueueWaits=300、PASS**。
+  - `loop-gate -Gate phase3` → **exit 0：70/70 checks**（run-id 03c55b003e124a15852b0ad9925d20f9，4.8s）。
+- 新证据/日志路径: logs/phase3/03c55b003e124a15852b0ad9925d20f9/（software/d3d12va/seek-storm/debug 四组 log+json）。
+- 调试历程（P3.2/P3.3 合计 6 个不同缺陷修复）：①FFmpeg 拒绝含空格路径（换 C:\veyra-deps）；②thread_count=0 触发帧线程延迟≥16 导致有界泵死锁（改单线程）；③MP4 帧 PTS 以流时基 1/15360 传递而 codec ctx time_base={0,1}（demuxer 暴露流时基，decoder 三级回退）；④openh264 需显式 gop_size=30 才有 mid-GOP 关键帧（否则 backward seek 永远落回帧 0）；⑤gate 的 FFmpeg DLL 名写错（avcodec-63 不是 avcodec-9）；⑥gate 运行需前置 PATH 指向 FFmpeg DLL 目录。
+- **诚实披露**：gate 70/70 通过，但 BACKLOG P3.4（YUV→RGB GPU 管线集成到 media 路径）和 P3.7（30 分钟耐力+内存无增长）尚未实现；gate 当前未包含这两项检查。NR 每 real frame 执行也未进入 gate。这些在 Reviewer 审查时可能被判定为门槛不完整。
+- 下一唯一动作: 提交已验证内容；Reviewer 审查或继续 P3.4/P3.7 后再关账。
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名

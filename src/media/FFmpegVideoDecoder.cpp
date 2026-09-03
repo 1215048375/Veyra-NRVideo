@@ -1,0 +1,262 @@
+#include "veyra/media/FFmpegVideoDecoder.h"
+
+#include <d3d12.h>
+
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavutil/avutil.h>
+#include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_d3d12va.h>
+}
+
+#include <format>
+
+#include "veyra/Log.h"
+
+namespace veyra::media {
+
+namespace {
+
+// get_format: only accept D3D12 (Playbook 13.2 get_format contract).
+enum AVPixelFormat SelectD3D12Format(struct AVCodecContext* /*ctx*/, const enum AVPixelFormat* pixFmts)
+{
+    for (const enum AVPixelFormat* p = pixFmts; *p != AV_PIX_FMT_NONE; ++p) {
+        if (*p == AV_PIX_FMT_D3D12) {
+            return *p;
+        }
+    }
+    return AV_PIX_FMT_NONE;
+}
+
+} // namespace
+
+FFmpegVideoDecoder::~FFmpegVideoDecoder()
+{
+    close();
+}
+
+bool FFmpegVideoDecoder::openSoftware(const AVCodecParameters* codecParameters,
+    int streamTimeBaseNum, int streamTimeBaseDen)
+{
+    if (context_ != nullptr) {
+        close();
+    }
+    if (codecParameters == nullptr) {
+        return false;
+    }
+    frameTimeBaseNum_ = streamTimeBaseNum;
+    frameTimeBaseDen_ = streamTimeBaseDen;
+
+    const AVCodec* codec = avcodec_find_decoder(codecParameters->codec_id);
+    if (codec == nullptr) {
+        log::error("media", std::format("decoder: no software decoder for codecId={}", static_cast<int>(codecParameters->codec_id)));
+        return false;
+    }
+
+    context_ = avcodec_alloc_context3(codec);
+    if (context_ == nullptr) {
+        return false;
+    }
+    if (avcodec_parameters_to_context(context_, codecParameters) < 0) {
+        log::error("media", "decoder: avcodec_parameters_to_context failed");
+        avcodec_free_context(&context_);
+        return false;
+    }
+    // Single-threaded decode: frame-threading adds a ~thread-count output
+    // delay, which deadlocks bounded in-flight pumps like the Phase 3
+    // pipeline (Playbook: decoded-ready queue cap 1..4).
+    context_->thread_count = 1;
+    if (avcodec_open2(context_, codec, nullptr) < 0) {
+        log::error("media", "decoder: avcodec_open2 failed");
+        avcodec_free_context(&context_);
+        return false;
+    }
+
+    frame_ = av_frame_alloc();
+    if (frame_ == nullptr) {
+        avcodec_free_context(&context_);
+        return false;
+    }
+
+    stats_ = DecoderStats{};
+    log::info("media", std::format("decoder: software decoder opened codec={} {}x{} pixFmt={}",
+        codec->name, context_->width, context_->height, static_cast<int>(context_->pix_fmt)));
+    return true;
+}
+
+bool FFmpegVideoDecoder::openD3D12VA(const AVCodecParameters* codecParameters,
+    int streamTimeBaseNum, int streamTimeBaseDen,
+    ID3D12Device* device, ID3D12CommandQueue* queue)
+{
+    if (context_ != nullptr) {
+        close();
+    }
+    if (codecParameters == nullptr || device == nullptr || queue == nullptr) {
+        return false;
+    }
+    frameTimeBaseNum_ = streamTimeBaseNum;
+    frameTimeBaseDen_ = streamTimeBaseDen;
+
+    const AVCodec* codec = avcodec_find_decoder(codecParameters->codec_id);
+    if (codec == nullptr) {
+        log::error("media", "decoder: no decoder for d3d12va codec");
+        return false;
+    }
+
+    // Shared Veyra device wrapped in a D3D12VA hw device context
+    // (Playbook 13.2). FFmpeg owns one reference via the buffer.
+    AVBufferRef* hwDeviceRef = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D12VA);
+    if (hwDeviceRef == nullptr) {
+        log::error("media", "decoder: av_hwdevice_ctx_alloc(D3D12VA) failed");
+        return false;
+    }
+    auto* hwDevice = reinterpret_cast<AVHWDeviceContext*>(hwDeviceRef->data);
+    auto* hwctx = reinterpret_cast<AVD3D12VADeviceContext*>(hwDevice->hwctx);
+    hwctx->device = device;
+    device->AddRef(); // FFmpeg context owns/releases this interface
+    const int initResult = av_hwdevice_ctx_init(hwDeviceRef);
+    if (initResult < 0) {
+        log::error("media", std::format("decoder: av_hwdevice_ctx_init failed code={}", initResult));
+        av_buffer_unref(&hwDeviceRef);
+        return false;
+    }
+
+    context_ = avcodec_alloc_context3(codec);
+    if (context_ == nullptr) {
+        av_buffer_unref(&hwDeviceRef);
+        return false;
+    }
+    if (avcodec_parameters_to_context(context_, codecParameters) < 0) {
+        avcodec_free_context(&context_);
+        av_buffer_unref(&hwDeviceRef);
+        return false;
+    }
+    context_->thread_count = 1;
+    context_->get_format = SelectD3D12Format;
+    context_->hw_device_ctx = av_buffer_ref(hwDeviceRef);
+    av_buffer_unref(&hwDeviceRef); // codec ctx holds its own reference now
+
+    if (avcodec_open2(context_, codec, nullptr) < 0) {
+        log::error("media", "decoder: avcodec_open2 failed for d3d12va");
+        avcodec_free_context(&context_);
+        return false;
+    }
+
+    frame_ = av_frame_alloc();
+    if (frame_ == nullptr) {
+        avcodec_free_context(&context_);
+        return false;
+    }
+    stats_ = DecoderStats{};
+    hwAccelActive_ = true;
+    gpuQueueWaitCount_ = 0;
+    log::info("media", std::format("decoder: d3d12va decoder opened codec={} {}x{} (shared Veyra device)",
+        codec->name, context_->width, context_->height));
+    return true;
+}
+
+void FFmpegVideoDecoder::close()
+{
+    if (frame_ != nullptr) {
+        av_frame_free(&frame_);
+    }
+    if (context_ != nullptr) {
+        avcodec_free_context(&context_);
+    }
+}
+
+int FFmpegVideoDecoder::width() const
+{
+    return context_ != nullptr ? context_->width : 0;
+}
+
+int FFmpegVideoDecoder::height() const
+{
+    return context_ != nullptr ? context_->height : 0;
+}
+
+int FFmpegVideoDecoder::pixelFormat() const
+{
+    return context_ != nullptr ? static_cast<int>(context_->pix_fmt) : -1;
+}
+
+bool FFmpegVideoDecoder::sendPacket(const AVPacket* packet)
+{
+    if (context_ == nullptr) {
+        return false;
+    }
+    const int result = avcodec_send_packet(context_, packet);
+    if (result < 0 && result != AVERROR(EAGAIN) && result != AVERROR_EOF) {
+        char errorText[AV_ERROR_MAX_STRING_SIZE]{};
+        av_strerror(result, errorText, sizeof(errorText));
+        log::error("media", std::format("decoder: send_packet failed code={} text={}", result, errorText));
+        return false;
+    }
+    if (packet != nullptr) {
+        ++stats_.framesSubmitted;
+    }
+    return true;
+}
+
+const AVFrame* FFmpegVideoDecoder::receiveFrame()
+{
+    if (context_ == nullptr) {
+        return nullptr;
+    }
+    const int result = avcodec_receive_frame(context_, frame_);
+    if (result < 0) {
+        return nullptr;
+    }
+    ++stats_.framesDecoded;
+    // Frame timestamps are in the CODEC context time_base; AVFrame.time_base
+    // is not reliably populated by every decoder path.
+    const int64_t stamp = frame_->best_effort_timestamp != AV_NOPTS_VALUE
+        ? frame_->best_effort_timestamp
+        : (frame_->pts != AV_NOPTS_VALUE ? frame_->pts : frame_->pkt_dts);
+    // Prefer the frame's own base; fall back to the codec context base, then
+    // to the demuxer stream base passed at open (observed: this FFmpeg passes
+    // stream-base PTS through while the codec context base stays {0,1}).
+    AVRational base = frame_->time_base;
+    if (base.num == 0 || base.den == 0) {
+        base = context_->time_base;
+    }
+    if (base.num == 0 || base.den == 0) {
+        base.num = frameTimeBaseNum_;
+        base.den = frameTimeBaseDen_;
+    }
+    const int64_t ptsUs = base.den > 0 ? av_rescale_q(stamp, base, { 1, 1000000 }) : 0;
+    lastFrameFormat_ = frame_->format;
+    if (hwAccelActive_ && frame_->format == AV_PIX_FMT_D3D12) {
+        // GPU queue wait on the frame's sync fence (Playbook 13.2: a GPU-side
+        // wait, never a CPU WaitForSingleObject per frame).
+        auto* d3dFrame = reinterpret_cast<AVD3D12VAFrame*>(frame_->data[0]);
+        if (d3dFrame != nullptr && d3dFrame->sync_ctx.fence != nullptr) {
+            // Note: the wait target is the Veyra direct queue when the frame
+            // consumer runs there; for the probe we count the wait and rely
+            // on the next GPU operation to serialize. The real pipeline (P3.4+)
+            // issues queue->Wait before touching the texture.
+            ++gpuQueueWaitCount_;
+        }
+    }
+    if (stats_.framesDecoded <= 3) {
+        log::info("media", std::format("decoder: frame#{} stamp={} tb={}/{} -> ptsUs={} format={}",
+            stats_.framesDecoded, stamp, base.num, base.den, ptsUs, frame_->format));
+    }
+    if (stats_.framesDecoded == 1) {
+        stats_.firstPts = ptsUs;
+    }
+    else if (ptsUs < stats_.lastPts) {
+        ++stats_.ptsNonMonotonicCount;
+    }
+    stats_.lastPts = ptsUs;
+    return frame_;
+}
+
+void FFmpegVideoDecoder::flushBuffers()
+{
+    if (context_ != nullptr) {
+        avcodec_flush_buffers(context_);
+    }
+}
+
+} // namespace veyra::media

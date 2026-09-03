@@ -66,10 +66,15 @@ Test-GateEnd
 # ---------------------------------------------------------------------------
 # 2. Dependency presence (FFmpeg 9.0.1 via pinned vcpkg)
 # ---------------------------------------------------------------------------
-$ffmpegLibs = @("avcodec", "avformat", "swscale", "swresample")
-foreach ($lib in $ffmpegLibs) {
-    $dll = Join-Path $installedRoot ("bin\" + $lib + "-9.dll")
-    Add-GateCheck ("ffmpeg:{0}-dll" -f $lib) (Test-Path -LiteralPath $dll -PathType Leaf) ("path={0}" -f $dll)
+$ffmpegDlls = @(
+    @{ Lib = "avcodec"; Dll = "avcodec-63.dll" },
+    @{ Lib = "avformat"; Dll = "avformat-63.dll" },
+    @{ Lib = "swscale"; Dll = "swscale-10.dll" },
+    @{ Lib = "swresample"; Dll = "swresample-7.dll" }
+)
+foreach ($entry in $ffmpegDlls) {
+    $dll = Join-Path $installedRoot ("bin\" + $entry.Dll)
+    Add-GateCheck ("ffmpeg:{0}-dll" -f $entry.Lib) (Test-Path -LiteralPath $dll -PathType Leaf) ("path={0}" -f $dll)
 }
 Test-GateEnd
 
@@ -93,6 +98,10 @@ Test-GateEnd
 
 $logDir = Join-Path $Root ("logs\phase3\" + $runId)
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+
+# FFmpeg DLLs live in the external dependency root; prepend them to PATH for
+# every probe invocation in this gate session.
+$env:PATH = "$installedRoot\bin;" + $env:PATH
 
 # ---------------------------------------------------------------------------
 # 5. Software-decode baseline run (PTS/VFR handling; Playbook 3A)

@@ -64,6 +64,17 @@ else {
     $configureExtra = " -DVEYRA_ENABLE_EXPERIMENTAL_DLSSNR=OFF"
 }
 
+# FFmpeg dependency roots (C:\veyra-deps: the project path contains spaces,
+# which FFmpeg's build refuses; see loop/JOURNAL.md).
+$ffmpegRoot = "C:\veyra-deps\installed\x64-windows"
+if (Test-Path -LiteralPath (Join-Path $ffmpegRoot "include\libavformat\avformat.h") -PathType Leaf) {
+    $configureExtra = $configureExtra + (' -DVEYRA_FFMPEG_ROOT="{0}"' -f $ffmpegRoot)
+}
+$clipToolsRoot = "C:\veyra-deps\tools-installed\x64-windows"
+if (Test-Path -LiteralPath (Join-Path $clipToolsRoot "include\libavcodec\avcodec.h") -PathType Leaf) {
+    $configureExtra = $configureExtra + (' -DVEYRA_CLIP_TOOLS_ROOT="{0}"' -f $clipToolsRoot)
+}
+
 # --- Configure + build inside one vcvars environment, from a temp batch file
 $batchDir = Join-Path $Root "out\build"
 New-Item -ItemType Directory -Force -Path $batchDir | Out-Null
