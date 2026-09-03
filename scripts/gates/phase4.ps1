@@ -78,7 +78,7 @@ $srCap = [bool]$sr.srCapabilityAvailable
 Add-GateCheck "sr:capability-reported" ($null -ne $sr.srCapabilityAvailable) "srCapabilityAvailable=$srCap"
 
 # 6. Upscale + resize required (fail-closed: SR must actually work).
-Add-GateCheck "sr:upscale" ([bool]$sr.upscale540to1080 -eq $true) "upscale=$($sr.upscale540to1080)"
+Add-GateCheck "sr:upscale" ([bool]$sr.upscale1080to4K -eq $true) "upscale=$($sr.upscale1080to4K)"
 Add-GateCheck "sr:upscale-evaluates" ([int64]$sr.upscaleEvaluates -ge 30) "evaluates=$($sr.upscaleEvaluates)"
 Add-GateCheck "sr:resize-recreate" ([bool]$sr.resizeRecreate -eq $true) "resize=$($sr.resizeRecreate)"
 

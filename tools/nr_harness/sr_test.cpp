@@ -298,7 +298,7 @@ int runSrTest(const FrameLoopArgs& args)
     json += std::format("  \"runId\": \"{}\",\n", jsonEscape(narrowText(args.runId)));
     json += std::format("  \"bypass11\": {},\n", bypassOk ? "true" : "false");
     json += std::format("  \"srCapabilityAvailable\": {},\n", srCapabilityAvailable ? "true" : "false");
-    json += std::format("  \"upscale540to1080\": {},\n", upscaleOk ? "true" : "false");
+    json += std::format("  \"upscale1080to4K\": {},\n", upscaleOk ? "true" : "false");
     json += std::format("  \"upscaleEvaluates\": {},\n", upscaleEvals);
     json += std::format("  \"bypassCount\": {},\n", srBackend.bypassCount());
     json += std::format("  \"resizeRecreate\": {}\n", resizeOk ? "true" : "false");

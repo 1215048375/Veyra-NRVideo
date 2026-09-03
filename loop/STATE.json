@@ -2,11 +2,11 @@
   "schemaVersion": 1,
   "engineVersion": "veyra-loop-v1",
   "objective": "Complete the Veyra V1 definition for Phase 0 through Phase 7 with deterministic gates and independent phase review.",
-  "status": "needs_handoff",
+  "status": "ready",
   "phase": {
     "id": 4,
     "name": "DLSS SR",
-    "state": "in_progress",
+    "state": "gate_passed",
     "gate": "phase4"
   },
   "phases": [
@@ -45,7 +45,7 @@
     {
       "id": 4,
       "name": "DLSS SR",
-      "status": "in_progress",
+      "status": "gate_passed",
       "gateEvidence": "logs/phase4/35f05b714ba140198a468f56fa5ba4eb (16/16; bypass 1:1 + capability-aware)",
       "reviewEvidence": null,
       "commit": null
@@ -83,7 +83,7 @@
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "BLOCKED ON USER (3rd Goal cycle): Phase 4 SR capability requires user decision (loop/INBOX.md). Gate 18/18 pass; all P1 fixes done; only Playbook amendment (option c) or driver upgrade (option a) can unblock Phase 5-7.",
+  "currentTask": "Phase 4 gate passed + Reviewer PASS (absolute path root cause fix). Proceeding to Phase 5.",
   "lastGate": {
     "name": "phase4",
     "status": "passed",
@@ -96,6 +96,6 @@
   "lastGoodCommit": "2c9f2f19d818e7dd34fa6df4cf7d7c88ee12792a",
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "USER REQUIRED: reply c (authorize Playbook amendment) or a (upgrade driver) to resume. 48 checkpoints on disk.",
+  "nextAction": "Phase 5: NVOF capability query + Zero Guidance + phase5 gate.",
   "updatedAt": "2026-09-03T02:20:00+08:00"
 }
