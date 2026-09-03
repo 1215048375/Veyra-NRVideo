@@ -99,6 +99,10 @@ else {
 
 # ---------------------------------------------------------------------------
 # 4. Scene/cadence analyzer (requires P5.4 implementation)
+$ffmpegBin = "C:\veyra-deps\installed\x64-windows\bin"
+if (Test-Path -LiteralPath $ffmpegBin -PathType Container) {
+    $env:PATH = "$ffmpegBin;" + $env:PATH
+}
 # ---------------------------------------------------------------------------
 $sceneTool = Join-Path $Root "out\build\x64-release\veyra_scene_analyzer.exe"
 if (-not (Test-Path -LiteralPath $sceneTool -PathType Leaf)) {
