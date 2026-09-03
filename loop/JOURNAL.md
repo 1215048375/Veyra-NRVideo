@@ -742,3 +742,28 @@ Result:
 - 现场检查结果：`third_party_local/nvidia/Optical_Flow_SDK_5.0/` 与 `third_party_local/nvidia/Video_Codec_SDK_13.1.0/` 均不存在。
 - 聊天授权不冒充 NVIDIA Developer Portal 的实际接受记录；Agent 仍不得代用户登录或点击法律条款。
 - 执行策略：立即继续 P5.1。到 P5.5 时若 Optical Flow SDK 仍缺失，将该原子任务标 BLOCKED 并继续同 Phase 中独立任务；Video Codec SDK 只在 P7.5 成为当前阻塞。
+
+---
+
+## Cycle — P5.1 新 phase5 gate（Launch V1 统一 Guidance 门槛）
+
+### Before
+
+- Phase: 5（统一 Guidance 与质量核心）
+- 唯一任务: 重写 scripts/gates/phase5.ps1 为 Launch V1 完整门槛（统一 EnhanceGraph、真实 SR→NR、scene/cadence、非零 NVOF motion、confidence、DAV2/明确 Auto fallback、1080p60+4K60 endurance）；先证明当前缺实现时 exit 1。
+- 可证伪假设: 当前缺统一 graph、非零 NVOF、DAV2、endurance → gate 必须以多个 FAIL 检查 exit 1。
+- 预计修改文件: scripts/gates/phase5.ps1（重写）。
+- 快速检查命令: `loop-gate -Gate phase5` → 预期 exit 1（多项缺失）。
+- 预期新增证据: fail-closed 证明。
+
+### After
+
+（待填）
+
+### After
+
+- 实际修改: scripts/gates/phase5.ps1 重写为 Launch V1 完整门槛（23 项检查）。
+- 实际命令与 exit code: `loop-gate -Gate phase5` → **exit 1**（5/23 失败：scene/nvof/depth/endurance×2——全部因实现未完成，正确 fail-closed）。18/23 通过（build/SR/NR parity/gitignore）。
+- 新证据/日志路径: logs/phase5/&lt;runId&gt;/（sr-test + parity-compare JSON）。
+- 是否有进展，依据: 是——P5.1 验收成立：新 gate 编码了 Launch V1 的全部 Phase 5 门槛，且证明了当前缺实现时无法通过。
+- 下一唯一动作: P5.2 统一契约（FramePacket/FrameWindow/GuidanceFrame/ResetCoordinator/EnhanceGraph）。
