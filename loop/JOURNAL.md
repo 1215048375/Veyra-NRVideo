@@ -816,3 +816,27 @@ Result:
 - 新证据: 统一契约接口有了具体实现类（EnhanceGraphImpl），实现 IEnhanceGraph 的 process/resetCoordinator/metrics 接口；SR bypass 决策（native 4K bypass / sub-4K upscale）；与 ResetCoordinator 集成。
 - 注: 完整的 GPU 管线编排（D3D12VA→YUV→SR→parity→NR→parity 的 command list 级串联）已存在于 media_probe 的 d3d12va 模式中；EnhanceGraphImpl 提供了统一契约的状态管理和指标追踪层，后续 P5.4-P5.10 将在此基础上扩展 scene analyzer 和 NVOF/DAV2 provider。
 - 下一唯一动作: P5.4 Scene/Cadence analyzer。
+
+---
+
+## Cycle — P5.4 Scene/Cadence analyzer
+
+### Before
+
+- Phase: 5
+- 唯一任务: 实现 SceneCadenceAnalyzer——histogram+SAD+PTS/sequence analyzer；硬切 reset、闪光不误切、duplicate 不跨帧生成历史；生成 translation/occlusion/cut-flash-duplicate 固定测试片并验证 analyzer 行为。
+- 可证伪假设: 硬切检测 SAD 超阈值；闪光 SAD 高但直方图相似；duplicate 帧 PTS 间隔为零。
+- 预计修改文件: include/veyra/core/SceneCadenceAnalyzer.h、src/core/SceneCadenceAnalyzer.cpp、tests/unit/SceneCadenceTests.cpp、CMakeLists.txt。
+- 快速检查命令: `veyra_unified_tests.exe` 或独立 `veyra_scene_tests.exe` → 0。
+- 预期新增证据: scene analyzer 检测 cut/flash/duplicate 正确。
+
+### After
+
+（待填）
+
+### After
+
+- 实际修改: include/veyra/core/SceneCadenceAnalyzer.h + src/core/SceneCadenceAnalyzer.cpp + tests/unit/SceneCadenceTests.cpp + CMakeLists.txt（veyra_scene_tests target）。
+- 实际命令与 exit code: `build.ps1 -Preset x64-debug` → 0；`veyra_scene_tests.exe` → **10/10, 0 failures**。
+- 新证据: 硬切检测（histogram+SAD 双阈值）、闪光不误切（高 SAD + 低 histogram 距离 = flash 而非 cut）、duplicate 检测（近零 SAD + 近零 PTS delta）、cadence break（PTS 间隔 3x 跳变）、reset 后新基线。
+- 下一唯一动作: P5.5 NVOF provider（若 SDK 缺失则 BLOCKED 并继续 P5.6/P5.7）。

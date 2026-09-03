@@ -145,6 +145,16 @@ target_compile_definitions(veyra_unified_tests PRIVATE
 target_include_directories(veyra_unified_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(veyra_unified_tests PRIVATE d3d12 veyra_gfx veyra_ngx)
 
+add_executable(veyra_scene_tests
+  tests/unit/SceneCadenceTests.cpp
+  src/core/SceneCadenceAnalyzer.cpp
+)
+veyra_apply_warnings(veyra_scene_tests)
+target_compile_features(veyra_scene_tests PRIVATE cxx_std_20)
+target_compile_definitions(veyra_scene_tests PRIVATE
+  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_include_directories(veyra_scene_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
 # ---------------------------------------------------------------------------
 # veyra_media: FFmpeg demux/decode (Phase 3). Links only the Playbook 3.4
 # dependency set from the pinned vcpkg install.
