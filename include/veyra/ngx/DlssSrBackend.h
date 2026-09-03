@@ -70,6 +70,9 @@ public:
     bool shouldBypass(uint32_t inputWidth, uint32_t outputWidth) const {
         return inputWidth == outputWidth;
     }
+    bool shouldBypass(uint32_t inW, uint32_t inH, uint32_t outW, uint32_t outH) const {
+        return inW == outW && inH == outH;
+    }
 
 private:
     NVSDK_NGX_Handle* handle_ = nullptr;
@@ -77,7 +80,9 @@ private:
     uint64_t evaluateCount_ = 0;
     uint64_t bypassCount_ = 0;
     uint32_t inputWidth_ = 0;
+    uint32_t inputHeight_ = 0;
     uint32_t outputWidth_ = 0;
+    uint32_t outputHeight_ = 0;
 };
 
 } // namespace veyra::ngx

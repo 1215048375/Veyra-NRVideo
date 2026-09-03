@@ -76,7 +76,9 @@ bool DlssSrBackend::create(NgxCoreHost& coreHost,
         release();
     }
     inputWidth_ = desc.inputWidth;
+    inputHeight_ = desc.inputHeight;
     outputWidth_ = desc.outputWidth;
+    outputHeight_ = desc.outputHeight;
 
     // 1:1 bypass: never create SR for same-resolution (Playbook section 11).
     if (shouldBypass(desc.inputWidth, desc.outputWidth)) {
@@ -148,7 +150,7 @@ bool DlssSrBackend::evaluate(ID3D12GraphicsCommandList* cmdList,
     evalParams.InMVScaleY = 1.0f;
     evalParams.InPreExposure = 1.0f;
     evalParams.InRenderSubrectDimensions.Width = inputWidth_;
-    evalParams.InRenderSubrectDimensions.Height = 0; // set from create height
+    evalParams.InRenderSubrectDimensions.Height = inputHeight_;
 
     uint32_t sehCode = 0;
     const NVSDK_NGX_Result result = CallEvaluateDlss(cmdList, handle_, params, &evalParams, sehCode);

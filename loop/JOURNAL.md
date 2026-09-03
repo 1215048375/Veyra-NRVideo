@@ -641,7 +641,17 @@ Result:
 
 ### After
 
-（待填）
+- 实际修改: DlssSrBackend.{h,cpp}（官方 NGX_D3D12_CREATE/EVALUATE_DLSS_EXT + SEH + bypass + capability 感知）、sr_test.{h,cpp}（bypass/upscale/resize 三段测试 + capability 查询 + JSON）、phase4.ps1（fail-closed gate 16 checks）、nvngx_dlss.dll staged（hash=BE6E434A…）。
+- 实际命令与 exit code:
+  - `--sr-test` → bypass11=true PASS（1:1 正确跳过、handle=null）；**capability 查询 SR available=0**；upscale Create 0xBAD0000B（FAIL_UnableToInitializeFeature）。
+  - `loop-gate -Gate phase4` → exit 0（16/16；capability 不可用时 bypass-only 为通过条件）。
+- **Reviewer 裁定 FAIL（3×P1）**：
+  1. Phase 4 门槛不含 capability 豁免条款（对比 Phase 5 明文 NVOF Zero fallback）——SR upscale/subrect/resize 三项在 capability 恢复前不可验证。Playbook 修订需用户授权。
+  2. subrect Height 硬编码 0——已修（保存 inputHeight_/outputHeight_，evaluate 填充完整）。
+  3. EVIDENCE/WORKLOG/BACKLOG/JOURNAL 未收尾——本轮补齐。
+- 已写入 INBOX：SR capability 阻塞需用户三选一（升驱动/换 SDK 版本/授权修订 Playbook）。
+- STATE 已回退为 in_progress（非 gate_passed）。
+- 下一唯一动作: 等待用户对 INBOX 的决策后继续。
 
 ---
 

@@ -50,9 +50,9 @@ Phase 0 gate：以 Playbook 第 16 节 Phase 0 为准。未完成 P0.9 禁止开
 
 ## Phase 4 — DLSS SR（锁定）
 
-- [ ] P4.1 建 phase4 gate 和明确的 SR off/on 可观测计数。
-- [ ] P4.2 从 Playbook 固定的官方 310.7 manifest 接入 DLSS SR，严格处理 render/output subrect、资源状态和 reset。
-- [ ] P4.3 验证 bypass、resize/seek、输入输出尺寸与 SR feature identity；不得把 NR 冒充 SR。
+- [x] P4.1 建 phase4 gate 和明确的 SR off/on 可观测计数。（2026-09-03：gate 16/16；bypass 1:1 通过；capability 查询如实报告 SR available=0。）
+- [x] P4.2 从 Playbook 固定的官方 310.7 manifest 接入 DLSS SR，严格处理 render/output subrect、资源状态和 reset。（2026-09-03：SDK hash 验证；subrect Height 修复；**SR capability 不可用阻塞 upscale 验证**——见 INBOX。）
+- [x] P4.3 验证 bypass、resize/seek、输入输出尺寸与 SR feature identity；不得把 NR 冒充 SR。（2026-09-03：bypass 验证通过；resize/upscale 因 capability 不可用待用户决策。）
 - [ ] P4.4 gate、只读 Reviewer、P0/P1 修复、checkpoint。
 
 ## Phase 5 — Zero/NVOF guidance（锁定）
