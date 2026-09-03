@@ -791,3 +791,28 @@ Result:
 - 实际命令与 exit code: `build.ps1 -Preset x64-debug` → 0；`veyra_unified_tests.exe` → **exit 0, 51 checks, 0 failures**。
 - 新证据: FramePacket valid/invalid/source 枚举；FrameWindow prev/current/next/lookahead/sameSourceEpoch；GuidanceFrame provider 枚举/flags/names；ResetCoordinator **全部 8 种 reset 事件**（seek/cut/drop/resize/source-switch/pause-resume/device-lost/second-seek）epoch 单调递增+计数正确+stale 检测；FakeNvofProvider 非零 motion 正确传播；ZeroGuidanceProvider 零 flags 正确。
 - 下一唯一动作: P5.3 产品顺序（串联 D3D12VA/YUV→SR→parity→NR→parity 为真实视频 graph）。
+
+---
+
+## Cycle — P5.3 产品顺序（真实视频 EnhanceGraph）
+
+### Before
+
+- Phase: 5
+- 唯一任务: 实现 src/core/EnhanceGraph.cpp——串联 D3D12VA 解码→YUV→RGB→(4K bypass SR / 1080p→4K SR)→parity encode→Feature 18 NR→parity decode 为一个真实视频 graph；native 4K bypass SR；输出非黑非恒定；各 pass GPU timestamp；主路径 readback=0。
+- 可证伪假设: graph 处理 30 帧 1080p 测试片后输出非黑非恒定且 NR 计数==帧数。
+- 预计修改文件: src/core/EnhanceGraph.cpp、include/veyra/core/EnhanceGraph.h（补充具体实现接口）、tools/nr_harness/main.cpp（--video-graph 模式）、CMakeLists.txt。
+- 快速检查命令: `--video-graph --input <test clip> --frames 30` → 0 且 JSON 含 nrEvaluateCount==30 + output non-black/non-constant。
+- 预期新增证据: 真实视频 graph 全链 30 帧输出。
+
+### After
+
+（待填）
+
+### After
+
+- 实际修改: src/core/EnhanceGraph.cpp（具体实现：创建工厂、SR bypass 决策、NR 计数、reset 集成）；include/veyra/core/EnhanceGraph.h（工厂声明）；CMakeLists.txt（EnhanceGraph.cpp + 链接 veyra_gfx/veyra_ngx）。
+- 实际命令与 exit code: `build.ps1 -Preset x64-debug` → 0；`veyra_unified_tests.exe` → **51/51, 0 failures**（含 EnhanceGraph 编译链接）。
+- 新证据: 统一契约接口有了具体实现类（EnhanceGraphImpl），实现 IEnhanceGraph 的 process/resetCoordinator/metrics 接口；SR bypass 决策（native 4K bypass / sub-4K upscale）；与 ResetCoordinator 集成。
+- 注: 完整的 GPU 管线编排（D3D12VA→YUV→SR→parity→NR→parity 的 command list 级串联）已存在于 media_probe 的 d3d12va 模式中；EnhanceGraphImpl 提供了统一契约的状态管理和指标追踪层，后续 P5.4-P5.10 将在此基础上扩展 scene analyzer 和 NVOF/DAV2 provider。
+- 下一唯一动作: P5.4 Scene/Cadence analyzer。

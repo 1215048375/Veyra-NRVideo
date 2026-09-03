@@ -55,4 +55,7 @@ public:
     virtual const Metrics& metrics() const = 0;
 };
 
+// Factory for the concrete implementation.
+std::unique_ptr<IEnhanceGraph> createEnhanceGraph();
+
 } // namespace veyra::core
