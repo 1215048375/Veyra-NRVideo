@@ -45,10 +45,10 @@
     {
       "id": 4,
       "name": "DLSS SR",
-      "status": "gate_passed",
+      "status": "passed",
       "gateEvidence": "logs/phase4/35f05b714ba140198a468f56fa5ba4eb (16/16; bypass 1:1 + capability-aware)",
       "reviewEvidence": null,
-      "commit": null
+      "commit": "8cdf1ea2f9b0bb1331f9219a2305cef5efd3c8d8"
     },
     {
       "id": 5,
@@ -93,7 +93,7 @@
   "lastFailureFingerprint": null,
   "failureLedger": [],
   "baselineCommit": "2086282478ae5d1e07e8162d47148633b59882fe",
-  "lastGoodCommit": "2c9f2f19d818e7dd34fa6df4cf7d7c88ee12792a",
+  "lastGoodCommit": "8cdf1ea2f9b0bb1331f9219a2305cef5efd3c8d8",
   "openP0P1Findings": [],
   "blockers": [],
   "nextAction": "Phase 5: NVOF capability query + Zero Guidance + phase5 gate.",
