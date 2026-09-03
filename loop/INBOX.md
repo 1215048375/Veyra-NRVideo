@@ -4,7 +4,17 @@
 
 当前没有需要用户处理的阻塞。
 
-（已解决）2026-09-02 Phase 0 发现的 D3D12 debug layer 缺失：用户已于 2026-09-02 安装 Windows "Graphics Tools"，probe 实测 `d3d12 debug layer enabled`，phase1 gate 55/55。无需进一步操作。
+（已解决）2026-09-03 Phase 4 SR：绝对路径修复后 SR 完全可用，无需修订 Playbook。
+
+（已解决）2026-09-02 Phase 0 D3D12 debug layer：用户安装 Graphics Tools。
+
+## 2026-09-03 · Phase 5 · NVOF SDK EULA（阻塞 Phase 5 完整门禁）
+
+- 发现时间与 Phase：2026-09-03，Phase 5 Reviewer 首轮。
+- 精确阻塞：Playbook §16 Phase 5 要求 NVOF 集成（current->previous 方向验证、10.5/32 转换、grid/densify、GuidanceFrame 共享），需要 NVIDIA Optical Flow SDK 5.0 头文件和 sample。SDK 下载需 NVIDIA Developer Program 登录并接受 EULA，Agent 无权代做。
+- 已做的验证：System32 nvofapi64.dll v32.0.16.1656 签名 Valid；Zero Guidance 30/30 Evaluate 非黑非恒定（三方可复现）。
+- 不受它影响的工作：Phase 5 的 Zero Guidance、DLL 探测、gate 基建、Phase 4 checkpoint。
+- 用户最小问题：是否接受 NVIDIA Optical Flow SDK 5.0 的 EULA（https://developer.nvidia.com/opticalflow/download）并下载到 third_party_local/nvidia/Optical_Flow_SDK_5.0/？或者授权以 capability 查询 + Zero fallback 作为 Phase 5 完成标准（按 BACKLOG P5.5 分支）？
 
 ## 2026-09-03 · Phase 4 · DLSS SR capability 不可用（阻塞 Phase 4 gate）
 

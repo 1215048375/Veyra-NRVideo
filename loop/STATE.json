@@ -6,7 +6,7 @@
   "phase": {
     "id": 5,
     "name": "NVOF guidance",
-    "state": "gate_passed",
+    "state": "in_progress",
     "gate": "phase5"
   },
   "phases": [
@@ -53,7 +53,7 @@
     {
       "id": 5,
       "name": "NVOF guidance",
-      "status": "gate_passed",
+      "status": "in_progress",
       "gateEvidence": "logs/phase5/2719cd368f1c43e8a412710283987237 (17/17; zero guidance 30 evaluates)",
       "reviewEvidence": null,
       "commit": null
