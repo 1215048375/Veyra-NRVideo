@@ -63,10 +63,11 @@ if(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR)
   if(NOT VEYRA_DLSS_SDK_ROOT OR NOT EXISTS "${VEYRA_DLSS_SDK_ROOT}/include/nvsdk_ngx.h")
     message(FATAL_ERROR "VEYRA_ENABLE_EXPERIMENTAL_DLSSNR requires VEYRA_DLSS_SDK_ROOT pointing at NVIDIA DLSS SDK 310.7 (include/nvsdk_ngx.h missing)")
   endif()
-  add_library(veyra_ngx STATIC
-    src/ngx/NgxCoreHost.cpp
-    src/ngx/DlssNrRuntimeAdapter.cpp
-  )
+add_library(veyra_ngx STATIC
+  src/ngx/NgxCoreHost.cpp
+  src/ngx/DlssNrRuntimeAdapter.cpp
+  src/ngx/DlssSrBackend.cpp
+)
   veyra_apply_warnings(veyra_ngx)
   target_compile_features(veyra_ngx PUBLIC cxx_std_20)
   target_link_libraries(veyra_ngx PUBLIC veyra_base veyra_gfx)
@@ -98,6 +99,7 @@ if(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR)
     tools/nr_harness/frame_loop.cpp
     tools/nr_harness/harness_util.cpp
     tools/nr_harness/parity_compare.cpp
+    tools/nr_harness/sr_test.cpp
   )
   veyra_apply_warnings(veyra_nr_harness)
   target_compile_features(veyra_nr_harness PRIVATE cxx_std_20)

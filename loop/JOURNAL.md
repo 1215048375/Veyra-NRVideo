@@ -628,6 +628,23 @@ Result:
 
 ---
 
+## Cycle 025 — P4.1 DLSS SR 接入与 phase4 gate
+
+### Before
+
+- Phase: 4
+- 唯一任务: 复制官方 nvngx_dlss.dll 到 runtime_local/nvidia/（stage-runtime 扩展）；创建 fail-closed scripts/gates/phase4.ps1（SR off/on 可观测、bypass、subrect、resize reset、官方 manifest 来源）；实现 DlssSrBackend（NGX_D3D12_CREATE_DLSS_EXT / NGX_D3D12_EVALUATE_DLSS_EXT）；扩展 nr_harness --sr-test 模式。
+- 可证伪假设: 若 nvngx_dlss.dll 缺失或 SR Create 失败，gate fail-closed。
+- 预计修改文件: src/ngx/DlssSrBackend.{h,cpp}、scripts/gates/phase4.ps1、tools/nr_harness/（--sr-test）、scripts/stage-runtime.ps1。
+- 快速检查命令: `--sr-test --runtime-dir <abs>` → 0（SR Create success + bypass at 1:1 + upscale at 540p→1080p）。
+- 预期新增证据: SR Create/Evaluate result hex、bypass 计数、upscale 计数、resize 后 reset。
+
+### After
+
+（待填）
+
+---
+
 复制下面模板开始每个新 cycle。必须先填 Before，再改代码；完成后填 After。
 
 ## Cycle NNN — 简短任务名

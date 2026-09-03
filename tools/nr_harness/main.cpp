@@ -24,6 +24,7 @@
 
 #include "frame_loop.h"
 #include "parity_compare.h"
+#include "sr_test.h"
 
 namespace {
 
@@ -462,6 +463,7 @@ int wmain(int argc, wchar_t** argv)
     bool createTest = false;
     bool frameLoop = false;
     bool parityCompare = false;
+    bool srTest = false;
     for (int i = 1; i < argc; ++i) {
         const std::wstring arg = argv[i];
         if (arg == L"--load-only") {
@@ -475,6 +477,9 @@ int wmain(int argc, wchar_t** argv)
         }
         else if (arg == L"--parity-compare") {
             parityCompare = true;
+        }
+        else if (arg == L"--sr-test") {
+            srTest = true;
         }
         else if (arg == L"--frames" && i + 1 < argc) {
             frames = static_cast<uint32_t>(wcstoul(argv[++i], nullptr, 10));
@@ -525,6 +530,13 @@ int wmain(int argc, wchar_t** argv)
     int exitCode = 0;
     if (shimTest && !runtimeDir.empty()) {
         exitCode = runShimTest(runtimeDir);
+    }
+    else if (srTest) {
+        veyra::harness::FrameLoopArgs loopArgs{};
+        loopArgs.runtimeDir = runtimeDir;
+        loopArgs.runId = runId;
+        loopArgs.jsonFile = jsonFile;
+        exitCode = veyra::harness::runSrTest(loopArgs);
     }
     else if (parityCompare && !runtimeDir.empty()) {
         veyra::harness::FrameLoopArgs loopArgs{};
