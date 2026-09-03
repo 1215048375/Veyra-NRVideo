@@ -767,3 +767,27 @@ Result:
 - 新证据/日志路径: logs/phase5/&lt;runId&gt;/（sr-test + parity-compare JSON）。
 - 是否有进展，依据: 是——P5.1 验收成立：新 gate 编码了 Launch V1 的全部 Phase 5 门槛，且证明了当前缺实现时无法通过。
 - 下一唯一动作: P5.2 统一契约（FramePacket/FrameWindow/GuidanceFrame/ResetCoordinator/EnhanceGraph）。
+
+---
+
+## Cycle — P5.2 统一契约（FramePacket/FrameWindow/GuidanceFrame/ResetCoordinator/EnhanceGraph）
+
+### Before
+
+- Phase: 5（统一 Guidance 与质量核心）
+- 唯一任务: 实现 include/veyra/core/ 下的 FramePacket、FrameWindow(prev/current/next/lookaheadFrames)、GuidanceFrame、ResetCoordinator、EnhanceGraph 接口；实现 fake/zero provider unit tests；reset epoch 覆盖 seek/cut/drop/resize/source switch/pause/device lost 共 8 种事件。
+- 可证伪假设: unit tests 验证 reset epoch 在 8 种事件下都正确递增，fake provider 的 motion/depth 值正确传递。
+- 预计修改文件: include/veyra/core/{FramePacket.h,FrameWindow.h,GuidanceFrame.h,ResetCoordinator.h,EnhanceGraph.h}、tests/unit/UnifiedContractTests.cpp、CMakeLists.txt。
+- 快速检查命令: `build.ps1 -Preset x64-debug` → 0；`veyra_unified_tests.exe` → 0（全部 contract 检查通过）。
+- 预期新增证据: 统一契约 unit test 全过 + reset epoch 覆盖 8 种事件。
+
+### After
+
+（待填）
+
+### After
+
+- 实际修改: include/veyra/core/{FramePacket.h,FrameWindow.h,GuidanceFrame.h,ResetCoordinator.h,EnhanceGraph.h}（5 个契约文件）；tests/unit/UnifiedContractTests.cpp（51 项检查）；CMakeLists.txt（veyra_unified_tests target）。
+- 实际命令与 exit code: `build.ps1 -Preset x64-debug` → 0；`veyra_unified_tests.exe` → **exit 0, 51 checks, 0 failures**。
+- 新证据: FramePacket valid/invalid/source 枚举；FrameWindow prev/current/next/lookahead/sameSourceEpoch；GuidanceFrame provider 枚举/flags/names；ResetCoordinator **全部 8 种 reset 事件**（seek/cut/drop/resize/source-switch/pause-resume/device-lost/second-seek）epoch 单调递增+计数正确+stale 检测；FakeNvofProvider 非零 motion 正确传播；ZeroGuidanceProvider 零 flags 正确。
+- 下一唯一动作: P5.3 产品顺序（串联 D3D12VA/YUV→SR→parity→NR→parity 为真实视频 graph）。

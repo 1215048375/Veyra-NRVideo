@@ -134,6 +134,16 @@ target_compile_definitions(veyra_parity_tests PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(veyra_parity_tests PRIVATE veyra_parity)
 
+add_executable(veyra_unified_tests
+  tests/unit/UnifiedContractTests.cpp
+)
+veyra_apply_warnings(veyra_unified_tests)
+target_compile_features(veyra_unified_tests PRIVATE cxx_std_20)
+target_compile_definitions(veyra_unified_tests PRIVATE
+  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_include_directories(veyra_unified_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(veyra_unified_tests PRIVATE d3d12)
+
 # ---------------------------------------------------------------------------
 # veyra_media: FFmpeg demux/decode (Phase 3). Links only the Playbook 3.4
 # dependency set from the pinned vcpkg install.
