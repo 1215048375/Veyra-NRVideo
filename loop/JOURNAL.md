@@ -855,3 +855,19 @@ Result:
 - **BLOCKED**: `third_party_local/nvidia/Optical_Flow_SDK_5.0/` 不存在。按用户指令和 BACKLOG P5.5 分支，标 BLOCKED 并继续 P5.6/P5.7 独立部分。
 - 已做验证: System32 nvofapi64.dll v32.0.16.1656 签名 Valid（运行时可用但头文件缺失导致无法编译 provider）。
 - 下一唯一动作: P5.6 Guidance validator（GPU NVOF cost、luma warp residual、out-of-frame、forward/back consistency — 部分 CPU 侧可独立实现）。
+
+---
+
+## Cycle — P5.7 Depth dependency manifest
+
+### Before
+
+- Phase: 5
+- 唯一任务: 创建 third_party_local/depth/manifest.json，固定 DAV2 Small FP16 模型和 ONNX Runtime DirectML 的官方 URL/version/license/input/output/shape。
+
+### After
+
+- 实际修改: third_party_local/depth/manifest.json（DAV2 v2.0 Apache-2.0 + ORT DirectML 1.20.0 MIT + Auto fallback 策略）。
+- 状态: manifest 结构完成，模型文件未下载（status: pending-verification）。用户需下载 ONNX 模型文件后 Agent 核对 hash。
+- 下一唯一动作: P5.8 DAV2 provider（依赖模型文件下载）或 P5.9 质量矩阵框架。
+- Note: third_party_local is in .gitignore; manifest.json is a local reference document, not tracked in Git.
