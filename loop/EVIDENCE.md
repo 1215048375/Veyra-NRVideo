@@ -2,6 +2,19 @@
 
 这里只登记真实存在的门禁证据。格式固定：
 
+## Phase 3 / phase3 / 2026-09-03T01:20:00+08:00
+
+- Commit: 验证内容 checkpoint 待登记于 STATE.phases[3].commit
+- Command: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate phase3`
+- Exit code: 0（外层 70；内部 41 checks，run-id a122c9f792e14ceeb117d07a0e08ff91）
+- Build configuration: x64-debug + x64-release 均真实构建；FFmpeg 9.0.1 (vcpkg 30ef65ca 基线, C:\veyra-deps)
+- Hardware/runtime identity: RTX 5070 / D3D12VA shared Veyra device / AV_PIX_FMT_D3D12 / Feature 18 via signed snippet
+- Logs/captures: logs/phase3/a122c9f792e14ceeb117d07a0e08ff91/（software+d3d12va+seek-storm+debug）；logs/phase3/endurance-30min.{json,log}（60 循环×900 帧）
+- Quantitative result: **software 300 帧 PTS 全单调零回读；d3d12va 300 帧 nrEvaluateCount=300/300 + shaderDispatches=300 + AV_PIX_FMT_D3D12 + sharedVeyraDevice=true + gpuReadbackCount=0；seek-storm 10/10 无 stale；debug infoqueue active 0 errors；endurance 60 loops=54000 帧 nrEvaluate=54000/54000 workingSetGrowth=94.4MB<256 commitGrowth=-46.5MB<256**
+- Reviewer: 首轮 FAIL（5×P1+8×P2）→ 修复（GPU queue wait/AVFrame lifetime waitIdle/实测 maxInFlight/NR per frame 54000/30min endurance+memory）→ 复核 **PASS**（独立 run 768dd095…全过；endurance JSON↔log 交叉一致；8+1 P2 均维持非阻塞）
+- Open P0/P1: none
+- Conclusion: Playbook §16 Phase 3 全部门槛机器验证通过且经独立 Reviewer 复核；Phase 3 关账，进入 Phase 4
+
 ## Phase 2 / phase2 / 2026-09-02T23:05:00+08:00
 
 - Commit: 验证内容 checkpoint 待 Reviewer 后登记；gate 运行于 220d6ba+f477948 之后的工作树

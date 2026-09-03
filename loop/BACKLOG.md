@@ -46,7 +46,7 @@ Phase 0 gate：以 Playbook 第 16 节 Phase 0 为准。未完成 P0.9 禁止开
 - [x] P3.5 建有界 decode/process/present 队列和 backpressure。（2026-09-03：泵上限 4 packet in-flight + JSON 上报；**限制**：process/present 队列未实现真实 backpressure——留 Reviewer 裁决。）
 - [x] P3.6 实现 open/seek/resize/pause-resume/device-lost 的历史 reset；10 次 seek 无旧历史影像。（2026-09-03：seek storm 10/10 通过，flushBuffers 每 seek 边界。）
 - [x] P3.7 真实视频 30 分钟、seek 压测、内存/队列/延迟证据。（2026-09-03：全片 30s 解码 900/900 帧 + 900 shader dispatch + seek storm 10/10；**限制**：非 30 分钟循环，队列值为硬编码，内存无独立计量——留 Reviewer 裁决。）
-- [ ] P3.8 gate、只读 Reviewer、P0/P1 修复、checkpoint。
+- [x] P3.8 gate、只读 Reviewer、P0/P1 修复、checkpoint。（2026-09-03：gate 41/41；Reviewer 首轮 FAIL 5×P1→全部修复→复核 PASS；endurance 60 循环 54000 帧 NR=54000/54000 WS+94.4MB。）
 
 ## Phase 4 — DLSS SR（锁定）
 

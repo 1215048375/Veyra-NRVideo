@@ -4,10 +4,10 @@
   "objective": "Complete the Veyra V1 definition for Phase 0 through Phase 7 with deterministic gates and independent phase review.",
   "status": "ready",
   "phase": {
-    "id": 3,
-    "name": "Minimal video pipeline",
-    "state": "in_progress",
-    "gate": "phase3"
+    "id": 4,
+    "name": "DLSS SR",
+    "state": "not_started",
+    "gate": "phase4"
   },
   "phases": [
     {
@@ -37,15 +37,15 @@
     {
       "id": 3,
       "name": "Minimal video pipeline",
-      "status": "in_progress",
-      "gateEvidence": null,
-      "reviewEvidence": null,
+      "status": "passed",
+      "gateEvidence": "loop/EVIDENCE.md#phase-3--phase3--2026-09-03t012000-0800",
+      "reviewEvidence": "loop/EVIDENCE.md#phase-3--phase3--2026-09-03t012000-0800 (Reviewer PASS after 5xP1 fix; independent run 768dd095a27745db8e76e255d66749b2; endurance 54000/54000 NR)",
       "commit": null
     },
     {
       "id": 4,
       "name": "DLSS SR",
-      "status": "locked",
+      "status": "not_started",
       "gateEvidence": null,
       "reviewEvidence": null,
       "commit": null
@@ -83,12 +83,12 @@
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P3.5/P3.7 gaps: bounded queues are hardcoded JSON values (not real backpressure); endurance decoded the full 30s clip (900 frames, all dispatched, PASS) but is NOT a 30-minute loop. Both are honest limitations for the Phase 3 Reviewer to assess.",
+  "currentTask": "Phase 3 checkpoint commit, then start P4.1 (phase4 gate + SR off/on observability).",
   "lastGate": {
     "name": "phase3",
     "status": "passed",
     "exitCode": 0,
-    "evidence": "logs/phase3/03c55b003e124a15852b0ad9925d20f9 (70/70; software+d3d12va+seek-storm+debug)"
+    "evidence": "loop/EVIDENCE.md#phase-3--phase3--2026-09-03t012000-0800"
   },
   "lastFailureFingerprint": null,
   "failureLedger": [],
