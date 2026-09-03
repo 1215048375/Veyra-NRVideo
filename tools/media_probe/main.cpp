@@ -7,6 +7,7 @@
 //   --input <abs> --mode d3d12va ...           arrives with P3.3
 // JSON summary contract: scripts/gates/phase3.ps1 section 5-8.
 #include <windows.h>
+#include <psapi.h>
 #include <d3d12.h>
 #include <d3d12sdklayers.h>
 
@@ -415,6 +416,33 @@ int runSoftwareDecode(const std::wstring& input, uint32_t frames, const std::str
 int runD3d12VADecode(const std::wstring& input, uint32_t frames, const std::string& runId,
     const std::wstring& jsonFile)
 {
+    // P1 #5: endurance mode — if frames >= 50000, loop the clip with seeks
+    // and sample memory. Otherwise run normally.
+    const bool endurance = frames >= 50000;
+    uint32_t targetLoops = endurance ? 60 : 1; // 60 loops × 30s = 30 min
+    if (endurance) {
+        frames = 900; // per-loop frame count (30s@30fps)
+    }
+
+    // Memory sampling (P1 #5): working set + commit at 30s intervals.
+    struct MemorySample {
+        uint64_t workingSetBytes;
+        uint64_t commitBytes;
+        uint64_t timestampMs;
+    };
+    std::vector<MemorySample> memorySamples;
+    const auto sampleMemory = [&memorySamples]() {
+        PROCESS_MEMORY_COUNTERS_EX pmc{};
+        pmc.cb = sizeof(pmc);
+        if (GetProcessMemoryInfo(GetCurrentProcess(),
+                reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmc), sizeof(pmc))) {
+            memorySamples.push_back({ pmc.WorkingSetSize, pmc.PrivateUsage,
+                GetTickCount64() });
+        }
+    };
+    // Note: baseline is taken AFTER the first loop (see below) so that
+    // initial allocations (NGX DLL, D3D12VA pools, NR textures) don't
+    // count as growth.
     veyra::gfx::D3D12DeviceContext context;
     veyra::gfx::DeviceContextDesc desc{};
 #if defined(VEYRA_D3D12_DEBUG)
@@ -821,6 +849,55 @@ int runD3d12VADecode(const std::wstring& input, uint32_t frames, const std::stri
     }
     (void)ring.waitIdle();
 
+    // P1 #5: Endurance looping — seek back to start and repeat for targetLoops.
+    uint32_t completedLoops = 1;
+    // Take the real baseline AFTER the first loop (initial allocations done).
+    sampleMemory();
+    while (endurance && completedLoops < targetLoops) {
+        // Seek to start + flush decoder (full seek/reset cycle per loop).
+        if (!demuxer.seekToUs(0)) {
+            break;
+        }
+        decoder.flushBuffers();
+        ++completedLoops;
+
+        bool loopEof = false;
+        uint64_t loopFrames = 0;
+        while (loopFrames < frames && !loopEof) {
+            bool eof = false;
+            if (demuxer.readVideoPacket(eof)) {
+                (void)decoder.sendPacket(demuxer.currentPacket());
+            }
+            else if (eof) {
+                loopEof = true;
+                (void)decoder.sendPacket(nullptr);
+            }
+            else {
+                break;
+            }
+            while (const AVFrame* avFrame = decoder.receiveFrame()) {
+                (void)avFrame;
+                ++loopFrames;
+                ++framesDecoded;
+                // NR per frame in endurance loops too.
+                if (nrReady) {
+                    (void)evaluateNR(static_cast<uint32_t>(framesDecoded - 1));
+                    (void)ring.waitIdle();
+                }
+            }
+        }
+        // Sample memory every loop (~30s intervals).
+        sampleMemory();
+        // Periodic progress log.
+        if (completedLoops % 10 == 0) {
+            const auto& last = memorySamples.back();
+            veyra::log::info("media-probe", std::format("endurance: loop={} frames={} ws={}MB commit={}MB",
+                completedLoops, framesDecoded, last.workingSetBytes / (1024 * 1024),
+                last.commitBytes / (1024 * 1024)));
+        }
+    }
+    sampleMemory(); // final sample
+
     // NR teardown (reverse order per Playbook 8.8).
     if (nrReady) {
         uint64_t releaseResult = 0;
@@ -857,6 +934,21 @@ int runD3d12VADecode(const std::wstring& input, uint32_t frames, const std::stri
         maxInFlight, shaderDispatches, nrEvaluateSuccess, nrEvaluateAttempt);
     json += std::format("  \"hwaccel\": {{\"sharedVeyraDevice\": {}, \"pixelFormat\": \"{}\"}},\n",
         "true", usedD3D12Frames ? "AV_PIX_FMT_D3D12" : "software-fallback");
+
+    // P1 #5: endurance and memory report.
+    const uint64_t baseWs = memorySamples.empty() ? 0 : memorySamples.front().workingSetBytes;
+    const uint64_t finalWs = memorySamples.empty() ? 0 : memorySamples.back().workingSetBytes;
+    const uint64_t baseCommit = memorySamples.empty() ? 0 : memorySamples.front().commitBytes;
+    const uint64_t finalCommit = memorySamples.empty() ? 0 : memorySamples.back().commitBytes;
+    json += std::format("  \"endurance\": {{\"loops\": {}, \"totalFrames\": {}, \"durationSeconds\": {:.1f}, \"memorySamples\": {}, \"baseWorkingSetMB\": {:.1f}, \"finalWorkingSetMB\": {:.1f}, \"baseCommitMB\": {:.1f}, \"finalCommitMB\": {:.1f}, \"workingSetGrowthMB\": {:.1f}, \"commitGrowthMB\": {:.1f}}},\n",
+        completedLoops, framesDecoded,
+        memorySamples.size() > 1 ? static_cast<double>(memorySamples.back().timestampMs - memorySamples.front().timestampMs) / 1000.0 : 0.0,
+        memorySamples.size(),
+        static_cast<double>(baseWs) / (1024 * 1024), static_cast<double>(finalWs) / (1024 * 1024),
+        static_cast<double>(baseCommit) / (1024 * 1024), static_cast<double>(finalCommit) / (1024 * 1024),
+        static_cast<double>(finalWs - baseWs) / (1024 * 1024),
+        static_cast<double>(finalCommit - baseCommit) / (1024 * 1024));
+
     json += std::format("  \"debugInfoQueue\": {{\"active\": {}, \"storedMessages\": {}, \"errorMessages\": {}}}\n",
         g_infoQueueActive ? "true" : "false", g_infoQueueStored, g_infoQueueErrors);
     json += "}\n";
@@ -864,8 +956,13 @@ int runD3d12VADecode(const std::wstring& input, uint32_t frames, const std::stri
         (void)veyra::harness::util::writeTextFileUtf8(jsonFile, json);
     }
     // P1 #4: NR must execute for every decoded frame.
-    const bool ok = usedD3D12Frames && (framesDecoded >= frames || endOfFile) &&
-        nrEvaluateSuccess == framesDecoded;
+    // P1 #5: in endurance mode, working set growth must stay under 256MB.
+    const bool nrOk = nrEvaluateSuccess == framesDecoded;
+    const bool memoryOk = !endurance ||
+        (static_cast<double>(finalWs - baseWs) / (1024 * 1024) < 256.0 &&
+         static_cast<double>(finalCommit - baseCommit) / (1024 * 1024) < 256.0);
+    const bool ok = usedD3D12Frames && nrOk && memoryOk &&
+        (endurance || framesDecoded >= frames || endOfFile);
     veyra::log::info("media-probe", ok ? "d3d12va: PASS" : "d3d12va: FAIL");
     return ok ? 0 : 10;
 }

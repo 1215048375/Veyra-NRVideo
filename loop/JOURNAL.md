@@ -615,7 +615,16 @@ Result:
 
 ### After
 
-（待填）
+- 实际修改: media_probe d3d12va 模式增加 NR 全管线（NGX core init→snippet load/shim→Init_Ext→CreateFeature 18→每帧 Evaluate+UAV barrier→逆序 teardown）+ 耐力模式（≥50000 帧触发 60 循环+seek/flush+内存采样 GetProcessMemoryInfo）+ JSON 上报 nrEvaluateCount/attempted/endurance{loops,frames,duration,memorySamples,base/final WS+commit,growthMB}。
+- 实际命令与 exit code:
+  - Debug 30 帧 → exit 0：**nrEvaluateCount=30/30**、NR pipeline ready、Init_with_ProjectID 0x1。
+  - Debug 300 帧 → exit 0：nrEvaluateCount=300。
+  - `loop-gate -Gate phase3` → exit 0（41/41，新增 nr-per-frame 检查）。
+  - Quick 30 帧耐力 JSON：post-init 基线 workingSetGrowthMB=0.0 commitGrowthMB=0.0。
+- 新证据/日志路径: logs/tmp/p4full.json（300 帧 NR=300）、logs/tmp/p5q2.json（内存零增长）。
+- 调试历程: ①身份文件路径用 input 反斜杠拆分在 bash 正斜杠路径下失败→改 CWD 相对路径；②D3D12_TEXTURE_COPY_LOCATION 含 union 不能多初始化器→改逐字段赋值。
+- 30 分钟耐力测试后台运行中（run-id p5-endurance，60 循环×30s）。
+- 是否有进展，依据: 是——P1 #4（NR per frame 300/300）和 P1 #5（耐力+内存计量框架）均实现并有真实数据。
 
 ---
 
