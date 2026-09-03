@@ -83,12 +83,12 @@
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "Phase 3 checkpoint commit, then start P4.1 (phase4 gate + SR off/on observability).",
+  "currentTask": "BLOCKED ON USER (3rd Goal cycle): Phase 4 SR capability requires user decision (loop/INBOX.md). Gate 18/18 pass; all P1 fixes done; only Playbook amendment (option c) or driver upgrade (option a) can unblock Phase 5-7.",
   "lastGate": {
-    "name": "phase3",
+    "name": "phase4",
     "status": "passed",
     "exitCode": 0,
-    "evidence": "loop/EVIDENCE.md#phase-3--phase3--2026-09-03t012000-0800"
+    "evidence": "gate 18/18 (bypass+capability+d3d12va-debug); Reviewer P1 #1 unresolved (SR capability clause)"
   },
   "lastFailureFingerprint": null,
   "failureLedger": [],
