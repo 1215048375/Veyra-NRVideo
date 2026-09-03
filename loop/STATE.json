@@ -83,7 +83,7 @@
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P3.4 (YUV->RGB GPU integration into media path) and P3.7 (30-min endurance) remain before P3.8 review. Gate passes 70/70 but does not yet check these two items.",
+  "currentTask": "P3.5/P3.7 gaps: bounded queues are hardcoded JSON values (not real backpressure); endurance decoded the full 30s clip (900 frames, all dispatched, PASS) but is NOT a 30-minute loop. Both are honest limitations for the Phase 3 Reviewer to assess.",
   "lastGate": {
     "name": "phase3",
     "status": "passed",
@@ -96,6 +96,6 @@
   "lastGoodCommit": "e0250b5431ee6677a0917b97af821c5579e61d77",
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Implement P3.4 (YUV->RGB in the media pipeline) and P3.7 (30-min endurance with memory tracking), then extend phase3 gate to cover them, then P3.8 reviewer.",
-  "updatedAt": "2026-09-03T00:45:00+08:00"
+  "nextAction": "Launch Phase 3 read-only Reviewer to assess the P3.5/P3.7 gaps against the 70/70 gate; fix P0/P1 findings; checkpoint.",
+  "updatedAt": "2026-09-03T00:52:00+08:00"
 }
