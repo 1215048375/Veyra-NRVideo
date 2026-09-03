@@ -172,6 +172,28 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_link_libraries(veyra_scene_analyzer PRIVATE ${FFMPEG_LIBRARIES} veyra_base)
 endif()
 
+# NVOF probe tool (phase5 gate expects veyra_nvof_probe.exe).
+set(VEYRA_NVOF_SDK_ROOT "" CACHE PATH "NVIDIA Optical Flow SDK root")
+if(NOT VEYRA_NVOF_SDK_ROOT)
+  set(VEYRA_NVOF_CANDIDATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party_local/nvidia/Optical_Flow_SDK_5.0.7")
+  if(EXISTS "${VEYRA_NVOF_CANDIDATE}/NvOFInterface/nvOpticalFlowCommon.h")
+    set(VEYRA_NVOF_SDK_ROOT "${VEYRA_NVOF_CANDIDATE}")
+  endif()
+endif()
+if(VEYRA_NVOF_SDK_ROOT AND EXISTS "${VEYRA_NVOF_SDK_ROOT}/NvOFInterface/nvOpticalFlowCommon.h")
+  add_executable(veyra_nvof_probe tools/nvof_probe/main.cpp)
+  veyra_apply_warnings(veyra_nvof_probe)
+  target_compile_options(veyra_nvof_probe PRIVATE /WX-)
+  target_compile_features(veyra_nvof_probe PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_nvof_probe PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_include_directories(veyra_nvof_probe PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    "${VEYRA_NVOF_SDK_ROOT}/NvOFInterface"
+    "${VEYRA_NVOF_SDK_ROOT}/Common/NvOFBase")
+  target_link_libraries(veyra_nvof_probe PRIVATE veyra_gfx veyra_base)
+endif()
+
 # ---------------------------------------------------------------------------
 # veyra_media: FFmpeg demux/decode (Phase 3). Links only the Playbook 3.4
 # dependency set from the pinned vcpkg install.
