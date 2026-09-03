@@ -5,14 +5,15 @@
 1. `README.md`——当前状态和唯一入口；
 2. `VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md`——唯一施工手册；
 3. `VEYRA_PRODUCT_SPEC_V1.md`——产品与技术边界；
-4. 当前阶段的 `docs/WORKLOG.md`——已完成、失败记录和下一步。
+4. `docs/COMPETITOR_AUDIT_2026-09-03.md`——竞品事实、许可证和可迁移启发；
+5. 当前阶段的 `docs/WORKLOG.md`——已完成、失败记录和下一步。
 
 如果任务以 Goal/无人值守模式运行，还必须先完整阅读：
 
-5. `loop/LOOP_ENGINE.md`——循环、恢复、审查和停机协议；
-6. `loop/STATE.json`——当前真实阶段和下一动作；
-7. `loop/BACKLOG.md` 与 `loop/INBOX.md`——唯一任务队列和人工阻塞；
-8. `loop/REVIEW_PROMPT.md`——阶段独立复核的固定只读任务。
+6. `loop/LOOP_ENGINE.md`——循环、恢复、审查和停机协议；
+7. `loop/STATE.json`——当前真实阶段和下一动作；
+8. `loop/BACKLOG.md` 与 `loop/INBOX.md`——唯一任务队列和人工阻塞；
+9. `loop/REVIEW_PROMPT.md`——阶段独立复核的固定只读任务。
 
 Goal 启动后，`.gitignore`、上述规则/方案、`loop/CONTROL_HASHES.json`、
 基础 `scripts/loop-gate.ps1` 和 `scripts/gates/README.md` 都是只读控制面。
@@ -28,8 +29,14 @@ preflight 报控制面 hash 漂移时必须停下，不得改 manifest 或 gate 
 - `nvngx_dlssnr.dll` 是 DLSSNR 运行时；只从项目根目录的已知文件复制到 `runtime_local`，不得联网寻找“更新偷跑版”、不得修改、重签名或提交 Git。
 - `renodx-dlss5-1.addon64` 是未签名的 ReShade/RenoDX 二进制 add-on，不是配置文件。它只准用于隔离的参考/对照环境，最终程序不得加载、注入、链接或随包分发它。
 - 最终主线不依赖 ReShade。所谓“类似 ReShade”指独立复现它的前后颜色传递、参数映射和输出处理。
-- V1 先做 SDR、同分辨率 DLSSNR、Zero Guidance，再按阶段做 DLSS SR、NVOF、DLSSG 2X。HDR、3X/4X、采集卡、Depth Anything、FRUC 都不是 V1 主线。
-- 已接受 Magpie Experimental 对“可调用”的可行性证明，不再做市场/画质可行性研究。但 Create/Evaluate、格式、状态、时序、资源生命周期仍必须做工程验证。
+- V1 必须同时完成采集卡实时增强、DLSS 5 播放器、图片/视频增强导出。删掉其中任何一条都属于擅自改产品，不得用“以后做”放行。
+- 三个入口共享 `FrameSource -> EnhanceGraph -> FrameSink`；禁止复制三套 NGX、颜色、Guidance 或 reset 逻辑。
+- V1 是首发产品，不是最小 MVP。必须保证 4K SDR 全链路：Windows DirectShow/UVC 1080p/2160p 30/60、最高 3840×2160 H.264/HEVC 播放、D3D12 NVENC H.264/HEVC 视频导出、PNG/JPEG 图片导出、DLSSG 2X。HDR、3X/4X、厂商私有采集 SDK、AV1/ProRes 与 VFR 原样输出仍不是本次承诺，不能把它们混同为“4K”。
+- V1 的质量主线是 NVOF motion + 置信度门控 + 可选 Depth Anything V2 Small；Zero Guidance 只允许作为诊断/回退，不得作为“高质量完成”。
+- 采集卡/普通视频不含游戏引擎原生 depth、motion、exposure、camera matrices 或 HUD-less color。任何 Agent 都不得宣称估算输入“等同原生”。
+- DLSS SR（若启用）在 Feature 18 前；DLSSG 在 Feature 18 后；播放器 OSD/字幕在 DLSSG 后合成，避免 UI 被插帧扭曲。
+- 采集卡的固有延迟不等于可用 lookahead。若要生成 A 与 B 之间的帧，必须等 B 真正到达；额外用 C 做一致性验证还要再等一个源帧。不得把采集卡内部/驱动缓冲宣称为“免费未来帧”。
+- 已接受 Magpie Experimental 对“可调用”的可行性证明，不再重复市场可行性争论。但 Create/Evaluate、真实输出、颜色、guidance、时序、延迟、稳定性及相对画质仍必须工程验证。
 
 ## 二进制身份，任何不一致都立即停工
 
@@ -58,7 +65,7 @@ renodx-dlss5-1.addon64
 4. 没有把 proprietary runtime 或本地 SDK 提交进版本控制；
 5. 下一阶段没有建立在未验证假设上。
 
-Phase 1 没有完成连续 300 次 Feature 18 Evaluate，就禁止开始 FFmpeg、UI、音频、SR 或 FG。
+Phase 0–4 的历史 checkpoint 只能证明各基础 harness 当时通过，不能冒充三种产品模式完成。Phase 7 的三条端到端 gate 全过前只能是开发中；功能 gate 通过但公开分发权未解决时只能写 `release_candidate / distribution_blocked`，不得写已公开首发或 complete。
 
 ## 无人值守 Goal Loop
 
@@ -66,7 +73,7 @@ Phase 1 没有完成连续 300 次 Feature 18 Evaluate，就禁止开始 FFmpeg�
 - 主 Agent 是唯一写入者。禁止多个 Agent 同时修改同一 checkout；阶段 Reviewer 必须是新上下文、只读，不能替 Maker 改代码。
 - 每个 cycle 只处理 `loop/BACKLOG.md` 当前 Phase 的第一个可执行原子任务。改动前写 `loop/JOURNAL.md`，改动后运行当前 gate。
 - 统一 gate 入口：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate phaseN`。
-- 同一 failure fingerprint 最多尝试 3 个真正不同、能增加证据的方案；连续 5 轮无新证据或总计 80 轮后必须留档停机，不得空转。
+- 同一 failure fingerprint 最多尝试 3 个真正不同、能增加证据的方案；连续 5 轮无新证据或总计 120 轮后必须留档停机，不得空转。
 - `loop/STOP` 是用户停机开关。看到它就更新状态并退出，Agent 不得删除。
 - 未实际获得独立 Reviewer 结论时只能标 `needs_review`；不能降级成“自己再看一遍”后自动放行。
 - 只准本地 checkpoint commit。禁止无人值守 push、PR、发布、上传 artifact 或制作安装包。
@@ -77,7 +84,11 @@ Phase 1 没有完成连续 300 次 Feature 18 Evaluate，就禁止开始 FFmpeg�
 - 每次只实现当前阶段最小闭环，不顺手重构整个工程。
 - 任何 NGX/NVOF 返回值、HRESULT、SEH、资源尺寸/格式和 GPU timestamp 都必须进入日志。
 - 所有历史型模块在 open/seek/resize/pause-resume/scene-cut/device-lost 时显式 reset。
-- 正常播放路径禁止 GPU→CPU 像素回读、每 pass CPU fence wait、无界帧队列和多份隐式颜色转换。
+- 正常播放、采集和最终视频导出路径禁止 GPU→CPU 像素回读、每 pass CPU fence wait、无界帧队列和多份隐式颜色转换。视频导出必须用 Video Codec SDK 的 D3D12 NVENC input/fence；raw pipe 只准作诊断 fallback，不能通过首发 gate。
+- 采集 ingress 使用 latest-frame mailbox（容量 1）并丢弃过期帧；图内部另有严格上限的 A/B/C history window。低延迟 FG 需要 A/B 的一帧 lookahead window；这不是可伪造为固定 `1/f` 的实测显示延迟。高质量实时模式最多再保留 C 做验证。播放器/导出不得丢源帧。
+- 所有来源先显式解析 range/matrix/transfer，进入统一 linear working texture；所有 sink 只做一次明确的输出转换。
+- Guidance motion 固定为 current→previous、单位为 post-SR `workingExtent` 像素；depth 为 R32F 相对深度；confidence 为 R8_UNORM。低置信度区域必须衰减/清零 motion，不能把坏向量硬塞给 NGX。
+- seek、scene cut、PTS discontinuity、capture drop、resize、source switch、pause/resume 和 device lost 必须原子 reset SR/NR/FG/depth/flow 的全部历史。
 - 创建 Feature 可以等待一次；逐帧执行用 3–4 个 command slots/fence values 轮转，不能每帧 `WaitForSingleObject`。
 - NGX 参数名和参数类型必须逐项照 Playbook；不要凭名字猜 `int`/`uint32_t`/`float`/resource。
 - 所有 DLL 用绝对路径、`LoadLibraryExW` 和受限 search flags 加载；禁止依赖当前工作目录搜索。
@@ -89,7 +100,9 @@ Phase 1 没有完成连续 300 次 Feature 18 Evaluate，就禁止开始 FFmpeg�
 ## 许可证与分发红线
 
 - Magpie 是 GPLv3。闭源 Veyra 不得复制其源码或做机械改名；只可把其公开行为当作黑盒/接口参考后独立实现。若要直接复用，先让用户明确接受 GPLv3 以及对应源码义务。
+- `video2dlssnr` 当前仓库未提供许可证；不得复制代码。`DLSS5-Feeder`、`dlss5-infinity-studio` 和 `dlss5-visual-enhancer` 只能按各自许可证与第三方 notices 取用；默认只借鉴公开行为与架构，任何代码复用都要在 `THIRD_PARTY_NOTICES` 逐项归因。
 - NVIDIA SDK/runtime 和当前 DLSSNR 文件的分发权不能假定。默认只做本机研发，`runtime_local/`、`third_party_local/`、抓帧和 SDK 压缩包必须 gitignore。
+- NVIDIA Video Codec SDK 头文件/sample 同样需要单独接受 EULA；系统 `nvEncodeAPI64.dll` 不复制进安装包。没有完成第三方分发审计前，“首发产品完成”不等于“获准公开捆绑发布”。
 - 不得上传、发布、打包或向第三方发送项目中的两个二进制。
 - 任何准备公开发布、签名安装包或 CI 上传 artifact 的动作，都必须先停下并让用户确认许可证与分发来源。
 
@@ -105,4 +118,4 @@ Phase 1 没有完成连续 300 次 Feature 18 Evaluate，就禁止开始 FFmpeg�
 
 ## 禁止用假完成糊弄
 
-以下均不算完成：只写接口桩、只编译未运行、仅显示理论 FPS、把 Raw NR 直接展示却声称完成 RenoDX parity、以 Zero Motion 冒充 NVOF、以重复上一帧冒充 DLSSG、或捕获到黑图仍把返回码 0 当成功。
+以下均不算完成：只写接口桩、只编译未运行、仅显示理论 FPS、把 Raw NR 直接展示却声称完成 parity、以 Zero Motion 冒充 NVOF、以重复/线性混合帧冒充 DLSSG、仅枚举采集卡却没持续显示、仅导出图片却声称视频导出、丢音轨/时间戳不报告、或捕获到黑图仍把返回码 0 当成功。

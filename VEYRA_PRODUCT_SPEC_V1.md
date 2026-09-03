@@ -1,859 +1,377 @@
-# Veyra DLSS 视频播放器
-## Product Spec V1（调用复现优先）
+# Veyra V1 产品与技术规格
 
-> 文档状态：Locked V1 Product Boundary  
-> 日期：2026-09-01  
-> 当前验证环境：Windows 11 x64 / GeForce RTX 5070 / Driver 616.56  
-> 核心目标：不研究 DLSS 5 是否适合普通视频，不自研模型画质；只完成稳定调用，并尽量复现 RenoDX/ReShade 的处理结果。
+版本：Launch V1.2
 
----
+日期：2026-09-03
+状态：用户已确认，替代此前“最小 MVP / 1080p 薄闭环”的 V1 边界。
 
-# 0. 前提与边界
+## 1. 产品定义
 
-本方案接受以下已经被 Magpie Experimental 证明的事实，不再重复做可行性研究：
+Veyra 是一个把同一套 DLSS 增强图应用到三种输入的 Windows 本地工具：
 
-1. 普通软件窗口、游戏捕获画面和视频帧可以作为 DLSS 输入。
-2. 独立应用可以调用 DLSS Neural Rendering、DLSS Super Resolution 和 DLSS Frame Generation。
-3. 视频没有游戏原生 Motion、Depth、Camera、HUD-less Buffer 时，仍可通过 Zero Guidance 或估算 Guidance 驱动相关功能。
-4. 第一阶段不评价 DLSS 5 对不同视频类型“好不好看”，不训练模型，也不承担 NVIDIA 模型本身的画质优化。
+1. HDMI/USB/PCIe 采集卡实时预览；
+2. 本地视频播放；
+3. 图片或视频增强并导出。
 
-本规格只解决四件事：
+它解决的是“把最终像素组织成 DLSS 可消费的工程契约”，不是游戏 mod，也不承诺从视频像素恢复游戏引擎原生数据。
 
-```text
-1. 播放器稳定取得 GPU 视频帧
-2. 原生创建并执行 DLSSNR Feature 18
-3. 复现 RenoDX/ReShade 的颜色代理、参数与输出处理
-4. 原生执行 DLSS Frame Generation，并正确显示生成帧
-```
+V1 完成的唯一判据：三个入口都能由一个可执行程序实际完成端到端任务，共同使用真实 Feature 18，并通过 4K SDR、长时间运行、恢复、诊断和输出复核；任何一个入口或 4K 主路径缺失，V1 都不完成。内部实现仍按原子任务递进，但不得用内部里程碑对外冒充 MVP 已发布。
 
-“不再做可行性测试”不等于“不做工程验收”。仍必须记录 Create/Evaluate 是否成功、是否真的生成新帧、输出时序是否正确，以及与 ReShade 是否存在明显的颜色管线偏差；这些是完成定义，不是重新研究 DLSS 是否可用于视频。
+## 2. 为什么现在仍值得做
 
----
+Magpie 和近期 GitHub 项目已经证明“窗口/图片/视频能调用 Feature 18”。所以 Veyra 不再把调用本身当护城河。
 
-# 1. 产品定义
+Veyra 的明确差异是：
 
-做一个面向 NVIDIA RTX 的极简 Windows 视频播放器与后续采集卡 Viewer：
+- 物理采集设备是一级输入，不要求先开 OBS 或把采集画面放进另一个窗口；
+- 播放与导出直接消费源文件，避免桌面二次捕获，保留 PTS、颜色和独立音轨；
+- 三入口共享 D3D12 graph、Guidance、reset 和参数，结果可复现；
+- 离线模式可以使用未来帧验证 motion/depth，实时工具不能；
+- 画质诊断可显示 motion、depth、confidence、reset 和各 pass GPU 时间，而不是只有“开/关”。
 
-- FFmpeg 负责文件解封装、视频解码和音频解码；
-- D3D12 负责核心 GPU 管线；
-- DLSS Super Resolution 负责需要的分辨率放大；
-- `nvngx_dlssnr.dll` Feature 18 负责 DLSS 5 Neural Rendering；
-- RenoDX Parity Layer 负责复现 ReShade 插件前后的颜色转换和输出处理；
-- NVIDIA NGX DLSS Frame Generation 负责 2X，后续再开放 3X/4X；
-- ReShade 只作为开发期参考实现和对照输出，不进入最终产品运行链；
-- 播放器 UI、字幕和 OSD 在 Frame Generation 之后绘制。
+如果最终实现只剩“打开视频然后 Zero Guidance 调 Feature 18”，项目应停止，因为那已经没有产品差异。
 
-产品第一优先级不是媒体库和播放器功能，而是：
+## 3. 首发承诺与明确边界
 
-> 同一输入、同一 DLSSNR DLL、同一参数下，Veyra 能稳定执行 Feature 18，并获得与 RenoDX/ReShade 同类的画面处理结果。
+### 3.1 必须首发
 
----
+| 场景 | 首发能力 | 成功定义 |
+|---|---|---|
+| Capture | Windows DirectShow/UVC 1080p/2160p 30/60 视频设备 + 同设备音频；低延迟/高质量缓冲模式；NR；可选 SR 与 FG 2X；窗口/全屏显示 | 真实 4K60-capable 设备；2160p60 连续 30 分钟；真实 Feature 18/FG；队列与 history window 有界；音频可听；每段延迟实测 |
+| Player | 最高 3840×2160、23.976–60 fps、H.264/HEVC 的 MP4/MKV/MOV；播放/暂停/seek/loop/全屏；音频；外置/内嵌基础字幕；NR；可选 SR/FG 2X | 4K30 与 4K60 各连续 30 分钟 + seek storm；A/V drift 在门槛内；无旧历史泄漏；不能靠丢源帧维持播放 |
+| Export | PNG/JPEG 输入输出；最高 3840×2160 H.264/HEVC 视频输入；D3D12 NVENC H.264/HEVC MP4/MKV 输出；可选 SR/NR/FG 2X；音频 remux/AAC；基础字幕策略明确 | 两种编码输出均可由 ffprobe/自身重新解码；帧数、尺寸、时长、音轨、字幕报告和 hash 满足 gate；取消/崩溃不留下假成功文件 |
 
-# 2. 已确认的本地运行时事实
+### 3.2 首发不承诺
 
-当前目录中的 `nvngx_dlssnr.dll`：
+- HDR/10-bit；
+- DLSSG 3X/4X；
+- 所有厂商私有采集 SDK；
+- VFR 原样导出；导出统一为用户选择的 CFR；
+- AV1/ProRes、ComfyUI、浏览器 UI；
+- 游戏端注入或 sidecar 原生 depth/motion；
+- 安装包内附 NVIDIA 实验 runtime 或模型权重。
 
-```text
-Version:                  310.8.0.0
-SHA-256:                  E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E
-Authenticode:             Valid / NVIDIA Corporation
-Minimum Driver:           615.00
-GPU Architecture:         NVSDK_NGX_GPU_Arch_Blackwell2
-Feature Runtime:          NVIDIA DLSSNR - DVS PRODUCTION
-```
+4K 指 3840×2160 像素能力，不自动包含 HDR。遇到 HDR/P010 内容必须明确拒绝或显示“需先转换为 SDR”，绝不能按 SDR 错解后继续处理。批量作业可以在单文件任务稳定后加入，但不能阻塞三个主入口的 4K gate。
 
-当前目录中的 `renodx-dlss5-1.addon64`：
+## 4. 平台与运行边界
 
-```text
-Internal Name:            renodx-dlss5.addon64
-Version:                  0.2026.0827.2036
-SHA-256:                  837B6A34D41C0EB75CB105AFEB5B985CFC72CB7F3A786C5DBB3F5415C45C978F
-Authenticode:             Not signed
-Type:                     ReShade binary add-on, not a configuration file
-```
+- Windows 11 x64；
+- C++20、Win32、D3D12；
+- NVIDIA RTX；DLSSG 参考 gate 以 RTX 5070 + HAGS on 为主；
+- 直接 NGX，不同时接 Streamline；
+- FFmpeg library 用于文件 demux/decode、DirectShow input、音频/字幕与 mux；
+- libass + FreeType/HarfBuzz 用于 SRT/ASS 文本字幕渲染，最终字幕层位于 FG 之后；
+- NVIDIA Video Codec SDK 13.1 头文件来自用户接受 EULA 后的本地目录；最终视频路径用系统 `nvEncodeAPI64.dll` + D3D12 resource/fence，不把 raw-frame `ffmpeg.exe` pipe 当首发实现；
+- WIC 用于 PNG/JPEG；
+- WASAPI shared/event mode 用于播放器与采集音频；
+- NVOF 来自系统 `nvofapi64.dll`，编译头文件来自用户接受 EULA 后放置的本地 Optical Flow SDK；
+- Depth Anything V2 Small / Video Depth Anything Small 仅在模型许可证、hash 和本地路径均确定时启用。
 
-插件暴露出的行为包括：
+## 5. 不可伪造的输入现实
 
-- 拦截 D3D12 NGX Create/Evaluate；
-- 在已有 DLSS 输出之后执行 Feature 18；
-- 使用 Color、MotionVectors、Depth 和 Output 合同；
-- 建立 Control-compatible color transfer；
-- 使用 soft-clip、sRGB proxy、UpgradeToneMap、HDR/chroma transfer；
-- 提供 Preset、Style、Intensity、Local Tone、Local Structure、Skin Structure、Auto Mask、UI Correction、Depth Convention 和 Motion Scale 参数。
+### 5.1 游戏原生 DLSS 可能得到
 
-因此，“接近 ReShade”的主要任务不是重新训练或优化 DLSS 5，而是复现它在 Feature 18 前后的数据合同。
+- engine depth；
+- object/camera motion；
+- exposure 与 camera matrices；
+- jitter；
+- HUD-less color、UI alpha；
+- render/output subrect。
 
-当前原始签名 DLL 的首个明确目标平台是本机 RTX 5070。不要在 V1 文案中宣称支持所有 RTX；其他显卡必须等实际 runtime capability 返回后再加入支持列表。
+### 5.2 采集卡与普通视频实际只有
 
----
+- 已经合成、色调映射和可能压缩的像素；
+- PTS/duration；
+- 文件或设备能提供的颜色 metadata；
+- 独立音频/字幕（若容器仍保留）。
 
-# 3. 最终处理管线
+所以 Veyra 的 `depth` 和 `motion` 是 estimated guidance。UI 若已烧进像素，也无法完美分离。产品文字必须叫“估算/增强”，不得叫“原生等价”。
 
-```text
-FFmpeg Demux / Decode
-        ↓
-D3D12 Video Frame
-        ↓
-YUV → Working RGB
-range / matrix / transfer / chroma
-        ↓
-Optional DLSS Super Resolution
-只在输入分辨率低于输出分辨率时启用
-        ↓
-RenoDX Parity Encode
-Control-compatible proxy / soft clip / transfer
-        ↓
-DLSSNR Feature 18
-Color + Motion/Zero Motion + Depth/Zero Depth
-        ↓
-RenoDX Parity Decode
-UpgradeToneMap / color strength / luminance protection
-        ↓
-DLSS Frame Generation
-2X first
-        ↓
-Subtitle / OSD / Player UI
-        ↓
-DXGI Present
-```
+## 6. 统一数据契约
 
-两条分辨率路径必须分开：
-
-```text
-同分辨率：Decode → Parity Encode → DLSSNR → Parity Decode
-
-放大播放：Decode → DLSS SR → Parity Encode → DLSSNR → Parity Decode
-```
-
-DLSSNR 不承担播放器的分辨率放大。需要 1080p→4K 时，由 DLSS SR 独立完成。
-
----
-
-# 4. 技术架构
-
-## 4.1 基础技术栈
-
-- C++20
-- CMake
-- Win32 Window
-- D3D12
-- DXGI Flip Model Swap Chain
-- FFmpeg shared libraries
-- WASAPI
-- NVIDIA NGX / DLSS SDK headers
-- NVIDIA NGX DLSSG helper contract；Streamline 只保留为 V1 之后的替换研究
-- NVIDIA Optical Flow API
-- Dear ImGui 仅用于开发面板；正式 UI 可继续使用或改为轻量自绘
-
-禁止在 V1 引入：
-
-- Qt
-- Electron / Chromium
-- MFC 大型 UI 架构
-- OpenCV
-- 插件系统
-- 媒体库和网络视频平台
-- Depth Anything / ONNX Runtime
-- 自研 Motion Cleaner
-- FRUC、XeSS FG 等第二帧生成后端
-
-## 4.2 共享 D3D12 设备
-
-播放器、DLSS SR、DLSSNR、DLSSG 和 Guidance 应尽量共享同一物理 Adapter 和 D3D12 Device。
-
-```text
-D3D12DeviceContext
-├─ Graphics/Compute Queue
-├─ Video Decode Queue
-├─ NGX Core Session
-├─ Descriptor Allocator
-├─ Texture Pool
-├─ Fence Timeline
-└─ GPU Timestamp Queries
-```
-
-正常播放路径禁止 CPU readback。只有开发期截图、诊断和极小状态值允许 readback。
-
-## 4.3 NGX Core Host
-
-建立进程级唯一的 `NgxCoreHost`：
-
-- 使用本项目自己的 Project ID 和 `NVSDK_NGX_ENGINE_TYPE_CUSTOM`；
-- 负责 NGX Init、Capability Parameters、Parameter Allocation 和最终 Shutdown；
-- DLSS SR、DLSSNR、DLSSG 作为独立 consumer 共用生命周期；
-- 所有 proprietary API 调用外层增加 SEH 防护和结构化错误日志；
-- 禁止多个模块各自随意 Init/Shutdown NGX；
-- Device Lost 或 Adapter Change 时整体销毁并重建。
-
-## 4.4 DLSSNR Runtime Adapter
-
-`DlssNrBackend` 只暴露稳定的内部接口：
+### 6.1 FramePacket
 
 ```cpp
-struct DlssNrCreateDesc {
-    uint32_t width;
-    uint32_t height;
-    uint32_t preset;
-    DXGI_FORMAT inputFormat;
-    DXGI_FORMAT outputFormat;
+struct FramePacket {
+    GpuTexture color;          // canonical linear RGBA16F
+    Rational pts;
+    Rational duration;
+    uint64_t sequence;
+    ColorDescription colorInfo;
+    FrameFlags flags;          // seek/cut/drop/resize/discontinuity/eos
+    SourceKind sourceKind;     // capture/player/image/export
 };
+```
 
-struct DlssNrEvalDesc {
-    GpuTexture color;
-    GpuTexture motion;
-    GpuTexture depth;
-    GpuTexture output;
-    DlssNrControls controls;
+强制规则：
+
+- 所有来源只在 ingress 做一次 range/matrix/transfer 解析和转换；
+- `pts` 不用 `double` 猜，内部保持有理数/100ns 整数；
+- source texture 的 D3D12 state 和 owner fence 必须随 packet 明确；
+- packet 不允许隐含当前工作目录、全局设备或裸生命周期指针。
+
+### 6.2 GuidanceFrame
+
+```cpp
+struct GuidanceFrame {
+    GpuTexture motion;         // RG16F, current -> previous, workingExtent pixels
+    GpuTexture depth;          // R32F, normalized relative depth
+    GpuTexture confidence;     // R8_UNORM, 0 reject ... 1 trust
     bool reset;
-    uint64_t frameId;
+    ResetReason resetReason;
+    GuidanceProvenance provenance;
+    uint64_t sourceSequence;
 };
 ```
 
-实现要求：
+强制规则：
 
-- 动态加载 `nvngx_dlssnr.dll`；
-- 获取 D3D12 Init/Create/Evaluate/Release/Shutdown exports；
-- 当前 pre-release signed-snippet 兼容行为隔离在单独 adapter 中；
-- Feature ID、私有参数名和 runtime workaround 不得泄漏到播放器业务层；
-- 将来 NVIDIA 发布正式 Streamline DLSS 5 后，只替换 backend，不重写播放器；
-- runtime 加载前核对文件名、版本、SHA-256、NVIDIA 签名、最低驱动和 GPU capability；
-- 不自动下载、不写入 Git、不进入公开安装包。
+- motion 的方向、单位和分辨率不可按调用方临时猜；consumer adapter 负责缩放；
+- NVOF S10.5 转换固定除以 32；
+- 低 confidence 区域平滑衰减 motion；必要时整帧回退 Zero，但日志必须写明；
+- depth 的 P02/P98 归一化使用时间 EMA，避免每帧呼吸；
+- depth age 超限、切镜或 motion 不可靠时，Auto 不得继续喂陈旧 depth；
+- NR、SR、FG 从同一个 frame sequence 消费一致 guidance/reset。
 
-## 4.5 参数层
+### 6.3 ResetCoordinator
 
-NGX Parameter 必须强类型封装：
+以下任一事件触发一个单调 `resetEpoch`，在同一 source frame 边界重置 NVOF、depth filter、SR、Feature 18 和 DLSSG：
 
-```cpp
-SetU32(name, value)
-SetI32(name, value)
-SetF32(name, value)
-SetD3D12Resource(name, resource)
-```
+- open/close/source switch；
+- seek；
+- scene cut；
+- capture frame drop 或 PTS discontinuity；
+- pause 后长时间恢复；
+- resize/quality-mode change；
+- device lost/recreate；
+- guidance provenance 发生不兼容切换。
 
-V1 支持参数：
+禁止不同模块各自偷偷决定 reset，导致一半历史新、一半历史旧。
 
-- Width / Height
-- Render Preset
-- Style
-- Intensity
-- Local Tone Strength
-- Local Structure Strength
-- Skin Structure Strength
-- Automatic Mask
-- UI Correction
-- Motion Vector Scale X/Y
-- Depth Inverted
-- Enabled
-- Reset
-- Color / Motion / Depth / Output subrect
-
-DLSSNR 参数默认值以 Playbook 已锁定的当前 runtime 调用合同为准。项目中没有 ReShade preset 配置文件；`renodx-dlss5-1.addon64` 是二进制 add-on，不能把它冒充 preset。Parity codec 的三个可调值在 V1 固定使用中性工程基线 1.0；若以后用户提供真实 preset，只新增可选对照 profile，不改变 V1 门禁。
-
----
-
-# 5. RenoDX Parity Layer
-
-## 5.1 定位
-
-ReShade/RenoDX 只承担两个角色：
-
-1. 当前 add-on 中可观察到的行为和 shader 数学参考；
-2. 用户以后提供同版本 preset/capture 时的可选固定输入对照。
-
-最终程序不加载 ReShade，也不加载 `.addon64`。
-
-## 5.2 必须复现的阶段
+## 7. 统一处理图
 
 ```text
-Original Working RGB
-        ↓
-Control-compatible proxy encode
-        ↓
-Feature 18 raw neural output
-        ↓
-Proxy decode / UpgradeToneMap
-        ↓
-Color-strength and luminance reconstruction
-        ↓
-Final RGB
+FrameSource
+  -> Ingress color conversion (NV12/P010/YUY2/BGRA -> RGBA16F linear)
+  -> Scene/cadence analyzer
+  -> optional DLSS SR (V1: Zero Guidance; only when output > source)
+  -> Guidance producer
+       NVOF motion + cost at the post-SR working extent
+       optional backward flow
+       luma/depth/fb consistency -> confidence
+       optional DAV2 depth + temporal reprojection
+  -> parity encode -> Feature 18 -> parity decode
+  -> optional DLSSG 2X
+  -> strength/color mix + anti-ringing clamp
+  -> UI/subtitle/diagnostics composition
+  -> FrameSink (present / encode / image)
 ```
 
-根据当前 `renodx-dlss5-1.addon64` 内嵌 shader，Parity Codec 按下面的确定行为实现，不从零猜算法。
+顺序约束：
 
-### A. Proxy Encode
+- V1 的 SR 在 Guidance、Feature 18 和 FG 前；SR 使用显式 Zero Guidance，不消费尚未生成的 NVOF/DAV2；
+- NVOF、depth、confidence、Feature 18 与 FG 全部工作在 post-SR working extent；SR bypass 时该 extent 等于 source extent；
+- native 3840×2160 输入选择 4K 输出时 SR 必须 bypass；1080p/1440p 选择 4K 输出时才做 SR。UI 同时显示 source extent、working extent 和 present/export extent；
+- FG 在 Feature 18 后；
+- Veyra 自己生成的 UI、字幕和 OSD 在 FG 后；
+- 已烧录在源视频中的 UI 只能通过 confidence/text mask 降低历史污染，不能假装分离；
+- post mix 必须能以 `strength=0` 精确回到未增强基线，以便 A/B。
 
-输入为播放器正确解码后的线性 RGB：
+## 8. Guidance 与画质策略
 
-1. 保留一份高精度 `Original`；
-2. `Original.rgb` 除以 `PaperWhiteScale`，负值截为 0；
-3. 对 0.75 以上的高光使用指数 shoulder soft-clip，压到可供当前模型使用的范围；
-4. 执行标准 sRGB Encode；
-5. 写入 RGBA8 `Proxy`，作为 `DLSSNR.Color`。
+### 8.1 Motion
 
-V1 资源建议：
+实时/播放：
 
-```text
-Original: R16G16B16A16_FLOAT
-Proxy:    R8G8B8A8_UNORM
-Neural:   R8G8B8A8_UNORM
-Final:    R16G16B16A16_FLOAT
-```
+- 首选 NVOF；输入为 current/previous color；输出 current→previous；
+- 优先支持硬件 grid 后 densify 到 post-SR `workingExtent`；
+- cost 映射为 confidence；
+- 在性能允许时运行 backward flow，以 forward/back error 降权遮挡区；
+- SDK/硬件不可用时允许自有 compute Lucas–Kanade 作为明确标记的 fallback；Zero 只作最后回退。
 
-### B. Feature 18
+离线：
 
-```text
-DLSSNR.Color  = Proxy
-DLSSNR.Output = Neural
-DLSSNR.MVec   = Motion or Zero Motion
-DLSSNR.Depth  = Depth or Zero Depth
-```
+- 保留前后各至少一帧；
+- forward/back consistency、luma warp residual、depth residual、边界/out-of-frame 共同生成 trust；
+- 不因“向量是 finite”就把 confidence 设为 1。
 
-Feature 18 处理的是经过 Control-compatible transfer 的 `Proxy`，不是直接处理播放器最终显示用的线性 FP16 画面。
+### 8.2 Depth
 
-### C. Parity Decode
+实时/播放：
 
-输出阶段同时读取 `Original`、`Proxy` 和 `Neural`：
+- Depth Anything V2 Small，固定模型 shape，FP16；
+- DirectML 与 Veyra 同一 D3D12 device/queue；优先使用 device tensor/I/O binding，禁止同步 readback 再 upload 的常态路径；
+- `Low Latency` 默认禁用或低频执行；`Balanced` 默认 interval 4；
+- 两次 inference 间用 motion/confidence 重投影；对 disocclusion 使用当前估计或降权；
+- 模型输出用 P02/P98 + EMA 映射到 R32F relative depth。
 
-1. 对 `Proxy` 和 `Neural` 做 sRGB Decode；
-2. 使用 BT.709 luminance 系数计算三者亮度；
-3. 根据 `Original` 与 `Proxy` 的亮度差，对 Neural 恢复被 soft-clip 压掉的亮度范围；
-4. 在 OkLab 中恢复色相/色度关系；
-5. 转入 AP1 约束负色域，再转回 BT.709；
-6. 使用 `TransferStrength` 在 Original 与升级结果之间混合；
-7. 单独构造 luminance-only 结果，再用 `ColorStrength` 决定保留多少 Neural 色彩变化；
-8. 乘回 `PaperWhiteScale`，保留 Original alpha，写入 Final FP16。
+离线高质量：
 
-这三个常量必须进入配置和抓帧清单：
+- 优先 Video Depth Anything Small 或逐帧 DAV2 + 双向时序过滤；
+- 只使用允许商业使用的 Small 权重；Base/Large 不进入默认构建；
+- future-looking 结果不能进入 `Low Latency`；可以进入明确标注额外帧延迟的 `Buffered Quality` 和离线导出。
 
-```text
-PaperWhiteScale
-TransferStrength
-ColorStrength
-```
+Depth `Auto` 的决策依据：age、depth residual、motion confidence、scene cut、内容稳定度。二维/动漫/文字/快速切镜时允许退回 Motion Only；“有 depth”不等于“效果更好”。
 
-它们属于 RenoDX Parity Codec，不等同于 Feature 18 自身的 `Intensity`、`LocalToneStrength` 或 `LocalStructureStrength`。
+### 8.3 Scene cut 与 cadence
 
-内部保留四个可抓取观察点：
+切镜不能只靠一个固定全图平均差：
 
-```text
-00_original
-01_proxy_input
-02_raw_dlssnr
-03_final_parity_output
-```
+- GPU 64-bin luma histogram 距离；
+- 缩略图 SAD；
+- NVOF confidence collapse；
+- PTS gap/duplicate；
+- capture sequence drop。
 
-## 5.3 实现原则
+至少两项同时越阈值或出现明确 discontinuity 才 reset，避免闪光/爆炸误判。所有阈值进入配置和日志。
 
-- 将 Parity Codec 写成独立 D3D12 compute pass；
-- 编码和解码都可单独 bypass；
-- 第一版先对齐 SDR；
-- HDR Transfer 参数和 HDR typed UAV 进入 V1.1；
-- 不加入主观锐化、降噪、肤质保护等额外滤镜；
-- 若结果与 ReShade 不同，优先检查格式、transfer、range、参数类型、subrect 和资源状态，不先怀疑模型。
+捕获源若已经包含主机游戏的 FG 帧，再次 2X 可能放大伪影。V1 提供独立 NR/SR/FG 开关；source FPS 已达到 target FPS 时 FG 默认关闭，并报告 cadence 判定，不自动双重补帧。
 
-## 5.4 “类似 ReShade”的完成定义
+### 8.4 采集后帧与延迟模式
 
-没有外部 RenoDX capture 时，完成条件由 CPU reference、GPU shader 对照和四阶段 capture 确定；不得编造一份“参考图”。用户以后提供同 addon hash、preset、输入和分辨率的 capture 时，再追加对照，不替换基础门禁。完成条件是：
+把连续采集帧记为 `A、B、C`：
 
-- CPU/GPU encode/decode 达到 Playbook 数值容差，四阶段资源真实存在；
-- 固定灰阶、色卡和高光输入不出现系统性洗白、压黑、截高光或整体色相漂移；
-- Style、Intensity、Structure、Auto Mask 以 Playbook 的精确名称/类型传入，开关或数值变化产生可观测且非恒定的输出；只有存在合格 reference 时才宣称调节方向与 RenoDX 一致；
-- Raw DLSSNR 与 Final Parity Output 可以分别抓取，确认差异来自 parity layer；
-- 若存在合格外部 reference capture，同一输入/参数下再检查整体亮度、gamma、饱和度与局部对比不存在明显系统性偏差。
+- 采集卡和驱动造成的延迟只是把 A、B、C 整体推迟送达；它不会让 Veyra 在 B 到达前访问 B。驱动内部缓冲不能算“免费 lookahead”。
+- `NR Low Latency`：B 到达就处理 B，不主动等待 C；FG 关闭。ingress mailbox 容量 1，过期帧直接丢弃并 reset。
+- `FG Low Latency`：要生成 A 与 B 中间的 A½，必须等 B 到达，因此算法需要一个 future-frame window。A½ 最早在 B 到达后才存在；稳定显示时理论附加下限约为半个源帧周期再加 GPU/pacing，保守调度可能接近一个源帧周期。60 fps 的一个周期为 16.7 ms，30 fps 为 33.3 ms；实际值必须测，不能拿周期公式冒充结果。
+- `Buffered Quality`：等 C 到达后再最终确认 A/B 区间；B↔C 只用于 forward/backward consistency、depth stability、遮挡/切镜和 trust mask，不伪装成 DLSSG 的额外输入。它相对 FG pair mode 再需要一个 future frame，通常额外接近一个源帧周期。
+- `Export Quality`：整个文件都可访问，允许更长 lookahead/双向分析，且不受交互延迟约束。
 
-这是接口复现验收，不是评价 DLSS 5 本身的审美效果。
+总延迟必须分项报告：`capture hardware/transport + driver queue + deliberate lookahead + GPU graph + present queue + display scanout`。Veyra 只能精确测量进入本进程之后的部分；没有外部高速相机或设备时间戳时，不得把内部延迟叫 click-to-photon。
 
----
+如果玩家本人靠 Veyra 预览操控游戏，默认 `NR Low Latency` 或 `FG Low Latency`；如果采集卡 HDMI OUT 直通玩家显示器，而 Veyra 只服务观众、录制或第二屏，则允许 `Buffered Quality`，因为控制延迟走直通链路。
 
-# 6. Frame Guidance
+画质收益不是线性的：从只见 A 到等到 B，才能做真正的 A↔B 双向 flow、遮挡判断和中间帧，这是主要收益；再等 C 主要改善加速度、切镜确认和深度稳定，通常是次要收益。默认不能为了很小的 C 收益牺牲交互延迟。
 
-V1 不自研 Guidance 算法，只实现 Magpie 已证明可工作的最小合同。
+### 8.5 Preset 与后处理
 
-统一内部规范：
+- Feature 18 暴露已确认的 NR preset/style/intensity/local tone/local structure/skin 等参数；参数类型必须来自已验证契约；
+- DLSS SR model preset 仅在官方 header/API 支持时使用；E/F/J/K/L/M 不得靠第三方 README 硬编码；
+- 可做 `Natural`、`Old Video`、`AI Video`、`Game Capture` 四个配置预设，但预设只是参数集合；
+- `Old Video` 可在 DLSS 前做轻量 deblock/deband，`AI Video` 可加强 scene-cut 与 history clamp；必须在 UI/日志中明确这些不是 DLSS 本身；
+- 后处理只允许有界 detail/color mix、anti-ringing clamp 和可关闭 sharpening。默认不得叠加会掩盖 DLSS 真实输出的强滤镜。
 
-```text
-Motion Direction: Current → Previous
-Motion Unit:      Source Pixels
-Motion Format:    R16G16_FLOAT
-Depth Format:     R32_FLOAT
-Frame Identity:   uint64 frameId
-```
+## 9. 三种模式的具体规格
 
-Provider：
+### 9.1 CaptureSource
 
-```text
-ZeroGuidanceProvider
-├─ Zero Motion
-└─ Zero Depth
+实现：FFmpeg `libavdevice` 的 `dshow` input；只支持 Windows 枚举到的设备。第一版不接 Elgato/Blackmagic 等私有 SDK。
 
-NvofGuidanceProvider
-├─ NVIDIA Optical Flow
-├─ Dense Motion output
-└─ Zero Depth by default
-```
+必须：
 
-V1 默认：
+- 枚举 video/audio device，显示 friendly name 与可用格式；
+- 用户可选择设备真实公布的 1920×1080 或 3840×2160、30/60 fps 和音频设备；首发认证样本必须包含 2160p60；
+- 接受 NV12/YUY2/MJPEG/H.264/HEVC 中设备真实支持的 SDR 格式；不能静默伪装成请求格式；P010/HDR 不得被错当 SDR；
+- `fflags=nobuffer`、low-delay、受控 `rtbufsize`；ingress latest-frame mailbox 容量 1，图内 A/B/C window 最大 3；
+- 处理落后时丢旧视频帧，计数并 reset temporal history；音频环形缓冲有上限；
+- UI 显式提供 `NR Low Latency / FG Low Latency / Buffered Quality`，显示主动 lookahead 帧数和换算毫秒数；
+- window/fullscreen present；VSync/tearing 行为显式；
+- 分开显示 capture ingress、GPU graph、present queue 的 latency；不要把内部时间叫端到端 click-to-photon。
 
-- DLSSNR：NVOF Motion，可回退 Zero Motion；
-- DLSSG：NVOF Motion + Zero Depth；
-- Estimated Depth：不实现；
-- Motion Cleanup / Occlusion：不实现；
-- NVOF cost 只归一化成 diagnostic confidence，供可视化、日志和 scene-cut 诊断；V1 不把 confidence 冒充 NR/FG 的正式输入；
-- 文件和采集模式使用同一 provider contract。
+参考 gate：真实 4K60-capable 设备输入 2160p60，连续 30 分钟；ingress queue ≤1、history window ≤3；working set/显存无持续增长；device removed=0；A/V 可听；NR Evaluate 全成功；FG on 时内部生成 cadence 为 120 Hz 且生成帧不等邻帧/简单 blend。另跑 1080p60→4K 输出，证明 SR 路径。没有 4K 设备时 Phase 7 保持阻塞，不能拿文件或虚拟摄像头替代。
 
-必须 Reset 的事件：
+### 9.2 MediaFileSource + DisplaySink
 
-- Seek
-- Resize
-- Source Change
-- Device Lost
-- Long Pause Resume
-- 硬切检测命中
-- Guidance frameId 不连续
+必须：
 
-Scene Cut V1 只需要一个轻量直方图/帧差检测器，用于触发 Reset，不承担画质优化。
+- H.264/HEVC，MP4/MKV/MOV，最高 3840×2160、23.976–60 fps；优先共享 D3D12VA decode；软件 fallback 明示；
+- 打开、播放、暂停、seek、关闭、全屏、窗口 resize；
+- WASAPI audio master clock，视频按 PTS present；
+- 10 次随机 seek 后首帧 reset；不得显示 seek 前历史；
+- 支持外置 SRT 和容器内首条文本字幕；ASS/SSA 至少正确使用 libass 渲染基础样式。字幕一律在 FG 后合成，不能被 NR/FG 扭曲；
+- EOF/drain、loop 和错误状态真实可见。
 
----
+A/V gate：4K30 与 4K60 各循环 30 分钟，drift 绝对值 ≤50 ms；P95 present lateness、真实源帧 drop、解码 fallback 进入日志；不可用理论 FPS 替代。
 
-# 7. DLSS Super Resolution
+### 9.3 ImageSource / ExportSource + EncodeSink
 
-DLSS SR 与 DLSSNR 是两个独立阶段：
+图片：
 
-- 输出尺寸等于输入尺寸：跳过 DLSS SR；
-- 输出尺寸大于输入尺寸：先 DLSS SR，再 DLSSNR；
-- DLSSNR 的输入/output 尺寸在 V1 保持一致；
-- UI 中将“分辨率增强”和“DLSS 5 Neural Rendering”分成两个开关，避免概念混淆。
+- WIC decode PNG/JPEG，应用 EXIF orientation；
+- 单帧 NR 的 reset=1；motion/depth 默认 Zero；可选 SR；
+- PNG/JPEG 输出，保留 ICC/EXIF 能力若已实现，否则明确报告丢弃；
+- 不覆盖原文件；先写 `.partial`，验证后原子 rename。
 
-用户 UI：
+视频：
 
-```text
-Upscale: OFF / Quality / Balanced / Performance
-DLSS 5:  OFF / ON
-```
+- 使用同一文件 demux/decode/EnhanceGraph；不允许另写一个 Python 核心；
+- 输入/输出最高 3840×2160；输出 CFR 23.976/24/25/30/50/60/120 或 source nominal×2；DLSSG 只生成中间帧，时间戳严格位于相邻源帧之间；
+- Feature 18/FG 输出在 GPU 上转换为 NV12；10-bit/HDR 尚未支持时不得生成伪 P010；
+- 使用 Video Codec SDK 13.1 的 D3D12 NVENC：注册 `ID3D12Resource`，为每个 slot 提供 input/output fence point，编码 H.264 或 HEVC；禁止整帧 GPU→CPU raw readback；
+- 只把压缩 bitstream 交给 FFmpeg `libavformat` mux；音频优先 remux，容器不兼容则 AAC；字幕可兼容时复制/转换，否则在开始前明确报告；
+- cancel 时停止 producer、drain/abort encoder 与 muxer，然后删除仅本任务的 `.partial`；已经成功的文件不删；
+- 完成后用 ffprobe + 自身 decoder 复核帧数、尺寸、FPS、duration、音轨和首尾非黑帧。
 
-V1 的 DLSS SR 固定使用 Zero Guidance；共享 NVOF 在 SR 输出之后生成，只供下游
-DLSSNR/DLSSG 使用，不能形成“先有 SR 输出才能算 NVOF、SR 又等待该 NVOF”的
-循环依赖。未来若要给 SR 实际 motion，必须另设 render-resolution provider，
-不复用本 V1 的 full-resolution `GuidanceFrame`。
+## 10. UI
 
----
+一个 Win32 可执行程序，三个 tab：
 
-# 8. DLSS Frame Generation
+- `Capture`：设备、格式、音频、输出尺寸、NR/SR/FG、质量档、开始/停止；
+- `Player`：打开、播放/暂停、seek、全屏、NR/SR/FG、质量档；
+- `Export`：图片/视频、输出路径/尺寸/FPS、质量档、开始/取消、进度；
+- `Diagnostics` 折叠区：runtime identity、Feature 18 state、guidance provenance、depth age、reset reason、FPS、GPU ms、queue depth、dropped frames。
+- 设置持久化、首次运行依赖检查、最近文件/设备、日志导出、崩溃后的 `.partial` 恢复/清理提示属于首发，不得留成“以后再做”。
 
-## 8.1 V1 范围
+首发 UI 可以朴素，但错误不能只进日志。任何 fallback（software decode、Zero motion、depth disabled、FG unavailable）必须在 UI 明示。
 
-- Native NGX DLSSG；
-- 只发布 2X；
-- 3X/4X 代码结构预留但 UI 隐藏；
-- 使用 capability parameters 查询可用性和最大倍率；
-- 不加入 FRUC 或其他后端。
+## 11. 性能预算
 
-## 8.2 输入合同
+参考机器：RTX 5070、driver 616.56、Windows 11、HAGS on。
 
-```text
-Final DLSSNR Color
-+ NVOF Motion / Zero Motion fallback
-+ Zero Depth
-+ Reset State
-→ DLSSG
-```
+- 4K60 native input、NR-only：RTX 5070 参考机连续 30 分钟不得持续积压，源帧处理 drop <0.1%；若实际 P95 graph time 超过 16.7 ms，4K60 realtime gate 失败，不能静默降分辨率；
+- 4K60 + FG 2X：内部 cadence 必须稳定产生 120 Hz 时间线；显示器不足 4K120 时可 offscreen 验证 generated output，但 UI 必须说明实际 present 上限；
+- `NR Low Latency` 的 `lookaheadFrames=0`；`FG Low Latency=1`；`Buffered Quality=2`。这些数字表示生成当前区间需要看到多少后帧，不等于宣称显示延迟恰好为 `N/f`；实际 ingress→present 与外部端到端时间必须测量；
+- Capture ingress queue depth ≤1，history window ≤3，GPU in-flight slots 4–6；禁止为了通过 4K gate 建立更深隐藏队列；
+- Player 4K60：不因正常处理主动丢源帧；若算力不足必须明确暂停/降级所选 feature，不能篡改 PTS；
+- Export：D3D12 NVENC，不回读 raw pixels；吞吐可以低于实时，但内存/显存有上限，working set 不随时长线性增长；
+- 4K 运行必须记录 D3D12 budget/usage、各资源池峰值；RTX 5070 12 GB 参考机在峰值仍保留至少 1.5 GiB budget headroom，否则 gate 失败；
+- 每个 pass 记录 GPU timestamp；不得用 CPU wall time代替 GPU cost；
+- Depth 若让实时路径超预算，Auto 降低更新频率或关闭 depth，不能积压帧。
 
-内部 `GuidanceFrame` 的 motion 单位固定为 source pixels；DLSSG adapter 必须按
-官方 310.7 header 的语义把它归一化到 `[-1,1]`，即 full-resolution motion
-使用 `mvecScale = {1.0 / width, 1.0 / height}`。NR 的私有 Feature 18 合同仍按
-其已验证参数使用 `MVecScaleX/Y = 1`，两个 backend 不得误共用同一 scale 值。
-固定 Magpie experimental 提交虽然在 DLSSG 写了 `{1,1}`，但这与官方 header
-注释冲突；该值只保留为显式 `magpie-unit` 诊断模式，不能静默成为 Veyra 默认。
-Phase 6 用已知像素平移片记录两种 mode、实际 scale、输出 hash/counter 和方向/
-幅值结论，不以主观观感选择。
+阈值如因真实硬件不可能达到，可以以实际日志向用户申请修订；Agent 不得自行放宽 gate。
 
-V1 明确标记未提供：
+## 12. 质量验证
 
-- HUD-less
-- UI Color
-- UI Alpha
-- Bidirectional Distortion Field
-- Output Real
+固定 corpus：
 
-播放器自己的 UI 和字幕放在 FG 后绘制，因此不会进入 DLSSG。
+- 细线/纹理慢移；
+- 大幅高速平移；
+- 遮挡与显露；
+- 烟火/粒子/半透明；
+- 人脸/皮肤；
+- 动漫/二维画面；
+- UI/字幕；
+- 硬切、闪光、重复帧、掉帧；
+- 老压缩视频；
+- AI 生成视频的形变/纹理漂移。
 
-## 8.3 时序
+每段至少输出 `off / zero / motion / motion+depth / auto`。保存：输入 hash、配置、runtime hash、输出 hash、flow/depth/confidence 可视化、reset timeline、GPU times。
 
-30→60 示例：
-
-```text
-Real A       0.00 ms
-Generated   16.67 ms
-Real B      33.33 ms
-Generated   50.00 ms
-Real C      66.67 ms
-```
-
-要求：
-
-- 音频仍是 master clock；
-- 生成帧具有独立 presentation timestamp；
-- 不通过重复 Present 假造输出 FPS；
-- Seek、暂停恢复和源切换后先 Reset，再接受新生成帧；
-- 记录每次 Evaluate、Interpolation Enabled/Disabled 和发布成功数。
-
----
-
-# 9. 播放器
-
-## 9.1 V1 用户功能
-
-- 打开本地视频；
-- 播放、暂停、Seek；
-- 音量和静音；
-- 窗口/全屏；
-- Upscale OFF/模式；
-- DLSS 5 OFF/ON；
-- Frame Generation OFF/2X；
-- 显示输入分辨率、输入 FPS、输出 FPS 和 backend 状态。
-
-## 9.2 媒体管线
-
-V1 的解码路径：
-
-```text
-FFmpeg D3D12VA
-→ D3D12 texture
-
-Fallback:
-software decode
-→ GPU upload
-```
-
-D3D11VA/D3D11On12 不在 V1；它会额外引入 device/queue/handle 同步和资源状态
-边界，不能作为弱模型“顺手加”的第三条路径。
-
-V1 gate 的最低格式矩阵：
-
-- H.264 / HEVC video；
-- AAC / PCM audio；
-- MP4 / MKV container。
-
-AV1、VP9、Opus、FLAC、MOV、WebM 可以在 FFmpeg 已提供 decoder/demuxer 时作为
-best-effort 路径，但不允许拖延 Phase 3/7，也不能在没有固定测试片证据时写成
-已支持。
-
-## 9.3 UI
-
-底栏只保留：
-
-```text
-Play | Volume | Upscale | DLSS 5 | FG 2X | Fullscreen
-```
-
-开发面板显示：
-
-- NGX Core status
-- DLSSNR Create/Evaluate result
-- DLSSNR active parameters
-- SR/NR/FG GPU time
-- Feature 18 successful frame count
-- FG real/generated frame count
-- Guidance type
-- Reset count and reason
-- Queue depth / dropped frames
-
----
-
-# 10. 工程目录
-
-```text
-Veyra/
-├─ CMakeLists.txt
-├─ cmake/
-├─ third_party/
-│  └─ README.md
-├─ runtime_local/                 # gitignored，不进入发行包
-├─ src/
-│  ├─ app/
-│  │  ├─ App.cpp
-│  │  ├─ MainWindow.cpp
-│  │  └─ Settings.cpp
-│  ├─ gfx/
-│  │  ├─ D3D12DeviceContext.cpp
-│  │  ├─ SwapChain.cpp
-│  │  ├─ TexturePool.cpp
-│  │  ├─ ColorConverter.cpp
-│  │  └─ GpuProfiler.cpp
-│  ├─ media/
-│  │  ├─ FFmpegDemuxer.cpp
-│  │  ├─ FFmpegVideoDecoder.cpp
-│  │  ├─ FFmpegAudioDecoder.cpp
-│  │  ├─ PlaybackClock.cpp
-│  │  └─ AudioWASAPI.cpp
-│  ├─ ngx/
-│  │  ├─ NgxCoreHost.cpp
-│  │  ├─ NgxParameters.cpp
-│  │  ├─ DlssSrBackend.cpp
-│  │  ├─ DlssNrBackend.cpp
-│  │  ├─ DlssNrRuntimeAdapter.cpp
-│  │  └─ DlssFgBackend.cpp
-│  ├─ parity/
-│  │  ├─ RenoDxParityCodec.cpp
-│  │  ├─ RenoDxParityProfile.cpp
-│  │  └─ ParityCapture.cpp
-│  ├─ guidance/
-│  │  ├─ FrameGuidance.h
-│  │  ├─ ZeroGuidanceProvider.cpp
-│  │  ├─ NvofGuidanceProvider.cpp
-│  │  └─ SceneCutReset.cpp
-│  ├─ player/
-│  │  ├─ VideoPipeline.cpp
-│  │  ├─ FrameScheduler.cpp
-│  │  └─ Presenter.cpp
-│  └─ ui/
-│     ├─ PlayerControls.cpp
-│     └─ DebugPanel.cpp
-├─ tools/
-│  ├─ nr_harness/
-│  └─ parity_capture/
-└─ validation/
-   ├─ fixed_frames/
-   ├─ fixed_clips/
-   └─ expected_manifest.json
-```
-
-`validation/` 不是用于研究模型好坏，而是防止接口、色彩和时序在代码修改后回归。
-
----
-
-# 11. 开发阶段
-
-## Phase 0 — Runtime Manifest 与 D3D12 Skeleton
-
-- C++20 / CMake；
-- Win32 Window；
-- D3D12 Device、Queue、SwapChain；
-- runtime manifest；
-- DLL hash/signature/version/capability 检查；
-- logging、SEH guard、GPU timestamp。
-
-完成条件：
-
-- 当前 RTX 5070 / 616.56 环境识别正确；
-- D3D12 窗口稳定；
-- proprietary runtime 不进入 Git。
-
-## Phase 1 — Feature 18 Native Harness
-
-先实现独立序列执行器，不先造完整播放器：
-
-```text
-fixed frame sequence
-→ D3D12 texture
-→ NGX Core
-→ signed DLSSNR runtime adapter
-→ Feature 18 Create/Evaluate
-→ output capture
-```
-
-完成条件：
-
-- Feature 18 Create 成功；
-- 连续 300 帧 Evaluate 成功；
-- Preset、Style、Intensity 等参数可改变；
-- Release/Shutdown 无泄漏或崩溃；
-- Raw output 可抓取。
-
-## Phase 2 — RenoDX Parity Codec
-
-- Proxy encode；
-- Feature 18；
-- Proxy decode / tone mapping；
-- 参数映射；
-- Original/Proxy/Raw/Final 四阶段确定性抓帧。
-
-完成条件：
-
-- CPU/GPU reference 数值门禁通过，固定灰阶/色卡/高光没有系统性 gamma、亮度、饱和度或高光偏差；
-- 参数变化产生可观测、非恒定输出；只有存在同 addon hash、preset、输入和分辨率的合格外部 reference 时，才追加“与 RenoDX 同方向”的结论；
-- 可切换 Raw / Parity Final。
-
-## Phase 3 — Minimal Video Pipeline
-
-- FFmpeg demux/decode；
-- 先做 video-only；
-- 连续 PTS；
-- DLSSNR history；
-- Seek/reset；
-- D3D12 present。
-
-完成条件：常见 1080p/4K 文件可连续播放，Feature 18 每个 real frame 稳定执行。
-
-## Phase 4 — DLSS Super Resolution
-
-- 输入/输出分辨率策略；
-- DLSS SR Create/Evaluate；
-- SR → NR 顺序；
-- resize/reset。
-
-完成条件：同分辨率自动跳过 SR，放大模式先 SR 后 NR，不发生错误 subrect 或资源错配。
-
-## Phase 5 — NVOF Guidance
-
-- Zero Guidance baseline；
-- NVIDIA Optical Flow；
-- Current→Previous / source-pixel contract；
-- frameId 和 reset。
-
-完成条件：DLSSNR 和 DLSSG 均消费同一个 source-pixel `GuidanceFrame`，各自 adapter
-执行自己的 scale 转换；当前机器 capability 可用时必须验证真实 NVOF，真实查询为
-unsupported 时才自动回退 Zero，不能主动跳过后把 Zero 标成 NVOF。
-
-## Phase 6 — DLSS Frame Generation 2X
-
-- capability query；
-- NGX DLSSG Create/Evaluate；
-- 生成帧发布；
-- PTS/cadence；
-- FG 后 UI。
-
-完成条件：
-
-- 确认 interpolation enabled；
-- 每两个 real frame 之间发布一个 generated frame；
-- 输出 FPS 统计来自实际 present，不是理论倍率；
-- Seek/pause/resize 后无旧历史生成帧。
-
-## Phase 7 — Audio 与最小 UI
-
-- FFmpeg audio decode；
-- WASAPI；
-- audio master clock；
-- 播放控制；
-- 正式底栏与隐藏调试面板。
-
-完成条件：长时间播放不发生持续 A/V drift，FG 不改变音频时长。
-
-# 12. 验收标准
-
-## 12.1 DLSSNR 调用
-
-- 日志明确记录 runtime hash、版本、Feature ID 和 Create result；
-- 每帧记录 Evaluate result；
-- 输出不是未处理输入的别名或错误 Copy；
-- 参数类型固定且可追踪；
-- reset 后首帧行为稳定；
-- 不因连续 Seek、Resize、暂停恢复崩溃。
-
-## 12.2 RenoDX/ReShade 相似性
-
-- 固定输入和固定参数；
-- 保存 Original、Proxy、Raw NR、Final 四阶段；
-- CPU/GPU parity 数值测试达到 Playbook 容差；
-- 检查全局亮度、gamma、饱和度、局部对比和高光范围；
-- 不做“哪个更好看”的主观评分；
-- 无外部 reference 时按已记录 shader 数学验收；有合格 reference 时才追加同条件对照。
-
-## 12.3 Frame Generation
-
-- capability 查询成功；
-- Create/Evaluate 成功；
-- generated frame count 与 real frame count 对应；
-- 生成帧拥有正确 PTS；
-- present cadence 连续；
-- reset 后不混入旧 source frame；
-- UI/字幕不进入生成输入。
-
-## 12.4 性能与稳定性
-
-- 正常路径无 CPU frame readback；
-- 每个 GPU stage 有 timestamp；
-- texture/fence/parameter/feature 生命周期无泄漏；
-- 记录 1080p 和 4K 的实测 GPU 时间，不在开发前虚构固定毫秒目标；
-- Device Lost 能显式失败或重建，不能静默黑屏。
-
----
-
-# 13. 依赖与代码边界
-
-## 13.1 Magpie
-
-Magpie 已经完成可行性证明，并可作为：
-
-- API 调用顺序参考；
-- 参数合同参考；
-- Guidance 数据格式参考；
-- DLSSG 状态和计数参考。
-
-如果 Veyra 计划闭源，不复制 Magpie GPLv3 源码；根据公开 SDK 接口和可观察行为独立实现。若决定接受 GPLv3 并公开对应源码，则可以重新评估直接复用的成本。
-
-## 13.2 RenoDX Add-on
-
-- 开发期本地参考；
-- 不链接进产品；
-- 不随安装包分发；
-- 不把 `.addon64` 当配置文件；
-- V1 codec 配置使用三个 1.0 中性工程 baseline 并记录到 validation manifest；
-- 只有用户另行提供真实 `ReShade.ini`/preset 和配套 capture 时，才建立可选 reference profile。
-
-## 13.3 NVIDIA Runtime
-
-- `nvngx_dlssnr.dll` 只放 `runtime_local/`；
-- runtime 目录加入 `.gitignore`；
-- 不自动下载；
-- 不修改签名 DLL；
-- 发行方式与正式 SDK 出现后单独决定；
-- backend 必须可被将来的官方 Streamline DLSS 5 实现替换。
-
----
-
-# 14. V1 明确不做什么
-
-- 不研究 DLSS 5 是否适合普通视频；
-- 不评价不同内容类型的模型审美；
-- 不训练或微调 AI 模型；
-- 不自研 Motion Cleaner；
-- 不接入 Depth Anything；
-- 不开发 FRUC fallback；
-- 不追求所有 RTX 显卡兼容；
-- 不做 HDR；
-- 不做 3X/4X；
-- 不做复杂字幕和媒体库；
-- 不把 ReShade 放入最终依赖；
-- 不先做采集卡而延误文件播放器主链。
-
----
-
-# 15. 最终 V1 定义
-
-```text
-V1.0 =
-Minimal FFmpeg Player
-+ D3D12 GPU-resident pipeline
-+ Optional DLSS Super Resolution
-+ Native DLSSNR Feature 18
-+ RenoDX-equivalent parity layer
-+ NVOF / Zero Guidance
-+ Native DLSS Frame Generation 2X
-+ WASAPI sync
-+ Minimal UI
-```
-
-V1 的发布门槛不是“我们优化了 NVIDIA 的模型”，而是：
-
-> Veyra 能在不依赖 ReShade 的情况下稳定调用 DLSSNR 与 DLSSG，按已记录的 RenoDX parity 数学正确处理颜色、参数和输出；若存在合格外部 reference，再证明不存在明显的管线级偏差。
-
----
-
-# 16. 开工顺序
-
-Agent 或开发者必须严格按以下顺序工作：
-
-```text
-1. Phase 0：D3D12 + runtime manifest
-2. Phase 1：Feature 18 native harness
-3. Phase 2：RenoDX parity codec
-4. Phase 3：video-only FFmpeg pipeline
-5. Phase 4：DLSS SR
-6. Phase 5：NVOF guidance
-7. Phase 6：DLSSG 2X
-8. Phase 7：audio/UI
-```
-
-禁止越过 Phase 1/2 直接堆播放器功能。调用链和 parity layer 是项目主体，播放器只是宿主。
+“比 Magpie 好”的发布条件不是单个截图。必须同机、同输入、同输出分辨率/FPS、同类参数，至少在指定场景的 temporal residual/flicker 与盲评同时胜出，才允许写场景限定结论。
+
+## 13. 安全与许可证
+
+- `nvngx_dlssnr.dll` 固定 SHA256 `E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E`，size `165840496`，NVIDIA 签名；不修改、不提交、不分发；
+- `renodx-dlss5-1.addon64` 固定 SHA256 `837B6A34D41C0EB75CB105AFEB5B985CFC72CB7F3A786C5DBB3F5415C45C978F`，size `359424`，未签名；不加载、不注入、不分发；
+- 所有 DLL 以绝对路径和受限 `LoadLibraryExW` flags 加载；
+- Magpie GPLv3 和无许可证竞品代码不得复制；
+- NVOF SDK、DLSS SDK、ORT runtime、模型、FFmpeg binary 各自有 manifest、hash、license；
+- 公开发布/安装包/上传 artifact 前必须单独完成分发许可审查；本规格只授权本机研发。
+
+## 14. V1 Definition of Done
+
+同时满足：
+
+1. Phase 0–7 gate 与独立 Reviewer 全通过；
+2. 三个 tab 均有真实端到端录屏/日志/输出证据；
+3. Capture 30 分钟、Player 30 分钟、Export 固定样本全部通过；
+4. Feature 18、SR、NVOF、DLSSG 的真实 Create/Evaluate/return code 进入日志；
+5. Guidance 可视化证明不是 Zero 冒充 motion/depth；
+6. 图片/视频输出非黑、非恒定、非简单复制；FG 帧非重复/线性混合；
+7. A/V、PTS、frame count、duration、reset、latency 和内存达到门槛；
+8. proprietary/local assets 未被 Git 跟踪；
+9. UI 明示所有 fallback 和实验性质；
+10. 不声明未验证的“原生等价”或“全面优于 Magpie”。
+11. 4K30/60 Player、4K60 Capture、4K H.264/HEVC Export 的独立证据齐全；不能用 1080p→4K 的单次 SR harness 冒充 4K 产品支持；
+12. 设置、依赖诊断、设备丢失/重新打开、导出崩溃恢复和日志导出达到首发行为；
+13. 若 NVIDIA/模型/FFmpeg/编码器分发权尚未解决，只能标记 `release candidate / distribution blocked`，不能生成并公开上传带受限资产的安装包。

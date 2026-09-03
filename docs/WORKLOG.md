@@ -257,3 +257,108 @@ Deleted/renamed:
 Next single task:
 
 Start the Goal using `loop/GOAL_PROMPT.md`. The first Agent action is the 54-check preflight; then it completes P0.1 and proceeds through Phase 0 backlog order without crossing the gate.
+
+## 2026-09-03 Fast-track V1 scope rebaseline and competitor audit
+
+Goal:
+
+Replace the obsolete player-only route with the user-confirmed first-release scope: physical capture-card enhancement, interactive media player, and image/video export, all sharing one DLSS quality graph. Audit Magpie and recent GitHub competitors before changing the plan.
+
+Facts found:
+
+- Magpie commit `289dc0f6d52075f5a06b47a3f70b35d438095bf5` already contains NVOF motion/confidence, optional Depth Anything V2 Small with temporal reprojection, and DLSSG. Adding a depth texture alone is not a competitive advantage.
+- `Merserk/dlss5-visual-enhancer`, `DaniilSokolyuk/video2dlssnr`, `Zonnery/dlss5-nr-player`, `SamG-Coder/dlss5-infinity-studio`, and `jlrouzies-fr/DLSS5-Feeder` were inspected at source/README level. Details, commit IDs, limitations and licenses are in `docs/COMPETITOR_AUDIT_2026-09-03.md`.
+- The screenshot comment's useful lesson is the complete DLSS render contract, not reverse engineering itself. HDMI/video pixels cannot recover engine-native depth/motion/HUD-less buffers; Veyra will use estimated guidance and label it honestly.
+
+Changed:
+
+- Replaced `VEYRA_PRODUCT_SPEC_V1.md` with the three-workflow product definition and measurable Definition of Done.
+- Replaced `VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md` with explicit module layout, dependencies, API contracts, motion/depth/reset rules, source/sink implementation steps and Phase 5–7 gates.
+- Added `docs/COMPETITOR_AUDIT_2026-09-03.md`.
+- Updated `README.md`, `AGENTS.md`, Goal/Loop/Reviewer instructions, gate contract, BACKLOG, STATE and INBOX.
+- Expanded the protected control set from 9 to 10 files and rebaselined `loop/CONTROL_HASHES.json`; `scripts/loop-gate.ps1` still fails closed on any drift.
+- Preserved Phase 0–4 checkpoints. Invalidated only the old Zero-only Phase 5 evidence because it no longer proves the new quality core.
+- Adversarial re-read found and fixed one graph-order contradiction: V1 now states everywhere that SR uses Zero Guidance first, then NVOF/depth/confidence are generated at the post-SR `workingExtent` for Feature 18 and FG. This prevents a weak Agent from building an SR↔NVOF circular dependency or mixing resource extents.
+- Verified the local official SDK already contains a signed `nvngx_dlssg.dll` 310.7.0.0 and recorded its exact path/size/hash in the Playbook. It is a Phase 6 staging source, not evidence that DLSSG currently works in Veyra.
+
+Commands actually run:
+
+- Cloned/fetched the six upstream repositories into a unique directory under `%LOCALAPPDATA%\Temp` and inspected files with `rg`/`Get-Content`; no upstream source was copied into Veyra.
+- `git status --short --branch`, `rg --files`, JSON parsing, suspicious-text scan, `git diff --check`.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate preflight` → exit 0, 68/68.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Root <project> -Preset x64-release` → exit 0, Ninja no work to do.
+
+Runtime result:
+
+- This was a control-plane/research task. No new Feature 18, NVOF, DAV2, DLSSG, capture-card or export run was executed. Historical Phase 0–4 runtime evidence was not re-labeled as current product completion.
+
+Known blockers:
+
+- Optical Flow SDK 5.0 headers/sample require the user to accept NVIDIA's EULA and place the SDK under `third_party_local`.
+- The final capture gate needs a real DirectShow/UVC device and HDMI test signal.
+- Public distribution of NVIDIA runtime/model/FFmpeg assets remains unauthorized.
+
+Next single task:
+
+P5.1: replace the obsolete Zero-only `scripts/gates/phase5.ps1` with the fail-closed Fast-track quality-core gate and prove it fails while unified graph/NVOF/depth implementations are absent.
+
+## 2026-09-03 Launch V1.2 / native-4K rebaseline
+
+User decision:
+
+- Do not ship or accept a minimal MVP. The first release must support native 4K SDR video and retain capture-card, player, image export and video export.
+
+Engineering decisions:
+
+- Native 4K means the Player/Capture/Export graph actually processes 3840x2160; the historical 1080p-to-4K SR harness is not product proof.
+- Capture latency is not free lookahead. `NR Low Latency` uses no future frame; `FG Low Latency` needs A/B (`lookaheadFrames=1`); `Buffered Quality` keeps bounded A/B/C (`lookaheadFrames=2`) and uses C only for Veyra consistency/depth/cut/trust, not as a fictional third DLSSG input.
+- Replaced the proposed full-frame readback/ffmpeg raw pipe release path with native D3D12 NVENC H.264/HEVC plus libavformat mux. Raw pipe is diagnostic-only and cannot pass Phase 7.
+- Added 4K resource pooling, DXGI video-memory budget/headroom, 4K30/60 player gates, real 4K60 capture gate, subtitle layer after FG, settings/dependency/recovery/log-export release behavior.
+- Increased the unattended safety limit from 80 to 120 cycles; failure/no-progress limits remain 3/5.
+- Added `release_candidate` and `distribution_blocked` state validation. Functional completion cannot be called a public launch while proprietary distribution rights remain unresolved.
+
+Primary references checked:
+
+- NVIDIA NVOFA FRUC programming guide for previous/next frames and forward/backward validation.
+- NVIDIA public DLSS-G programming guide for resources and pacing.
+- NVIDIA Video Codec SDK 13.1 NVENC guide for D3D12 resources and fence points.
+- Elgato official device comparison for the distinction between HDMI passthrough and software preview latency.
+
+Commands actually run:
+
+- JSON parse for STATE/control/config files and PowerShell AST parse for `scripts/loop-gate.ps1`.
+- Markdown fence-balance scan.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate preflight` -> exit 0, 70/70.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Root <project> -Preset x64-release` -> exit 0, Ninja no work to do.
+
+Runtime boundary:
+
+- No native-4K Feature 18/NVOF/DAV2/DLSSG/Player/Capture/NVENC Export run was executed in this control-plane turn. None of those features is claimed complete.
+
+New external blockers:
+
+- Video Codec SDK 13.1 EULA/header/sample.
+- A real DirectShow/UVC 4K60 SDR capture device, HDMI audio and 4K60 source.
+- Public distribution rights for the experimental runtime and bundled assets.
+
+Next single task:
+
+P5.1: replace the obsolete phase5 gate with the Launch V1 1080p60 + native-4K60 fail-closed gate, then prove it fails for the currently missing product graph/guidance implementations.
+
+## 2026-09-03 NVIDIA SDK EULA decision handoff
+
+User decision:
+
+- The user accepts the NVIDIA Optical Flow SDK and Video Codec SDK licensing direction and authorizes their use for local Veyra development.
+- This chat record is not evidence that NVIDIA Developer Portal acceptance/download has completed. Both expected SDK directories were checked and remain absent.
+
+State update:
+
+- `loop/INBOX.md` and `loop/STATE.json` now distinguish the resolved product decision from the unresolved package acquisition.
+- The next Maker must not ask the user to reconsider the EULA. It should continue P5.1 immediately and only treat the missing Optical Flow package as a concrete blocker when P5.5 needs its headers/sample.
+- Video Codec SDK absence does not block Phase 5; it becomes a concrete integration blocker at P7.5.
+- No SDK, runtime, driver or source code was installed or changed by this documentation handoff.
+
+Next single task:
+
+P5.1: replace the obsolete Phase 5 gate with the Launch V1 fail-closed quality-core gate and prove the current missing implementation produces exit 1.

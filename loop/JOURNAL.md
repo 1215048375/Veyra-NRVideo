@@ -697,3 +697,48 @@ Result:
 - 是否有进展，依据: Phase 2 完整闭环（gate+reviewer 双绿）。
 - STATE/BACKLOG 更新: phases[2] → passed + checkpoint；Phase 3 解锁。
 - 下一唯一动作: Phase 3 P3.1。
+
+---
+
+## Scope Rebaseline 2026-09-03 — P5.0 Fast-track control plane
+
+### Before
+
+- Phase: 5
+- 唯一任务: 按用户新决定把 Capture / Player / Image+Video Export 全部纳入首发，并基于 Magpie/近期竞品源码审计重做质量路线与无人值守控制面。
+- 可证伪假设: 若权威文档仍出现“采集/深度/导出不是 V1”、STATE/Backlog 不一致、protected hash 不匹配或 preflight 非零，则重基线失败。
+- 预计修改文件: README、AGENTS、Product Spec、Playbook、竞品审计、Loop/Goal/Reviewer、STATE/BACKLOG/INBOX、gate contract/hash manifest。
+- 快速检查命令: JSON parse、`git diff --check`、`loop-gate -Gate preflight`、Release build。
+- 预期新增证据: 新控制面 10-file hash 全过；preflight exit 0；下一任务唯一指向 P5.1。
+
+### After
+
+- 上游审计: Magpie `289dc0f...`；Merserk `f90f731...`；video2dlssnr `e194611...`；Infinity `4e936b4...`；DLSS5-Feeder `03da7d9...`；另审查 Zonnery 的直接 Feature 18/Zero guidance 路线。临时 clone 位于 `%LOCALAPPDATA%\Temp\veyra-competitor-audit-20260903`，Veyra 未复制任何第三方源码。
+- 决策: 三种 source 共享 `FrameSource -> EnhanceGraph -> FrameSink`；SR→Feature18→FG；NVOF confidence + optional DAV2；Capture mailbox=1；Player/Export 不丢源帧；Export 首发允许有界 readback；只保证薄格式矩阵。
+- 实际验证: STATE/CONTROL_HASHES JSON 可解析；`git diff --check` 仅出现行尾转换 warning、无 whitespace error；preflight 68/68 exit 0；x64-release build exit 0（no work to do）。
+- 运行边界: 本轮没有执行新的 Feature 18/NVOF/DAV2/DLSSG/采集/导出，不声称产品功能完成。
+- 对抗复核: 发现 Product Spec/竞品审计把 Guidance 画在 SR 前，与已决定的 post-SR NVOF 路径冲突；已统一为 SR(Zero) -> workingExtent Guidance -> NR -> FG，并重锁控制面 hash。
+- P5.0 状态: DONE。
+- 下一唯一动作: P5.1 重写 phase5 gate 并做缺实现时的负向测试。
+
+## Scope Rebaseline 2026-09-03 — P5.0b Launch V1.2 / native 4K
+
+### Before
+
+- 用户撤销最小 MVP，要求首发版本和 4K 视频，并询问采集卡延迟能否提供后帧。
+- 风险假设：直接把 1080 改成 4K 会漏掉显存、编码、设备协商、缓冲和恢复；把采集卡固有延迟当 future frame 会制造错误架构。
+
+### After
+
+- 结论：采集卡延迟只把整个流推后，不能提前拿到 B。A/B 是 FG 中间帧的主要收益；C 只改善一致性/深度/切镜，收益次要且多一帧等待。
+- 控制面：首发要求 native 4K SDR Player/Capture/Export、D3D12 NVENC H.264/HEVC、A/B/C 有界窗口、字幕/设置/恢复/诊断；HDR 仍独立且 fail closed。
+- 验证：JSON/AST/fence scan 通过；preflight 70/70 exit 0；x64-release build exit 0。
+- 运行边界：未执行任何新的 4K 产品 runtime，不声称实现完成。
+- 下一唯一动作：P5.1 新 phase5 gate 先因缺少 1080p/native-4K graph 与 guidance 而失败。
+
+## Operator decision 2026-09-03 — NVIDIA SDK EULA
+
+- 用户明确接受 Optical Flow SDK 与 Video Codec SDK 的许可方向，并授权本机研发使用；后续 Agent 不得重复询问是否接受。
+- 现场检查结果：`third_party_local/nvidia/Optical_Flow_SDK_5.0/` 与 `third_party_local/nvidia/Video_Codec_SDK_13.1.0/` 均不存在。
+- 聊天授权不冒充 NVIDIA Developer Portal 的实际接受记录；Agent 仍不得代用户登录或点击法律条款。
+- 执行策略：立即继续 P5.1。到 P5.5 时若 Optical Flow SDK 仍缺失，将该原子任务标 BLOCKED 并继续同 Phase 中独立任务；Video Codec SDK 只在 P7.5 成为当前阻塞。

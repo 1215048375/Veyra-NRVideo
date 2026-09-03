@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "engineVersion": "veyra-loop-v1",
-  "objective": "Complete the Veyra V1 definition for Phase 0 through Phase 7 with deterministic gates and independent phase review.",
+  "objective": "Ship Launch V1, not an MVP: one shared engine, native 4K SDR capture/player/export, Feature 18, DLSSG 2X, bounded live lookahead, D3D12 NVENC H.264/HEVC, and product recovery/diagnostics.",
   "status": "ready",
   "phase": {
     "id": 5,
-    "name": "NVOF guidance",
+    "name": "Unified guidance and quality core",
     "state": "in_progress",
     "gate": "phase5"
   },
@@ -15,7 +15,7 @@
       "name": "Runtime probe and D3D12 skeleton",
       "status": "passed",
       "gateEvidence": "loop/EVIDENCE.md#phase-0--phase0--2026-09-02t210909-0800",
-      "reviewEvidence": "loop/EVIDENCE.md#phase-0--phase0--2026-09-02t210909-0800 (Reviewer PASS, independent rerun a55d5fb41b164abc88fc2760f0b635ec, zero P0/P1)",
+      "reviewEvidence": "Reviewer PASS; independent rerun a55d5fb41b164abc88fc2760f0b635ec; zero P0/P1",
       "commit": "1fb7afa5779a6c6a0a585d4ecf18a640260a2fcf"
     },
     {
@@ -23,7 +23,7 @@
       "name": "Feature 18 native harness",
       "status": "passed",
       "gateEvidence": "loop/EVIDENCE.md#phase-1--phase1--2026-09-02t222000-0800",
-      "reviewEvidence": "loop/EVIDENCE.md#phase-1--phase1--2026-09-02t222000-0800 (Reviewer PASS after P1 fix, independent rerun 0ede6908f036462f99ced2ccfe48f169, zero P0/P1)",
+      "reviewEvidence": "Reviewer PASS after P1 fix; independent rerun 0ede6908f036462f99ced2ccfe48f169",
       "commit": "1dcf834f56986d334a2a6256b196fa1d878ad9b1"
     },
     {
@@ -31,7 +31,7 @@
       "name": "RenoDX-equivalent parity codec",
       "status": "passed",
       "gateEvidence": "loop/EVIDENCE.md#phase-2--phase2--2026-09-02t230500-0800",
-      "reviewEvidence": "loop/EVIDENCE.md#phase-2--phase2--2026-09-02t230500-0800 (Reviewer PASS after P1 fix; independent run 304e1dda07784fa2b7c024ee5110289c; ulp ruling accepted)",
+      "reviewEvidence": "Reviewer PASS after P1 fix; independent rerun 304e1dda07784fa2b7c024ee5110289c",
       "commit": "e0250b5431ee6677a0917b97af821c5579e61d77"
     },
     {
@@ -39,28 +39,28 @@
       "name": "Minimal video pipeline",
       "status": "passed",
       "gateEvidence": "loop/EVIDENCE.md#phase-3--phase3--2026-09-03t012000-0800",
-      "reviewEvidence": "loop/EVIDENCE.md#phase-3--phase3--2026-09-03t012000-0800 (Reviewer PASS after 5xP1 fix; independent run 768dd095a27745db8e76e255d66749b2; endurance 54000/54000 NR)",
+      "reviewEvidence": "Reviewer PASS after P1 fixes; independent rerun 768dd095a27745db8e76e255d66749b2",
       "commit": "2c9f2f19d818e7dd34fa6df4cf7d7c88ee12792a"
     },
     {
       "id": 4,
-      "name": "DLSS SR",
+      "name": "DLSS SR foundation",
       "status": "passed",
-      "gateEvidence": "logs/phase4/6679ef834f924b3499c5122f0c3fa850 (21/21; absolute path fix, 1080p->4K 30 evaluates)",
-      "reviewEvidence": "Reviewer PASS; independent run fd0f05726b0d46819fd549cf23c1ed6e",
+      "gateEvidence": "logs/phase4/6679ef834f924b3499c5122f0c3fa850; 1080p to 4K, 30 evaluates after absolute-path fix",
+      "reviewEvidence": "Reviewer PASS; independent rerun fd0f05726b0d46819fd549cf23c1ed6e",
       "commit": "8cdf1ea2f9b0bb1331f9219a2305cef5efd3c8d8"
     },
     {
       "id": 5,
-      "name": "NVOF guidance",
+      "name": "Unified guidance and quality core",
       "status": "in_progress",
-      "gateEvidence": "logs/phase5/2719cd368f1c43e8a412710283987237 (17/17; zero guidance 30 evaluates)",
+      "gateEvidence": null,
       "reviewEvidence": null,
       "commit": null
     },
     {
       "id": 6,
-      "name": "DLSSG 2X",
+      "name": "DLSSG 2X, bounded lookahead, and 4K realtime engine",
       "status": "locked",
       "gateEvidence": null,
       "reviewEvidence": null,
@@ -68,7 +68,7 @@
     },
     {
       "id": 7,
-      "name": "Audio and minimum UI",
+      "name": "4K player, capture-card, NVENC export, and release readiness",
       "status": "locked",
       "gateEvidence": null,
       "reviewEvidence": null,
@@ -76,26 +76,31 @@
     }
   ],
   "cycle": {
-    "completed": 22,
-    "maximum": 80,
+    "completed": 24,
+    "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "Phase 4 gate passed + Reviewer PASS (absolute path root cause fix). Proceeding to Phase 5.",
+  "currentTask": "EULA intent recorded: user authorizes official Optical Flow and Video Codec SDK use, but both local SDK packages remain absent. Continue at P5.1; do not wait for them until the first task that actually requires them.",
   "lastGate": {
-    "name": "phase4",
+    "name": "preflight",
     "status": "passed",
     "exitCode": 0,
-    "evidence": "gate 18/18 (bypass+capability+d3d12va-debug); Reviewer P1 #1 unresolved (SR capability clause)"
+    "evidence": "2026-09-03 Launch V1.2 native-4K rebaseline; preflight 70/70; release build exit 0"
   },
   "lastFailureFingerprint": null,
   "failureLedger": [],
   "baselineCommit": "2086282478ae5d1e07e8162d47148633b59882fe",
   "lastGoodCommit": "8cdf1ea2f9b0bb1331f9219a2305cef5efd3c8d8",
   "openP0P1Findings": [],
-  "blockers": [],
-  "nextAction": "Phase 5: NVOF capability query + Zero Guidance + phase5 gate.",
-  "updatedAt": "2026-09-03T02:20:00+08:00"
+  "blockers": [
+    "User accepted the Optical Flow SDK licensing direction on 2026-09-03, but third_party_local/nvidia/Optical_Flow_SDK_5.0 is absent; official portal acceptance/download and package verification are still required before P5.5 hardware integration.",
+    "User accepted the Video Codec SDK licensing direction on 2026-09-03, but third_party_local/nvidia/Video_Codec_SDK_13.1.0 is absent; official portal acceptance/download and package verification are still required before P7 native D3D12 NVENC integration.",
+    "A real DirectShow/UVC 4K60 SDR capture device, HDMI audio, and 4K60 source signal are required before P7 capture gate can pass.",
+    "Public distribution rights for the experimental DLSSNR runtime and all bundled NVIDIA/model/FFmpeg assets are unresolved; a local release candidate is allowed, public launch is blocked."
+  ],
+  "nextAction": "P5.1: replace the obsolete Zero-only phase5 gate with a fail-closed Launch V1 quality-core gate covering 1080p60 and native 4K60, then prove it fails for missing implementations.",
+  "updatedAt": "2026-09-03T17:20:00+08:00"
 }

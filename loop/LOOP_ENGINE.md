@@ -6,7 +6,7 @@
 
 ## 1. 目标与真源
 
-目标是完成 Playbook 定义的 V1（Phase 0 到 Phase 7），也不评价 DLSS 对日常视频是否“好看”。
+目标是完成 Product Spec 定义的 Launch V1（Phase 0 到 Phase 7）：物理采集卡、播放器、图片/视频导出三个闭环及 4K SDR、D3D12 NVENC、产品恢复/诊断全部完成。它不是最小 MVP。质量需要同源证据；不得回避比较，也不得无证据宣称“更好”。
 
 信息优先级：
 
@@ -116,7 +116,7 @@ BACKLOG 只允许更新状态、补充不降低原门槛的原子子任务；禁
 - 同一 failure fingerprint 的 3 个不同方案都失败：ESCALATE。
 - 连续 5 轮没有新增可验证证据：ESCALATE。
 - 用户授权/许可证/硬件是唯一剩余阻塞：BLOCKED。
-- 80 个完整 cycle 后仍未完成：NEEDS_HANDOFF，留下可直接续跑的状态。
+- 120 个完整 cycle 后仍未完成：NEEDS_HANDOFF，留下可直接续跑的状态。
 - Phase 0 到 7 的全部完成定义真实成立：COMPLETE。
 
 ## 6. 每一轮的固定协议
@@ -146,7 +146,7 @@ BACKLOG 只允许更新状态、补充不降低原门槛的原子子任务；禁
 
 ### SELECT
 
-只选择 loop/BACKLOG.md 中当前 Phase 的第一个未完成且未阻塞原子任务。一个 cycle 只能有一个主任务，预计应能在一次小 patch 和一次验证中闭环。
+只选择 loop/BACKLOG.md 中当前 Phase 的第一个未完成、前置满足且未阻塞原子任务。一个 cycle 只能有一个主任务，预计应能在一次小 patch 和一次验证中闭环。若更早任务因用户 EULA/外部硬件被明确标为 BLOCKED，可以继续同 Phase 的独立 TODO，但最终 gate 不能绕过该阻塞。
 
 选择顺序：
 
@@ -224,7 +224,7 @@ failureLedger 必须按 fingerprint 累积 attempt、假设、命令和结果；
 
 1. 完整读 AGENTS、本循环、当前 Phase 定义和 git diff；
 2. 独立重跑 phaseN gate；
-3. 对照 Playbook 第 19 节逐项审查；
+3. 对照 Product Spec 的 Definition of Done 与 Playbook 当前 Phase 逐项审查；
 4. 查找伪完成、错误类型、资源状态、历史 reset、许可证和证据缺口；
 5. 仅输出 P0/P1/P2 findings、证据和结论。
 
@@ -250,7 +250,7 @@ Reviewer 通过后：
 
 ## 7. 阶段门禁摘要
 
-具体参数、命令和阈值以 Playbook 第 16、17、21 节为准，下面只定义不可省略的出门条件。
+具体参数、命令和阈值以 Product Spec 与 Playbook 为准，下面只定义不可省略的出门条件。
 
 | Phase | 必须证明的结果 |
 |---|---|
@@ -259,11 +259,11 @@ Reviewer 通过后：
 | 2 | Original→Parity Encode→Feature18→Parity Decode；CPU/GPU shader 对照在 Playbook 容差内；identity/bypass、色阶/transfer/range 正确 |
 | 3 | FFmpeg 共享 D3D12 device 的 D3D12VA 解码；无正常路径 CPU 像素回读；seek/reset；30 分钟播放和有界队列 |
 | 4 | DLSS SR 接入；正确 render/output subrect 与 reset；关闭 SR 时可旁路；没有把 NR 冒充 SR |
-| 5 | 查询 NVOF runtime/capability；可用时验证真实 flow/cost→confidence、grid/scale/sign 与 scene-cut reset；不可用时以真实 capability 结果触发 Zero fallback；不得主动跳过或用零运动冒充 NVOF |
-| 6 | DLSSG 2X 真实生成帧；按官方 header 验证 source-pixel motion 的归一化 scale/方向；generated-frame counter/hash/timestamp 证明不是重复 present；cadence、reset 与 UI 合成顺序正确 |
-| 7 | audio-master 时钟、A/V sync、seek/pause/resume；有界低延迟队列；最小 UI 位于 FG 后；端到端稳定性 |
+| 5 | 统一 graph、真实 SR→NR、scene/cadence、NVOF motion/confidence、可选 DAV2 depth/Auto fallback、1080p/4K 质量矩阵和 30 分钟耐久 |
+| 6 | DLSSG 2X 真实生成帧；A/B 与 A/B/C 模式；generated 非重复/非 blend；4K PTS/cadence/reset；D3D12 present、WASAPI、延迟与队列 |
+| 7 | 4K Player、真实 4K60 Capture、Image Export、D3D12 NVENC 4K H.264/HEVC Export 和产品 UI/恢复全部端到端通过；音频、字幕、取消、内存/显存、许可证证据完整 |
 
-不得用 HDR、3X/4X、采集、Depth Anything 等未来扩展拖延 V1。
+不得用 HDR、3X/4X、VFR 原样导出或厂商私有采集 SDK 拖延 V1；也不得把 4K、采集、Depth Anything/明确 Auto fallback、D3D12 NVENC 或导出从 V1 删除。
 
 ## 8. 前进证据与防骗规则
 
@@ -283,7 +283,7 @@ Reviewer 通过后：
 
 遇到阻塞先判断是否影响所有后续工作。
 
-- NVOF SDK/账号条款不可用：完成当前 Phase 内不依赖 SDK 的 capability、Zero fallback、接口和测试工作，再记录 Phase 5 阻塞。Phase 5 gate 未通过时不得把 Phase 6/7 标为开始；严格顺序优先于“多做一点”。
+- NVOF SDK/账号条款不可用：把对应 backlog 项标为 BLOCKED，完成当前 Phase 内不依赖 SDK 的接口、graph、scene/cadence、depth manifest 和 synthetic tests；Phase 5 gate 未通过时不得开始 Phase 6/7。
 - DLSSNR hash 不符、签名无效、required export 缺失：安全停机，不换 DLL。
 - 当前 GPU/driver 不满足实际运行：只继续当前 Phase 内的纯 CPU/配置/诊断工作，GPU gate 保持未通过；不得提前把后续 Phase 标为开始。
 - 需要用户接受许可证、提供凭据、公开发布或执行系统级变更：写入 INBOX，不擅自同意。
@@ -296,7 +296,7 @@ Reviewer 通过后：
 
 1. Phase 0 到 7 在 BACKLOG 和 STATE 中均为 passed；
 2. 每一阶段都有 phase gate 的 exit 0 证据和 Reviewer 通过结论；
-3. Playbook 第 21 节的每一项都有真实日志/counter/capture/present 证据；
+3. Product Spec 第 14 节与 Playbook Phase 5–7 的每一项都有真实日志、计数器、采集、呈现和导出证据；
 4. 没有未解决 P0/P1；
 5. 专有文件与 local SDK 未被 Git 跟踪或打包；
 6. 最终 Debug/Release 构建和端到端运行真实执行；

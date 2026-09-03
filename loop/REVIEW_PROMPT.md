@@ -9,8 +9,9 @@ Maker 在每个 Phase gate 首次通过后，把下面任务交给一个新上�
 的 logs/captures 下生成带 run-id 的新诊断证据。
 
 先完整阅读 AGENTS.md、loop/LOOP_ENGINE.md、
-VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md 中 Phase N、日志/证据、常见失败和
-对抗式审查章节，再读 loop/EVIDENCE.md、docs/WORKLOG.md、从
+VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md 中 Phase N、观测字段、测试资产、
+禁止捷径和对抗式审查要求，再读 docs/COMPETITOR_AUDIT_2026-09-03.md、
+loop/EVIDENCE.md、docs/WORKLOG.md、从
 BASE_COMMIT 到当前工作区的完整 diff。不要信任 Maker 的成功摘要。
 BASE_COMMIT 必须是 STATE.baselineCommit（Phase 0）或
 STATE.phases[N-1].commit（后续 Phase）；先用 git cat-file -e 验证它
@@ -30,6 +31,14 @@ STATE.phases[N-1].commit（后续 Phase）；先用 git cat-file -e 验证它
 - open/seek/resize/pause/scene-cut/device-lost 缺 history reset；
 - 正常路径 GPU→CPU 回读、每帧 fence wait、无界队列；
 - Raw NR 冒充 parity、Zero Motion 冒充 NVOF、重复 present 冒充 FG；
+- 窗口/桌面捕获冒充物理采集卡；只导出截图冒充视频导出；
+- estimated depth/motion 宣称为游戏原生；有 depth 但 age/residual 不受控；
+- Player/Capture/Export 复制三套 graph，行为与 reset 已经分叉；
+- 导出丢音轨、帧数/时长错误、取消后遗留假成功文件；
+- 只把 UI/解码器尺寸改成 3840×2160，实际 graph/capture/export 仍未跑 native 4K；
+- 用 raw RGBA/NV12 readback + pipe 冒充 D3D12 NVENC，或只验证 H.264 而漏掉 HEVC；
+- 把采集卡固有延迟当成免费 lookahead，A/B/C 窗口无界，或把 C 错当成 DLSSG 可直接接收的第三帧；
+- 没有首次运行依赖检查、设置持久化、device-lost/source reconnect、partial 恢复和日志导出却声称 release-ready；
 - ReShade addon、泄露 runtime、GPL Magpie 或 local SDK 污染主线；
 - Maker 修改验收标准、测试或日志来制造通过。
 - Goal 开始后控制面文件被修改，或 phase gate 降低 Playbook 门槛。

@@ -1,85 +1,70 @@
-# Veyra Loop Backlog
+# Veyra Launch V1 Backlog
 
-状态标记：TODO、DOING、BLOCKED、GATE_PASS、REVIEW_PASS、DONE。主 Agent 只能选择当前 Phase 的第一个 TODO；前置 Phase 未完成时，后续项保持锁定。
+状态：`TODO / DOING / BLOCKED / GATE_PASS / REVIEW_PASS / DONE`。Maker 每个 cycle 只处理当前 Phase 第一个前置满足的 TODO。若某项因外部许可/硬件明确标为 BLOCKED，可继续同一 Phase 后面与它独立的 TODO；该 Phase 最终 gate 仍不得通过。
 
-## Phase 0 — Runtime probe + D3D12 skeleton（当前）
+## Phase 0–4 — 已验证基础
 
-- [x] P0.1 运行 preflight，核对真实工作区、二进制身份、工具链和 GPU/driver；把结果写入 JOURNAL/STATE。（2026-09-02 Goal Cycle 001：preflight 54/54 exit 0；RTX 5070/616.56/12227 MiB/compute 12.0；nvofapi64 32.0.16.1656；MSVC 14.44.35207；CMake 3.31.6；Ninja 1.12.1；DXC 1.8；Git 2.53。证据：loop/JOURNAL.md Cycle 001。）
-- [x] P0.2 确认 .gitignore 后按 LOOP_ENGINE 固定顺序初始化本地 Git；显式 staged allowlist、建立 baseline commit、切到 agent/veyra-v1-loop、写 baselineCommit 状态指针；验证两个二进制、runtime_local、third_party_local、reference_local、captures、logs 均未被跟踪。（2026-09-02：baseline=2086282，loop 指针提交=09abf5d，8/8 ignore 探针通过，17 文件 allowlist，Git 后 preflight 66/66。）
-- [x] P0.3 先创建 fail-closed 的 scripts/gates/phase0.ps1，编码 Playbook 的 Phase 0 门槛；此时因为工程/输出不存在必须失败。（2026-09-02：gate 建立并 AST-clean；负向运行 exit 1，5 项缺失输入全报；无项目变异。）
-- [x] P0.4 建立最小 CMake/C++20 Win32 x64 工程与 Debug/Release presets，不引入 FFmpeg/UI。（2026-09-02：Ninja presets 双配置构建 exit 0，stub 运行 exit 0，build.ps1 解析 vswhere/vcvars，presets 无机器路径。）
-- [x] P0.5 实现结构化 logger、HRESULT/NGX result 字符串、文件 size/hash/signature 检查。（2026-09-02：--self-test 实测 BCrypt SHA256、WinVerifyTrust、CryptQueryObject 签名者、版本提取；staged DLL 身份与固定契约全匹配；双 preset 构建 exit 0。）
-- [x] P0.6 实现 D3D12DeviceContext：RTX adapter、device、direct queue、debug layer、4-slot command allocator/list/fence/event ring。（2026-09-02：--device-info 实测 RTX 5070/0x10DE/FL 12_2/4-slot ring + timestamp query 全通过；debug layer 缺失记 INBOX。）
-- [x] P0.7 实现 veyra_runtime_probe：受限绝对路径加载本地复制的 nvngx_dlssnr.dll，验证 required exports；不得加载 addon。（2026-09-02：LoadLibraryExW 受限 flags 成功，exports 5/5 实测，3s 冒烟 PASS；addon 从未被加载。）
-- [x] P0.8 Debug/Release 构建并实际运行 probe；D3D12 窗口循环 5 分钟无 device removed；记录命令、exit code、GPU/driver、hash/signature/exports、日志路径。（2026-09-02：phase0 gate exit 0/70 checks；run-id a5fd6348…；Release 300s/30002 帧 deviceRemoved=false；证据见 loop/EVIDENCE.md。）
-- [x] P0.9 当前 gate 通过、只读 Reviewer 通过、修完 P0/P1、写 checkpoint。（2026-09-02：Reviewer PASS，GATE_EXIT 0/0，无 P0/P1；4 条 P2 已记录并按协议处理。）
+- [x] Phase 0：D3D12 device、4-slot command ring、runtime identity/probe。checkpoint `1fb7afa5779a6c6a0a585d4ecf18a640260a2fcf`。
+- [x] Phase 1：signed-snippet Feature 18 Create；300/300 Evaluate；真实非黑输出。checkpoint `1dcf834f56986d334a2a6256b196fa1d878ad9b1`。
+- [x] Phase 2：parity encode/decode CPU/GPU golden 与完整 Feature 18 pipeline。checkpoint `e0250b5431ee6677a0917b97af821c5579e61d77`。
+- [x] Phase 3：FFmpeg D3D12VA decode、YUV→linear、seek/endurance。checkpoint `2c9f2f19d818e7dd34fa6df4cf7d7c88ee12792a`。
+- [x] Phase 4：DLSS SR 绝对路径修复、1080p→4K 30 Evaluate、resize。checkpoint `8cdf1ea2f9b0bb1331f9219a2305cef5efd3c8d8`。
 
-Phase 0 gate：以 Playbook 第 16 节 Phase 0 为准。未完成 P0.9 禁止开始 Phase 1。
+这些 checkpoint 是基础证据，不代表 V1 三种模式完成。旧 Phase 5 Zero-only gate 证据因产品边界改变而失效。
 
-## Phase 1 — Feature 18 native harness（锁定）
+## Phase 5 — 统一 Guidance 与质量核心（当前）
 
-- [x] P1.0a（Reviewer P2 加固项，不降低任何门槛）: 在接入 Evaluate 循环前把 ID3D12Fence 时间线计数器收敛为单一 owner（ring 从 device context 派生 fence 值或明确所有权注释），避免 Phase 1 起重复/非单调 fence 值。（2026-09-02：移除 context 冗余计数器，ring 为唯一 signaler，双 preset+device-info 回归通过。）
-- [x] P1.1 先建立 phase1 gate 和确定性 RGBA8 测试帧/输出统计。（2026-09-02：phase1.ps1 fail-closed 建立并负向验证 exit 1；JSON 契约含输出统计/变体 hash/防陈旧字段；nr-default.json 就位；NGX SDK 310.7 已 staging。）
-- [x] P1.2 封装 NGX Core、parameter block、DLSSNR runtime 和严格逆序 RAII。（2026-09-02：Init_with_ProjectID result=0x1 真实成功；exports 5/5；逆序释放干净；harness --load-only 双配置 PASS。）
-- [x] P1.3 实现受隔离、可关闭的 caller-name 兼容层；禁止 patch DLL。（2026-09-02：IAT 单 owner shim + 8 项边界测试全过；DLL 文件从未被修改。）
-- [x] P1.4 严格按 Playbook 参数名与类型 Create Feature 18。（2026-09-02：CreateFeature id=18 result=0x1 handle=non-null，双配置 PASS；8.5 参数全表按名按类型设置。）
-- [x] P1.5 实现 Proxy→Feature18→Raw 的 D3D12 资源、barrier、subrect 与异步 4-slot 执行。（2026-09-02：5 帧全过，输出非黑非恒定，PNG 捕获有效；零初始化用 upload-copy 实现。）
-- [x] P1.6 连续 300/300 Evaluate；验证输出非黑、非恒定、随输入/参数变化；记录 GPU timings/result/capture。（2026-09-02：Debug+Release 双双 300/300；三 hash 互异；ts avgMs=6.32；PNG/JSON 齐。）
-- [x] P1.7 重建/reset/释放测试。（2026-09-02：连续两轮完整 Create/Evaluate(Reset)/Release + create-test + shim-test 4/4 PASS，无残留/无 device removed。）
-- [x] P1.8 gate、只读 Reviewer、P0/P1 修复、checkpoint。（2026-09-02：gate 56/56；Reviewer 首轮 FAIL 抓出 P1 空转检查→修复后 PASS；checkpoint 见 STATE.phases[1].commit。）
+- [x] **P5.0 控制面重基线**：Fast-track Product Spec/Playbook/竞品审计/Loop 已统一；CONTROL_HASHES 扩为 10 个受保护文件；preflight 68/68 exit 0；Release build exit 0；历史 Phase 0–4 证据保留，旧 Zero-only Phase 5 证据失效。（2026-09-03）
+- [x] **P5.0b 首发/4K 重基线**：用户撤销最小 MVP；首发改为 4K SDR、A/B/C 有界后帧模式、D3D12 NVENC 与产品级恢复/诊断；不把 HDR 混同 4K。（2026-09-03）
+- [ ] **P5.1 新 gate 先失败**：重写 `scripts/gates/phase5.ps1`，至少要求统一 graph、真实 SR→NR、scene/cadence、non-zero NVOF motion、confidence、DAV2/明确 Auto fallback、1080p60+4K60 endurance。实现缺失时必须 exit 1。
+- [ ] **P5.2 统一契约**：实现 `FramePacket`、`FrameWindow(prev/current/next/lookaheadFrames)`、`GuidanceFrame`、`ResetCoordinator`、`EnhanceGraph` 与 fake/zero provider unit tests；reset epoch 覆盖 seek/cut/drop/resize/source switch/pause/device lost。
+- [ ] **P5.3 产品顺序**：把现有 D3D12VA/YUV、optional SR、parity encode、Feature 18、parity decode 串成真实视频 graph；native 4K bypass SR，1080p→4K 走 SR；输出非黑、非恒定、随输入变化；记录各 pass GPU timestamp；主路径 readback=0。
+- [ ] **P5.4 Scene/Cadence**：生成 translation/occlusion/cut-flash-duplicate 固定片；实现 histogram+SAD+PTS/sequence analyzer；硬切 reset、闪光不误切、duplicate 不跨帧生成历史。
+- [ ] **P5.5 NVOF provider**：从本地 Optical Flow SDK 5.0 编译；System32 runtime 受限加载；current→previous、S10.5 `/32`、grid/densify、cost→confidence；`+8 px` 合成片方向/幅值通过；缺 SDK 时标 BLOCKED 并继续 P5.6/P5.7 的独立部分。
+- [ ] **P5.6 Guidance validator**：GPU 实现 NVOF cost、luma warp residual、out-of-frame、forward/back consistency；生成 R8 confidence 并平滑衰减 motion；保存 motion/confidence 可视化与统计。
+- [ ] **P5.7 Depth 依赖 manifest**：固定 Windows App SDK ML/ORT 包、DAV2 Small FP16 model 的官方 URL/version/hash/license/input/output/shape；只放 `third_party_local`；未知或非商用模型不得用。
+- [ ] **P5.8 DAV2 provider**：同 device DirectML session、sequential run、固定 shape、device tensor/I/O binding；P02/P98+EMA、motion reprojection、age/residual、Auto 降级；实时 render thread 无同步 GPU→CPU→GPU 往返。
+- [ ] **P5.9 质量矩阵**：固定 corpus 输出 off/zero/motion/motion+depth/auto；保存 input/config/runtime/output hash、flow/depth/confidence、reset timeline、GPU p50/p95。Depth 在二维/快速切镜变坏时 Auto 必须降级。
+- [ ] **P5.10 耐久与 gate**：1080p60 与 native 4K60 graph 各 30 分钟，NR/NVOF/DAV2 计数真实、queue/resource pool/working-set/VRAM 有界、RTX5070 headroom≥1.5 GiB、device removed=0；phase5 gate exit 0。
+- [ ] **P5.11 Reviewer/checkpoint**：新上下文只读 Reviewer，修完 P0/P1，gate 重跑，更新状态并创建本地 checkpoint。
 
-## Phase 2 — RenoDX-equivalent parity codec（锁定）
+## Phase 6 — DLSSG 2X 与实时播放 engine（锁定）
 
-- [x] P2.1 为 transfer/range/matrix/proxy encode/decode 建 CPU golden tests 和 phase2 gate。（2026-09-02：12/12 双配置 0 failures；gate fail-closed 验证 exit 1；亮度保持误差 0.000000。）
-- [x] P2.2 实现 Original→Parity Encode shader，显式定义输入/输出色域、transfer、range 和资源格式。（2026-09-02：ParityEncode.hlsl，GPU vs CPU ≤1 code。）
-- [x] P2.3 实现 Parity Decode 与 Raw/bypass 对照；记录三个 1.0 中性 codec baseline、来源说明、addon hash 和 capture hash。当前没有 preset；不得加载 addon 取值。（2026-09-02：ParityDecode.hlsl；JSON 记录 1.0/1.0/1.0+addon 实测 hash+raw/final hash；addon 从未加载。）
-- [x] P2.4 CPU/GPU golden、identity/bypass、灰阶/色卡/高光测试达到 Playbook 容差。（2026-09-02：encode≤1 code、decode≤0.002、CPU 12/12。）
-- [x] P2.5 完整 Original→Encode→Feature18→Decode capture；不得以主观好看作为 gate。（2026-09-02：四阶段七文件捕获，raw≠final hash，量化统计非主观。）
-- [x] P2.6 gate、只读 Reviewer、P0/P1 修复、checkpoint。（2026-09-02：首轮 FAIL 抓出 P1 空证据→修复后终判 PASS；ulp 容差裁定经裁决接受；checkpoint 见 STATE.phases[2].commit。）
+- [ ] **P6.0 新 gate 先失败**：`scripts/gates/phase6.ps1` 要求真实 DLSSG、generated 非重复/非 blend、PTS/cadence/reset、D3D12 present、WASAPI、4K、A/B 与 A/B/C 延迟和有界队列。
+- [ ] **P6.1 DlssFgBackend**：用官方 310.7 header/runtime；capability/HAGS/runtime identity；Create/Evaluate/Release；ResourceNeverProvided flags；2X only。
+- [ ] **P6.2 FG 方向与真假**：known translation 片验证 motion scale/方向；60 real → 59 generated；generated hash 不等邻帧，不等 50/50 blend；切镜/duplicate/drop 不跨界生成。
+- [ ] **P6.3 PresentSink**：flip-discard、VSync/tearing、resize、3-buffer；Feature 18 后画面→FG→UI/diagnostics→present；主路径 readback=0。
+- [ ] **P6.4 Audio**：FFmpeg audio decode + WASAPI event mode；audio master、pause/seek/stop flush；underrun/overrun/drift 日志。
+- [ ] **P6.5 EngineController**：UI-safe commands；source/render/audio 生命周期；Capture ingress mailbox=1、A/B window=2、A/B/C window=3，Player/Export backpressure；模式/主动 lookahead 毫秒/fallback 明示。
+- [ ] **P6.6 Player probe**：真实 4K H.264/HEVC + audio/subtitle，play/pause/10 seek/resize/loop；A/V drift ≤50 ms；NR/SR/FG 可独立开关。
+- [ ] **P6.7 耐久与 gate**：4K30 与 4K60 Player 各 30 分钟；4K60 NR-only 不持续积压，FG2X 产生正确 120 Hz 内部时间线；latency breakdown/queue/VRAM 达 Product Spec；phase6 gate exit 0。
+- [ ] **P6.8 Reviewer/checkpoint**：只读 Reviewer，修 P0/P1，本地 checkpoint。
 
-## Phase 3 — Minimal video pipeline（锁定）
+## Phase 7 — 三个首发产品闭环（锁定）
 
-- [x] P3.1 引入固定版本 FFmpeg 依赖和 phase3 gate，不改变 NGX harness。（2026-09-03：vcpkg 30ef65ca 基线，FFmpeg 9.0.1，C:eyra-deps 空间路径适配，gate fail-closed 建立并负向验证。）
-- [x] P3.2 先完成 H.264/HEVC 软件 decode 最小基线，正确按 PTS/VFR 驱动，不猜固定 FPS。（2026-09-03：300 帧 PTS 全单调，测试片 30s H.264 1080p30。）
-- [x] P3.3 共享 Veyra D3D12 device 的 D3D12VA decode，记录实际 AV_PIX_FMT_D3D12、hw device 和 shared device identity。（2026-09-03：300 帧 AV_PIX_FMT_D3D12 共享设备，gate 70/70。）
-- [x] P3.4 完成 YUV range/matrix/transfer→linear RGB，禁止正常路径 GPU→CPU 像素回读。（2026-09-03：YuvToLinearRgb shader 300/300 dispatch，gpuReadbackCount=0，单堆修复 E_INVALIDARG。）
-- [x] P3.5 建有界 decode/process/present 队列和 backpressure。（2026-09-03：泵上限 4 packet in-flight + JSON 上报；**限制**：process/present 队列未实现真实 backpressure——留 Reviewer 裁决。）
-- [x] P3.6 实现 open/seek/resize/pause-resume/device-lost 的历史 reset；10 次 seek 无旧历史影像。（2026-09-03：seek storm 10/10 通过，flushBuffers 每 seek 边界。）
-- [x] P3.7 真实视频 30 分钟、seek 压测、内存/队列/延迟证据。（2026-09-03：全片 30s 解码 900/900 帧 + 900 shader dispatch + seek storm 10/10；**限制**：非 30 分钟循环，队列值为硬编码，内存无独立计量——留 Reviewer 裁决。）
-- [x] P3.8 gate、只读 Reviewer、P0/P1 修复、checkpoint。（2026-09-03：gate 41/41；Reviewer 首轮 FAIL 5×P1→全部修复→复核 PASS；endurance 60 循环 54000 帧 NR=54000/54000 WS+94.4MB。）
+- [ ] **P7.0 联合 gate 先失败**：`scripts/gates/phase7.ps1` 分别验证 4K Player、4K Capture、Image Export、4K H.264/HEVC Video Export、产品 UI/恢复；任何一项缺失都 exit 1。
+- [ ] **P7.1 Player tab**：Win32 打开、播放/暂停、seek、loop、全屏、基础字幕、质量档、NR/SR/FG 开关、设置持久化与实时诊断；实际驱动 Phase 6 engine。
+- [ ] **P7.2 CaptureCardSource**：FFmpeg avdevice+dshow / DirectShow 枚举；实际 codec/color/size/fps 回报；1080p/2160p 30/60 video+audio；ingress mailbox=1；drop 触发全链 reset；HDR 输入 fail closed。
+- [ ] **P7.3 Capture tab**：设备/格式/音频/输出/NR Low Latency/FG Low Latency/Buffered Quality、NR/SR/FG、start/stop/fullscreen；主动 lookahead、fallback、丢帧和分项 latency 可见。
+- [ ] **P7.4 Image export**：WIC PNG/JPEG、EXIF orientation、optional SR + reset Feature18、PNG/JPEG output、不覆盖、partial+validate+atomic rename。
+- [ ] **P7.5 NVENC dependency/backend**：用户提供 Video Codec SDK 13.1；System32 `nvEncodeAPI64.dll` 受限加载；D3D12 resource registration + per-slot fences；H.264/HEVC 4K capability；只有压缩 bitstream 回 CPU。
+- [ ] **P7.6 Video export**：同一 EnhanceGraph；最高 4K H.264/HEVC input、D3D12 NVENC H.264/HEVC MP4/MKV CFR output；optional FG2X；audio remux/AAC；字幕 policy；cancel/crash partial recovery；ffprobe+self-decode 验证。
+- [ ] **P7.7 Export tab**：input/output/size/FPS/H.264-HEVC/quality/start/cancel/progress/error；图片与视频都实际工作。
+- [ ] **P7.8 产品恢复/诊断**：首次运行检查、最近文件/设备、设置持久化、source reconnect、device-lost、残留 partial 提示、日志包导出。
+- [ ] **P7.9 三模式端到端**：4K30/60 Player 各 30 分钟；真实 4K60 采集卡 30 分钟；图片 corpus；4K H.264/HEVC 视频 corpus 含音频/字幕/FG；所有 runtime/result/queue/latency/VRAM 证据完整。
+- [ ] **P7.10 Magpie 同源 A/B**：同机同输入同输出条件，比较至少五类片段；只记录有证据的场景限定结论，不把未胜出写成“全面更好”。
+- [ ] **P7.11 许可证/分发审计**：Git 无 proprietary/local assets；THIRD_PARTY_NOTICES 完整；不能分发的 runtime/model/SDK 有明确用户供应流程；未清零时标 distribution blocked。
+- [ ] **P7.12 Reviewer/final checkpoint**：联合 gate + 新上下文 Reviewer；无 P0/P1；功能状态 release_candidate；分发 blocker 清零后才可 STATE complete；本地 commit；停止，不自动发布。
 
-## Phase 4 — DLSS SR（锁定）
+## 不能移出 V1 的门槛
 
-- [x] P4.1 建 phase4 gate 和明确的 SR off/on 可观测计数。（2026-09-03：gate 16/16；bypass 1:1 通过；capability 查询如实报告 SR available=0。）
-- [x] P4.2 从 Playbook 固定的官方 310.7 manifest 接入 DLSS SR，严格处理 render/output subrect、资源状态和 reset。（2026-09-03：SDK hash 验证；subrect Height 修复；**SR capability 不可用阻塞 upscale 验证**——见 INBOX。）
-- [x] P4.3 验证 bypass、resize/seek、输入输出尺寸与 SR feature identity；不得把 NR 冒充 SR。（2026-09-03：bypass 验证通过；resize/upscale 因 capability 不可用待用户决策。）
-- [ ] P4.4 gate、只读 Reviewer、P0/P1 修复、checkpoint。
-
-## Phase 5 — Zero/NVOF guidance（锁定）
-
-- [ ] P5.1 保留并验证明示的 Zero Guidance 路径。
-- [ ] P5.2 查询 System32 NVOF runtime/version/capability；建立 phase5 gate、flow/confidence 可视化与合成平移片。
-- [ ] P5.3 接入 NVOF，验证 current→previous 符号、fixed 10.5 / 32 转换、grid/scale/densify、scene cut、seek/reset；绝不以零向量冒充 NVOF。
-- [ ] P5.4 让 NR/FG 消费同一个 GuidanceFrame；验证 API context 无多线程并发调用；比较 Zero/NVOF 日志和 reset。
-- [ ] P5.5 gate、只读 Reviewer、P0/P1 修复、checkpoint。若 SDK 获取需要用户接受条款，先完成 Phase 5 内 capability/Zero fallback/接口测试，写 INBOX；gate 保持未通过且 Phase 6 继续锁定。
-
-## Phase 6 — DLSSG 2X（锁定）
-
-- [ ] P6.1 建 phase6 gate：generated count、内容 hash、timestamp/cadence、disable flag。
-- [ ] P6.2 接入真实 DLSSG 2X 输入、history 和 reset；默认按官方 header 将 source-pixel motion 用 `1/width,1/height` 归一化，Magpie `{1,1}` 仅保留显式 diagnostic mode。
-- [ ] P6.3 用已知像素平移片验证 DLSSG motion 方向/幅值和 scale mode，证明 generated frame 不是重复 present；验证 seek/pause/resume/scene-cut。
-- [ ] P6.4 确保 UI/OSD 在 FG 后合成，队列和 present cadence 有界。
-- [ ] P6.5 gate、只读 Reviewer、P0/P1 修复、checkpoint。
-
-## Phase 7 — Audio + minimum UI（锁定）
-
-- [ ] P7.1 建 phase7 端到端 gate 和 A/V sync/latency 采样。
-- [ ] P7.2 实现 audio-master 时钟、音频输出、drop/repeat 策略。
-- [ ] P7.3 实现最小 open/play/pause/seek、功能开关、诊断 OSD；UI 位于 FG 后。
-- [ ] P7.4 执行 60 分钟 A/V drift、seek storm、pause/resume、resize、device recovery、FG on/off 音频时长和功能组合矩阵。
-- [ ] P7.5 Debug/Release 最终构建、端到端证据、许可证/跟踪文件审计。
-- [ ] P7.6 gate、只读 Reviewer、修完全部 P0/P1、最终 checkpoint，按 Loop COMPLETE 条件收口。
-
-## 不属于本 Goal
-
-HDR、3X/4X、采集卡、Depth Anything、FRUC、主观画质调优、公开发布和安装包全部留在 V1 Goal 之外。
+- 真实物理采集设备，不是窗口/桌面 capture；
+- 真正可交互播放器，不是只解码 CLI；
+- 图片和视频两种导出，不是截图保存；
+- Feature 18 真实 Evaluate；
+- NVOF/estimated depth 的真实身份与 fallback；
+- DLSSG generated frame 真实性；
+- 音频、时序、reset、延迟、内存与许可证证据。
+- native 4K Player/Capture/Export，不用 1080p harness、静态图片或虚拟摄像头冒充；
+- D3D12 NVENC H.264/HEVC，不用 raw-frame pipe 冒充首发导出；
+- 首次运行、设置持久化、设备恢复、partial job recovery 和日志导出。

@@ -13,6 +13,13 @@
 9. 可重复运行；每次生成唯一 run-id，验证证据的 run-id、时间、输入 hash 和当前可执行文件 hash，不能把旧残留误认成本次结果；
 10. exit 0 只表示本阶段机器可验证条件通过，不代替独立 Reviewer。
 
+Launch V1 Phase 5–7 额外要求：
+
+- `phase5.ps1` 必须解析真实 SR→NR graph、NVOF 非零 motion、confidence、DAV2/Auto fallback、scene/reset，以及 1080p60/native-4K60 各 30 分钟 endurance；旧的 Zero-only gate 必须重写，不能继续使用；
+- `phase6.ps1` 必须运行真实 DLSSG + 4K present/audio probe，证明 generated frame 不等于前后帧和 50/50 blend，并检查 A/B、A/B/C、PTS/cadence/latency/queue/VRAM；
+- `phase7.ps1` 是联合 gate，4K Player、真实 4K60 DirectShow/UVC Capture、Image Export、D3D12 NVENC 4K H.264/HEVC Video Export、产品 UI/恢复五组证据缺一即失败；
+- 硬件/SDK 不可用是诚实的 gate failure，不是跳过项。不得把 capability unavailable 自动改写为产品完成。
+
 基础 `scripts/loop-gate.ps1` 会在 phase gate 前后 hash 所有 Git 已跟踪和未忽略的
 项目文件；phase gate 只能让被测程序写入已忽略的 `logs/`、`captures/` 或 build
 目录。任何源码、gate、STATE/记录或控制面变化都会让外层 gate 失败。
@@ -43,3 +50,10 @@ exit 0
 - 不核对 run-id、输入/exe hash，直接复用任意旧日志或 capture；
 - 用当前日期、代码行数、编译成功代替 Create/Evaluate/present 证据；
 - 捕获到黑图、恒定图、重复帧仍因 API 返回 0 而通过。
+- 用窗口/桌面 capture 冒充物理采集卡，或只验证设备枚举不验证持续帧流；
+- 只检查输出文件存在，不用 ffprobe/自身 decoder 检查帧数、尺寸、时长、音轨和首尾内容；
+- motion/depth texture 存在但全零、恒定、过期或方向错误仍通过；
+- 把简单 blend、重复 present 或理论 2X counter 当成 DLSSG 生成帧。
+- 用 1080p→4K 的单次 SR harness 冒充 native 4K Player/Capture/Export；
+- 用整帧 GPU→CPU readback/raw pipe 冒充 D3D12 NVENC export；
+- 采集 A/B/C 窗口超过 Product Spec 上限，或不记录 deliberate lookahead 帧数/毫秒数。

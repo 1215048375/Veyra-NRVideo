@@ -1,2191 +1,917 @@
-# Veyra DLSS Video Player
+# Veyra Launch V1 施工手册
 
-## Agent 施工手册 V1
+版本：1.1
 
-文档日期：2026-09-01  
-适用目录：`C:\Users\123\Desktop\Veyra DLSS Video Player`  
-产品方案基线：`VEYRA_PRODUCT_SPEC_V1.md`
+日期：2026-09-03
 
-这不是概念方案，而是交给下一位 Agent 的执行合同。目标是让能力一般的模型也能按固定顺序搭建、调用、验收，并且在失败时知道停在哪里。除非用户明确改需求，不准擅自换技术栈、扩大 V1 或跳阶段。
+适用范围：Phase 5–7；Phase 0–4 已有基础代码与历史证据。
+目标读者：可以执行命令和写 C++，但不应被迫猜架构、参数方向或验收口径的 Agent。
 
----
+## 0. 本手册的权威顺序
 
-# 0. 先说结论
+1. 安全、二进制、许可证与 gate 规则以 `AGENTS.md` 为最高优先级；
+2. 产品必须解决什么以 `VEYRA_PRODUCT_SPEC_V1.md` 为准；
+3. 如何实现以本文件为准；
+4. 当前唯一任务以 `loop/STATE.json` + `loop/BACKLOG.md` 为准；
+5. 已经真实做过什么以 `docs/WORKLOG.md` 与 `loop/EVIDENCE.md` 为准。
 
-Veyra V1 采用下面这条唯一主线：
+旧的“采集卡/深度/导出不是 V1”决定已经作废。不要从 Git history 复制旧路线回来。
 
-~~~text
-FFmpeg demux/decode
-  ↓
-D3D12VA surface（早期 harness 可临时 CPU upload）
-  ↓
-YUV → linear working RGB
-  ↓
-可选 DLSS Super Resolution
-  ↓
-保留 Original FP16
-  ↓
-RenoDX-equivalent Proxy Encode
-  ↓
-动态加载 nvngx_dlssnr.dll
-  ↓
-NGX Feature 18 Create/Evaluate
-  ↓
-RenoDX-equivalent Parity Decode
-  ↓
-可选 DLSS Frame Generation 2X
-  ↓
-最后叠加播放器 UI
-  ↓
-DXGI Present
-~~~
+## 1. 每次开工的固定动作
 
-关键工程决定：
+在项目根目录依次运行，任何失败先记录，不要修改 gate 自我放行：
 
-- Windows x64、C++20、Win32、D3D12。
-- 所有 GPU 阶段共用一个 DXGI adapter、一个 `ID3D12Device` 和主 direct queue。
-- V1 直接用 NGX SDK。不要同时集成 Streamline；那会增加 swapchain、resource tagging、plugin lifecycle 和本地 Feature 18 adapter 之间的变量。
-- `nvngx_dlssnr.dll` 不是链接库，必须用 `LoadLibraryExW` 动态加载并解析导出。
-- `renodx-dlss5-1.addon64` 不是配置文件，更不是播放器依赖。它只用于确认参数名、shader 数学和参考输出。
-- “类似 ReShade”不是实现通用 ReShade shader 加载器；只复现当前 RenoDX DLSS5 add-on 的颜色代理编码、Feature 18 参数和输出恢复。
-- 第一件事不是完整播放器，而是固定帧的 `veyra_nr_harness`。连续 300 帧成功之前，不做 FFmpeg/UI/音频/SR/FG。
-- 已接受 Magpie Experimental 对“Feature 18 能调用、DLSSG 能执行”的可行性证明。这里仍要做接口和时序回归测试，因为“别人跑通过”不等于本工程不会写错参数。
+```powershell
+git status --short --branch
+git log -1 --oneline
+rg --files
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate preflight
+```
 
----
+再读：
 
-# 1. 当前项目里有什么
-
-当前目录还不是代码仓库，也没有应用源码。有效控制面、方案和本地二进制是：
-
-~~~text
+```text
 README.md
 AGENTS.md
 VEYRA_PRODUCT_SPEC_V1.md
 VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md
-loop/
-scripts/
+docs/COMPETITOR_AUDIT_2026-09-03.md
 docs/WORKLOG.md
-nvngx_dlssnr.dll
-renodx-dlss5-1.addon64
-~~~
+loop/STATE.json
+loop/BACKLOG.md
+loop/INBOX.md
+```
 
-不存在仍有效的历史方案；不要联网找旧副本，也不要从旧文档恢复被当前边界否决的功能。
+不要因为 `out/` 有旧 exe 就认为当前源码已通过。每条证据必须绑定 run-id、当前 exe hash、输入 hash、配置 hash 和 runtime hash。
 
-## 1.1 DLSSNR 文件
+## 2. 当前代码：保留什么
 
-~~~text
-File:        nvngx_dlssnr.dll
-Size:        165840496 bytes
-SHA256:      E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E
-Version:     310.8.0.0
-Description: NVIDIA DLSSNR - DVS PRODUCTION
-Signature:   Valid NVIDIA Authenticode signature
-Timestamp:   2026-08-12 04:29:33
-Min driver:  615.00（来自文件 version resource）
-GPU target:  Blackwell2（来自文件 version resource）
-NGX API:     0x0000013（来自文件 version resource）
-~~~
+以下是已经存在、应复用而不是重写的基础：
 
-已确认的 D3D12 导出：
+```text
+src/base + include/veyra/*
+  Logger, HRESULT/NGX result, FileIdentity
 
-~~~text
-NVSDK_NGX_D3D12_Init_Ext
-NVSDK_NGX_D3D12_CreateFeature
-NVSDK_NGX_D3D12_EvaluateFeature
-NVSDK_NGX_D3D12_ReleaseFeature
-NVSDK_NGX_D3D12_Shutdown1
-~~~
+src/gfx + include/veyra/gfx/*
+  D3D12DeviceContext, 4-slot CommandSlotRing, fence/timestamp
 
-注意：文件也含 D3D11/Vulkan/CUDA 通用符号，但内部文本明确显示当前 D3D11 路径未完成。V1 不碰 D3D11 Feature 18。
+src/ngx + include/veyra/ngx/*
+  NgxCoreHost, DlssNrRuntimeAdapter, DlssSrBackend, 参数集中定义
 
-## 1.2 RenoDX 文件
+src/parity + shaders/Parity*.hlsl
+  RenoDX-equivalent proxy encode/decode 与 CPU golden
 
-~~~text
-File:        renodx-dlss5-1.addon64
-Size:        359424 bytes
-SHA256:      837B6A34D41C0EB75CB105AFEB5B985CFC72CB7F3A786C5DBB3F5415C45C978F
-Version:     0.2026.0827.2036
-Signature:   NotSigned
-Internal:    RenoDX.DLSS5 / DLSS 5 Neural Rendering
-~~~
+src/media + include/veyra/media/*
+  FFmpegDemuxer, FFmpegVideoDecoder, D3D12VA 共享设备
 
-它是 ReShade binary add-on，通过 ReShade add-on API 保存配置和 hook NGX。最终 Veyra 不加载它。它已经给出三个重要事实：
+shaders/YuvToLinearRgb.hlsl
+  YUV range/matrix/transfer -> linear RGB
 
-1. 插入点是游戏 DLSS 输出之后、UI 之前；
-2. Feature 18 的参数字符串和资源合同；
-3. Control-compatible soft-clip/sRGB/UpgradeToneMap codec 的 shader 数学。
+tools/nr_harness, tools/media_probe
+  已有 Feature 18 / SR / 视频耐久证据入口
+```
 
-## 1.3 当前机器
+Phase 0–4 并不包含播放器、capture、export、NVOF、DAV2 或 DLSSG。命名存在不等于功能存在。
 
-~~~text
-OS:          Windows 11 Pro for Workstations, build 26200
-GPU:         NVIDIA GeForce RTX 5070
-Driver:      616.56
-VRAM:        12227 MiB
-Compute:     12.0
-nvofapi64:   32.0.16.1656, signed, present in System32
-~~~
+## 3. 目标目录与 target
 
-这台机器满足当前 DLL 标注的 driver/GPU 条件。不要把这个事实扩张成“所有 NVIDIA GPU 都支持”。V1 对修改过的 Ada runtime 不提供支持。
+按下面结构增量添加。不要把所有类塞进 `main.cpp`。
 
-## 1.4 开发工具，已安装但多数不在普通 PATH
+```text
+include/veyra/pipeline/
+  FramePacket.h
+  GuidanceFrame.h
+  ResetCoordinator.h
+  EnhanceGraph.h
 
-~~~text
-Visual Studio Build Tools:
-C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools
+src/pipeline/
+  ResetCoordinator.cpp
+  EnhanceGraph.cpp
+  SceneCadenceAnalyzer.cpp
 
-MSVC:
-C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207
+include/veyra/guidance/
+  IGuidanceProvider.h
+  ZeroGuidanceProvider.h
+  NvofGuidanceProvider.h
+  DepthAnythingProvider.h
+  GuidanceValidator.h
 
-CMake 3.31.6:
-C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe
+src/guidance/
+  ZeroGuidanceProvider.cpp
+  NvofGuidanceProvider.cpp
+  DepthAnythingProvider.cpp
+  GuidanceValidator.cpp
 
-Ninja 1.12.1:
-C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe
+shaders/guidance/
+  NvofInput.hlsl
+  NvofDensify.hlsl
+  GuidanceValidate.hlsl
+  SceneHistogram.hlsl
+  DepthPreprocess.hlsl
+  DepthNormalizeReproject.hlsl
 
-MSBuild:
-C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe
+include/veyra/ngx/DlssFgBackend.h
+src/ngx/DlssFgBackend.cpp
 
-DXC:
-C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\dxc.exe
+include/veyra/source/
+  IFrameSource.h
+  MediaFileSource.h
+  CaptureCardSource.h
+  ImageSource.h
 
-Git:
-C:\Program Files\Git\cmd\git.exe
-~~~
+src/source/
+  MediaFileSource.cpp
+  CaptureCardSource.cpp
+  ImageSource.cpp
 
-普通终端找不到 `cmake` 不代表没装。优先用以上绝对路径或从 VS Developer PowerShell 启动。
+include/veyra/sink/
+  IFrameSink.h
+  D3D12PresentSink.h
+  WasapiAudioSink.h
+  ImageExportSink.h
+  VideoExportSink.h
 
----
+src/sink/
+  D3D12PresentSink.cpp
+  WasapiAudioSink.cpp
+  ImageExportSink.cpp
+  VideoExportSink.cpp
 
-# 2. 真源、参考源和不能抄的东西
+apps/veyra/
+  main.cpp
+  MainWindow.cpp/.h
+  CapturePage.cpp/.h
+  PlayerPage.cpp/.h
+  ExportPage.cpp/.h
 
-按下面优先级判断事实：
+tests/
+  unit/GuidanceMathTests.cpp
+  unit/CadenceTests.cpp
+  integration/...
+```
 
-1. 本目录两个二进制的 hash、导出、内嵌参数/数学；
-2. 本文与 Product Spec 的已锁定产品边界；
-3. NVIDIA 官方 SDK 头文件、sample 和文档；
-4. Magpie Experimental 的可观察调用顺序；
-5. 其他博客、论坛和一键整合包一律不作为实现真源。
+CMake targets：
 
-## 2.1 Magpie 只作行为参考
+```text
+veyra_pipeline    depends base,gfx,parity,ngx
+veyra_guidance    depends pipeline,gfx and optional NVOF/DML
+veyra_sources     depends media,pipeline,avdevice,WIC
+veyra_sinks       depends pipeline,gfx,FFmpeg/WIC/WASAPI
+veyra_app         WIN32 executable, owns UI only
+veyra_quality_probe
+veyra_capture_probe
+veyra_export_probe
+```
 
-固定参考：
+`veyra_app` 不直接调用 `NVSDK_NGX_*`，不直接管理 NVOF session，也不写 shader barrier。它只组装 source/graph/sink 和状态。
 
-~~~text
-Repo:    https://github.com/SAOG0721/Magpie
-Branch:  experimental
-Commit:  e15394a9e15b996b52ad92c6bf22747b2e7ae46d
-License: GPLv3
-~~~
+## 4. 本地依赖放置
 
-重点阅读文件：
+所有本地/有许可约束的内容都在已 gitignore 的目录。禁止拷进 `src` 或提交。
 
-~~~text
-src/Magpie.Core/NgxD3D12Core.cpp
-src/Magpie.Core/NgxD3D12Core.h
-src/Magpie.Core/DLSSNRFilter.cpp
-src/Magpie.Core/DLSSNRFilter.h
-src/Magpie.Core/DLSSFrameGenerator.cpp
-src/Magpie.Core/DLSSFrameGenerator.h
-src/Magpie.Core/FrameGuidanceTypes.h
-src/Magpie.Core/NvidiaOpticalFlowProvider.cpp
-~~~
+```text
+runtime_local/nvidia/
+  nvngx_dlssnr.dll
+  nvngx_dlss.dll
+  nvngx_dlssg.dll
+  runtime-manifest.json
 
-闭源 Veyra 不得复制这些文件或机械改名。应依据公开 NGX/NVOF 接口和本文列出的行为独立实现。如果用户决定整个项目接受 GPLv3，再单独评估复用。
-
-不要复用 Magpie 的 NGX Project ID。Veyra 必须使用自己的 Project ID；本地实验可生成一个持久 GUID，发布前必须换成 NVIDIA 分配/允许的身份。
-
-## 2.2 不从非官方来源拿 DLL
-
-不要去 Discord、网盘、论坛或所谓“一键包”下载别的 `nvngx_dlssnr.dll`、`nvngx_dlss.dll`、patched Ada DLL。只使用当前根目录已给出的 DLSSNR 文件和 NVIDIA 官方 DLSS SDK 里的公开 SR/FG runtime。
-
----
-
-# 3. 依赖从哪里拿、拿什么、放哪里
-
-## 3.1 目录约定
-
-创建以下三个本地目录，并全部加入 `.gitignore`：
-
-~~~text
-runtime_local/       # 本机 proprietary feature DLL 和 manifest
-third_party_local/   # 下载/解压的 SDK 与 vcpkg
-reference_local/     # Magpie 源码快照、ReShade 对照材料
-~~~
-
-公开的本项目源码放在 `src/`、`shaders/`、`tools/`、`tests/`；第三方 SDK 不复制进这些目录。
-
-## 3.2 NVIDIA DLSS SDK 310.7.0
-
-来源：
-
-~~~text
-Release: https://github.com/NVIDIA/DLSS/releases/tag/v310.7.0
-Repo:    https://github.com/NVIDIA/DLSS
-Tag:     v310.7.0
-~~~
-
-下载 release ZIP 或 clone 后 checkout tag，解压到：
-
-~~~text
 third_party_local/nvidia/DLSS_SDK_310.7.0/
-~~~
+  include/
+  lib/Windows_x86_64/
 
-至少确认这些文件存在：
-
-~~~text
-include/nvsdk_ngx.h
-include/nvsdk_ngx_defs.h
-include/nvsdk_ngx_helpers.h
-include/nvsdk_ngx_helpers_dlssg.h
-include/nvsdk_ngx_params.h
-include/nvsdk_ngx_params_dlssg.h
-
-lib/Windows_x86_64/x64/nvsdk_ngx_s.lib
-lib/Windows_x86_64/rel/nvngx_dlss.dll
-lib/Windows_x86_64/rel/nvngx_dlssg.dll
-~~~
-
-用途：
-
-- `nvsdk_ngx_s.lib`：NGX D3D12 core 入口；
-- `nvsdk_ngx_helpers.h`：DLSS Super Resolution helper；
-- `nvsdk_ngx_helpers_dlssg.h`：DLSS Frame Generation helper；
-- `nvngx_dlss.dll` / `nvngx_dlssg.dll`：Phase 4/6 的公开 feature runtime。
-
-不要用 SDK 的 `dev` DLL 做验收；正常使用 `rel`。不要用它覆盖根目录 `nvngx_dlssnr.dll`，这不是同一个 feature。
-
-## 3.3 NVIDIA Optical Flow SDK 5.0
-
-来源：
-
-~~~text
-Download: https://developer.nvidia.com/opticalflow/download
-Docs:     https://docs.nvidia.com/video-technologies/optical-flow-sdk/index.html
-Guide:    https://docs.nvidia.com/video-technologies/optical-flow-sdk/nvofa-programming-guide/index.html
-~~~
-
-下载需要 NVIDIA Developer Program 登录并接受 EULA，Agent 不得绕过。让用户在官方页面下载，然后解压到：
-
-~~~text
 third_party_local/nvidia/Optical_Flow_SDK_5.0/
-~~~
-
-解压后用 `rg --files` 找并确认：
-
-~~~text
-nvOpticalFlowCommon.h
-nvOpticalFlowD3D12.h
-NvOFUtils...D3D12...（名称以 SDK 实际 sample 为准）
-D3D12 optical-flow sample
-~~~
+  nvofapi/include/
+  Samples/NvOFBasic/...
 
-运行时 `nvofapi64.dll` 来自 NVIDIA 驱动的 System32，不从 SDK 随包复制。程序用：
+third_party_local/nvidia/Video_Codec_SDK_13.1.0/
+  Interface/nvEncodeAPI.h
+  Samples/NvCodec/NvEncoder/NvEncoderD3D12.*
 
-~~~text
-LoadLibraryExW(L"nvofapi64.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32)
-GetProcAddress(..., "NvOFAPICreateInstanceD3D12")
-GetProcAddress(..., "NvOFGetMaxSupportedApiVersion")
-~~~
-
-不要链接或分发一个来路不明的 `nvofapi64.dll`。
-
-## 3.4 FFmpeg 9.0.1 与 Dear ImGui 1.92.8
-
-V1 用 vcpkg manifest 锁版本。固定 registry baseline：
-
-~~~text
-vcpkg commit:
-30ef65cad98f08e7197c9a1656fbd871bcb72f2d
-
-该 baseline 的 port：
-ffmpeg 9.0.1#1
-imgui 1.92.8#1
-~~~
-
-将 vcpkg clone 到：
-
-~~~powershell
-git clone https://github.com/microsoft/vcpkg.git third_party_local/vcpkg
-git -C third_party_local/vcpkg checkout 30ef65cad98f08e7197c9a1656fbd871bcb72f2d
-& .\third_party_local\vcpkg\bootstrap-vcpkg.bat -disableMetrics
-~~~
-
-项目根目录的 `vcpkg.json` 使用：
-
-~~~json
-{
-  "name": "veyra-dlss-video-player",
-  "version-string": "0.1.0",
-  "builtin-baseline": "30ef65cad98f08e7197c9a1656fbd871bcb72f2d",
-  "dependencies": [
-    {
-      "name": "ffmpeg",
-      "default-features": false,
-      "features": [
-        "avcodec",
-        "avformat",
-        "swresample",
-        "swscale"
-      ]
-    },
-    {
-      "name": "imgui",
-      "features": [
-        "dx12-binding",
-        "win32-binding"
-      ]
-    }
-  ]
-}
-~~~
-
-不要启用 `gpl`、`nonfree`、`x264`、`x265` 或 `fdk-aac`。播放器只需要解码、封装、重采样和早期软件转换 fallback。
-
-FFmpeg CMake 接法：
-
-~~~cmake
-find_package(FFMPEG REQUIRED)
-target_include_directories(veyra_media PRIVATE ${FFMPEG_INCLUDE_DIRS})
-target_link_directories(veyra_media PRIVATE ${FFMPEG_LIBRARY_DIRS})
-target_link_libraries(veyra_media PRIVATE ${FFMPEG_LIBRARIES})
-~~~
-
-ImGui 接法：
-
-~~~cmake
-find_package(imgui CONFIG REQUIRED)
-target_link_libraries(veyra_ui PRIVATE imgui::imgui)
-~~~
-
-用 `x64-windows` 动态 triplet，避免把 FFmpeg 静态链接义务藏进可执行文件。发布阶段仍需附 LGPL notice 和对应动态库许可证。
-
-## 3.5 Streamline
-
-参考版本：
-
-~~~text
-https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.12.0
-~~~
-
-V1 不下载、不链接、不初始化 Streamline。原因不是它不能用，而是当前主线已经用直接 NGX，混用会把 swapchain proxy、resource tagging、plugin lifecycle 和本地 Feature 18 adapter 搅在一起。等直接 NGX 的 SR/NR/FG 全部稳定后，才允许另开分支评估 Streamline。
-
----
-
-# 4. 第一次开工的精确步骤
-
-## 4.1 先保护二进制，再初始化 Git
-
-当前目录不是 Git 仓库。必须先创建 `.gitignore`，至少包含：
-
-~~~gitignore
-# Proprietary / local-only
-/nvngx_dlssnr.dll
-/renodx-dlss5-1.addon64
-/runtime_local/
-/third_party_local/
-/reference_local/
-
-# Build
-/out/
-/build/
-/.vs/
-/vcpkg_installed/
-CMakeUserPresets.json
-
-# Diagnostics and captures
-/captures/
-/logs/
-*.pdb
-*.ilk
-*.dmp
-*.etl
-~~~
-
-确认忽略规则后才执行。Goal 模式必须同时遵守 `loop/LOOP_ENGINE.md` 的 P0.2 baseline/branch 流程：
-
-~~~powershell
-git init -b main
-git status --short --ignored
-git check-ignore -v --no-index -- nvngx_dlssnr.dll renodx-dlss5-1.addon64 runtime_local/.probe third_party_local/.probe reference_local/.probe captures/.probe logs/.probe loop/STOP
-~~~
-
-如果上述任一敏感路径没有显示为 ignored，禁止 staging。初始化 baseline 时只显式 `git add` 已审查的源码/文档路径并先检查 `git diff --cached --name-only`；不要使用 `git add .`。若仓库已存在，不重新 init、不重写历史。
-
-## 4.2 验证本地输入
-
-从根目录运行：
-
-~~~powershell
-Get-Item -LiteralPath '.\nvngx_dlssnr.dll','.\renodx-dlss5-1.addon64' | Select-Object Name,Length
-Get-FileHash -Algorithm SHA256 -LiteralPath '.\nvngx_dlssnr.dll','.\renodx-dlss5-1.addon64'
-Get-AuthenticodeSignature -LiteralPath '.\nvngx_dlssnr.dll','.\renodx-dlss5-1.addon64' | Select-Object Path,Status,StatusMessage
-nvidia-smi --query-gpu=name,driver_version,memory.total,compute_cap --format=csv,noheader
-~~~
-
-必须得到第 1 节列出的 size/hash。DLSSNR 必须 `Valid`；addon 预期 `NotSigned`。任何变化都写入 `docs/WORKLOG.md` 并停工。
-
-## 4.3 建立 runtime_local
-
-只复制，不移动根目录原件：
-
-~~~text
-runtime_local/
-└─ nvidia/
-   ├─ nvngx_dlssnr.dll       # 从项目根目录复制
-   ├─ nvngx_dlss.dll         # Phase 4 才从官方 DLSS 310.7 rel 复制
-   ├─ nvngx_dlssg.dll        # Phase 6 才从官方 DLSS 310.7 rel 复制
-   └─ runtime-manifest.json
-~~~
-
-Phase 1 只放 `nvngx_dlssnr.dll`。不要为了“看起来齐全”提前塞入论坛里的 310.8 SR/FG DLL。
-
-`runtime-manifest.json` 初始内容：
-
-~~~json
-{
-  "schema": 1,
-  "mode": "local-experimental-only",
-  "files": [
-    {
-      "name": "nvngx_dlssnr.dll",
-      "size": 165840496,
-      "sha256": "E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E",
-      "fileVersion": "310.8.0.0",
-      "authenticode": "Valid",
-      "source": "user-provided workspace file",
-      "redistributable": false
-    }
-  ]
-}
-~~~
-
-Phase 4/6 加 DLL 时，Agent 必须计算各自 hash 并追加 manifest，不能写“latest”。
-
-## 4.4 创建本地 NGX 身份
-
-不要复用 Magpie 的 Project ID。执行一次：
-
-~~~powershell
-New-Item -ItemType Directory -Force '.\runtime_local\config'
-$id = [guid]::NewGuid().ToString()
-@{
-  ngxProjectId = $id
-  engineType = 'custom'
-  engineVersion = 'Veyra-Experimental-0.1.0'
-} | ConvertTo-Json | Set-Content '.\runtime_local\config\ngx-local.json' -Encoding utf8
-~~~
-
-这是本机研发身份，不代表 NVIDIA 授权的发行身份。准备发布前，必须替换为合规 Project ID。
-
-## 4.5 建立工程骨架
-
-最终目录：
-
-~~~text
-Veyra DLSS Video Player/
-├─ README.md
-├─ AGENTS.md
-├─ VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md
-├─ VEYRA_PRODUCT_SPEC_V1.md
-├─ loop/
-├─ scripts/
-├─ CMakeLists.txt
-├─ CMakePresets.json
-├─ vcpkg.json
-├─ .gitignore
-├─ cmake/
-│  ├─ VeyraWarnings.cmake
-│  ├─ VeyraShaders.cmake
-│  └─ VeyraRuntime.cmake
-├─ config/
-│  ├─ nr-default.json
-│  ├─ parity-default.json
-│  └─ player-default.json
-├─ docs/
-│  ├─ WORKLOG.md
-│  ├─ DECISIONS.md
-│  └─ RUNTIME_REPORT.md
-├─ include/veyra/
-│  ├─ Result.h
-│  ├─ Log.h
-│  └─ FrameTypes.h
-├─ src/
-│  ├─ app/
-│  ├─ gfx/
-│  ├─ media/
-│  ├─ ngx/
-│  ├─ parity/
-│  ├─ guidance/
-│  ├─ player/
-│  └─ ui/
-├─ shaders/
-│  ├─ GenerateTestPattern.hlsl
-│  ├─ YuvToLinearRgb.hlsl
-│  ├─ ParityEncode.hlsl
-│  ├─ ParityDecode.hlsl
-│  ├─ NvofVectorConvert.hlsl
-│  └─ Present.hlsl
-├─ tools/
-│  ├─ runtime_probe/
-│  ├─ nr_harness/
-│  └─ parity_capture/
-├─ tests/
-│  ├─ unit/
-│  └─ integration/
-├─ validation/
-│  ├─ manifests/
-│  ├─ fixed_frames/
-│  └─ fixed_clips/
-├─ scripts/
-│  ├─ configure.ps1
-│  ├─ build.ps1
-│  ├─ stage-runtime.ps1
-│  └─ verify-runtime.ps1
-├─ runtime_local/             # ignored
-├─ third_party_local/         # ignored
-├─ reference_local/           # ignored
-└─ out/                       # ignored
-~~~
-
-不要一开始创建几十个空类。Phase 0 只建立实际要编译的 `gfx`、`ngx`、`tools/runtime_probe` 和 `tools/nr_harness`。
-
----
-
-# 5. CMake 和构建方式
-
-## 5.1 CMake cache 变量
-
-根 `CMakeLists.txt` 必须定义：
-
-~~~cmake
-set(VEYRA_DLSS_SDK_ROOT "" CACHE PATH "NVIDIA DLSS SDK root")
-set(VEYRA_NVOF_SDK_ROOT "" CACHE PATH "NVIDIA Optical Flow SDK root")
-set(VEYRA_RUNTIME_ROOT "" CACHE PATH "Local NVIDIA runtime root")
-
-option(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR
-  "Enable local-only experimental Feature 18 adapter" OFF)
-option(VEYRA_ENABLE_DLSS_SR "Enable public DLSS SR backend" OFF)
-option(VEYRA_ENABLE_DLSS_FG "Enable public DLSSG backend" OFF)
-option(VEYRA_ENABLE_NVOF "Enable NVIDIA Optical Flow guidance" OFF)
-option(VEYRA_ENABLE_D3D12_DEBUG "Enable D3D12 debug layer" ON)
-~~~
-
-如果启用 NR 而 SDK/runtime 路径缺失，配置阶段直接 `message(FATAL_ERROR)`。不要拖到运行时才报头文件或 DLL 找不到。
-
-## 5.2 编译目标
-
-按阶段创建：
-
-~~~text
-veyra_base              logging/result/config/hash/signature
-veyra_gfx               D3D12 device/queue/resources/barriers/profiler
-veyra_ngx               NGX core + NR runtime adapter + later SR/FG
-veyra_parity            parity shaders/profile/capture
-veyra_guidance          zero guidance + later NVOF
-veyra_media             FFmpeg demux/decode/audio
-veyra_player_core       scheduler/pipeline
-veyra_ui                Win32/ImGui
-
-veyra_runtime_probe.exe
-veyra_nr_harness.exe
-veyra_parity_tests.exe
-veyra_player.exe
-~~~
-
-不要让 `veyra_player.exe` 直接拥有 Feature 18 调用细节。它只面向 `IDlssNrBackend`。
-
-## 5.3 系统库
-
-基础链接：
-
-~~~cmake
-target_link_libraries(veyra_gfx PUBLIC
-  d3d12
-  dxgi
-  dxguid
-)
-
-target_link_libraries(veyra_base PUBLIC
-  bcrypt
-  wintrust
-  crypt32
-  version
-  shlwapi
-)
-~~~
-
-全项目：
-
-~~~cmake
-target_compile_features(veyra_base PUBLIC cxx_std_20)
-target_compile_definitions(veyra_base PRIVATE
-  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-~~~
-
-MSVC 警告至少 `/W4 /permissive- /Zc:__cplusplus`。不要全局 `/WX` 阻塞第三方头；只对本项目 target 开启。
-
-NGX：
-
-~~~cmake
-target_include_directories(veyra_ngx PRIVATE
-  "${VEYRA_DLSS_SDK_ROOT}/include")
-target_link_libraries(veyra_ngx PRIVATE
-  "${VEYRA_DLSS_SDK_ROOT}/lib/Windows_x86_64/x64/nvsdk_ngx_s.lib")
-~~~
-
-## 5.4 Shader 编译
-
-使用已安装 DXC：
-
-~~~text
-C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\dxc.exe
-~~~
-
-目标：
-
-~~~text
-Entry: main
-Target: cs_6_0
-Debug:  -Zi -Qembed_debug -Od
-Release:-O3 -Qstrip_debug -Qstrip_reflect
-~~~
-
-CMake custom command 将每个 HLSL 编译为 `out/<preset>/shaders/*.dxil`。运行时不调用 D3DCompile 编译字符串；这样 shader 错误在构建阶段暴露。
-
-## 5.5 Preset
-
-至少提供：
-
-~~~text
-x64-debug
-x64-release
-~~~
-
-生成命令示例：
-
-~~~powershell
-$cmake = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
-$vcpkgToolchain = (Resolve-Path '.\third_party_local\vcpkg\scripts\buildsystems\vcpkg.cmake')
-$dlssRoot = (Resolve-Path '.\third_party_local\nvidia\DLSS_SDK_310.7.0')
-$runtimeRoot = (Resolve-Path '.\runtime_local\nvidia')
-& $cmake --preset x64-debug -DCMAKE_TOOLCHAIN_FILE="$vcpkgToolchain" -DVCPKG_TARGET_TRIPLET=x64-windows -DVEYRA_DLSS_SDK_ROOT="$dlssRoot" -DVEYRA_RUNTIME_ROOT="$runtimeRoot" -DVEYRA_ENABLE_EXPERIMENTAL_DLSSNR=ON
-& $cmake --build --preset x64-debug
-& $cmake --build --preset x64-debug --target veyra_nr_harness
-~~~
-
-不要把这些机器绝对路径提交进 `CMakePresets.json`。共享 preset 用 cache variable 占位；本机覆盖放 ignored 的 `CMakeUserPresets.json` 或让 `scripts/configure.ps1` 解析。
-
----
-
-# 6. GPU 基础层，必须先写对
-
-## 6.1 Adapter 和 device
-
-`D3D12DeviceContext` 初始化顺序：
-
-1. 可选启用 `ID3D12Debug`；
-2. `CreateDXGIFactory2`；
-3. `IDXGIFactory6::EnumAdapterByGpuPreference(HIGH_PERFORMANCE)`；
-4. 只选 `VendorId == 0x10DE` 且非 software adapter；
-5. `D3D12CreateDevice`，最低 feature level 12_0；
-6. 创建 direct command queue；
-7. 创建 fence/event；
-8. 记录 adapter description、LUID、dedicated memory、driver/runtime report。
-
-不要偷偷 fallback 到 WARP 后继续报告“DLSS 已启用”。runtime probe 可显示 WARP，但 NR backend 必须返回 unsupported。
-
-## 6.2 Command slots
-
-创建 4 个 slot，每个拥有：
-
-~~~text
-ID3D12CommandAllocator
-fenceValue
-2 个 timestamp query index
-临时 descriptor range
-保持本帧 AVFrame/texture 存活的引用
-~~~
-
-每帧只等待“将要复用的 slot 的 fence”，不是等待刚提交的当前帧。正常队列深度最多 1 个待处理 real frame。Phase 1 创建 Feature 后允许同步等待一次。
-
-## 6.3 Barrier 原则
-
-建立统一 `ResourceStateTracker`，不要在各 backend 猜状态。NR Evaluate 前：
-
-~~~text
-Color / MVec / Depth:
-  D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
-
-Output:
-  D3D12_RESOURCE_STATE_UNORDERED_ACCESS
-~~~
-
-Evaluate 后对 Output 发 UAV barrier，再转为后续 parity shader 的 `NON_PIXEL_SHADER_RESOURCE`。如果官方对应 SDK 版本明确要求不同状态，以官方头/sample 为准，同时更新本表和 WORKLOG；禁止一个资源在代码里同时被两套 state tracker 管。
-
-所有 NR/parity pass 放在同一 direct command list/queue，避免跨 queue fence 增加延迟。
-
-## 6.4 纹理合同
-
-Phase 1 只要求 Proxy/Neural/Zero Guidance；Phase 2 再加入 Original/Final：
-
-~~~text
-Proxy:      R8G8B8A8_UNORM,     1920x1080, ALLOW_UNORDERED_ACCESS，Phase 1 直接生成
-Neural:     R8G8B8A8_UNORM,     1920x1080, ALLOW_UNORDERED_ACCESS
-ZeroMotion: R16G16_FLOAT,        1920x1080, 全 0
-ZeroDepth:  R32_FLOAT,           1920x1080, 全 0
-Confidence: R8_UNORM,            1920x1080, 全 0，仅 guidance 内部
-
-Original:   R16G16B16A16_FLOAT, 1920x1080, ALLOW_UNORDERED_ACCESS，Phase 2 加入
-Final:      R16G16B16A16_FLOAT, 1920x1080, ALLOW_UNORDERED_ACCESS，Phase 2 加入
-~~~
-
-不允许把 motion/depth 设为 null。即使不用真实 guidance，也传入尺寸正确、格式正确、全零的纹理。
-
----
-
-# 7. NGX Core Host
-
-文件：
-
-~~~text
-src/ngx/NgxCoreHost.h
-src/ngx/NgxCoreHost.cpp
-src/ngx/NgxResult.cpp
-src/ngx/NgxParameters.h
-~~~
-
-## 7.1 一进程一次
-
-`NgxCoreHost` 对一个 D3D12 device 只初始化一次。SR、NR、FG 是 consumer，不得各自调用一套 core Init/Shutdown。
-
-初始化伪代码：
-
-~~~cpp
-const wchar_t* featurePaths[] = { runtimeDir.c_str() };
-NVSDK_NGX_FeatureCommonInfo common{};
-common.PathListInfo.Path = featurePaths;
-common.PathListInfo.Length = 1;
-
-auto result = NVSDK_NGX_D3D12_Init_with_ProjectID(
-    veyraProjectId.c_str(),
-    NVSDK_NGX_ENGINE_TYPE_CUSTOM,
-    "Veyra-Experimental-0.1.0",
-    runtimeDir.c_str(),
-    device,
-    &common,
-    NVSDK_NGX_Version_API);
-~~~
-
-所有参数块统一由 core 创建/销毁：
-
-~~~text
-NVSDK_NGX_D3D12_AllocateParameters
-NVSDK_NGX_D3D12_GetCapabilityParameters
-NVSDK_NGX_D3D12_DestroyParameters
-~~~
-
-最终 consumer 和 parameter block 都释放后，才调用：
-
-~~~text
-NVSDK_NGX_D3D12_Shutdown1(device)
-~~~
-
-## 7.2 外部调用保护
-
-当前 runtime 是实验构建。每个 NGX 外部入口包在 MSVC SEH 边界：
-
-~~~cpp
-__try {
-  result = external_call(...);
-} __except(EXCEPTION_EXECUTE_HANDLER) {
-  sehCode = GetExceptionCode();
-  result = NVSDK_NGX_Result_FAIL_PlatformError;
-}
-~~~
-
-SEH 不是正常控制流。每次触发都视为失败，记录 operation、feature、result hex、SEH code，停止当前 backend，不能吞掉后继续 present 垃圾纹理。
-
----
-
-# 8. Feature 18 Runtime Adapter：精确调用协议
-
-文件：
-
-~~~text
-src/ngx/DlssNrBackend.h
-src/ngx/DlssNrBackend.cpp
-src/ngx/DlssNrRuntimeAdapter.h
-src/ngx/DlssNrRuntimeAdapter.cpp
-src/ngx/DlssNrParameters.h
-~~~
-
-`DlssNrRuntimeAdapter.cpp` 是项目里唯一允许知道以下内容的文件：
-
-- Feature ID 18；
-- signed snippet application ID；
-- DLL 导出函数签名；
-- caller-name compatibility；
-- 本地 runtime 路径和实验开关。
-
-这样未来 NVIDIA 正式 SDK 到来时，只替换 adapter，不拆整个播放器。
-
-## 8.1 编译门
-
-只有 `VEYRA_ENABLE_EXPERIMENTAL_DLSSNR=ON` 才编译 adapter。Release/发行 preset 默认 OFF。本地启用时启动日志必须明确显示：
-
-~~~text
-EXPERIMENTAL LOCAL-ONLY DLSSNR ADAPTER ENABLED
-~~~
-
-## 8.2 加载方式
-
-绝对路径：
-
-~~~cpp
-runtimeDir / L"nvngx_dlssnr.dll"
-~~~
-
-先验证 size/hash/signature，再：
-
-~~~cpp
-LoadLibraryExW(
-  absoluteDllPath.c_str(),
-  nullptr,
-  LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
-  LOAD_LIBRARY_SEARCH_SYSTEM32);
-~~~
-
-`absoluteDllPath` 必须先经 `GetFullPathNameW`/`std::filesystem::canonical` 解析并确认仍位于配置的 `runtime_local/nvidia`。`LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR` 只给同目录依赖，`LOAD_LIBRARY_SEARCH_SYSTEM32` 只给系统依赖；不要用 `LOAD_WITH_ALTERED_SEARCH_PATH`、裸 `LoadLibraryW` 或进程当前目录。
-
-解析并逐项非空检查：
-
-~~~cpp
-using InitExtFn = NVSDK_NGX_Result(NVSDK_CONV*)(
-    unsigned long long,
-    const wchar_t*,
-    ID3D12Device*,
-    NVSDK_NGX_Version,
-    const NVSDK_NGX_Parameter*);
-
-using CreateFeatureFn = NVSDK_NGX_Result(NVSDK_CONV*)(
-    ID3D12GraphicsCommandList*,
-    NVSDK_NGX_Feature,
-    NVSDK_NGX_Parameter*,
-    NVSDK_NGX_Handle**);
-
-using EvaluateFeatureFn = NVSDK_NGX_Result(NVSDK_CONV*)(
-    ID3D12GraphicsCommandList*,
-    const NVSDK_NGX_Handle*,
-    const NVSDK_NGX_Parameter*,
-    PFN_NVSDK_NGX_ProgressCallback);
-
-using ReleaseFeatureFn =
-    NVSDK_NGX_Result(NVSDK_CONV*)(NVSDK_NGX_Handle*);
-
-using ShutdownFn =
-    NVSDK_NGX_Result(NVSDK_CONV*)(ID3D12Device*);
-~~~
-
-导出名必须逐字一致：
-
-~~~text
+third_party_local/microsoft/windowsappsdk.ml/1.8.2124/
+  include/
+  lib/native/x64/
+  runtimes-framework/win-x64/native/
+
+third_party_local/models/depth-anything-v2-small/
+  model_fp16.onnx
+  LICENSE.txt
+  manifest.json
+
+third_party_local/models/video-depth-anything-small/
+  model.onnx              # 仅离线高质量实现实际选用时需要
+  LICENSE.txt
+  manifest.json
+
+third_party_local/ffmpeg/bin/
+  ffprobe.exe
+  LICENSE.txt
+  manifest.json
+```
+
+### 4.1 已知存在
+
+- 根目录 `nvngx_dlssnr.dll` 与 `runtime_local/nvidia/nvngx_dlssnr.dll`；
+- `runtime_local/nvidia/nvngx_dlss.dll`；
+- `third_party_local/nvidia/DLSS_SDK_310.7.0`；
+- SDK 内已有 `lib/Windows_x86_64/rel/nvngx_dlssg.dll`：7,519,856 bytes，version `310.7.0.0`，SHA256 `135EAF0733C1E37381A8C28ABCF7A862404A54132B81787C04E35D09EFC5E36F`，Authenticode `Valid / NVIDIA Corporation`。它尚未 stage，也尚未通过 Veyra 的 DLSSG Create/Evaluate；
+- vcpkg FFmpeg decode 依赖。
+
+### 4.2 当前外部阻塞
+
+- Optical Flow SDK 5.0 与 Video Codec SDK 13.1 需要用户登录 NVIDIA Developer Program 并分别接受 EULA；Agent 不得替用户点击同意；
+- depth model、Windows App SDK ML/ORT 包和 ffprobe binary 必须在使用前记录来源、版本、SHA256、许可证；
+- capture gate 需要一块 Windows 能枚举并提供 4K60 SDR + HDMI audio 的真实采集卡和回环信号。
+
+依赖缺失时先完成不依赖它的接口、CPU golden、shader、synthetic gate 和 UI。只有真正走到硬件集成任务才写 `INBOX` 并阻塞；不要一开始空等。
+
+### 4.3 runtime staging
+
+继续使用 `scripts/stage-runtime.ps1` 的安全原则：只从已知绝对路径复制；复制前后校验 size/hash/signature；manifest 记录 source path 和 timestamp。新增 DLSSG 时只从 `third_party_local/nvidia/DLSS_SDK_310.7.0/lib/Windows_x86_64/rel/nvngx_dlssg.dll` 复制，并匹配上面的锁定身份；不能从 GitHub release 或游戏目录随便捡版本。
+
+任何 runtime hash 改变都是新的实验变量；必须新建证据，不得复用旧 gate。
+
+## 5. 构建开关
+
+保留并使用：
+
+```cmake
+VEYRA_ENABLE_EXPERIMENTAL_DLSSNR
+VEYRA_ENABLE_DLSS_SR
+VEYRA_ENABLE_DLSS_FG
+VEYRA_ENABLE_NVOF
+VEYRA_ENABLE_D3D12_DEBUG
+```
+
+新增：
+
+```cmake
+VEYRA_ENABLE_DEPTH_DML       # default OFF
+VEYRA_ENABLE_CAPTURE_DSHOW   # Windows default ON when avdevice exists
+VEYRA_ENABLE_EXPORT          # default ON when WIC + FFmpeg exist
+VEYRA_ENABLE_NVENC_D3D12     # release export default ON; dependency missing -> configure fail
+VEYRA_WINDOWS_ML_ROOT        # local extracted package
+VEYRA_DEPTH_MODEL_ROOT       # local model directory
+VEYRA_VIDEO_CODEC_SDK_ROOT   # local Video Codec SDK 13.1 root
+VEYRA_FFPROBE_EXE            # validation only; absolute path, not baked into source
+```
+
+规则：功能开关 ON 而依赖缺失时 CMake configure 直接失败并写精确缺失路径；不能编译一个运行时才静默变 Zero 的假 backend。
+
+在 `vcpkg.json` 给 FFmpeg 加 `avdevice`，并固定 libass/FreeType/HarfBuzz 版本用于字幕。不要为了 capture 再引入 OpenCV/Python。首发 UI 用 Win32，不增加 WebView2/Gradio。
+
+## 6. 线程与队列
+
+固定 owner：
+
+```text
+UI thread            Win32 message loop; never blocks on long GPU/FFmpeg work
+source thread        file demux/decode OR dshow capture
+render thread        sole owner of EnhanceGraph and all NGX calls
+audio thread         WASAPI event-driven render
+export writer thread consumes bounded NVENC bitstream packets and libavformat mux
+depth worker         one DML session, sequential Run only
+```
+
+不同模式：
+
+| 模式 | 视频 source queue | 策略 |
+|---|---:|---|
+| Capture ingress | 1 | 新帧覆盖未处理旧帧；drop++；next frame reset |
+| Capture graph window | 2 or 3 | FG Low Latency 保留 A/B；Buffered Quality 保留 A/B/C；绝不继续增长 |
+| Player | 4 | backpressure；不丢源帧；audio master |
+| Export | 4 | backpressure；绝不丢源帧；writer 慢则阻塞 producer |
+
+1080p GPU command slot 3–4 个，4K 使用 4–6 个并以显存 budget 动态拒绝超配。Feature create/rebuild 可等待一次；逐帧不能在每个 pass 后 `WaitForSingleObject`。只在资源跨队列、NVENC slot 重用或 present 时用 fence 建立依赖。
+
+4K 资源纪律：一张 3840×2160 RGBA16F texture 约 63.3 MiB，不能在每个 pass/每帧临时创建。建立按 `workingExtent/format/flags` 键控的 resource pool，记录 current/peak allocation；在启动 4K graph 前调用 `IDXGIAdapter3::QueryVideoMemoryInfo`，把 NGX 内部估算、swapchain、decode surfaces、A/B/C history、motion/depth/confidence、NVENC slots 全部计入预算。参考 RTX 5070 12 GB gate 要求运行峰值仍至少保留 1.5 GiB budget headroom。
+
+延迟模式的窗口固定定义：
+
+```text
+NR Low Latency:     current=B, prev=A optional, next=null; 不主动等 C；FG off
+FG Low Latency:     prev=A, current=B, next=null; B 到达后生成 A½；lookaheadFrames=1
+Buffered Quality:   prev=A, current=B, next=C; C 只验证 A/B guidance；lookaheadFrames=2
+Export Quality:     文件级有界 lookahead；不受交互延迟门槛
+```
+
+`lookaheadFrames` 是数据依赖，不是延迟测量。FG pair 的稳态附加显示延迟理论下限约 `0.5/f + graph/pacing`，保守调度可能接近 `1/f`；加入 C 通常再增加约 `1/f`。采集卡已经造成的延迟不能抵扣这些依赖。若玩家使用 HDMI passthrough 操控，Veyra 的缓冲只影响观众/录制；若玩家看 Veyra 窗口操控，UI 默认不启用 Buffered Quality。
+
+收益优先级固定：B 使 A↔B 双向 flow/遮挡/中间帧成为可能，是主要提升；C 只用于加速度、depth temporal stability、cut confirmation 和 trust refinement，是次要提升。质量数据未证明 C 有收益时，Auto 必须退回 A/B，不能只因模式名更高级就强制多等一帧。
+
+后帧/双向 flow 的规范依据是 NVIDIA NVOFA FRUC guide：<https://docs.nvidia.com/video-technologies/optical-flow-sdk/nvfruc-programming-guide/index.html>。它说明 consecutive previous/next frames 与 forward/backward flow；Veyra 不因此改用 FRUC 冒充 DLSSG。
+
+## 7. 统一接口
+
+先实现接口和 fake providers，再碰硬件：
+
+```cpp
+class IFrameSource {
+public:
+    virtual SourceInfo info() const = 0;
+    virtual Result start() = 0;
+    virtual SourceReadResult read(FramePacket&, AudioPacket*) = 0;
+    virtual Result seek(Rational) = 0; // unsupported for capture/image
+    virtual void stop() noexcept = 0;
+};
+
+class IGuidanceProvider {
+public:
+    virtual Result initialize(const GuidanceConfig&, D3D12DeviceContext&) = 0;
+    virtual Result produce(const FrameWindow&, GuidanceFrame&) = 0;
+    virtual void reset(uint64_t epoch, ResetReason) noexcept = 0;
+};
+
+class IFrameSink {
+public:
+    virtual Result begin(const StreamDescription&) = 0;
+    virtual Result consume(const ProcessedFrame&) = 0;
+    virtual Result end() = 0;
+    virtual void cancel() noexcept = 0;
+};
+```
+
+`FrameWindow` 明确保存 `prev/current/next`、各自 PTS/sequence 和 `lookaheadFrames`。`next` 缺失不是错误；provider 只能执行与当前模式相符的因果算法。DLSSG 不接收任意第三帧 C；C 只用于 Veyra 自己的 consistency/depth/cut/trust 计算。
+
+接口的真实定义可以调整语法，但不得丢失：PTS/duration/sequence、color metadata、source flags、reset epoch、provenance、fence ownership、lookahead/cancel/EOS。
+
+## 8. Feature 18：不要改坏已通过的协议
+
+### 8.1 runtime 与调用路径
+
+`DlssNrRuntimeAdapter` 继续从 `runtime_local/nvidia/nvngx_dlssnr.dll` 绝对路径加载，受限 search flags，解析并逐项验证：
+
+```text
 NVSDK_NGX_D3D12_Init_Ext
 NVSDK_NGX_D3D12_CreateFeature
 NVSDK_NGX_D3D12_EvaluateFeature
 NVSDK_NGX_D3D12_ReleaseFeature
 NVSDK_NGX_D3D12_Shutdown1
-~~~
+```
 
-不要静态 link `nvngx_dlssnr.dll`，不要依赖当前目录搜索，不要改名为 `nvngx.dll`。
+使用已经实测的 signed-snippet App ID `0x0876232C` 和 caller compatibility adapter。不得：
 
-## 8.3 caller-name compatibility 隔离层
+- patch DLL 文件；
+- 把 addon 改名成 DLL；
+- 改回未通过的普通 core Feature 18 路径；
+- 省略 SEH/result logging；
+- 在 UI/source/export 中复制一份 private parameter code。
 
-当前 signed snippet 会检查 caller module name。Magpie 的已验证路径在 DLL 的 `GetModuleFileNameW` import slot 上装一个最小兼容 shim：只有当查询的是 Veyra caller module 时返回 `nvngx.dll`，其他调用全部转发原始 `GetModuleFileNameW`。
+### 8.2 Create 参数类型
 
-实现要求：
+唯一字符串真源是 `include/veyra/ngx/DlssNrParameters.h`。当前中性同分辨率 create：
 
-1. 解析已加载 signed snippet 的 PE import table；
-2. 只寻找 KERNEL32/API-set 下名为 `GetModuleFileNameW` 的 IAT slot；
-3. 全局只允许一个 adapter session 持有该 slot；
-4. 保存原函数指针和旧页面保护；
-5. `VirtualProtect` 只覆盖一个指针宽度；
-6. `InterlockedExchangePointer` 安装 shim；
-7. 恢复页面保护并 `FlushInstructionCache`；
-8. shim 只对本模块 handle 返回字面量 `nvngx.dll`，并严格模拟 `GetModuleFileNameW` 的 buffer/return/error 语义；
-9. 所有其他 module handle 调原函数；
-10. Release/Shutdown 后必须逆序恢复原 IAT，再 `FreeLibrary`。
-
-Veyra caller module handle 用 shim 函数地址解析，不按 exe 文件名猜：
-
-~~~cpp
-GetModuleHandleExW(
-  GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-  GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-  reinterpret_cast<LPCWSTR>(shimFunctionAddress),
-  &callerModule);
-~~~
-
-shim 的边界测试必须覆盖：`hModule == callerModule`、`nullptr`、`nSize == 0`、刚好容纳 10 个 wchar（9 字符加 NUL）、过小 buffer 和非 caller module。`nSize == 0` 时返回 0、不得访问 buffer、不得改变 last-error；过小 buffer 必须 NUL 截断、返回 `nSize` 并设置 `ERROR_INSUFFICIENT_BUFFER`；正常返回 9（不含 NUL）。测试要先写入 sentinel last-error，分别验证成功、截断和零长度路径。禁止 `wcscpy` 和越界写。所有非 caller 情况原样转发保存的真实函数指针。
-
-不要 patch DLL 文件，不要全局 hook Kernel32，不要影响进程内其他模块。这个兼容层是未公开、脆弱、只限本机实验的东西，必须能通过一个编译开关完全移除。
-
-如果 IAT 中没有目标 import、已有其他 owner、`VirtualProtect` 失败或不能恢复，立即报错并停止 NR；不允许退化成更宽泛的 hook。
-
-独立实现时只参考 Magpie 对外行为，不复制 GPL 源码。参考位置：
-
-~~~text
-Magpie experimental:
-src/Magpie.Core/DLSSNRFilter.cpp
-  SnippetGetModuleFileNameW
-  FindImportedFunctionSlot
-  InstallSnippetCallerCompatibility
-  RestoreSnippetCallerCompatibility
-~~~
-
-## 8.4 signed snippet 初始化
-
-常量：
-
-~~~cpp
-constexpr auto kDlssNrFeature =
-    static_cast<NVSDK_NGX_Feature>(18);
-constexpr unsigned long long kSignedSnippetAppId = 0x0876232Cull;
-~~~
-
-这个 App ID 来自当前 signed snippet 的已验证调用合同；它不是 Veyra NGX Project ID，二者不能混用。
-
-调用：
-
-~~~cpp
-snippetInitExt(
-  0x0876232Cull,
-  runtimeDir.c_str(),
-  device,
-  NVSDK_NGX_Version_API,
-  nullptr);
-~~~
-
-顺序必须是：
-
-~~~text
-NgxCoreHost Init
-→ Load signed snippet
-→ install narrow caller compatibility
-→ signed snippet Init_Ext
-→ core AllocateParameters
-→ set create parameters
-→ signed snippet CreateFeature(feature 18)
-→ close/execute init command list
-→ wait once for creation
-~~~
-
-不要默认走 core 的 `NVSDK_NGX_D3D12_CreateFeature(18)`。在 Magpie 当前实现中，core Feature 18 路径只保留为显式 diagnostic，正常路径是 signed snippet export。
-
-## 8.5 Create 参数，名字和类型
-
-所有字符串集中在 `DlssNrParameters.h`，禁止散落：
-
-| 参数 | 类型 | Phase 1 值 |
-|---|---:|---:|
-| `DLSSNR.Width` | uint32 | width |
-| `DLSSNR.Height` | uint32 | height |
-| `DLSSNR.InputWidth` | uint32 | width |
-| `DLSSNR.InputHeight` | uint32 | height |
-| `DLSSNR.OutputWidth` | uint32 | width |
-| `DLSSNR.OutputHeight` | uint32 | height |
-| `DLSSNR.Output.Width` | uint32 | width |
-| `DLSSNR.Output.Height` | uint32 | height |
-| `DLSSNR.Upscaling` | uint32 | 0 |
-| `DLSSNR.Scale` | float | 1.0 |
-| `DLSSNR.ScalingRatio` | float | 1.0 |
-| `DLSSNRComputeScalingRatioCallback` | void* callback | callback sets ratio 1.0 |
-| `DLSSNR.Hint.Render.Preset` | int | profile preset |
-| `Width` / NGX standard width | uint32 | width |
-| `Height` / NGX standard height | uint32 | height |
-| `PerfQualityValue` | int | Balanced |
-| `CreationNodeMask` | uint32 | 1 |
-| `VisibilityNodeMask` | uint32 | 1 |
-
-不要省略那些看似重复的 width/height。当前实验 runtime 同时观察 DLSSNR 自定义名和 NGX 标准名。
-
-`DLSSNRComputeScalingRatioCallback` 签名接受 `NVSDK_NGX_Parameter*`，内部只设置：
-
-~~~cpp
-params->Set("DLSSNR.ScalingRatio", 1.0f);
-return NVSDK_NGX_Result_Success;
-~~~
-
-## 8.6 Evaluate 参数，名字和类型
-
-资源：
-
-| 参数 | 类型 | 值 |
+| 参数 | setter | 值 |
 |---|---|---|
-| `DLSSNR.Color` | ID3D12Resource* | Proxy |
-| `DLSSNR.Output` | ID3D12Resource* | Neural |
-| `DLSSNR.MVec` | ID3D12Resource* | Motion 或 ZeroMotion |
-| `DLSSNR.Depth` | ID3D12Resource* | Depth 或 ZeroDepth |
-
-每个资源都设置完整 subrect，类型为 uint32：
-
-~~~text
-DLSSNR.ColorSubrectBaseX/Y/Width/Height
-DLSSNR.OutputSubrectBaseX/Y/Width/Height
-DLSSNR.MVecSubrectBaseX/Y/Width/Height
-DLSSNR.DepthSubrectBaseX/Y/Width/Height
-~~~
-
-Phase 1 均为 `0, 0, width, height`。
-
-其他参数：
-
-| 参数 | 类型 | 默认 |
-|---|---:|---:|
-| `DLSSNR.MVecScaleX` | float | 1.0 |
-| `DLSSNR.MVecScaleY` | float | 1.0 |
-| `DLSSNR.DepthInverted` | int | 1 |
-| `DLSS.Indicator.Invert.X.Axis` | int | 0 |
-| `DLSS.Indicator.Invert.Y.Axis` | int | 0 |
-| `DLSSNR.Enabled` | int | 1 |
-| `DLSSNR.Reset` | int | 首帧/seek/resize/scene cut 为 1，否则 0 |
-| `DLSSNR.Style` | int | 0 |
-| `DLSSNR.Intensity` | float | 1.0 |
-| `DLSSNR.LocalToneStrength` | float | 1.0 |
-| `DLSSNR.LocalStructureStrength` | float | 1.0 |
-| `DLSSNR.SkinStructureStrength` | float | -1.0 |
-| `DLSSNR.UseAutoMask` | int | 0 |
-| `DLSSNR.UICorrection` | int | 0 |
-
-这些默认值与当前 Magpie Experimental 的 baseline 一致。不要先发明 slider 范围。Phase 1 用 JSON profile 直接写值；等通过 reference capture 确认 UI 合法范围后再加 clamp。
-
-## 8.7 每帧执行
-
-Phase 1 一个 frame 的 command list：
-
-~~~text
-reset reusable slot
-→ GenerateTestPattern 直接写 Proxy RGBA8
-→ barriers
-→ set every Evaluate parameter
-→ signed snippet EvaluateFeature(cmd, handle, params, nullptr)
-→ UAV barrier on Neural
-→ timestamp resolves
-→ close and submit once
-→ signal slot fence
-~~~
-
-Phase 2 再把前半段换成“生成/加载 Original → ParityEncode 写 Proxy”，并在 Neural 后接 ParityDecode 写 Final。Phase 1 不得为了提前追求最终观感而把 parity bug 混进 Feature 18 调用验证。
-
-Evaluate 返回成功只表示命令记录成功，不表示像素一定正确。Phase 1 同时检查：
-
-- output 非全黑/非全常数；
-- 无 NaN/Inf；
-- 修改 Style/Intensity 时 output hash 会变化；
-- 300 次 evaluateSuccessCount == 300；
-- D3D12 debug layer 无 resource-state error；
-- GPU timestamp 非 0。
-
-## 8.8 释放顺序
-
-~~~text
-drain GPU slots
-→ signed snippet ReleaseFeature
-→ core DestroyParameters
-→ signed snippet Shutdown1(device)
-→ restore caller IAT
-→ FreeLibrary(snippet)
-→ release NR textures
-→ release NR consumer from NgxCoreHost
-→ all NGX consumers gone后 core Shutdown1(device)
-~~~
-
-每一步即使前一步失败也要尝试安全清理剩余已初始化对象。用显式 init-state bitmask/RAII，不用一个 `initialized=true` 糊住部分初始化。
-
----
-
-# 9. RenoDX Parity Codec：如何做到“类似 ReShade”
-
-这部分才是“类似 ReShade”的核心。Feature 18 只输出 neural proxy；RenoDX 的观感还来自前后的颜色传递。直接把播放器线性 FP16 喂给 NR 或把 Raw Neural 直接 present，都会发生 gamma、亮度和高光错误。
-
-文件：
-
-~~~text
-shaders/ParityEncode.hlsl
-shaders/ParityDecode.hlsl
-src/parity/RenoDxParityCodec.*
-src/parity/RenoDxParityProfile.*
-tests/unit/ParityCpuReference.*
-~~~
-
-## 9.1 固定资源
-
-~~~text
-Original = 线性 BT.709 working RGB，R16G16B16A16_FLOAT
-Proxy    = encode 后，R8G8B8A8_UNORM
-Neural   = Feature 18 raw output，R8G8B8A8_UNORM
-Final    = decode/reconstruct 后，R16G16B16A16_FLOAT
-~~~
+| `DLSSNR.Width/Height` | U32 | NR input extent |
+| `DLSSNR.InputWidth/InputHeight` | U32 | NR input extent |
+| `DLSSNR.OutputWidth/OutputHeight` | U32 | NR output extent |
+| `DLSSNR.Output.Width/.Height` | U32 | NR output extent |
+| `DLSSNR.Upscaling` | U32 | 0；SR 是独立前置 pass |
+| `DLSSNR.Scale` | F32 | 1.0 |
+| `DLSSNR.ScalingRatio` | F32 | 1.0 |
+| `DLSSNR.Hint.Render.Preset` | I32 | 已验证 profile 值，默认 0 |
+| `Width/Height` | U32 | output extent |
+| `PerfQualityValue` | I32 | 当前 baseline 1 |
+| `CreationNodeMask/VisibilityNodeMask` | U32 | 1 |
+
+任何新增 NR 参数先在 harness 做 one-variable A/B，记录类型、值、result 和输出 hash，再进入 UI。
+
+### 8.3 Evaluate 资源和参数
+
+```text
+DLSSNR.Color   -> parity encoded Proxy
+DLSSNR.Output  -> Raw Neural output
+DLSSNR.MVec    -> GuidanceFrame.motion or explicit ZeroMotion
+DLSSNR.Depth   -> GuidanceFrame.depth or explicit ZeroDepth
+```
+
+所有 Color/Output/MVec/Depth subrect 的 BaseX/BaseY/Width/Height 每帧都设置，不能依赖旧参数残留。
+
+| 参数 | setter | 规则 |
+|---|---|---|
+| `DLSSNR.MVecScaleX/Y` | F32 | consumer adapter 后为 1.0；若传未适配 source extent，必须用合成平移片推导并记录 |
+| `DLSSNR.DepthInverted` | I32 | 与实际 depth 约定一致；estimated baseline 固定并 A/B |
+| `DLSS.Indicator.Invert.X/Y.Axis` | I32 | baseline 0 |
+| `DLSSNR.Enabled` | I32 | 1 |
+| `DLSSNR.Reset` | I32 | `ResetCoordinator.epoch` 变化的首帧为 1 |
+| `DLSSNR.Style` | I32 | UI 值；默认 0 |
+| `DLSSNR.Intensity` | F32 | 0–2；默认 1 |
+| `DLSSNR.LocalToneStrength` | F32 | 默认 1 |
+| `DLSSNR.LocalStructureStrength` | F32 | 默认 1 |
+| `DLSSNR.SkinStructureStrength` | F32 | 默认 -1 |
+| `DLSSNR.UseAutoMask` | I32 | 默认 0，只有独立 A/B 后开放 |
+| `DLSSNR.UICorrection` | I32 | 播放/导出默认 0；烧录 UI 不等同游戏 UI resource |
 
-四个阶段必须可抓：
+每帧日志至少含 frame sequence/PTS/reset epoch、guidance provenance、资源 extent/format/state、Evaluate result/SEH、GPU ms、output hash sampling。
 
-~~~text
-00_original
-01_proxy_input
-02_raw_dlssnr
-03_final_parity_output
-~~~
+## 9. 颜色与 parity
 
-## 9.2 Parity Encode 的确定数学
+统一 working format：`R16G16B16A16_FLOAT` linear。Feature 18 proxy/raw 继续使用 Phase 2 已验证的 encode/decode，不把 raw output 直接 present。
+
+每个 source 的 ingress 必须明确：
 
-对每个 RGB 分量：
+```text
+pixel format: NV12 / YUV420P / YUY2 / BGRA ...
+range: limited/full
+matrix: BT.601/709/2020
+transfer: sRGB/BT.709...
+primaries
+rotation/sample aspect ratio
+```
 
-~~~text
-linear = max(Original.rgb, 0) / PaperWhiteScale
+metadata 缺失时采用有日志的可预测规则：SD 默认 601，HD SDR 默认 709；UI 显示“assumed”。不要根据“看着有点灰”去调 NR intensity 掩盖颜色错误。
 
-shoulder(x) =
-  0.75 + 0.25 * (1 - exp(-5.7780 * (x - 0.75)))
+输出 SDR 为 BT.709 limited（视频）或 sRGB full（PNG/JPEG）。只做一次 output transfer。
 
-proxyLinear =
-  x <= 0.75 ? x : shoulder(x)
+## 10. DLSS SR
 
-Proxy.rgb = sRGBEncode(proxyLinear)
-Proxy.a   = Original.a
-~~~
-
-`5.7780` 是当前 addon binary 中可观察到的 codec 常数。不要随意换成 filmic curve。
+复用 `DlssSrBackend` 和 Phase 4 已通过的绝对 runtime 路径修复。Product graph 规则：
 
-标准 sRGB：
+- output 与 source 同尺寸时 bypass，计数 `srBypassCount`；
+- output 更大时先 SR，再 parity/Feature 18；
+- V1 SR 明确使用 Zero Guidance；它不能等待后面才从 post-SR 帧生成的 NVOF/DAV2，禁止形成 `SR -> NVOF -> SR` 循环依赖；
+- SR 输出定义为 `workingExtent`。NVOF、DAV2/confidence、Feature 18 与 DLSSG 都消费这个 extent；SR bypass 时 `workingExtent == sourceExtent`；
+- SR 只用官方 SDK 310.7 header/helper；
+- render/output subrect、jitter、motion scale、exposure 每帧显式设置；
+- 从最终像素做 SR 没有游戏原生 subpixel jitter，baseline jitter=0，不能宣传等同游戏 SR；
+- 若后续实现 synthetic jitter，只能做默认关闭的实验，必须证明不闪烁；
+- SR output 需真实非黑/非恒定，并与 bilinear baseline 不同；不能只看 `Available=1`。
 
-~~~text
-Encode(c):
-  c <= 0.0031308
-    ? 12.92 * c
-    : 1.055 * pow(c, 1/2.4) - 0.055
+Phase 5 首个质量任务把真实视频 `SR -> NR` 串起来，不能继续用独立 SR harness 代替产品顺序。
 
-Decode(c):
-  c <= 0.04045
-    ? c / 12.92
-    : pow((c + 0.055) / 1.055, 2.4)
-~~~
-
-dispatch：
+## 11. NVOF motion
 
-~~~text
-[numthreads(16,16,1)]
-groupsX = ceil(width / 16)
-groupsY = ceil(height / 16)
-越界线程必须 return
-~~~
-
-## 9.3 Parity Decode 的确定数学
-
-亮度：
-
-~~~text
-Y = dot(rgb, (0.212639, 0.715169, 0.072192))
-~~~
+### 11.1 头文件与动态库
 
-读取：
-
-~~~text
-original = max(Original.rgb, 0) / PaperWhiteScale
-proxy    = sRGBDecode(Proxy.rgb)
-neural   = sRGBDecode(Neural.rgb)
-~~~
-
-OkLab 矩阵必须按下面数值、以 `mul(matrix, vector)` 的方向使用，别转置：
-
-~~~text
-RGB → LMS
-0.4122214708  0.5363325363  0.0514459929
-0.2119034982  0.6806995451  0.1073969566
-0.0883024619  0.2817188376  0.6299787005
-
-cuberoot(LMS) → OkLab
-0.2104542553  0.7936177850 -0.0040720468
-1.9779984951 -2.4285922050  0.4505937099
-0.0259040371  0.7827717662 -0.8086757660
-
-OkLab → LMS'
-1.0  0.3963377774  0.2158037573
-1.0 -0.1055613458 -0.0638541728
-1.0 -0.0894841775 -1.2914855480
-
-LMS³ → RGB
- 4.0767416621 -3.3077115913  0.2309699292
--1.2684380046  2.6097574011 -0.3413193965
--0.0041960863 -0.7034186147  1.7076147010
-~~~
-
-cuberoot 必须是 signed：
-
-~~~text
-sign(x) * pow(abs(x), 1/3)
-~~~
-
-AP1 gamut clamp：
-
-~~~text
-BT.709 → AP1
-0.613097  0.339523  0.047379
-0.070194  0.916354  0.013452
-0.020616  0.109570  0.869815
-
-AP1 → BT.709
- 1.705051 -0.621792 -0.083259
--0.130256  1.140805 -0.010548
--0.024003 -0.128969  1.152972
-
-ClampAp1(c) = AP1To709(max(0, BT709ToAP1(c)))
-~~~
-
-HueOkLab：
-
-~~~text
-incorrectLab = ToOkLab(incorrect)
-correctLab   = ToOkLab(correct)
-incorrectChroma = length(incorrectLab.ab)
-correctChroma   = length(correctLab.ab)
-incorrectLab.ab =
-  correctLab.ab *
-  (correctChroma == 0 ? 1 : incorrectChroma / correctChroma)
-return ClampAp1(FromOkLab(incorrectLab))
-~~~
-
-UpgradeToneMap：
-
-~~~text
-originalY = Luminance(original)
-proxyY    = Luminance(proxy)
-neuralY   = Luminance(neural)
-
-if originalY < proxyY:
-  ratio = originalY / proxyY
-else:
-  newY  = neuralY + max(0, originalY - proxyY)
-  ratio = neuralY > 0 ? newY / neuralY : 0
-
-scaled   = HueOkLab(neural * ratio, neural)
-upgraded = lerp(original, scaled, TransferStrength)
-~~~
-
-最终：
-
-~~~text
-originalY = Luminance(original)
-upgradedY = Luminance(upgraded)
-ratio = originalY == 0 ? 1 : upgradedY / originalY
-luminanceOnly = original * ratio
-result = lerp(luminanceOnly, upgraded, ColorStrength)
-Final = float4(result * PaperWhiteScale, Original.a)
-~~~
-
-## 9.4 Parity 配置
-
-三个 codec 参数和 NR 参数分开：
-
-~~~json
-{
-  "schema": 1,
-  "paperWhiteScale": 1.0,
-  "transferStrength": 1.0,
-  "colorStrength": 1.0,
-  "nr": {
-    "preset": 0,
-    "style": 0,
-    "intensity": 1.0,
-    "localToneStrength": 1.0,
-    "localStructureStrength": 1.0,
-    "skinStructureStrength": -1.0,
-    "useAutoMask": false,
-    "uiCorrection": false
-  }
-}
-~~~
-
-`paperWhiteScale/transferStrength/colorStrength = 1.0` 是 V1 的规范化中性工程 baseline，不得谎称它就是 addon 所有环境下的 UI 默认。当前项目没有 ReShade/RenoDX preset；`renodx-dlss5-1.addon64` 是二进制 add-on，不是 profile。Phase 2 必须把这三个 baseline 值、addon hash、输入/输出分辨率和 capture hash 一起记录。若用户以后提供真实 preset，只把它导入为单独命名的可选 reference profile；preset 缺失不阻塞 V1，也禁止通过加载 addon 取值。
-
-## 9.5 单元测试
-
-写一份独立 CPU float reference，不调用 GPU：
-
-- 纯黑、纯白、18% gray；
-- 0.75 阈值左右 `0.7499/0.75/0.7501`；
-- 高光 `1/2/4/8`；
-- RGB primary、肤色近似值；
-- 负分量和 alpha；
-- 64×64 gradient/checker/edge pattern。
-
-测试：
-
-~~~text
-CPU encode → quantize RGBA8 → CPU decode
-GPU encode → readback RGBA8
-GPU decode → readback FP16
-~~~
+- include 只从 `third_party_local/nvidia/Optical_Flow_SDK_5.0/nvofapi/include`；
+- runtime 只用 `C:\Windows\System32\nvofapi64.dll`；
+- `LoadLibraryExW(..., LOAD_LIBRARY_SEARCH_SYSTEM32)`；
+- 解析 `NvOFGetMaxSupportedApiVersion` 和 `NvOFAPICreateInstanceD3D12`；
+- 不把 `nvofapi64.dll` 复制进输出或安装包。
 
-容差：
+### 11.2 初始化
 
-~~~text
-Proxy RGBA8: 每通道最多 1 code value
-Final FP16:  abs error <= 0.002，且无 NaN/Inf
-~~~
+严格参考 SDK 5.0 D3D12 sample 的结构大小/version：
 
-只有 diagnostic capture 工具允许同步 GPU readback。正常播放器路径不允许。
+1. 查询 API version；
+2. `nvCreateOpticalFlowD3D12` 使用 Veyra 的同一 D3D12 device；
+3. query supported input/output/cost formats 与 grid；
+4. 选择 performance preset；优先硬件支持的 4x4 grid，再 densify；
+5. 创建 current/previous ABGR8 input、S10.5 vector output、cost output；
+6. 注册资源，保存 handle；
+7. 建立 app fence point 与 OF fence point；
+8. resize/device lost 时逆序 unregister/destroy/recreate。
 
----
+NVOF context 单线程使用，不并发调用。
 
-# 10. Frame Guidance
+### 11.3 每帧
 
-统一数据合同：
+```text
+current/previous post-SR linear color（SR bypass 时就是 ingress color）
+ -> NvofInput compute: explicit linear->sRGB, verified channel order
+ -> signal app input fence
+ -> nvOFExecuteD3D12(current, previous, output, cost)
+ -> graphics queue waits OF output fence
+ -> NvofDensify: int16 S10.5 / 32 -> RG16F workingExtent pixels
+ -> cost -> confidence
+ -> GuidanceValidate
+```
 
-~~~cpp
-struct GuidanceFrame {
-  uint64_t frameId;
-  uint32_t width;
-  uint32_t height;
-  ID3D12Resource* motion;     // R16G16_FLOAT
-  ID3D12Resource* depth;      // R32_FLOAT
-  ID3D12Resource* confidence; // R8_UNORM
-  bool motionIsZero;
-  bool depthIsZero;
-  bool requiresHistoryReset;
-};
-~~~
+第一帧、reset frame 不调用带旧 previous 的 flow，发布 Zero Motion + reset。之后 current 成为 previous。
 
-固定语义：
+方向 gate：生成已知向右移动 `+8 px/frame` 的图案；warp current 到 previous 后 residual 应显著下降。若结果需要 `-8` 才正确，修 provider 的方向，不在 consumer 随意翻转。
 
-~~~text
-Motion direction: Current → Previous
-Motion unit:      source pixels
-Motion scale:     1.0, 1.0 after conversion
-Depth:            relative inverse if real
-Depth inverted:   true
-~~~
+### 11.4 confidence
 
-## 10.1 Zero Guidance
+最少四项：
 
-Phase 1 就实现。每个 frameId 发布尺寸正确的全零 motion/depth/confidence；metadata 不能复用旧 frameId。第一帧、seek、resize、scene cut、device recreate 设置 reset。
+- NVOF cost；
+- forward/back error（实时可按预算隔帧做，离线必须做）；
+- luma warp residual；
+- out-of-frame/occlusion mask。
 
-Zero Guidance 是诚实的 fallback，不得在日志/UI 显示为 NVOF。
+depth 可用时再加入 depth residual。最终 `confidence` 0–1，motion 乘以 smooth confidence；不要硬阈值造成边缘断裂。必须提供可视化和统计 p05/p50/p95。
 
-## 10.2 NVOF D3D12
+## 12. Depth Anything
 
-Phase 5 再做。调用路径：
+### 12.1 模型与 runtime
 
-~~~text
-Load System32 nvofapi64.dll
-→ NvOFGetMaxSupportedApiVersion
-→ NvOFAPICreateInstanceD3D12
-→ nvCreateOpticalFlowD3D12(device)
-→ nvOFGetCaps
-→ nvOFInit
-→ register current/reference/output/cost resources
-→ queue waits on producer fence
-→ nvOFExecuteD3D12
-→ graphics queue waits on NVOF output fence
-→ NvofVectorConvert compute
-~~~
+第一选择是 Depth Anything V2 Small FP16。模型目录 `manifest.json` 必须含：URL、下载日期、SHA256、输入/输出名、shape、opset、license、商业可用判定。任何一项未知就不进入 release gate。
 
-初始配置：
+Windows ML/ONNX Runtime DML 用固定 package，必须：
 
-~~~text
-mode:                NV_OF_MODE_OPTICALFLOW
-perfLevel:           NV_OF_PERF_LEVEL_MEDIUM
-external hints:      false
-output cost:         true, UINT8
-prediction:          forward
-grid:                首选 1x1；不支持则 2x2/4x4 后 densify
-input/reference:     current frame → previous frame
-~~~
+- 与 Veyra 同一 adapter/device；
+- `SessionOptionsAppendExecutionProvider_DML1(IDMLDevice*, commandQueue*)`；
+- disable memory pattern；execution mode sequential；
+- 固定 input shape；
+- 同一 session 不并发 `Run`；
+- 用 I/O binding/device tensor 把输入输出留在 GPU；
+- 若当前 package 无法安全绑定 Veyra D3D12 buffer，先实现有界异步 staging 但明确计数，Capture `Low Latency` 默认关闭 depth。禁止同步 render thread 等待 CPU inference。
 
-NVOF 不直接接受 Veyra 的 `Original/Final R16G16B16A16_FLOAT`。Phase 5 baseline 在 optional SR 之后、NR 之前，从同一 pre-NR linear frame 用 compute shader 生成专用 8-bit `NvofInput`，通过 SDK D3D12 buffer/register 路径声明为 `NV_OF_BUFFER_FORMAT_ABGR8`；全程 GPU-resident，不做 CPU 像素回读。实际 DXGI resource format、row pitch 和 RGBA/ABGR 通道映射必须以 SDK 5.0 D3D12 sample/返回的 resource desc 为准，并用 RGB bars 验证，禁止凭枚举名字猜 swizzle。
+### 12.2 preprocess/postprocess
 
-至少保留 current/previous 两组独立注册 buffer 并用 fence 轮转；第一帧没有 previous 时发布 Zero Guidance，不调用 NVOF。seek/resize/scene-cut/device recreate 后，下一次 execute 设置 `disableTemporalHints = 1`，不得让 NVOF 内部 temporal hint 跨历史边界。
+Preprocess shader：
 
-NVOF raw vector 是 signed 10.5 fixed point，X/Y 各 16 bit。转 source-pixel float 时除以 32。若 grid 大于 1，按 SDK sample 的坐标定义 densify 到完整尺寸，不能简单把 raw texture 当 `R16G16_FLOAT`。
+- letterbox/resize 到模型 shape；
+- RGB 顺序与 normalization 逐项按模型定义；
+- FP16 NCHW buffer；
+- 记录 crop/scale 以映射回 source extent。
 
-NVOF 的 UINT8 cost 越高表示越不可信；内部字段既然命名为 confidence，就统一转换为 `1.0 - cost / 255.0` 后写 `R8_UNORM`。禁止把 raw cost 原样写入却标成 confidence。
+Postprocess：
 
-NVOF API context 非线程安全。一个 context 只在 guidance worker/受 mutex 保护的单一调用点使用。
+- 检查 finite；
+- 计算 P02/P98，更新 EMA；
+- 映射为 `[0,1]` R32F；
+- 明确定义 near/far 与 `DepthInverted`；
+- motion reprojection 上一深度；
+- current inference 与 reprojected history 根据 confidence/residual 混合；
+- scene cut/reset 清空 EMA/history；
+- depth result 带 source sequence 与 age，过期不能使用。
 
-选择 current 为 input、previous 为 reference，是为了得到 Current→Previous。用一个平移测试片验证符号：画面向右平移时，当前像素回查 previous 的方向必须与 contract 一致；符号错误就修 producer，禁止在 NR 和 FG 两边各自乘一次 -1。
+### 12.3 调度
 
-## 10.3 Guidance 尺寸
+```text
+Low Latency: off or interval 8, never block current frame
+Balanced: interval 4, reproject between results
+Export Quality: interval 1 or Video Depth Anything Small, no dropping
+```
 
-V1 让 NVOF 在 DLSSNR 的 working extent 上工作：
+Auto 降级顺序：stable depth -> motion only -> zero。日志/UI 写明原因：missing model、late result、age、residual、cut、DML failure。
 
-- 无 SR：video output extent；
-- 有 SR：SR 输出/NR 输入 extent。
+不要从 Magpie 复制 GPL 代码。算法思想需独立实现，类名/组织/代码不能机械对应。
 
-这样 NR/FG 都消费同一份 full-resolution motion，`MVecScaleX/Y=1`。不要在一个 backend 用 render resolution、另一个用 output resolution。
+## 13. SceneCadenceAnalyzer
 
----
+GPU 生成 64-bin luma histogram 和 160×90 thumbnail SAD。输入还有：NVOF confidence summary、PTS delta、sequence gap、duplicate hash。
 
-# 11. DLSS Super Resolution
+建议 baseline（随后由 corpus 固化，不可无证据乱调）：
 
-Phase 4 实现，独立 backend：
+```text
+hard discontinuity: seek/source switch/resize/drop -> immediate reset
+probable cut: histogram distance high AND (SAD high OR confidence collapse)
+duplicate: perceptual hash equal + SAD extremely low
+flash: histogram high but motion/edge structure remains coherent -> do not reset unless next frame confirms
+```
 
-~~~text
-src/ngx/DlssSrBackend.*
-~~~
+输出 `CadenceDecision`：normal/cut/duplicate/drop/discontinuity，带各 score。它是 ResetCoordinator 的唯一内容分析输入。
 
-使用官方 `nvsdk_ngx_helpers.h`：
+## 14. DLSSG 2X
 
-~~~text
-NGX_D3D12_CREATE_DLSS_EXT
-NGX_D3D12_EVALUATE_DLSS_EXT
-~~~
+### 14.1 集成来源
 
-资源和参数以 310.7.0 header 为真源，不手写一套私有字符串。
+只用本地官方 DLSS SDK 310.7 的：
 
-策略：
-
-- input extent == output extent：整个 SR backend bypass；
-- input extent < output extent：SR 先执行，NR 后执行；
-- 第一轮用 Zero Guidance、jitter 0、preExposure 1 跑通；`reset=1` 只用于首帧和真实 history invalidation，正常后续帧必须为 0；
-- V1 的 SR 始终使用 Zero Guidance；full-resolution NVOF 在 SR 输出后生成，只供 NR/FG，禁止让 SR 反向依赖自己的输出；
-- SDR V1 不设置 HDR feature flag；
-- seek/resize/quality mode change 时 Release/Create 并 reset；
-- 不允许让 DLSSNR 自己兼任放大。
-
-Phase 4 必须单独抓：
-
-~~~text
-decoded_linear
-sr_output
-nr_proxy
-nr_raw
-final
-~~~
-
-如果 SR output gamma 错，先查输入是不是 linear、pre-exposure、format 和 range，不调 NR 参数掩盖。
-
----
-
-# 12. DLSS Frame Generation 2X
-
-Phase 6 实现：
-
-~~~text
-src/ngx/DlssFgBackend.*
-src/player/GeneratedFrameScheduler.*
-~~~
-
-使用官方：
-
-~~~text
+```text
 nvsdk_ngx_helpers_dlssg.h
-NGX_D3D12_CREATE_DLSSG_EXT
-NGX_D3D12_EVALUATE_DLSSG_EXT
-~~~
-
-先从 capability parameters 读取：
-
-~~~text
-NVSDK_NGX_Parameter_FrameGeneration_Available
-NVSDK_NGX_Parameter_FrameGeneration_FeatureInitResult
-NVSDK_NGX_DLSSG_Parameter_MultiFrameCountMax
-~~~
+nvsdk_ngx_defs_dlssg.h
+nvsdk_ngx_params_dlssg.h
+doc/DLSS-FG Programming Guide.pdf
+sample（若本地 SDK 有）
+```
 
-V1 固定 2X，即每相邻 real frame 只生成 1 帧：
+同时以 NVIDIA 的公开 DLSS-G integration guide 交叉核对资源、frame constants 和 pacing：<https://github.com/NVIDIA-RTX/Streamline/blob/main/docs/ProgrammingGuideDLSS_G.md>。Veyra 仍直接 NGX，不引入 Streamline runtime。
 
-~~~text
-multiFrameCount = 1
-multiFrameIndex = 1
-~~~
+不要抄 Magpie GPL 实现，不要抄无许可证仓库。
 
-Create：
+### 14.2 backend
 
-~~~text
-Width/Height:             最终 backbuffer extent
-RenderWidth/RenderHeight: guidance extent
-NativeBackbufferFormat:   Final NR color format
-~~~
-
-如果永远不提供以下资源，按官方 header/Magpie 已验证路径设置 `ResourceNeverProvided_Flags`：
+`DlssFgBackend` 封装 capability/create/evaluate/release。Create 前记录：GPU architecture、driver、HAGS、runtime hash/version、MultiFrameCountMax。
 
-~~~text
-HUDLess
-UI
-UIAlpha
-BidirectionalDistortionField
-OutputReal
-~~~
+首发只请求 2X（每对 real frames 1 个 generated frame）。资源至少包含 SDK helper 要求的：
 
-Evaluate 基线：
+- current/previous real color（Feature 18 后、UI 前）；
+- motion；
+- depth 或明确 ZeroDepth；
+- output interpolated；
+- camera/constants、frame id、reset；
+- 对永不提供的 HUD-less/UI/UIAlpha/BidirectionalDistortionField/OutputReal 按官方 header 设置 `ResourceNeverProvided_Flags`，不能传悬空 texture。
 
-~~~text
-pBackbuffer                 = 当前 Final NR real frame
-pMVecs                      = NVOF motion 或 ZeroMotion
-pDepth                      = ZeroDepth（V1 不估深度）
-pOutputInterpFrame          = generated output
-pOutputDisableInterpolation = 4-byte/required output buffer
-BackbufferFrameID           = 单调 frameId
-mvecScale                   = 1/width,1/height（GuidanceFrame 是 source-pixel 单位）
-reset                       = history reset flag
-cameraMotionIncluded        = NVOF dense motion 时 true，Zero Motion 时 false
-depthInverted               = false when using zero depth
-camera matrices             = identity baseline
-~~~
+motion scale 不能沿用 Feature 18 值。按官方 DLSSG header 定义和合成平移片确认；在结果未确认前把 `{1,1}` 与 `{1/width,1/height}` 都叫 diagnostic candidate，不得写死宣传。
 
-`mvecScale` 是 DLSSG 的归一化倍率，不是 Feature 18 的 `DLSSNR.MVecScaleX/Y`。
-官方 310.7 helper 要求 scale 后的 motion 落入 `[-1,1]`；因此 full-resolution
-source-pixel motion 使用 `{1/width, 1/height}`，平移测试同时验证方向和幅值。
-所有 backbuffer/motion/depth/output subrect 都显式填满各自 extent，不能依赖
-结构体的零尺寸默认值。
+### 14.3 cadence
 
-已锁定的 Magpie experimental commit 在这一字段使用 `{1,1}`，与官方 header
-注释矛盾。实现 `DlssgMvecScaleMode::{OfficialNormalized, MagpieUnitDiagnostic}`：
-V1 默认且可发布路径只能是 `OfficialNormalized`；后者只允许 harness 显式选择，
-用于复现上游行为和定位 runtime 差异。Phase 6 的固定平移片必须把 mode、scale、
-输入 motion 的 min/max、generated hash/counter 和几何方向/幅值一起写入日志；
-不能因为两个模式都返回 success 就声称二者等价，也不能自动把诊断模式保存成默认。
+DLSSG 输出的 generated PTS = `(prevPTS + currentPTS)/2`。呈现顺序：previous real（已经提交）→ generated → current real。参数、reset 和 quality mode 只在 real-frame boundary 改。
 
-UI 必须在 FG 之后叠加。若把 UI 放进 `pBackbuffer`，FG 会把字幕、按钮和鼠标一起插值，结果不等价于 RenoDX 的“UI downstream”。
+切镜/duplicate/drop/seek：不生成跨边界帧；reset backend；直接 present current real。
 
-## 12.1 时序
+证明 generated frame 真实：
 
-要生成 F0 与 F1 中间的 G0.5，必须先拿到 F1。因此 2X FG 有至少一个 source-frame 的时间依赖：
+- Evaluate success 且 output resource 非空；
+- generated hash != previous hash；generated hash != current hash；
+- generated 不是简单 50/50 blend（pixel residual 对 blend baseline 超过固定阈值）；
+- 已知平移片中物体位于合理中间位置；
+- 60 个 real frames 得到严格 59 个可用中间帧（首帧前无生成），时间单调。
 
-~~~text
-decode/process F0, hold
-decode/process F1
-evaluate FG using history/current
-present F0
-present G0.5
-present F1
-~~~
+## 15. 三个 source
 
-实际 NVIDIA helper 的发布顺序以 runtime contract 为准，但 scheduler 必须明确 real/generated PTS，不能重复帧冒充。
+### 15.1 MediaFileSource
 
-对源帧间隔 Δ：
+组合现有 `FFmpegDemuxer` + `FFmpegVideoDecoder`：
 
-~~~text
-PTS(G between A,B) = (PTS(A) + PTS(B)) / 2
-~~~
+1. demux 保存 stream time_base、PTS、duration、rotation/color metadata；
+2. 优先 `AV_PIX_FMT_D3D12` 共享 Veyra device；
+3. decode surface 经 YUV shader 到 linear RGBA16F；
+4. seek：`av_seek_frame`/`avformat_seek_file`，flush codec，increment reset epoch；
+5. EOF 完整 drain；
+6. audio packet 送独立 decoder（新增），转换为 WASAPI mix format；
+7. player 以 audio clock 为 master，export 以源 PTS 为真源。
 
-变帧率视频按相邻真实 PTS 插值，不按 nominal FPS 猜。
+### 15.2 CaptureCardSource
 
-## 12.2 证明真的插帧
+给 vcpkg FFmpeg 开 `avdevice`，调用 `avdevice_register_all()`，`av_find_input_format("dshow")`。
 
-同时满足：
+枚举可以用 dshow device listing 回调或独立安全 probe；不要解析本地化 stderr 作为长期 API。若 FFmpeg 暂无稳定枚举 API，可用 Windows DirectShow COM 枚举 friendly name，再将用户选中的精确 name 传给 dshow input。
 
-- capability available；
-- Create/Evaluate success；
-- `pOutputDisableInterpolation` 表明 interpolation 没被 runtime 禁用；
-- generated frame hash 不等于前后 real frame；
-- 实际 Present 计数接近 real×2；
-- debug overlay 分开显示 real/generated；
-- seek/pause/resize 后旧 generated frame 不再 present。
+打开字典至少尝试用户明确选择的：
 
-理论设置 2X 或把上一帧重复 present 两次都不算成功。
+```text
+video_size=<1920x1080 or 3840x2160 selected from the device's real modes>
+framerate=60
+pixel_format/device-specific format
+rtbufsize=<bounded>
+fflags=nobuffer
+flags=low_delay
+probesize/analyzeduration kept small but nonzero
+```
 
----
+打开后读取实际 stream codec/size/fps/color；不一致则 UI 显示实际值或失败，不能静默当请求模式。P010/HDR 未实现前必须拒绝或要求源设备输出 SDR，禁止按 NV12/SDR 误读。
 
-# 13. FFmpeg 媒体管线
+source thread 只保留最新视频 packet/frame；覆盖旧帧时 `droppedByVeyra++`，下一 frame flags `drop|discontinuity`。音频用独立有界 ring，过载时按时钟策略丢弃并记录。
 
-Phase 3 先 video-only。分两小步：
+首发支持 Windows 已暴露给 DirectShow 的 UVC/采集设备，认证模式包含 1080p30/60 与 2160p30/60。厂商专用设备显示“not exposed through DirectShow”，不崩溃；通用支持不等于宣称所有品牌型号均已认证。
 
-## 13.1 Phase 3A：功能基线
+### 15.3 ImageSource
 
-先用软件 decode + upload 验证 demux、PTS、seek/reset 和连续 NR。这个路径只用于 bring-up，不是最终性能路径。
+WIC：`IWICImagingFactory2` → decoder → frame → color transform/format converter → upload。应用 EXIF orientation；不支持 multipage/animation 时取第一帧并警告。单 frame flags 包含 open/reset/EOS。
 
-~~~text
-avformat_open_input
-→ avformat_find_stream_info
-→ av_find_best_stream(video)
-→ avcodec_alloc_context3 / parameters_to_context
-→ avcodec_open2
-→ packet send / frame receive
-→ swscale to BGRA/NV12 if needed
-→ upload to D3D12
-~~~
+图片不做 FG。SR 可选；NR 只执行 reset frame。可选 still accumulation 必须另过 gate，默认 off。
 
-完成后立刻进入 3B，不要把 CPU upload 当最终“零拷贝播放器”。
+## 16. 三个 sink
 
-## 13.2 Phase 3B：D3D12VA，共用 Veyra device
+### 16.1 D3D12PresentSink
 
-使用 FFmpeg `AV_HWDEVICE_TYPE_D3D12VA`，不要让 FFmpeg 另建 adapter/device：
+- flip-discard swapchain，2–3 buffers；
+- 支持 VSync on 和 tearing on（硬件允许时）；
+- present texture 与 UI overlay 分层；
+- resize 等待自身必要 fence 后重建，不 `Flush` 每帧；
+- 记录 acquire/submit/present result、backbuffer id、queue depth、CPU/GPU timestamp；
+- Capture 的“内部延迟”从 decoded/captured frame 到达 Veyra 的 QPC 到 present submit QPC，不冒充 HDMI 端到端。
 
-~~~cpp
-AVBufferRef* ref = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D12VA);
-auto* hw = reinterpret_cast<AVHWDeviceContext*>(ref->data);
-auto* d3d = reinterpret_cast<AVD3D12VADeviceContext*>(hw->hwctx);
+### 16.2 WasapiAudioSink
 
-d3d->device = veyraDevice;
-veyraDevice->AddRef(); // FFmpeg context owns/release this interface
+- shared mode、event-driven；
+- player/capture 两种来源都走同一 sink；
+- resample 到 mix format，ring buffer 有固定上限；
+- player audio clock 是视频调度主钟；capture 尽量跟设备 timestamp，发生 drop 时不让音频无界累积；
+- pause/seek/stop flush，clock epoch 与 ResetCoordinator 对齐；
+- 记录 underrun/overrun、played frames、drift。
+
+### 16.3 ImageExportSink
+
+输出先写同目录唯一 `.partial`，成功 decode-back 验证后 `MoveFileExW` 原子替换为最终新文件；默认不覆盖。PNG lossless，JPEG quality 可调。失败/取消只删本任务明确创建的 partial。
+
+### 16.4 VideoExportSink
+
+首发必须是 D3D12 NVENC，不允许用全帧 readback/raw pipe 过门禁：
+
+规范真源：<https://docs.nvidia.com/video-technologies/video-codec-sdk/13.1/nvenc-video-encoder-api-prog-guide/index.html>，特别是 D3D12 external resources、input/output fence points、register/map/unmap/unregister 生命周期。
 
-av_hwdevice_ctx_init(ref);
-codec->hw_device_ctx = av_buffer_ref(ref);
-~~~
-
-`get_format` 只在 decoder 提供时选择 `AV_PIX_FMT_D3D12`；否则记录 codec/profile 并 fallback software，不要声称硬解。
-
-每个硬解 AVFrame：
-
-~~~cpp
-auto* d3dFrame =
-  reinterpret_cast<AVD3D12VAFrame*>(frame->data[0]);
-
-ID3D12Resource* texture = d3dFrame->texture;
-int subresource = d3dFrame->subresource_index;
-auto& sync = d3dFrame->sync_ctx;
-~~~
-
-不要把 `frame->data[0]` 直接 cast 为 `ID3D12Resource*`。
-
-固定 FFmpeg 9.0.1 的 `AVD3D12VAFrame::subresource_index` 在 texture-array 模式表示 array slice。创建 NV12/P010 plane SRV 时：
-
-- 非 array texture 使用 `Texture2D.PlaneSlice = 0/1`；
-- array texture 使用 `Texture2DArray.FirstArraySlice = subresource_index`、`ArraySize = 1`、`PlaneSlice = 0/1`；
-- 不得把 `subresource_index` 当 plane index，也不得永远读取 array slice 0；
-- 日志记录 `d3dFrame->flags`、resource desc、array slice 和两个 plane SRV 描述。
-
-等待 `sync_ctx.fence/value` 后，再对实际 slice/plane 做正确的 state transition；对应 `AVFrame` 必须继续存活到 Veyra graphics fence 完成。
-
-GPU 同步：
-
-~~~text
-graphicsQueue->Wait(sync.fence, sync.fence_value)
-~~~
-
-这是 GPU queue wait，不是 CPU `WaitForSingleObject`。必须保持对应 `AVFrame`/`AVBufferRef` 存活，直到消费该 surface 的 graphics fence 完成。
-
-## 13.3 YUV → linear RGB
-
-`YuvToLinearRgb.hlsl` 读取：
-
-- NV12：plane 0 `R8_UNORM`，plane 1 `R8G8_UNORM`；
-- P010：plane 0 `R16_UNORM`，plane 1 `R16G16_UNORM`。
-
-每帧根据 FFmpeg metadata 选择：
-
-~~~text
-color_range
-colorspace
-color_primaries
-color_trc
-chroma_location
-~~~
-
-V1 至少正确支持：
-
-~~~text
-BT.709 limited/full SDR
-BT.601 limited/full SDR
-NV12 8-bit
-P010 SDR fallback
-~~~
-
-HDR/PQ/HLG 在 V1 中明确报 unsupported/bypass NR，不可把 PQ 数值当线性 RGB。
-
-优化顺序：
-
-1. 先独立 YUV→Original shader，保证颜色正确；
-2. 再把 Proxy Encode 融合进同一 dispatch，同时写 Original FP16 和 Proxy RGBA8；
-3. 融合前后用固定帧测试保证 1 code value 内一致。
-
-## 13.4 Seek/reset
-
-seek 流程必须完整：
-
-~~~text
-pause scheduler
-→ stop accepting decoded frames
-→ drain/retire GPU slots
-→ avcodec_flush_buffers
-→ av_seek_frame / avformat_seek_file
-→ clear packet/frame queues
-→ reset playback clock
-→ reset SR/NR/FG/NVOF history
-→ first new frame carries Reset=1
-→ resume
-~~~
-
-只调 `av_seek_frame` 而不清历史会把 seek 前内容混进 Neural/FG 输出。
-
----
-
-# 14. 音频、UI 和播放时钟
-
-Phase 7：
-
-~~~text
-FFmpeg audio decode
-→ swresample to 48 kHz float stereo
-→ event-driven WASAPI shared mode
-→ audio clock is master
-~~~
-
-视频 scheduler 按 PTS 对齐音频：
-
-- 视频早：等待；
-- 视频轻微晚：尽快 present；
-- 严重晚：只丢尚未进入 temporal chain 的 real frame，并立即 history reset；
-- FG 不改变音频时长；
-- pause 时音频和视频同时冻结；
-- seek 后清 WASAPI padding/重新基准。
-
-UI：
-
-- 正常底栏只显示播放/暂停、seek、音量、SR/NR/FG 开关；
-- 调试面板显示 runtime/hash、参数、result、GPU ms、queue depth、real/generated present counts、guidance type、reset reason；
-- ImGui 在 Final/Generated frame 之后绘制；
-- UI 开关改变 NR 配置时，标记下一 real frame reset，不能在一对 FG 中间切参数。
-
----
-
-# 15. 延迟预算和不能犯的错误
-
-Parity Encode/Decode 是 compute shader，本身不需要帧缓存，只增加 GPU 执行时间。DLSSNR/NVOF 也主要增加 GPU time。真正不可避免的整帧等待主要来自 2X FG：生成中间帧前需要下一张 real frame。
-
-理论额外等待：
-
-~~~text
-24 fps source: one frame ≈ 41.7 ms
-30 fps source: one frame ≈ 33.3 ms
-60 fps source: one frame ≈ 16.7 ms
-~~~
-
-这是 temporal availability，不包括 decode、NR、FG GPU time 和显示扫描。最终必须实测，不得承诺固定值。
-
-低延迟规则：
-
-- decoded-ready queue 上限 1；
-- GPU in-flight slots 3–4，但不做多帧 lookahead；
-- 单 direct queue 串起 color/SR/NR/parity；
-- normal path 无 GPU→CPU pixel readback；
-- 不在每个 pass/每帧 CPU wait；
-- D3D12VA fence 用 queue wait；
-- Present 用 flip model，支持时用 waitable swapchain；
-- capture 模式和正常模式完全分开；
-- 关闭 FG 时不保留下一 real frame，立即 present；
-- 统计 `decode→present`、`NR GPU`、`FG GPU`、`queue depth` 和 `present cadence`。
-
-禁止：
-
-~~~text
-decode 4–8 帧排队再处理
-每帧 WaitForSingleObject
-每 pass ExecuteCommandLists
-用 CPU memcpy 在 FP16/RGBA8 间来回
-为了 debug 一直开启同步 readback
-FG 开启后仍按源 FPS sleep
-~~~
-
----
-
-# 16. 分阶段施工与硬门槛
-
-## Phase 0 — Runtime probe + D3D12 skeleton
-
-实现：
-
-~~~text
-veyra_runtime_probe
-D3D12DeviceContext
-CommandSlotRing
-ResourceStateTracker
-GpuProfiler
-RuntimeManifest
-Win32 test window
-~~~
-
-`veyra_runtime_probe --runtime-dir <absolute>` 输出：
-
-~~~text
-OS build
-adapter name/vendor/LUID/VRAM
-driver version
-D3D12 feature level
-DLL path/size/SHA256/file version/signature
-required export present/missing
-nvofapi64 path/version
-experimental flag
-~~~
-
-完成门槛：
-
-- Debug/Release 均可构建；
-- D3D12 窗口循环 5 分钟无 device removed；
-- runtime hash/signature 与 manifest 一致；
-- proprietary files 都是 ignored；
-- WORKLOG 记录真实命令和输出。
-
-## Phase 1 — Feature 18 Native Harness
-
-CLI 必须支持：
-
-~~~text
-veyra_nr_harness
-  --runtime-dir <absolute>
-  --width 1920
-  --height 1080
-  --frames 300
-  --guidance zero
-  --profile config/nr-default.json
-  --capture-frame 0
-  --capture-dir captures/phase1
-~~~
-
-输入由 `GenerateTestPattern.hlsl` 直接生成 RGBA8 Proxy，包含 gradient、checker、硬边和 RGB bars。Phase 1 先不依赖 Original、Parity Shader 或外部图片。
-
-完成门槛：
-
-- signed snippet Init_Ext success；
-- Feature 18 handle 非空；
-- 300/300 Evaluate success；
-- raw output 非黑、无 NaN；
-- 至少两组 Style/Intensity 产生不同 output hash；
-- Release/Shutdown 后无 crash/device removed；
-- D3D12 debug layer 无 state/descriptor lifetime error；
-- 保存 `logs/phase1.log` 与 capture manifest。
-
-任何一项不满足，不进入 Phase 2/3。
-
-## Phase 2 — Parity Codec
-
-实现 CPU reference、两个 shader、四阶段 capture、profile。
-
-完成门槛：
-
-- `ParityCpuReference` 全过；
-- GPU/CPU encode 误差 ≤1 code；
-- GPU/CPU decode FP16 误差 ≤0.002；
-- Original/Proxy/Raw/Final 四份真实抓帧存在；
-- 没有系统性洗白、压黑、截高光、整体偏色；
-- V1 中性 baseline 的三个 codec 参数、来源说明和 capture hash 已记录；
-- Raw/Final 可即时切换，证明 parity 确实执行。
-
-## Phase 3 — Minimal Video Pipeline
-
-3A 软件 decode，3B D3D12VA。
-
-完成门槛：
-
-- H.264/HEVC 的合法测试片可播放；
-- PTS 单调处理正确，VFR 不按固定 FPS 猜；
-- 10 次 seek 后无旧历史影像；
-- NR 每个 real frame 执行；
-- D3D12VA 模式日志显示共享 device 和 `AV_PIX_FMT_D3D12`；
-- normal path 无 pixel readback；
-- 30 分钟 video-only 无内存持续增长。
-
-## Phase 4 — DLSS SR
-
-完成门槛：
-
-- 1:1 自动 bypass；
-- 1080p→4K 走 SR→NR；
-- SR/NR resource extent/subrect 对齐；
-- resize/quality change 正确重建；
-- SR runtime 来自官方 310.7 manifest；
-- Phase 4 以 Zero Guidance 完成 SR 门禁，日志明确标为 Zero；NVOF 属于 Phase 5，尚未实现时必须报告 not enabled，不能用零运动冒充 NVOF。
-
-## Phase 5 — NVOF Guidance
-
-完成门槛：
-
-- System32 runtime/version/capability query 成功；
-- current→previous 方向由平移片验证；
-- fixed 10.5 除以 32 的转换测试通过；
-- 1x1 或 densified full-res motion；
-- NR/FG 消费同一个 GuidanceFrame；
-- NVOF 不可用时明确 fallback Zero；
-- API context 无多线程并发调用。
-
-## Phase 6 — DLSSG 2X
-
-完成门槛：
-
-- capability available、Create/Evaluate success；
-- 插值未被 disable；
-- 每对 real frame 产生一帧不同内容；
-- present counter 实际接近 2X；
-- generated PTS 位于相邻 real PTS 中点；
-- UI 在 FG 后；
-- seek/pause/resize 无 stale generated frame；
-- 报告新增 latency。
-
-## Phase 7 — Audio + minimum UI
-
-完成门槛：
-
-- WASAPI event-driven playback；
-- audio master clock；
-- 60 分钟 A/V drift 无持续增长；
-- FG on/off 不改变音频时长；
-- UI 改参数在 real-frame 边界 reset；
-- debug panel 数据来自真实 counter/timestamp。
-
----
-
-# 17. 日志、抓帧和验收证据
-
-## 17.1 日志格式
-
-每行至少：
-
-~~~text
-timestamp
-thread
-frameId
-component
-operation
-resultHex/HRESULT
-SEH code if any
-width/height/format
-reset flag/reason
-GPU ms if available
-~~~
-
-必须出现的计数：
-
-~~~text
-nrCreateCount
-nrEvaluateAttempt/Success/Failure
-nrResetCount
-nvofSuccess/Fallback
-srEvaluateSuccess
-fgRealFrameCount
-fgGeneratedFrameCount
-presentReal/Generated/Dropped
-decodeQueueDepth
-gpuSlotWaitMs
-~~~
-
-## 17.2 Capture 格式
-
-RGBA8 阶段可保存无损 PNG。FP16 阶段不要强行转 8 bit 后声称是原始数据：
-
-~~~text
-00_original.rgba16f.bin
-00_original.json
-01_proxy.png
-02_raw_dlssnr.png
-03_final.rgba16f.bin
-03_final-preview.png
-03_final.json
-~~~
-
-JSON 写 width、height、DXGI format、row pitch、color space、profile、runtime hash、frameId、PTS。
-
-## 17.3 WORKLOG 模板
-
-每阶段追加：
-
-~~~markdown
-## YYYY-MM-DD Phase N
-
-Goal:
-
-Changed:
-
-Commands actually run:
-
-Results:
-
-Artifacts/logs:
-
-Failures and exact codes:
-
-Decision:
-
-Next single task:
-~~~
-
-不准写“测试应该能过”。没在 RTX 5070 上跑就写“未执行”。
-
----
-
-# 18. 常见失败定位表
-
-## DLL hash 不一致
-
-动作：停工。记录实际 path/size/hash/signature，询问用户。不要自动下载替换。
-
-## `LoadLibraryExW` 失败
-
-检查：
-
-1. 是否绝对路径；
-2. runtime 是否 staged；
-3. Win32 `GetLastError`；
-4. 进程是否 x64；
-5. DLL signature/hash；
-6. 依赖搜索 flags。
-
-不要把 search path 扩到整个磁盘。
-
-## 导出缺失
-
-动作：报告缺失导出和 file version，停。不要尝试 ordinal 猜函数。
-
-## signed snippet Init_Ext 失败
-
-按顺序查：
-
-1. NGX core 是否先成功；
-2. adapter/device 是否同一个；
-3. runtimeDir 是否正确；
-4. caller compatibility 是否只对正确 module handle 生效；
-5. driver ≥615；
-6. GPU 是否当前支持；
-7. result hex/SEH。
-
-不要先改 App ID 或复用 Magpie Project ID。
-
-## CreateFeature 返回 `0xBAD00005` / InvalidParameter
-
-逐项 dump 参数“名字、类型、值”，重点：
-
-- 重复的 input/output/standard width/height 是否全设；
-- Upscaling=0、Scale=1、ScalingRatio=1；
-- callback 是否有效；
-- Preset 是 int；
-- node mask 是 uint32；
-- command list/device 是否同源；
-- feature ID 精确为 18；
-- create resources extent 是否稳定。
-
-不要通过删参数随机试。
-
-## Evaluate InvalidParameter
-
-重点：
-
-- 四个 resource 都非 null；
-- resource 属于同一个 D3D12 device；
-- Proxy/Neural/Motion/Depth format；
-- subrect 全部在资源内部且非 0；
-- parameter type；
-- motion/depth extent 与 output 相同；
-- output 有 UAV flag/state；
-- first frame Reset=1。
-
-## 返回 success 但黑图
-
-检查：
-
-1. Proxy 是否非黑；
-2. Neural UAV barrier；
-3. capture 是否读对 subresource/row pitch；
-4. output 是否被下一 pass 清零；
-5. sRGB encode 是否写到 UNORM；
-6. resource state tracker；
-7. parameter block 是否在 GPU 完成前被复用/销毁。
-
-success 不是画面正确的证据。
-
-## 画面洗白/压黑/高光断层
-
-按顺序查：
-
-1. YUV range；
-2. BT.601/709 matrix；
-3. transfer 是否 decode 到 linear；
-4. PaperWhiteScale；
-5. Proxy 是否 sRGB encode；
-6. Neural/Proxy 是否 sRGB decode；
-7. FP16/UNORM format；
-8. shoulder 常数/阈值；
-9. matrix 是否转置。
-
-不要先调 Intensity。
-
-## 时间越播越慢/延迟越来越高
-
-检查：
-
-- packet/frame queue 是否有上限；
-- slot 是否每帧同步等待；
-- capture readback 是否误开；
-- scheduler 是否按 nominal FPS 而非 PTS；
-- FG 是否缓存超过下一 real frame；
-- audio clock/present clock 是否双重 sleep；
-- NVOF/NGX 是否每帧重建 feature。
-
-## device removed
-
-记录：
-
-~~~text
-GetDeviceRemovedReason
-DRED breadcrumbs
-DRED page-fault data
-last frameId
-last resource states
-last NGX operation
-~~~
-
-不要立刻自动循环重建导致日志被冲掉。先写 crash report，再做一次受控 device recreation。
-
-## FG “成功”但画面重复
-
-检查 interpolation-disable output、generated hash、multiFrameCount/index、BackbufferFrameID、history reset、真实 motion。重复 present 不是 DLSSG。
-
----
-
-# 19. 对抗式审查：最可能把项目做废的十件事
-
-1. 一上来搭完整播放器，Feature 18 错误被 FFmpeg/UI/时钟问题淹没。
-2. 把 addon 当配置或 DLL 加载，最终仍依赖 ReShade。
-3. Raw Neural 直接 present，误判为 DLSS 画质差，实际是缺 parity。
-4. 把 sRGB Proxy 当 linear 或把 FP16 当 UNORM。
-5. 参数名正确但类型错误，得到 InvalidParameter。
-6. 每帧 CPU wait，功能能跑但延迟和吞吐彻底坏掉。
-7. 用理论倍率冒充真实 DLSSG 帧。
-8. NVOF 符号、单位或 grid 转换错误，却在 consumer 端乱乘 scale。
-9. 复制 GPL Magpie 源码后还想闭源发布。
-10. 把 leaked/local runtime 放进 Git、安装包或云端 artifact。
-
-每个 PR/阶段完成前，对照这十条逐项打勾。
-
----
-
-# 20. 唯一执行入口
-
-无人值守施工只使用根目录 `loop/GOAL_PROMPT.md`，并严格执行
-`loop/LOOP_ENGINE.md`。不要从本手册摘一段另写启动 Prompt；那会丢失循环上限、Reviewer、STOP、控制面 hash 和恢复规则。
-
-机器可读进度在 `loop/STATE.json`，唯一任务顺序在 `loop/BACKLOG.md`，
-实际门禁证据在 `loop/EVIDENCE.md`。每个 Phase 的 gate 和只读 Reviewer
-都通过后才自动进入下一 Phase。
-
-若不是 Goal 模式，只执行 STATE 指向的当前 Phase，完成或阻塞后停下报告，
-不得自行跨 Phase。任何状态文字都不能覆盖真实编译、运行、日志、counter、
-capture 和 present 结果。
-
----
-
-# 21. 最终 V1 完成定义
-
-只有下面全部真实成立，才能说 V1 完成：
-
-~~~text
-Windows x64 player
-+ FFmpeg D3D12VA decode on shared device
-+ correct SDR YUV/range/transfer handling
-+ optional DLSS SR
-+ native signed-snippet DLSSNR Feature 18
-+ RenoDX-equivalent proxy encode/decode
-+ Zero/NVOF guidance with explicit identity
-+ native DLSSG 2X with real generated frames
-+ audio-master A/V sync
-+ UI after FG
-+ bounded low-latency queues
-+ runtime/hash/result/GPU timing diagnostics
-+ no ReShade/addon dependency in final executable
-~~~
-
-并且：
-
-- Feature 18 连续执行、重建、seek/reset 稳定；
-- CPU/GPU parity 数值测试与固定灰阶/色卡/高光门禁通过；若用户提供合格 RenoDX reference capture，再追加同输入/参数的管线级偏差对照；
-- runtime/local SDK 未进入 Git 或发行包；
-- 没有用 Magpie GPL 源码污染预定的闭源边界；
-- 所有“成功”都有日志、counter、capture 或实际 present 证据。
-
-这份手册不评价 DLSS5 对日常视频是否好看。我们的职责是正确调用、正确复现 parity、正确控制时序；模型本身的审美效果不在工程优化范围内。
+1. 只从 `third_party_local/nvidia/Video_Codec_SDK_13.1.0/Interface/nvEncodeAPI.h` 编译；动态加载系统 `C:\Windows\System32\nvEncodeAPI64.dll`，校验签名/version，禁止随包复制；
+2. `NvEncodeAPICreateInstance` 后查询 H.264/HEVC、3840×2160、目标 profile/level、async encode 和 input format capability；缺失就明确失败；
+3. 用现有 D3D12 device 打开 session，输入为 default-heap `ID3D12Resource`；Feature 18/FG 后由 shader 转 NV12，native 4K 不经过 CPU；
+4. 预分配有界 4–8 slot。每 slot 有 input resource、registered handle、input/output fence point、bitstream output 和状态机；不得每帧 register/unregister；
+5. 按官方 D3D12 contract 调 `NvEncRegisterResource`、`NvEncMapInputResource`、`NvEncEncodePicture`；NVENC 等 input fence，完成后 signal output fence；资源复用前等待对应 slot，不全局 flush；
+6. 只锁定/读取压缩 bitstream，不回读 RGBA/NV12 pixels；把 packet、PTS、DTS、duration 交给 FFmpeg `libavformat` 写 MP4/MKV；
+7. H.264 与 HEVC 都必须有 UI 选项；默认 4K 用 HEVC，码率/CQ/preset 选择写入 job manifest；
+8. 音频优先 packet remux；不兼容时解码后 AAC。字幕可兼容时复制/转换；否则开始前列出会丢失的 stream 并让任务失败或由用户明确关闭，不得静默丢；
+9. 输出为同目录唯一 `.partial`；正常 EOS flush encoder/mux trailer 后做 ffprobe + Veyra self-decode，才原子 rename；
+10. cancel/device-lost/crash recovery 只清理本 job 的 partial，逆序 unmap/unregister/destroy；下次启动列出遗留 job manifest，不误删成功文件；
+11. `ffprobe.exe` 只用于独立验证，来自绝对配置路径并有 manifest；诊断 raw-pipe backend 若保留，必须编译为默认 OFF 且永远不能满足 Phase 7 export gate。
+
+输出 CFR。target FPS 支持 23.976/24/25/30/50/60/120 或 source nominal×2，最高 3840×2160；时间以整数 time base 写，VFR 原样导出不在本次首发。
+
+## 17. UI 组装
+
+先让 probes 端到端，再做 UI。Win32 一个窗口、TabControl 三页，不引入 WebView：
+
+```text
+Capture: device / format / audio / output size / quality / NR SR FG / start stop fullscreen
+Player: open / play pause / seek / loop / output size / quality / NR SR FG / fullscreen
+Export: input / output / image-video / size / FPS / H.264-HEVC / quality / start cancel / progress
+Diagnostics: runtime, backend, fallback, reset, latency breakdown, lookahead frames, GPU ms, VRAM, queue, drops
+```
+
+UI 事件只提交 command 到 engine controller。禁止 UI thread 直接等待 decode/GPU/child process。
+
+错误分类：
+
+```text
+Unsupported      device/codec/GPU capability not available
+MissingLocalAsset SDK/runtime/model/ffmpeg absent
+InvalidMedia     bad input or unsupported metadata
+RuntimeFailure   NGX/NVOF/DML/FFmpeg returned failure
+DeviceLost       D3D12 device removed/recreate failed
+Cancelled        user cancelled, not an error
+```
+
+所有 fallback 以黄色状态显示；Feature 18/FG failure 不能静默显示原图却标“DLSS on”。
+
+产品级 UI 还必须：设置写 `%LOCALAPPDATA%/Veyra`、首次启动 dependency/capability 检查、最近文件与设备恢复、4K/HDR 支持状态、日志包导出、残留 `.partial` 作业提示、device-lost 后可重开。不得把这些行为留给命令行。
+
+## 18. 质量预设
+
+配置序列化到 `config/`，但本地用户选项写 AppData，不覆盖仓库默认。
+
+```text
+Low Latency
+  SR auto when target larger
+  NR Natural/intensity 1
+  NVOF motion
+  depth off or interval 8 if budget permits
+  FG off for zero deliberate buffering; enabling FG switches to FG Low Latency
+  capture mailbox 1
+
+FG Low Latency
+  bounded A/B window
+  wait for B, generate A-half, then present B
+  lookaheadFrames=1; measured display latency is not assumed to equal 1/f
+  NVOF forward/back on A/B when budget permits
+
+Buffered Quality
+  bounded A/B/C window
+  C only validates A/B motion/depth/cut/trust
+  lookaheadFrames=2; C usually adds about 1/f versus pair mode
+  recommended when player uses HDMI passthrough, not the Veyra preview
+
+Balanced
+  SR auto
+  NR Natural/intensity 1
+  NVOF + confidence
+  DAV2 interval 4 + reprojection
+  FG optional
+
+Export Quality
+  no dropped frames
+  file-level forward/back flow validation and bounded future lookahead
+  DAV2 interval 1 or VDA Small
+  NR + optional SR
+  FG 2X to selected CFR
+
+Old Video
+  conservative deblock/deband pre-pass
+  strict confidence/history rejection
+  detail/color mix exposed
+
+AI Video
+  aggressive cut/discontinuity detection
+  depth Auto, falls back on inconsistent geometry
+  no assumption of physically valid motion
+```
+
+`Old Video` 与 `AI Video` 仍必须通过 same graph；不允许独立 Python pipeline。
+
+## 19. 观测字段
+
+每次 run JSON 至少：
+
+```text
+runId, timestamp, gitCommit, dirty
+exeHash, configHash, inputHash
+gpu, driver, HAGS
+dlssnr/dlss/dlssg/nvof/DML/model/ffmpeg identities
+sourceKind, actual format/size/fps/color metadata
+decoded/captured/source frames
+dropped/duplicated/real/generated/presented/encoded frames
+srCreate/evaluate/bypass counts + results
+nrCreate/evaluate/reset counts + results/SEH
+nvofExecute/fallback/zero counts + direction/grid/cost/confidence
+depthInference/reproject/stale/drop counts + age/timing
+fgCreate/evaluate/generated counts + results
+queue high-water marks
+GPU p50/p95 per pass
+capture ingress->present p50/p95
+audio underrun/overrun/A-V drift
+working set start/peak/end
+output probe: codec,size,fps,frames,duration,audio
+```
+
+日志中的 `available`、`created`、`evaluated` 分开。capability available 不等于 create 成功，create 成功不等于输出正确。
+
+## 20. 测试资产
+
+新增生成器，不把版权视频提交：
+
+- `translation_8px_1080p60.mp4`：高对比方块每帧 +8 px；
+- `occlusion_1080p60.mp4`：前景遮挡后显露纹理；
+- `cut_flash_duplicate_1080p60.mp4`：硬切、单帧闪光、重复、PTS gap；
+- `particles_alpha_1080p60.mp4`：烟/粒子/半透明；
+- `ui_text_1080p60.mp4`：固定文字覆盖运动背景；
+- 上述 translation/occlusion/cut/particles/ui 五组同时生成 `3840x2160@60` 版本，用于全分辨率 graph、FG、显存与 cadence gate；
+- `real_4k_h264_30.mp4` 与 `real_4k_hevc_60.mp4`：有音频、颜色 metadata 和字幕的可再分发测试素材或程序生成素材；
+- `old_video_artifacts_720p30.mp4`：可程序生成 block/ringing/noise；
+- `ai_warp_720p30.mp4`：程序化非刚体形变；
+- `capture_loop`：用另一台主机或测试图输出到真实采集卡。
+
+每个生成资产记录生成命令和 SHA256。不要把黑帧、纯色或重复帧当唯一测试。
+
+## 21. Phase 5：统一质量核心
+
+严格按 `loop/BACKLOG.md` 的第一个 TODO：
+
+1. 重建 fail-closed phase5 gate；先让它因实现缺失而失败；
+2. `FramePacket/GuidanceFrame/ResetCoordinator/EnhanceGraph`；
+3. 真实视频 `SR -> parity -> Feature 18 -> parity`；
+4. SceneCadenceAnalyzer + synthetic tests；
+5. NVOF provider + direction/grid/cost/confidence；
+6. DAV2 DML provider + age/reprojection/Auto fallback；
+7. quality corpus 输出 `off/zero/motion/motion+depth/auto`；
+8. 1080p60 与 4K60 各 30 分钟 endurance，记录 D3D12 budget/usage；
+9. gate + 独立 Reviewer + checkpoint。
+
+Phase 5 gate 必须失败于：只有 Zero、motion 全零、known translation 方向错、depth 恒定/陈旧、reset 缺失、SR/NR 顺序错、readback 出现在 live graph。
+
+## 22. Phase 6：DLSSG 与实时 engine
+
+1. 重建 fail-closed phase6 gate；
+2. DlssFgBackend capability/create/evaluate/release；
+3. known translation 证明 generated 非重复/非 blend；
+4. cadence/reset/PTS；
+5. PresentSink + WASAPI + EngineController；
+6. player probe 跑真实视频和音频；
+7. 4K30/60 player、A/B 与 A/B/C 调度、latency breakdown、queue/VRAM/endurance；
+8. gate + Reviewer + checkpoint。
+
+Phase 6 完成时可以有 CLI/probe，但必须已经是真实 display/audio/FG engine；不能只有 DLL 探测。
+
+## 23. Phase 7：三个产品闭环
+
+1. `MediaFileSource + PresentSink + WASAPI` 完整 4K 播放器，含基础字幕、设置恢复和日志导出；
+2. `CaptureCardSource + PresentSink + WASAPI` 真实 4K60 采集卡，验证 NR Low Latency、FG Low Latency、Buffered Quality；
+3. `ImageSource + ImageExportSink`；
+4. `MediaFileSource + D3D12 NvencExportSink`，4K H.264/HEVC、audio/subtitle policy、FG 2X、cancel/crash recovery、probe；
+5. Win32 三页 UI；
+6. 三模式 fallback/错误/诊断可见；
+7. 4K30/60 Player 各 30 分钟、4K60 Capture 30 分钟、4K H.264/HEVC Export corpus；
+8. 同源 Magpie A/B，只能写场景限定结论；
+9. phase7 gate + 独立 Reviewer；
+10. 首次运行诊断、设置持久化、device-lost/source reconnect、partial job recovery；
+11. 本地 checkpoint，标记 release candidate；许可证/分发阻塞清零前停止 Goal，不得自动发布或打包 proprietary runtime。
+
+Phase 7 gate 是联合 gate。图片导出通过不能替代视频导出；屏幕/窗口捕获不能替代物理采集设备；CLI 能跑不能替代播放器交互；Zero guidance 不能替代质量核心。
+
+## 24. 无人值守原子任务模板
+
+每个 cycle 只做一个原子任务，格式：
+
+```text
+Before:
+  git status
+  preflight
+  journal intent
+
+Implement:
+  最小代码/测试，不改无关文件
+
+Verify:
+  Debug + Release build（与任务相关）
+  unit/integration probe
+  current phase gate
+  inspect JSON/log/capture, not exit code only
+
+Record:
+  WORKLOG
+  JOURNAL
+  EVIDENCE
+  STATE
+  local checkpoint only after gate/review rules allow
+```
+
+同一 failure fingerprint 最多三个真正不同方案。换变量名、重复命令、删检查不算不同方案。
+
+## 25. 禁止捷径
+
+- 不复制 Magpie GPL 或无许可证竞品源码；
+- 不把 `renodx-dlss5-1.addon64` 注入 Veyra 主程序；
+- 不在磁盘 patch NVIDIA runtime；
+- 不用 Zero Motion/Depth 冒充 NVOF/DAV2；
+- 不用 blend/duplicate 冒充 DLSSG；
+- 不在 capture path 用窗口截图冒充采集卡；
+- 不用 Python/Gradio 另做一套 export 核心；
+- 不把 README 声明当实测；
+- 不用单张“更锐”截图宣称优于 Magpie；
+- 不因赶时间放宽 gate。赶时间的方法是缩格式矩阵、复用 graph、先做 vertical slice，不是说谎。
+
+## 26. 每次向用户汇报
+
+必须写：
+
+- 当前 Phase 和还差哪个门槛；
+- 修改文件；
+- 实际执行的命令、exit code、run-id、日志路径；
+- Feature 18/SR/NVOF/DML/DLSSG 的真实 result；
+- 是否在 RTX、真实采集卡、真实音频上运行；没运行就明确“未执行”；
+- fallback、质量和许可证风险；
+- 下一条唯一原子任务。
+
+“代码应该能工作”“Magpie 已证明所以无需测试”“驱动更新后大概好”都不是结果。

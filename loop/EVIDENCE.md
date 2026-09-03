@@ -117,3 +117,30 @@
 - Reviewer: not run；preflight 不是 Phase gate
 - Open P0/P1: none
 - Conclusion: P0.1 验收成立——Goal Agent 亲自采集的 preflight + 工具链/GPU/driver 证据取代交接基线；Phase 0 仍未通过（P0.2–P0.9 未完成）
+
+## Fast-track control rebaseline / preflight / 2026-09-03T15:59:14+08:00
+
+- Commit: not yet checkpointed; working tree based on `7b85752`
+- Command: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate preflight`
+- Exit code: 0
+- Build configuration: x64-release configure/build also executed, exit 0 (`ninja: no work to do`)
+- Hardware/runtime identity: root `nvngx_dlssnr.dll` size/hash/Valid NVIDIA signature all rechecked by preflight; RenoDX add-on size/hash/NotSigned identity rechecked; no addon loaded
+- Logs/captures: command output only; this is control-plane evidence, not a Phase 5 runtime gate
+- Quantitative result: 68/68 preflight checks; protected control set is exactly 10 files; final manifest hash `332DB6AA1D5F109F8D6CA729985F2110FAB5AD57C086B155D5BBFDE0015D7A75`; STATE ledger 0–7 valid; sensitive Git paths none tracked
+- Adversarial consistency pass: fixed the sole SR/Guidance graph-order contradiction; Product Spec, Playbook and competitor audit now all require `ingress -> optional SR(Zero) -> post-SR Guidance -> Feature 18 -> FG`
+- Local DLSSG source identity recorded: SDK 310.7.0 `nvngx_dlssg.dll`, 7,519,856 bytes, SHA256 `135EAF0733C1E37381A8C28ABCF7A862404A54132B81787C04E35D09EFC5E36F`, valid NVIDIA signature; not yet staged or executed
+- Reviewer: not run; P5.0 is a user-authorized control rebaseline, not the Phase 5 completion gate
+- Open P0/P1: old `scripts/gates/phase5.ps1` is obsolete and must be replaced before Phase 5 can pass; recorded as next backlog task
+- Conclusion: Fast-track control plane is internally consistent and fail-closed; no new Feature 18/NVOF/DAV2/DLSSG/Capture/Export success is claimed
+
+## Launch V1.2 4K control rebaseline / preflight / 2026-09-03T16:53:03+08:00
+
+- Commit: not checkpointed; working tree based on `7b85752`
+- Command: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate preflight`
+- Exit code: 0
+- Build: x64-release configure/build exit 0 (`ninja: no work to do`)
+- Quantitative result: 70/70 preflight checks; protected control set exactly 10 files; manifest SHA256 `77A9414588B0EF09156CB97EDF3618AF36D63DF12C5E2E3F8E15743292B96921`; cycle limit 24/120; four external/distribution blockers recorded
+- New invariants: native 4K Player/Capture/Export; A/B and A/B/C windows bounded at 2/3; lookaheadFrames is not fabricated latency; D3D12 NVENC H.264+HEVC; release-candidate/distribution-blocked consistency checks
+- Runtime scope: control-plane only. Native-4K Feature 18/NVOF/DAV2/DLSSG/Capture/NVENC were not executed and are not marked passed
+- Reviewer: not run; P5.0b is a user-authorized scope/control rebaseline, not Phase 5 completion
+- Conclusion: Launch V1.2 control plane is fail-closed and ready for P5.1

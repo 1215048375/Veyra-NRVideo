@@ -42,6 +42,7 @@ function Get-ProjectSourceSnapshot {
             "AGENTS.md",
             "VEYRA_PRODUCT_SPEC_V1.md",
             "VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md",
+            "docs/COMPETITOR_AUDIT_2026-09-03.md",
             "loop/LOOP_ENGINE.md",
             "loop/GOAL_PROMPT.md",
             "loop/REVIEW_PROMPT.md",
@@ -137,6 +138,7 @@ $requiredFiles = @(
     "AGENTS.md",
     "VEYRA_PRODUCT_SPEC_V1.md",
     "VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md",
+    "docs/COMPETITOR_AUDIT_2026-09-03.md",
     ".gitignore",
     "loop\LOOP_ENGINE.md",
     "loop\GOAL_PROMPT.md",
@@ -155,7 +157,7 @@ foreach ($requiredFile in $requiredFiles) {
 }
 
 $controlManifestPath = Join-Path $root "loop\CONTROL_HASHES.json"
-$expectedControlManifestHash = "BAD07CB327A0B2171B738C7AEA42F20F54585A332A378A5523BD09453C3BE0D3"
+$expectedControlManifestHash = "77A9414588B0EF09156CB97EDF3618AF36D63DF12C5E2E3F8E15743292B96921"
 if (Test-Path -LiteralPath $controlManifestPath -PathType Leaf) {
     $actualControlManifestHash = (Get-FileHash -LiteralPath $controlManifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
     $manifestHashValid = $actualControlManifestHash -eq $expectedControlManifestHash
@@ -171,6 +173,7 @@ if (Test-Path -LiteralPath $controlManifestPath -PathType Leaf) {
                 "README.md",
                 "VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md",
                 "VEYRA_PRODUCT_SPEC_V1.md",
+                "docs/COMPETITOR_AUDIT_2026-09-03.md",
                 "loop/GOAL_PROMPT.md",
                 "loop/LOOP_ENGINE.md",
                 "loop/REVIEW_PROMPT.md",
@@ -185,7 +188,7 @@ if (Test-Path -LiteralPath $controlManifestPath -PathType Leaf) {
                     ([string]$_.sha256 -match '^[0-9A-Fa-f]{64}$')
             }).Count -eq $manifestEntries.Count
             $manifestSchemaValid = ($controlManifest.schemaVersion -eq 1) -and
-                ($manifestEntries.Count -eq 9) -and
+                ($manifestEntries.Count -eq 10) -and
                 $validManifestEntries -and
                 (($actualControlPaths -join "|") -ceq ($expectedControlPaths -join "|"))
             Add-Check "control-manifest-schema" $manifestSchemaValid "schemaVersion=$($controlManifest.schemaVersion) files=$($manifestEntries.Count) exactProtectedSet=$((($actualControlPaths -join '|') -ceq ($expectedControlPaths -join '|')))"
@@ -223,7 +226,7 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
         $validSchema = ($state.schemaVersion -eq 1) -and ($state.engineVersion -eq "veyra-loop-v1")
         Add-Check "state-json" $validSchema "schemaVersion=$($state.schemaVersion) engineVersion=$($state.engineVersion)"
 
-        $allowedStatuses = @("ready", "running", "repairing", "needs_review", "paused", "blocked", "needs_handoff", "complete")
+        $allowedStatuses = @("ready", "running", "repairing", "needs_review", "paused", "blocked", "needs_handoff", "release_candidate", "distribution_blocked", "complete")
         $validStatus = $allowedStatuses -contains [string]$state.status
         Add-Check "state-status" $validStatus "status=$($state.status)"
 
@@ -280,7 +283,7 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
             ($sameFailureAttempts -le $maximumSameFailureAttempts) -and
             ($noProgressCycles -ge 0) -and
             ($noProgressCycles -le $maximumNoProgressCycles) -and
-            ([int]$state.cycle.maximum -eq 80) -and
+            ([int]$state.cycle.maximum -eq 120) -and
             ([int]$state.cycle.maximumSameFailureAttempts -eq 3) -and
             ([int]$state.cycle.maximumNoProgressCycles -eq 5)
         Add-Check "state-loop-limits" $validLimits "completed=$completedCycles/$maximumCycles sameFailure=$sameFailureAttempts/$maximumSameFailureAttempts noProgress=$noProgressCycles/$maximumNoProgressCycles"
@@ -302,11 +305,11 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
 
         $stateStatus = [string]$state.status
         $cycleBoundValid = ($completedCycles -lt $maximumCycles) -or
-            (@("needs_handoff", "paused", "complete") -contains $stateStatus)
+            (@("needs_handoff", "paused", "release_candidate", "distribution_blocked", "complete") -contains $stateStatus)
         $failureBoundValid = ($sameFailureAttempts -lt $maximumSameFailureAttempts) -or
-            (@("blocked", "needs_handoff", "paused", "complete") -contains $stateStatus)
+            (@("blocked", "needs_handoff", "paused", "release_candidate", "distribution_blocked", "complete") -contains $stateStatus)
         $noProgressBoundValid = ($noProgressCycles -lt $maximumNoProgressCycles) -or
-            (@("blocked", "needs_handoff", "paused", "complete") -contains $stateStatus)
+            (@("blocked", "needs_handoff", "paused", "release_candidate", "distribution_blocked", "complete") -contains $stateStatus)
         $loopBoundsValid = $cycleBoundValid -and $failureBoundValid -and $noProgressBoundValid
         Add-Check "state-loop-bounds" $loopBoundsValid "status=$stateStatus cycle=$cycleBoundValid failure=$failureBoundValid noProgress=$noProgressBoundValid"
 
@@ -320,6 +323,17 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                 (@($state.blockers).Count -eq 0) -and
                 $completionHasGitPointers)
         Add-Check "state-completion" $completionConsistent "status=$($state.status) allPhasesPassed=$allPhasesPassed openP0P1=$(@($state.openP0P1Findings).Count) blockers=$(@($state.blockers).Count) gitPointers=$completionHasGitPointers"
+
+        $releaseLike = @("release_candidate", "distribution_blocked") -contains [string]$state.status
+        $releaseCandidateConsistent = (-not $releaseLike) -or
+            ($allPhasesPassed -and
+                (@($state.openP0P1Findings).Count -eq 0) -and
+                $completionHasGitPointers)
+        Add-Check "state-release-candidate" $releaseCandidateConsistent "status=$($state.status) allPhasesPassed=$allPhasesPassed openP0P1=$(@($state.openP0P1Findings).Count) gitPointers=$completionHasGitPointers"
+
+        $distributionBlockedConsistent = ([string]$state.status -ne "distribution_blocked") -or
+            ($releaseCandidateConsistent -and (@($state.blockers).Count -gt 0))
+        Add-Check "state-distribution-blocked" $distributionBlockedConsistent "status=$($state.status) blockers=$(@($state.blockers).Count)"
 
         $blockedStateConsistent = ([string]$state.status -ne "blocked") -or
             (([string]$state.phase.state -eq "blocked") -and (@($state.blockers).Count -gt 0))
