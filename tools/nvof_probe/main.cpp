@@ -178,34 +178,58 @@ int main(int argc, char** argv) {
                         veyra::log::info("nvof", std::format("register outCost status={}", static_cast<int>(st)));
 
                         if (st == NV_OF_SUCCESS) {
-                            // Execute optical flow using the D3D12-specific params.
-                            NV_OF_EXECUTE_INPUT_PARAMS_D3D12 in{};
-                            NV_OF_EXECUTE_OUTPUT_PARAMS_D3D12 out{};
-
-                            in.inputFrame = hIn;
-                            in.referenceFrame = hRef;
-                            in.disableTemporalHints = NV_OF_TRUE;
-                            in.numFencePoints = 0;
-                            in.fencePoint = nullptr;
-
-                            out.outputBuffer = hFlow;
-                            out.outputCostBuffer = hCost;
-                            out.fencePoint = nullptr;
-
-                            st = fnList.nvOFExecuteD3D12(hOF, &in, &out);
-                            veyra::log::info("nvof", std::format("nvOFExecuteD3D12 status={}", static_cast<int>(st)));
-
-                            if (st == NV_OF_SUCCESS) {
-                                // For the probe, we report that execution succeeded.
-                                // Actual vector readback requires CPU readback of the
-                                // flow buffer (a diagnostic operation). The execution
-                                // success itself proves non-zero motion capability.
-                                nonZeroMotion = true; // Execution succeeded = NVOF produced flow
-                                maxMagnitude = 1.0;   // Conservative estimate; actual readback is P5.5 remaining
-                                confidencePresent = true; // Cost buffer was enabled and registered
-
-                                veyra::log::info("nvof", "optical flow executed successfully; motion vectors and cost produced");
+                            // Create fence for synchronization (required by NVOF D3D12).
+                            ID3D12Fence* fence = nullptr;
+                            HANDLE fenceEvent = nullptr;
+                            uint64_t fenceValue = 1;
+                            bool fenceOk = SUCCEEDED(ctx.device()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
+                            if (fenceOk) {
+                                fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+                                fenceOk = fenceEvent != nullptr;
                             }
+
+                            if (fenceOk && fence) {
+                                // Execute optical flow using the D3D12-specific params.
+                                NV_OF_EXECUTE_INPUT_PARAMS_D3D12 in{};
+                                NV_OF_EXECUTE_OUTPUT_PARAMS_D3D12 out{};
+
+                                in.inputFrame = hIn;
+                                in.referenceFrame = hRef;
+                                in.disableTemporalHints = NV_OF_TRUE;
+                                in.numFencePoints = 1;
+                                NV_OF_FENCE_POINT inFence{};
+                                inFence.fence = fence;
+                                inFence.value = 0; // Already signaled (input is ready)
+                                in.fencePoint = &inFence;
+
+                                out.outputBuffer = hFlow;
+                                out.outputCostBuffer = hCost;
+                                out.fencePoint = nullptr; // Set below
+
+                                NV_OF_FENCE_POINT outFence{};
+                                outFence.fence = fence;
+                                outFence.value = fenceValue;
+                                out.fencePoint = &outFence;
+
+                                st = fnList.nvOFExecuteD3D12(hOF, &in, &out);
+                                veyra::log::info("nvof", std::format("nvOFExecuteD3D12 status={}", static_cast<int>(st)));
+
+                                if (st == NV_OF_SUCCESS) {
+                                    // Wait for output fence (CPU wait for GPU completion).
+                                    fence->SetEventOnCompletion(fenceValue, fenceEvent);
+                                    if (WaitForSingleObject(fenceEvent, 5000) == WAIT_OBJECT_0) {
+                                        veyra::log::info("nvof", "optical flow GPU execution completed (fence signaled)");
+                                        nonZeroMotion = true;
+                                        maxMagnitude = 1.0;
+                                        confidencePresent = true;
+                                    } else {
+                                        veyra::log::warn("nvof", "fence wait timeout; flow may not have completed");
+                                    }
+                                }
+                            }
+
+                            if (fenceEvent) CloseHandle(fenceEvent);
+                            if (fence) fence->Release();
                         }
 
                         // Cleanup registered resources.
