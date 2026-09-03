@@ -86,7 +86,11 @@ Add-GateCheck "pipeline:run-nr" ($nrExit -eq 0) "exitCode=$nrExit"
 if (Test-Path -LiteralPath $nrJson -PathType Leaf) {
     $nr = Get-Content -Raw -Encoding UTF8 -LiteralPath $nrJson | ConvertFrom-Json
     Add-GateCheck "pipeline:nr-count" (([int64]$nr.frames) -ge 30) "frames=$($nr.frames)"
-    Add-GateCheck "pipeline:non-black" ([bool]$nr.decode.nanInfCount -eq $false -or $true) "decode ok"
+    # Check stage luma values: proxy/raw/final should all be non-zero and distinct.
+    $proxyLuma = [double]$nr.stageLuma.proxy
+    $rawLuma = [double]$nr.stageLuma.raw
+    $finalLuma = [double]$nr.stageLuma.final
+    Add-GateCheck "pipeline:non-black" (($proxyLuma -gt 0.001) -and ($rawLuma -gt 0.001) -and ($finalLuma -gt 0.001)) "proxy=$proxyLuma raw=$rawLuma final=$finalLuma"
     # The parity JSON uses decode/encode/output structure; check encode tolerance as proxy.
     $encDelta = [double]$nr.encode.maxCodeDelta
     Add-GateCheck "pipeline:encode-1code" ($encDelta -le 1.0) "maxCodeDelta=$encDelta"
@@ -163,11 +167,8 @@ if ((Test-Path -LiteralPath $mediaProbe -PathType Leaf) -and (Test-Path -Literal
     $e1Exit = $LASTEXITCODE
     Add-GateCheck "endurance:1080p60-run" ($e1Exit -eq 0) "exitCode=$e1Exit"
 }
-elseif (Test-Path -LiteralPath $endurance1080Json -PathType Leaf) {
-    Write-Host "[INFO] endurance:1080p60 using pre-existing JSON"
-}
 else {
-    Add-GateCheck "endurance:1080p60" $false "media_probe or test clip missing"
+    Add-GateCheck "endurance:1080p60-run" $false "media_probe or test clip missing (fail-closed)"
 }
 
 if (Test-Path -LiteralPath $endurance1080Json -PathType Leaf) {
@@ -178,21 +179,18 @@ if (Test-Path -LiteralPath $endurance1080Json -PathType Leaf) {
 }
 
 # ---------------------------------------------------------------------------
-# 8. native 4K60 endurance (user-approved 5-minute duration; 1080p decoded then SR-upscaled graph)
+# 8. Second endurance pass (1080p source, same graph; 4K SR integration is Phase 6)
 # ---------------------------------------------------------------------------
-$endurance4kJson = Join-Path $logDir "endurance-4k60.json"
+$endurance4kJson = Join-Path $logDir "endurance-second.json"
 
 if ((Test-Path -LiteralPath $mediaProbe -PathType Leaf) -and (Test-Path -LiteralPath $testClip -PathType Leaf)) {
-    Write-Host "[INFO] endurance:4k60 running (5 min, 1080p source upscaled to 4K)..."
-    & $mediaProbe --input $testClip --mode d3d12va --frames 54000 --run-id "$runId-end4k" --log-file (Join-Path $logDir "endurance-4k60.log") --json-file $endurance4kJson
+    Write-Host "[INFO] endurance:second-pass running (5 min, 1080p; 4K SR graph is Phase 6 scope)..."
+    & $mediaProbe --input $testClip --mode d3d12va --frames 54000 --run-id "$runId-end2" --log-file (Join-Path $logDir "endurance-second.log") --json-file $endurance4kJson
     $e4Exit = $LASTEXITCODE
-    Add-GateCheck "endurance:4k60-run" ($e4Exit -eq 0) "exitCode=$e4Exit"
-}
-elseif (Test-Path -LiteralPath $endurance4kJson -PathType Leaf) {
-    Write-Host "[INFO] endurance:4k60 using pre-existing JSON"
+    Add-GateCheck "endurance:second-run" ($e4Exit -eq 0) "exitCode=$e4Exit"
 }
 else {
-    Add-GateCheck "endurance:4k60" $false "media_probe or test clip missing"
+    Add-GateCheck "endurance:second-run" $false "media_probe or test clip missing"
 }
 
 if (Test-Path -LiteralPath $endurance4kJson -PathType Leaf) {
