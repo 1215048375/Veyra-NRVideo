@@ -20,7 +20,7 @@
 - [ ] **P5.2 统一契约**：实现 `FramePacket`、`FrameWindow(prev/current/next/lookaheadFrames)`、`GuidanceFrame`、`ResetCoordinator`、`EnhanceGraph` 与 fake/zero provider unit tests；reset epoch 覆盖 seek/cut/drop/resize/source switch/pause/device lost。
 - [ ] **P5.3 产品顺序**：把现有 D3D12VA/YUV、optional SR、parity encode、Feature 18、parity decode 串成真实视频 graph；native 4K bypass SR，1080p→4K 走 SR；输出非黑、非恒定、随输入变化；记录各 pass GPU timestamp；主路径 readback=0。
 - [ ] **P5.4 Scene/Cadence**：生成 translation/occlusion/cut-flash-duplicate 固定片；实现 histogram+SAD+PTS/sequence analyzer；硬切 reset、闪光不误切、duplicate 不跨帧生成历史。
-- [ ] **P5.5 NVOF provider**：从本地 Optical Flow SDK 5.0 编译；System32 runtime 受限加载；current→previous、S10.5 `/32`、grid/densify、cost→confidence；`+8 px` 合成片方向/幅值通过；缺 SDK 时标 BLOCKED 并继续 P5.6/P5.7 的独立部分。
+- [x] **P5.5 NVOF provider** BLOCKED: Optical Flow SDK 5.0 directory absent. User must download from NVIDIA Developer Portal. Continue P5.6+ independent work. (2026-09-03)：从本地 Optical Flow SDK 5.0 编译；System32 runtime 受限加载；current→previous、S10.5 `/32`、grid/densify、cost→confidence；`+8 px` 合成片方向/幅值通过；缺 SDK 时标 BLOCKED 并继续 P5.6/P5.7 的独立部分。
 - [ ] **P5.6 Guidance validator**：GPU 实现 NVOF cost、luma warp residual、out-of-frame、forward/back consistency；生成 R8 confidence 并平滑衰减 motion；保存 motion/confidence 可视化与统计。
 - [ ] **P5.7 Depth 依赖 manifest**：固定 Windows App SDK ML/ORT 包、DAV2 Small FP16 model 的官方 URL/version/hash/license/input/output/shape；只放 `third_party_local`；未知或非商用模型不得用。
 - [ ] **P5.8 DAV2 provider**：同 device DirectML session、sequential run、固定 shape、device tensor/I/O binding；P02/P98+EMA、motion reprojection、age/residual、Auto 降级；实时 render thread 无同步 GPU→CPU→GPU 往返。

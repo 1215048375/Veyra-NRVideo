@@ -840,3 +840,18 @@ Result:
 - 实际命令与 exit code: `build.ps1 -Preset x64-debug` → 0；`veyra_scene_tests.exe` → **10/10, 0 failures**。
 - 新证据: 硬切检测（histogram+SAD 双阈值）、闪光不误切（高 SAD + 低 histogram 距离 = flash 而非 cut）、duplicate 检测（近零 SAD + 近零 PTS delta）、cadence break（PTS 间隔 3x 跳变）、reset 后新基线。
 - 下一唯一动作: P5.5 NVOF provider（若 SDK 缺失则 BLOCKED 并继续 P5.6/P5.7）。
+
+---
+
+## Cycle — P5.5 NVOF provider BLOCKED
+
+### Before
+
+- Phase: 5
+- 唯一任务: 实现 NVOF provider（需要 Optical Flow SDK 5.0 头文件）。
+
+### After
+
+- **BLOCKED**: `third_party_local/nvidia/Optical_Flow_SDK_5.0/` 不存在。按用户指令和 BACKLOG P5.5 分支，标 BLOCKED 并继续 P5.6/P5.7 独立部分。
+- 已做验证: System32 nvofapi64.dll v32.0.16.1656 签名 Valid（运行时可用但头文件缺失导致无法编译 provider）。
+- 下一唯一动作: P5.6 Guidance validator（GPU NVOF cost、luma warp residual、out-of-frame、forward/back consistency — 部分 CPU 侧可独立实现）。
