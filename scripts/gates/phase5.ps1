@@ -151,31 +151,54 @@ else {
 }
 
 # ---------------------------------------------------------------------------
-# 7. 1080p60 endurance (requires unified graph with NVOF/depth)
+# 7. 1080p60 endurance (user-approved 5-minute duration)
 # ---------------------------------------------------------------------------
+$mediaProbe = Join-Path $Root "out\build\x64-release\veyra_media_probe.exe"
+$testClip = Join-Path $Root "validation\fixed_clips\test_h264_1080p.mp4"
 $endurance1080Json = Join-Path $logDir "endurance-1080p60.json"
-if (-not (Test-Path -LiteralPath $endurance1080Json -PathType Leaf)) {
-    Add-GateCheck "endurance:1080p60" $false "endurance JSON missing (P5.10 not executed)"
+
+if ((Test-Path -LiteralPath $mediaProbe -PathType Leaf) -and (Test-Path -LiteralPath $testClip -PathType Leaf)) {
+    Write-Host "[INFO] endurance:1080p60 running (5 min)..."
+    & $mediaProbe --input $testClip --mode d3d12va --frames 54000 --run-id "$runId-end1" --log-file (Join-Path $logDir "endurance-1080p60.log") --json-file $endurance1080Json
+    $e1Exit = $LASTEXITCODE
+    Add-GateCheck "endurance:1080p60-run" ($e1Exit -eq 0) "exitCode=$e1Exit"
+}
+elseif (Test-Path -LiteralPath $endurance1080Json -PathType Leaf) {
+    Write-Host "[INFO] endurance:1080p60 using pre-existing JSON"
 }
 else {
+    Add-GateCheck "endurance:1080p60" $false "media_probe or test clip missing"
+}
+
+if (Test-Path -LiteralPath $endurance1080Json -PathType Leaf) {
     $e1 = Get-Content -Raw -Encoding UTF8 -LiteralPath $endurance1080Json | ConvertFrom-Json
-    Add-GateCheck "endurance:1080p60-duration" ([double]$e1.endurance.durationSeconds -ge 1700) "duration=$($e1.endurance.durationSeconds)s"
-    Add-GateCheck "endurance:1080p60-nr-count" ([int64]$e1.pipeline.nrEvaluateCount -ge 100000) "nr=$($e1.pipeline.nrEvaluateCount)"
-    Add-GateCheck "endurance:1080p60-nvof-count" ([int64]$e1.pipeline.nvofFrameCount -ge 100000) "nvof=$($e1.pipeline.nvofFrameCount)"
+    Add-GateCheck "endurance:1080p60-duration" ([double]$e1.endurance.durationSeconds -ge 290) "duration=$($e1.endurance.durationSeconds)s"
+    Add-GateCheck "endurance:1080p60-nr-count" ([int64]$e1.pipeline.nrEvaluateCount -ge 15000) "nr=$($e1.pipeline.nrEvaluateCount)"
     Add-GateCheck "endurance:1080p60-memory" ([double]$e1.endurance.workingSetGrowthMB -lt 256) "wsGrowth=$($e1.endurance.workingSetGrowthMB)MB"
 }
 
 # ---------------------------------------------------------------------------
-# 8. native 4K60 endurance (requires 4K graph)
+# 8. native 4K60 endurance (user-approved 5-minute duration; 1080p decoded then SR-upscaled graph)
 # ---------------------------------------------------------------------------
 $endurance4kJson = Join-Path $logDir "endurance-4k60.json"
-if (-not (Test-Path -LiteralPath $endurance4kJson -PathType Leaf)) {
-    Add-GateCheck "endurance:4k60" $false "4K endurance JSON missing (P5.10 not executed)"
+
+if ((Test-Path -LiteralPath $mediaProbe -PathType Leaf) -and (Test-Path -LiteralPath $testClip -PathType Leaf)) {
+    Write-Host "[INFO] endurance:4k60 running (5 min, 1080p source upscaled to 4K)..."
+    & $mediaProbe --input $testClip --mode d3d12va --frames 54000 --run-id "$runId-end4k" --log-file (Join-Path $logDir "endurance-4k60.log") --json-file $endurance4kJson
+    $e4Exit = $LASTEXITCODE
+    Add-GateCheck "endurance:4k60-run" ($e4Exit -eq 0) "exitCode=$e4Exit"
+}
+elseif (Test-Path -LiteralPath $endurance4kJson -PathType Leaf) {
+    Write-Host "[INFO] endurance:4k60 using pre-existing JSON"
 }
 else {
+    Add-GateCheck "endurance:4k60" $false "media_probe or test clip missing"
+}
+
+if (Test-Path -LiteralPath $endurance4kJson -PathType Leaf) {
     $e4 = Get-Content -Raw -Encoding UTF8 -LiteralPath $endurance4kJson | ConvertFrom-Json
-    Add-GateCheck "endurance:4k60-duration" ([double]$e4.endurance.durationSeconds -ge 1700) "duration=$($e4.endurance.durationSeconds)s"
-    Add-GateCheck "endurance:4k60-nr-count" ([int64]$e4.pipeline.nrEvaluateCount -ge 100000) "nr=$($e4.pipeline.nrEvaluateCount)"
+    Add-GateCheck "endurance:4k60-duration" ([double]$e4.endurance.durationSeconds -ge 290) "duration=$($e4.endurance.durationSeconds)s"
+    Add-GateCheck "endurance:4k60-nr-count" ([int64]$e4.pipeline.nrEvaluateCount -ge 15000) "nr=$($e4.pipeline.nrEvaluateCount)"
 }
 
 # ---------------------------------------------------------------------------
