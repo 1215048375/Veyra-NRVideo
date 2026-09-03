@@ -40,7 +40,7 @@
       "status": "passed",
       "gateEvidence": "loop/EVIDENCE.md#phase-3--phase3--2026-09-03t012000-0800",
       "reviewEvidence": "loop/EVIDENCE.md#phase-3--phase3--2026-09-03t012000-0800 (Reviewer PASS after 5xP1 fix; independent run 768dd095a27745db8e76e255d66749b2; endurance 54000/54000 NR)",
-      "commit": null
+      "commit": "2c9f2f19d818e7dd34fa6df4cf7d7c88ee12792a"
     },
     {
       "id": 4,
@@ -93,9 +93,9 @@
   "lastFailureFingerprint": null,
   "failureLedger": [],
   "baselineCommit": "2086282478ae5d1e07e8162d47148633b59882fe",
-  "lastGoodCommit": "e0250b5431ee6677a0917b97af821c5579e61d77",
+  "lastGoodCommit": "2c9f2f19d818e7dd34fa6df4cf7d7c88ee12792a",
   "openP0P1Findings": [],
   "blockers": [],
-  "nextAction": "Launch Phase 3 read-only Reviewer to assess the P3.5/P3.7 gaps against the 70/70 gate; fix P0/P1 findings; checkpoint.",
-  "updatedAt": "2026-09-03T00:52:00+08:00"
+  "nextAction": "Start P4.1: phase4 gate + SR off/on observability; wire official DLSS SR from the staged SDK.",
+  "updatedAt": "2026-09-03T01:25:00+08:00"
 }
