@@ -946,8 +946,8 @@ int runD3d12VADecode(const std::wstring& input, uint32_t frames, const std::stri
         memorySamples.size(),
         static_cast<double>(baseWs) / (1024 * 1024), static_cast<double>(finalWs) / (1024 * 1024),
         static_cast<double>(baseCommit) / (1024 * 1024), static_cast<double>(finalCommit) / (1024 * 1024),
-        static_cast<double>(finalWs - baseWs) / (1024 * 1024),
-        static_cast<double>(finalCommit - baseCommit) / (1024 * 1024));
+        static_cast<double>(static_cast<int64_t>(finalWs) - static_cast<int64_t>(baseWs)) / (1024 * 1024),
+        static_cast<double>(static_cast<int64_t>(finalCommit) - static_cast<int64_t>(baseCommit)) / (1024 * 1024));
 
     json += std::format("  \"debugInfoQueue\": {{\"active\": {}, \"storedMessages\": {}, \"errorMessages\": {}}}\n",
         g_infoQueueActive ? "true" : "false", g_infoQueueStored, g_infoQueueErrors);
@@ -959,8 +959,8 @@ int runD3d12VADecode(const std::wstring& input, uint32_t frames, const std::stri
     // P1 #5: in endurance mode, working set growth must stay under 256MB.
     const bool nrOk = nrEvaluateSuccess == framesDecoded;
     const bool memoryOk = !endurance ||
-        (static_cast<double>(finalWs - baseWs) / (1024 * 1024) < 256.0 &&
-         static_cast<double>(finalCommit - baseCommit) / (1024 * 1024) < 256.0);
+        (static_cast<double>(static_cast<int64_t>(finalWs) - static_cast<int64_t>(baseWs)) / (1024 * 1024) < 256.0 &&
+         static_cast<double>(static_cast<int64_t>(finalCommit) - static_cast<int64_t>(baseCommit)) / (1024 * 1024) < 256.0);
     const bool ok = usedD3D12Frames && nrOk && memoryOk &&
         (endurance || framesDecoded >= frames || endOfFile);
     veyra::log::info("media-probe", ok ? "d3d12va: PASS" : "d3d12va: FAIL");
