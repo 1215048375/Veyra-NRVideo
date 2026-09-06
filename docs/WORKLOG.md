@@ -796,6 +796,36 @@ L2(GBV)runtime 扫描 1764+ ERROR,id=938 `GPU_BASED_VALIDATION_DESCRIPTOR_UNINIT
 ### 原始证据
 logs/phase6-manual/t10/{L0,L1,L2,NF}-{r1,r2}.{log,json}
 
+## 2026-09-06 Goal session 1（Cycle 030-033）：接管、gate 重建、corpus、契约
+
+### 执行摘要
+
+新 Maker 按 GOAL_PROMPT 接管，完成 4 个原子 cycle，全部本地 checkpoint，无 push：
+
+- **Cycle 030 R0 接管**: preflight 70/70；Release build exit 0；接管指纹 `61feb89b38e32f589b5c2fb6750526e5ad90dc3c`（44 entry）；四类窄 probe 新 run-id 复现基线（NVOF PASS / FG 59/59 / audio PASS / player FAIL driftP95=2858ms 复现已知缺陷）；44 项分类 keep/repair/hold 入 JOURNAL；保护性存档 `bb9c5361`（不含 MP4 删除，不写 lastGoodCommit）。
+- **Cycle 031 R1.1 gate 重建并先红**: phase5.ps1 重写为 42 项 fail-closed 契约（删除 manifest-depth/第二次 1080p 冒充 4K/5 分钟冒充 30 分钟三个假通过口；新增产品库执行证明、本次 run extent/hash/timing/VRAM/reset JSON 契约、主路径纪律）。当前实现 exit 1，34/42 命名失败与 Playbook R1 逐项对应。存档 `7ec1e0c`。
+- **Cycle 032 R1.2 确定性 corpus**: veyra_clip_gen 五场景（translation/occlusion/cut-flash-duplicate/particles/ui-text）× 1080p60/4K60 共 10 片 + SHA256 manifest。DLL 遮蔽问题（最小版 avcodec 遮蔽含 openh264 的 tools 版）用隔离运行目录 `out/build/x64-release/clipgen/` 解决。gate corpus:* 四项转绿，其余保持红（30/42）。存档 `c7d6414`。
+- **Cycle 033 R2 契约族**: include/veyra/pipeline（Rational PTS 负值/未知、ColorDescription+assumed 标志+P010 fail-closed 路径、10 位 FrameFlags+breaksHistory、GpuTextureHandle ownerSlot/expectedState/readyFence、FrameWindow 固定 prev/current/next+lookaheadFrames≤2 无 vector、GuidanceFrame provenance/age/sourceSequence、ResetCoordinator 帧边界消费）。PipelineContractTests 50/50 Debug+Release；旧 unified 51/51 无回归。附带修复 descriptor_present_probe:617 debug C4702。存档 `07eb66d`。
+
+### 实际命令（关键）
+
+- `loop-gate.ps1 -Gate preflight` → 70/70 exit 0（session 首尾各一次）
+- `build.ps1 -Preset x64-release` → exit 0（多轮）
+- `veyra_nvof_probe` / `veyra_fg_harness --fg-test|--audio-test` / `veyra_player_probe --duration-seconds 20` → 0/0/0/12（logs/takeover-20260906/）
+- `phase5.ps1 -Root .` → exit 1（34/42 → 30/42 两轮，失败清单见 JOURNAL 031/032）
+- `veyra_clip_gen --make-corpus` → exit 0（隔离目录）
+- `veyra_pipeline_tests` / `veyra_unified_tests` → 50/50、51/51（Debug+Release）
+
+### 未执行/未通过
+
+- Phase 5 gate 仍 exit 1（产品库/runner/真实 EnhanceGraph 未实现——这是 R3 的任务）；无 Phase 通过、无 Reviewer、无 lastGoodCommit 变更。
+- player probe drift 2.8s 与 L2 GBV id=938 维持已知 FAIL（Phase 6 范围，未动）。
+- 未运行 30 分钟耐久（runner 不存在，gate 正确拒绝）。
+
+### 下一条唯一任务
+
+R3.1：从 player_probe 抽取真实成员建立 veyra_sinks（WasapiAudioSink，~194-690 行）/veyra_guidance（NvofGuidanceProvider 包 NvOfSession）/veyra_sources（MediaFileSource），随后 R3.2 把 GPU 链移入 EnhanceGraph 使 `product:enhance-graph-submits-gpu` 检查具备通过条件。STATE.nextAction 已写入精确指针。
+
 ## 2026-09-06 强 Agent 接管审计与 Launch V1.3 重基线
 
 ### 用户决定

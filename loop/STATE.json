@@ -106,6 +106,6 @@
     "A real DirectShow/UVC 4K60 SDR capture device, HDMI audio, and 4K60 source signal are required before P7 capture gate can pass.",
     "Public distribution rights for the experimental DLSSNR runtime and all bundled NVIDIA/model/FFmpeg assets are unresolved; a local release candidate is allowed, public launch is blocked."
   ],
-  "nextAction": "Playbook R2.2: wire NVOF/depth guidance production to the new GuidanceFrame contract (provenance, sourceSequence, depthAge, extentsMatch) and migrate probe window semantics onto FrameWindow fixed prev/current/next with lookaheadFrames modes; keep veyra::core compat layer compiling. Then R2.3 ResetCoordinator integration tests (open/seek/cut/drop/resize/source-switch/pause-resume/device-lost at real-frame boundaries).",
-  "updatedAt": "2026-09-06T16:55:00+08:00"
+  "nextAction": "Playbook R3.1: establish the remaining product library targets with real members extracted from tools/player_probe (veyra_sinks: WasapiAudioSink from AudioPipeline/AudioRenderer lines ~194-690 + link D3D12PresentSink; veyra_guidance: NvofGuidanceProvider wrapping NvOfSession + ZeroGuidanceProvider + GuidanceValidator skeleton; veyra_sources: MediaFileSource wrapping FFmpegDemuxer/FFmpegVideoDecoder). No empty/interface-only targets; player_probe must keep compiling and reproduce the same probe behavior. Then R3.2 moves the real GPU chain into EnhanceGraph (src/pipeline/EnhanceGraph.cpp must submit command lists + NGX evaluate per the gate check).",
+  "updatedAt": "2026-09-06T17:10:00+08:00"
 }

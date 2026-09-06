@@ -17,12 +17,13 @@
 历史 `c4ee3f3` 及其日志只保留为组件证据。旧 Phase 5 gate 接受 manifest-only depth、第二次 1080p endurance 冒充 4K 位置证据，且 `EnhanceGraph` 只增加计数，因此旧 gate/Reviewer/checkpoint 不再满足当前 Product Spec。
 
 - [x] **R0.0 对抗式状态审计**：确认 preflight 70/70、Release build exit 0；确认 Phase 0–4 有效；确认 Phase 5 假通过、Phase 6 未提交资产、约 31 个 worktree status entry、tracked 测试片删除、无 UI/Capture/Export；用户决定继续实验 Feature 18。（2026-09-06）
-- [ ] **R0.1 新 Maker 接管指纹**：重新运行 preflight/build/git status/diff-check；记录 `git diff --binary` hash；逐项分类当前未提交文件为 keep/repair/obsolete；不得 reset/clean/checkout；用新 run-id 重跑 NVOF/FG/audio/player 窄 probe。
-- [ ] **R1.1 phase5 gate 重建并先红**：重写 `scripts/gates/phase5.ps1`；移除 manifest-only depth 和假 4K；恢复 30 分钟门槛；要求产品 library、真实 extent/hash/timing/VRAM/queue/reset；当前实现必须因具体缺项 exit 1。
-- [ ] **R1.2 确定性 corpus**：用 `veyra_clip_gen` 在 ignored run 目录生成 1080p60/4K60 translation、occlusion、cut/flash/duplicate、particles、UI；记录生成命令/SHA256；gate 不再依赖已删除 tracked MP4。
-- [ ] **R2.1 FramePacket**：迁移到 `include/veyra/pipeline`；加入 rational/100ns PTS、duration、ColorDescription、FrameFlags、SourceKind、GPU resource state/owner fence/slot；兼容层只用于迁移期。
-- [ ] **R2.2 FrameWindow/GuidanceFrame**：固定 prev/current/next 与 lookaheadFrames 0/1/2，删除无界 vector；motion=current→previous working pixels、depth R32F、confidence R8、provenance/age/sourceSequence/reset reason。
-- [ ] **R2.3 ResetCoordinator tests**：open/seek/cut/drop/resize/source-switch/pause-resume/device-lost 八类事件同一 epoch；负/缺失 PTS、跨 epoch history、窗口上限和 fence ownership 测试 Debug/Release 通过。
+- [x] **R0.1 新 Maker 接管指纹**：重新运行 preflight/build/git status/diff-check；记录 `git diff --binary` hash；逐项分类当前未提交文件为 keep/repair/obsolete；不得 reset/clean/checkout；用新 run-id 重跑 NVOF/FG/audio/player 窄 probe。
+- [x] **R1.1 phase5 gate 重建并先红**：重写 `scripts/gates/phase5.ps1`；移除 manifest-only depth 和假 4K；恢复 30 分钟门槛；要求产品 library、真实 extent/hash/timing/VRAM/queue/reset；当前实现必须因具体缺项 exit 1。
+- [x] **R1.2 确定性 corpus**：用 `veyra_clip_gen` 在 ignored run 目录生成 1080p60/4K60 translation、occlusion、cut/flash/duplicate、particles、UI；记录生成命令/SHA256；gate 不再依赖已删除 tracked MP4。
+- [x] **R2.1 FramePacket**：迁移到 `include/veyra/pipeline`；加入 rational/100ns PTS、duration、ColorDescription、FrameFlags、SourceKind、GPU resource state/owner fence/slot；兼容层只用于迁移期。
+- [x] **R2.2 FrameWindow/GuidanceFrame**：固定 prev/current/next 与 lookaheadFrames 0/1/2，删除无界 vector；motion=current→previous working pixels、depth R32F、confidence R8、provenance/age/sourceSequence/reset reason。
+- [x] **R2.3 ResetCoordinator tests**：open/seek/cut/drop/resize/source-switch/pause-resume/device-lost 八类事件同一 epoch；负/缺失 PTS、跨 epoch history、窗口上限和 fence ownership 测试 Debug/Release 通过。
+<!-- 2026-09-06 Goal cycles 030-033: R0.1 takeover fingerprint 61feb89b + probes r0-*; R1.1 gate 42-check fail-closed proven red 34/42; R1.2 corpus 10 clips + SHA256 manifest (corpus:* green); R2.1-R2.3 delivered as one contract family include/veyra/pipeline + PipelineContractTests 50/50 debug+release (rational PTS, 8 reset reasons at frame boundaries, cross-epoch rejection, window cap, fence ownership). Checkpoints: bb9c5361/7ec1e0c/c7d6414/07eb66d. -->
 - [ ] **R3.1 CMake 产品库**：建立并实际链接 `veyra_pipeline`、`veyra_guidance`、`veyra_sources`、`veyra_sinks`；不允许空 target 或只含接口。
 - [ ] **R3.2 真 EnhanceGraph**：把 D3D12VA/YUV、SR、scene、NVOF/confidence、parity encode、Feature18、parity decode、optional FG、post mix 的真实提交从 `player_probe`/harness 迁入共享 graph；主路径 readback=0。
 - [ ] **R3.3 probe 去重**：`player_probe` 只做参数、组装、scenario、JSON；目标小于 800 行且不保留第二套 NGX/NVOF/barrier/resource lifetime。headless test 与 player probe 对 300 帧产生同计数/输出 hash。
