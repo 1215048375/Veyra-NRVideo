@@ -944,6 +944,40 @@ C staged teardown 定位崩溃=swapChain_.Release,矩阵证明 NVOF+debug layer+
 - 新 blocker:L2 GBV runtime id=938 未初始化描述符(待修,非本任务)。
 - 未执行:query-heap GPU timestamp(用户明令禁止);Reviewer/checkpoint(未授权)。
 
+## Cycle 031 — R1.1 phase5 gate 重建并先红（2026-09-06 Goal）
+
+### Before
+
+- Phase: 5（重开，in_progress）
+- 唯一任务: 重写 `scripts/gates/phase5.ps1` 为 fail-closed 产品级 gate：移除 manifest-only depth 与第二次 1080p 冒充 4K 两个假通过口、恢复 30 分钟门槛、要求产品库（veyra_pipeline/veyra_guidance）真实存在并被 runner 链接、要求本次 run 的 extent/counter/hash/timing/VRAM/reset JSON 契约、主路径纪律（readback=0、逐帧 CPU wait=0、有界队列）；并在当前实现上证明 exit 1。
+- 可证伪假设: 当前 CMake 无 veyra_pipeline/veyra_guidance/veyra_quality_probe target、无 src/pipeline、无 corpus manifest → 新 gate 必须以这些具体缺项 exit 1；若 gate 在这些缺失下 exit 0 则它仍是假 gate，必须重写。
+- 预计修改文件: scripts/gates/phase5.ps1（整体重写，ASCII-only）。
+- 快速检查命令: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate phase5` → 预期 exit 1，失败项命中 product-library/corpus/runner/endurance 缺口。
+- 预期新增证据: 新 gate 脚本 + 负向 exit 1 运行输出（run-id 落 logs/phase5/）。
+
+### After
+
+- 实际修改: scripts/gates/phase5.ps1 整体重写（42 项检查，ASCII-only，AST-CLEAN）。
+- 实际命令与 exit code:
+  - AST 解析 → AST-CLEAN。
+  - `loop-gate.ps1 -Gate phase5` → **exit 1**（外层 1 失败项 = phase-gate:phase5 exitCode=1；phase-gate-no-project-mutation 通过，gate 未改任何非忽略文件）。
+  - 内层直跑 `phase5.ps1 -Root .` → **exit 1，34/42 检查失败**，失败清单精确命中计划缺口（run-id e293aaf83e0d4eb2b2980b5b4305deb4 及第二轮复跑，logs/phase5/<runId>/）。
+- 失败项与本计划逐项对应：
+  - `product:veyra_pipeline-target` / `product:veyra_guidance-target` / `product:quality-runner-target` / `product:player-links-pipeline` / `product:enhance-graph-submits-gpu` — 共享产品库与真实 GPU graph 提交不存在（R3 范围）；
+  - `corpus:*` ×4 — 确定性 corpus manifest 不存在（R1.2 范围）；
+  - `quality:*` ×12、`depth:provider-from-run` — runner 缺失，全部 fail-closed "not available"；**depth 明确不接受 manifest**（旧 gate 假通过口 #1 已删除）；
+  - `endurance:*` ×10 — 4K 检查必须来自本次 run JSON 的 extent（旧 gate 假通过口 #2 已删除）；duration 门槛 1790s/30min（旧 gate 假通过口 #3 已删除）；
+  - `discipline:main-path` — readback/cpu-wait/deviceRemoved 契约；
+  - `quality:hash-binding` — exe/input/config/runtime hash + run-id 绑定（旧 gate 假通过口 #4 已删除）。
+- 通过项: gate:self-control-chars、build:x64-release、git-ignore ×6。
+- 新 gate 关键设计: runner 契约 `veyra_quality_probe --corpus/--input --duration-seconds --guidance {off,zero,motion,motion-depth,auto}`；JSON 必含 extent×3、frames×3、nrEvaluate/nvofExecute、provenance/nonZeroMotionCount、confidence P05/P50/P95、depthMode/fallback/age、resetCountsByReason/sceneCut/crossCut、gpuPass P50/P95、readback/cpuFenceWaitPerFrame/queueHighWater/vramBudgetHeadroom、workingSet S/P/E、deviceRemovedCount、hashes×4+runId；阈值 1790s/97000 帧/1536MiB VRAM headroom/queue≤6/wsGrowth<512MiB；depth manifest 永不放行 provider 检查。
+- 失败 fingerprint: phase5|loop-gate -Gate phase5|1|product-library+corpus+runner missing —— 预期的 fail-closed 证明，非缺陷。
+- 是否有进展，依据: 是——Phase 5 验收从"旧 gate 可被 manifest/假 4K/5 分钟糊弄"变为机器可验证的 fail-closed 契约，且证明当前实现无法通过。
+- STATE/BACKLOG 更新: cycle.completed=31；BACKLOG R1.1 → DONE（gate 重建并先红）；nextAction → R1.2。
+- 下一唯一动作: R1.2 — 扩展 veyra_clip_gen 支持 translation/occlusion/cut-flash-duplicate/particles/ui-text 五类场景，生成 1080p60+4K60 corpus 与 SHA256 manifest。
+
+---
+
 ## Cycle 030 — R0 新 Maker 接管：preflight/指纹/分类/四类窄 probe（2026-09-06 Goal）
 
 ### Before
