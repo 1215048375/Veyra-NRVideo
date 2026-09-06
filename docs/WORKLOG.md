@@ -796,6 +796,30 @@ L2(GBV)runtime 扫描 1764+ ERROR,id=938 `GPU_BASED_VALIDATION_DESCRIPTOR_UNINIT
 ### 原始证据
 logs/phase6-manual/t10/{L0,L1,L2,NF}-{r1,r2}.{log,json}
 
+## 2026-09-06 Goal session 2（Cycle 034-036）：产品库 R3.1 全部建立
+
+### 执行摘要
+
+接 session 1，完成 Playbook R3.1（四个产品库全部以真实成员建立并被 gate 检查放行）：
+
+- **Cycle 034 R3.1a veyra_sinks**: WASAPI 音频（AudioPipeline 水位环形缓冲 + AudioRenderer 事件驱动 PTS 锚定主时钟 + 原子 seek）从 player_probe **逐字迁移**到 `veyra_sinks`（include/veyra/sink/WasapiAudioSink.h）。player_probe 3641→3128 行。行为验证无回归：underruns=0 overruns=0 seekCount=11、exit 12（已知 drift FAIL）不变。gate 新增 product:sinks/sources/player-links-sinks 检查并修复 player-links-pipeline 的跨 target 假阳性。
+- **Cycle 035 R3.1b veyra_guidance**: IGuidanceProvider 接口 + **ZeroGuidanceProvider 真 GPU 实现**（三纹理 upload-copy 零初始化、GpuTextureHandle 完整生命周期字段、epoch 边界 requiresReset、provenance=Zero 诚实上报）。GPU 集成测试 13/13 双配置（真 RTX 5070，诊断 readback 验证全零）。测试自身曾有一个 staging 溢出 bug（分配 8 行复制 1080 行）——provider 本身正确，box 限定后全绿。
+- **Cycle 036 R3.1c veyra_sources**: MediaFileSource 组合 veyra_media（无第二份解码实现）：Rational PTS 用真实流时基（实测 1/15360 单调）、Open/Seek/Discontinuity flags、单调 epoch、ColorDescription 解析 + assumed 默认（1080p→BT709 Limited 全 assumed）、原子 seek（demuxer+flush+flag）、EOS drain。corpus 驱动 23/23 双配置。修 3 轮：TRC 常量名、std::format 参数数（运行时 abort）、EOS 期望值。
+
+### Gate 状态
+
+phase5 gate 28/45 失败（exit 1 保持）。**产品库检查全绿**：pipeline/guidance/sinks/sources 四 target + player-links-sinks。剩余红项：quality-runner-target、player-links-pipeline、enhance-graph-submits-gpu（全部 R3.2 范围）+ 矩阵/depth/耐久（R3.2-R5 范围）。
+
+### R3.2 迁移地图（供下个上下文）
+
+- `processOneFrame` 位于 player_probe main.cpp:1982-~2470，~500 行 lambda，深度捕获 main() 作用域。
+- 链路：ring.acquire(slot) → NV12 源（D3D12VA 纹理 fence-wait+双 plane SRV / 软件 sws→Nv12Upload dispatch）→ YuvToRgb dispatch 到 srcRgba → SR evaluate 或 ScaleBlit bypass 到 workRgba → ParityEncode → **submitAndSignal+新 list**（snippet 约束）→ NR evaluate（全参数块）→ ParityDecode 到 finalRgba → videoFrame[parity] blit + NVOF A/B 链（blit 传递）→ [后续未读：NVOF execute/densify/FG evaluate/presentQueue]。
+- 迁移目标：src/pipeline/EnhanceGraph.cpp（gate 检查 ExecuteCommandLists+Evaluate 必须在此文件）；NvofGuidanceProvider 同批出生；player_probe 最终 <800 行（R3.3）。
+
+### 下一条唯一任务
+
+R3.2 EnhanceGraph 真实 GPU 链迁移（精确指针已写入 STATE.nextAction）。
+
 ## 2026-09-06 Goal session 1（Cycle 030-033）：接管、gate 重建、corpus、契约
 
 ### 执行摘要
