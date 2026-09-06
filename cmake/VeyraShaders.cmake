@@ -40,3 +40,31 @@ function(veyra_add_compute_shader target_name shader_name)
   add_custom_target(${target_name} DEPENDS "${output}")
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${source}")
 endfunction()
+
+# Compiles a vertex+pixel shader pair (entry vsMain/psMain) into two DXIL
+# files under <binary-dir>/shaders/. Used by the graphics present path.
+function(veyra_add_graphics_shader_pair target_name shader_name)
+  veyra_find_dxc(DXC_EXE)
+  set(source "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${shader_name}.hlsl")
+  set(vs_out "${CMAKE_CURRENT_BINARY_DIR}/shaders/${shader_name}_vs.dxil")
+  set(ps_out "${CMAKE_CURRENT_BINARY_DIR}/shaders/${shader_name}_ps.dxil")
+  set(config_flags -O3 -Qstrip_debug -Qstrip_reflect)
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(config_flags -Od -Zi -Qembed_debug)
+  endif()
+  add_custom_command(
+    OUTPUT "${vs_out}"
+    COMMAND "${DXC_EXE}" -T vs_6_0 -E vsMain ${config_flags}
+            -Fo "${vs_out}" "${source}"
+    DEPENDS "${source}"
+    COMMENT "dxc ${shader_name}.hlsl VS (${CMAKE_BUILD_TYPE})"
+    VERBATIM)
+  add_custom_command(
+    OUTPUT "${ps_out}"
+    COMMAND "${DXC_EXE}" -T ps_6_0 -E psMain ${config_flags}
+            -Fo "${ps_out}" "${source}"
+    DEPENDS "${source}"
+    COMMENT "dxc ${shader_name}.hlsl PS (${CMAKE_BUILD_TYPE})"
+    VERBATIM)
+  add_custom_target(${target_name} DEPENDS "${vs_out}" "${ps_out}")
+endfunction()

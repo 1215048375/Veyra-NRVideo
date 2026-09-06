@@ -35,6 +35,10 @@ public:
 
     void write(LogLevel level, const char* component, const std::string& message);
 
+    // Flush the file sink immediately (staged-teardown markers must survive
+    // a crash on the very next call).
+    void flush();
+
 private:
     std::mutex mutex_;
     std::FILE* file_ = nullptr;
@@ -42,6 +46,8 @@ private:
 };
 
 namespace log {
+
+// Flush the log sink to disk immediately (teardown markers).
 
 void trace(const char* component, const std::string& message);
 void info(const char* component, const std::string& message);

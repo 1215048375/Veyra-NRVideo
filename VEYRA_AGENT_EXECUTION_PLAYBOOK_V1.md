@@ -1,8 +1,8 @@
 # Veyra Launch V1 施工手册
 
-版本：1.1
+版本：1.2（强 Agent 接管恢复版）
 
-日期：2026-09-03
+日期：2026-09-06
 
 适用范围：Phase 5–7；Phase 0–4 已有基础代码与历史证据。
 目标读者：可以执行命令和写 C++，但不应被迫猜架构、参数方向或验收口径的 Agent。
@@ -16,6 +16,291 @@
 5. 已经真实做过什么以 `docs/WORKLOG.md` 与 `loop/EVIDENCE.md` 为准。
 
 旧的“采集卡/深度/导出不是 V1”决定已经作废。不要从 Git history 复制旧路线回来。
+
+## 0.1 2026-09-06 接管结论：先纠正完成状态
+
+新 Agent 不得从 `STATE.json` 旧的“Phase 5 passed”字面继续 Phase 6。对当前树的对抗式审查发现：
+
+- Phase 0–4 的 checkpoint 和实测证据继续有效；
+- Feature 18、SR、parity、NVOF、DLSSG、WASAPI、Present 的单项/组合 probe 有真实价值，禁止推倒重写；
+- 旧 `phase5.ps1` 允许只有 depth manifest 时通过，并把第二次 1080p endurance 放在 4K 检查位置；
+- `src/core/EnhanceGraph.cpp` 只复制 packet 和增加计数，注释明确真正 GPU pipeline 仍由 harness 编排；
+- `tools/player_probe/main.cpp` 约 3600 行，是实验集成场，不是可复用产品 engine；
+- 最新 t10 播放器矩阵虽已解决 teardown 崩溃，但所有场景仍为 FAIL：drift P95 约 2.8 秒，且 L2/GBV 报大量 descriptor-uninitialized；
+- Phase 7 产品文件基本不存在：没有 `veyra_app`、CaptureCardSource、ImageExportSink、VideoExportSink 或完整 Depth provider。
+
+因此 Phase 5 必须重开为 `in_progress`，Phase 6/7 锁定。历史 Phase 5 commit 只作为组件证据来源，不再是 `lastGoodCommit`。当前可交付 Launch V1 进度约 40%，不是按 6/8 Phase 计算的 75%。
+
+## 0.2 实验 DLSS 5 后端决定
+
+NVIDIA 已正式面向合作游戏发布 DLSS 5，但公开 Developer/Streamline 包尚未提供可供 Veyra 直接替换的通用 DLSS 5 接口。用户于 2026-09-06 决定继续使用固定 hash 的 `nvngx_dlssnr.dll` Feature 18 做本机研发。
+
+执行含义：
+
+1. 保留并复用 `DlssNrRuntimeAdapter`、签名 snippet 和已验证参数契约；
+2. 不再等待“官方 SDK 上线”才施工；
+3. 不代表效果与官方游戏路径等价，除非同源 A/B 证明；
+4. runtime 继续外置、可关闭、精确 hash 校验、绝对路径加载；
+5. 不从游戏、驱动缓存或网络替换版本，不 patch、不提交、不打包、不上传；
+6. 功能全部完成而分发权仍未解决时，最终状态只能是 `distribution_blocked`。
+
+## 0.3 强 Agent 接管恢复计划（唯一执行顺序）
+
+下面 R0–R12 是当前施工主线。`loop/BACKLOG.md` 提供同一顺序的可勾选原子项。任何更早 R 项未达到 exit 0/Reviewer 条件，不得跳到后面做 UI 或导出。
+
+### R0：保护现有工作树并建立可信基线
+
+目的：保存原 Agent 未提交的真实成果，同时避免把失败状态误标 checkpoint。
+
+第一组命令必须原样执行：
+
+```powershell
+git status --porcelain=v1
+git diff --stat
+git diff --check
+git log -10 --oneline
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate preflight
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Root . -Preset x64-release
+```
+
+已知接管基线：preflight 70/70 和 Release build 曾于 2026-09-06 exit 0；控制面更新前有 31 个 status entry，完成本次文档重基线后为 44 个（其中包含本次计划/状态修改）；`validation/fixed_clips/test_h264_1080p.mp4` 处于删除状态；`loop/local/fixed_clips/test_av_{1080p,4k}.mp4` 为已忽略本地素材。新 Agent 必须重新确认，不能抄这个结果。
+
+动作：
+
+- 对 `git diff --binary` 计算 hash 并写 JOURNAL，作为接管指纹；
+- 不执行 reset、clean、checkout 或整树格式化；
+- 逐文件把未提交代码分为 `keep / repair / generated-or-obsolete`，在 JOURNAL 列表化；
+- 受版本控制测试片的删除先保持原状。R1 改为确定性生成 corpus 后，再单独向用户报告是否应提交该删除；
+- 失败代码可以在当前工作树继续修，不能把失败矩阵提交成 `phase-6:` checkpoint；
+- 先为当前源码跑最窄的 NVOF、FG、audio 和 player probe，日志写入新的 run-id，避免依赖旧 t10 文件。
+
+R0 完成证据：preflight/build exit 0、接管 diff hash、四类资产清单、没有专有文件被跟踪。R0 不是 Phase gate。
+
+### R1：重写 Phase 5 gate，先证明会失败
+
+目的：删除旧 gate 的两个假通过口，不删历史日志。
+
+只修改 `scripts/gates/phase5.ps1` 及为 gate 服务的确定性 clip generator。新 gate 必须先在当前实现上 exit 1，至少准确命中：
+
+- `EnhanceGraph` 没有真实提交完整 GPU graph；
+- DAV2 未实现时只能报告明确 Auto fallback，不能因 manifest 存在宣称 provider 完成；
+- native 4K 路径没有当前 run 的真实 extent/Feature 18/NVOF/VRAM 证据；
+- 30 分钟要求不能改成 5 分钟；
+- current executable/input/config/runtime hash 或 run-id 缺失；
+- 主路径出现全帧 readback、每 pass CPU wait 或无界队列。
+
+新 gate 输入不得依赖已删除的 tracked MP4。使用 `veyra_clip_gen` 在 `loop/local/fixed_clips` 或本次 `logs/phase5/<runId>/inputs` 生成 1080p60 与 4K60 translation/occlusion/cut/ui/particles 片，记录生成命令和 SHA256。
+
+新 gate 必查 JSON：
+
+```text
+sourceExtent, workingExtent, outputExtent
+sourceFrames, processedFrames, nrEvaluateCount, nvofExecuteCount
+guidanceProvenance, nonZeroMotionCount, confidenceP05/P50/P95
+depthMode, depthFallbackReason, depthAgeP95
+resetCountsByReason, sceneCutCount, crossCutHistoryCount
+gpuPassP50/P95, normalPathReadbackCount, cpuFenceWaitPerFrame
+queueHighWater, resourcePoolPeak, vramBudgetHeadroomMiB
+workingSetStart/Peak/End, deviceRemovedCount
+exeHash, inputHash, configHash, runtimeHash, runId
+```
+
+R1 完成证据：新 gate 对当前缺陷 fail closed；失败项与本计划一致。绝不先改阈值让它绿。
+
+### R2：把数据契约补全到产品规格
+
+当前 `FramePacket/FrameWindow/GuidanceFrame` 只能算草稿。按下列文件拆分并保留兼容迁移层：
+
+```text
+include/veyra/pipeline/FramePacket.h
+include/veyra/pipeline/FrameWindow.h
+include/veyra/pipeline/GuidanceFrame.h
+include/veyra/pipeline/ResetCoordinator.h
+src/pipeline/ResetCoordinator.cpp
+tests/unit/PipelineContractTests.cpp
+```
+
+必须补齐：
+
+- PTS/duration 使用 rational 或 100ns 整数，禁止 `uint64 ptsUs` 无法表达负/未知 PTS；
+- `ColorDescription` 含 format/range/matrix/transfer/primaries/rotation/SAR 和 assumed 标志；
+- `FrameFlags` 含 open/seek/cut/drop/duplicate/resize/discontinuity/pause-resume/device-lost/EOS；
+- GPU resource 不裸借用无生命周期信息：至少携带 owner slot、expected state、ready fence/value、extent/format；
+- `FrameWindow` 固定 `prev/current/next` 和 `lookaheadFrames=0/1/2`，删除可无限增长的 vector；
+- motion 为 current→previous、post-SR working pixels；depth R32F；confidence R8_UNORM；记录 provenance/age/sourceSequence；
+- reset 为单调 epoch，所有 SR/NR/FG/NVOF/depth/cadence 在同一 real-frame boundary 消费；
+- unit tests 覆盖 8 类 reset、负/缺失 PTS、跨 epoch history 拒绝、窗口容量上限和资源 fence 所有权。
+
+R2 完成证据：Debug/Release unit tests exit 0；旧 probe 经适配仍构建；没有复制一套第二契约。
+
+### R3：把真实 GPU 链从 player probe 抽成共享 EnhanceGraph
+
+创建并在 CMake 中实际链接：
+
+```text
+veyra_pipeline
+  FramePacket/Window/ResetCoordinator/SceneCadenceAnalyzer/EnhanceGraph
+veyra_guidance
+  ZeroGuidanceProvider/NvofGuidanceProvider/GuidanceValidator/DepthAnythingProvider
+veyra_sources
+  MediaFileSource（先实现）
+veyra_sinks
+  D3D12PresentSink/WasapiAudioSink（先迁移）
+```
+
+`EnhanceGraph::process` 必须真正执行且记录：
+
+```text
+ingress color normalize
+-> SR bypass or DLSS SR
+-> scene/cadence
+-> NVOF inputs + execute + densify/cost
+-> confidence validation + optional depth
+-> parity encode
+-> Feature 18 Evaluate
+-> parity decode
+-> optional DLSSG pair generation
+-> bounded post mix/clamp
+-> ProcessedFrame(real + optional generated + fences/timestamps)
+```
+
+迁移原则：
+
+- 从 `player_probe` 提取已经证明过的代码，不复制后再留下两份；
+- backend 对象由 render thread 单一所有，RAII 逆序：Feature→params→runtime→NGX core，NVOF 必须 unregister→release registered textures→destroy/unload；
+- create/resize 可以一次等待，逐帧使用 4–6 slot 和 GPU fence；禁止每个 pass `WaitForSingleObject`；
+- UI、source、sink 不得调用 private NGX 参数或 shader barrier；
+- `player_probe` 最终缩为参数解析、组装 source/graph/sink、运行 scenario、写 JSON；目标小于 800 行。不能为了行数机械拆无语义 helper。
+
+R3 最窄证明：同一 `veyra_pipeline` library 被 `player_probe` 和一个 headless integration test 同时链接；两者对同一 300 帧输入产生相同 output/config hash 和 Evaluate 计数；旧 metrics-only graph 测试必须失败。
+
+### R4：完成 Guidance、Depth 与 reset 质量核心
+
+NVOF：
+
+- 使用当前已存在的官方本地 `third_party_local/nvidia/Optical_Flow_SDK_5.0.7`；INBOX 中旧“5.0 缺失”记录已作废；
+- 保留 B8G8R8A8 input、R16G16_SINT S10.5 `/32`、grid 4、cost R8_UINT 和当前→前帧方向的十组位移证据；
+- 将 `NvOfSession` 包进 `NvofGuidanceProvider`，第一帧/reset 不消费旧 A；
+- 至少用 cost、luma warp residual、out-of-frame/occlusion 生成 confidence；离线与 Buffered Quality 加 forward/back consistency；
+- confidence 平滑衰减 motion，不用单个魔法阈值把所有低纹理区切成 0。
+
+Depth：
+
+- 先核对 `third_party_local/depth/manifest.json`，它目前只证明候选身份，不证明模型/runtime 已齐；
+- 只允许商业条款明确的 DAV2 Small FP16；锁定 URL/version/hash/license/input/output/shape/opset；
+- 建 `DepthAnythingProvider`，同一 D3D12 adapter，sequential session，固定 shape；正常路径用 GPU binding，不能在 render thread 同步整帧 readback/upload；
+- P02/P98+EMA、current→previous motion reprojection、age、residual、scene cut reset；
+- `Auto` 在 missing/late/stale/inconsistent 时明确切 Motion Only，并把原因写 JSON/UI；
+- 直到真实 depth visual/statistics 通过，不能把 `NvofDav2` 当默认。
+
+Scene/reset：把现有 CPU analyzer 扩展到实际 GPU histogram/SAD 输入；seek、cut、drop、resize、source switch、pause/resume、device lost 各做一个 integration case，确认 SR/NR/FG/NVOF/depth 的 reset epoch 同值。
+
+R4 质量矩阵必须输出 `off/zero/motion/motion+depth/auto`，保存 flow/depth/confidence/reset 可视化和 timing。画质差的样本允许 Auto 回退，但不得静默。
+
+### R5：重新关闭 Phase 5
+
+按 R1 的 gate 跑完整 1080p60 和 native 4K60 各 30 分钟。4K 必须由 JSON 与资源描述符同时证明 working extent 为 3840×2160；不能只看窗口或输出文件尺寸。
+
+通过顺序固定：
+
+1. Release build；
+2. unit/integration/quality corpus；
+3. `loop-gate phase5` exit 0；
+4. 新上下文只读 Reviewer 独立重跑；
+5. 修完 P0/P1 后再次 gate+Reviewer；
+6. checkpoint；
+7. 才把 STATE Phase 5 改回 passed、Phase 6 解锁。
+
+### R6：Phase 6 正确性与性能修复
+
+先处理现有真实失败，不先扩功能。
+
+1. **GBV id=938**：根据错误中的 command list、root parameter、descriptor index 建最小复现；所有被 root descriptor table 覆盖的槽位在 dispatch 前写入有效 descriptor 或显式 null descriptor。禁止关闭 GBV、过滤消息或减少扫描条数过关。
+2. **GPU timing**：为 upload、YUV、SR、NVOF input/execute/densify、confidence、parity encode、NR、decode、FG、composite、present 分配 query-heap timestamp；ResolveQueryData 到小型 timing buffer 可异步读取，不能每帧等待。
+3. **去串行化**：定位 P95 超预算 pass；消除重复 4K blit、重复颜色转换、per-pass fence wait 和临时纹理；使用 keyed resource pool 与 4–6 command slots。
+4. **A/V scheduler**：WASAPI audio clock 为主；Player 不丢真实源帧，慢于实时就明确暂停/降 feature，不允许 lateness 积到秒级；seek 原子 flush/re-anchor/reset。
+5. **FG cadence**：59/59 truth 证据保留；产品路径再次证明 generated 非重复/非 blend、PTS 严格中点、cut/duplicate/drop 不跨界。
+6. **延迟窗口**：NR Low Latency=0、FG Low Latency=1、Buffered Quality=2；队列上限写在类型和 JSON，不以实际暂时没增长代替约束。
+7. **teardown**：保留 s10 的 drainQueue 和 NVOF 逆序释放；每次修性能后运行 L0/L1/L2/no-feature 矩阵，禁止 `ExitProcess` 掩盖析构问题。
+
+Phase 6 快速门槛：1080p 与 4K scenario 均 `driftP95<=50ms`、drop=0、GBV error/corruption=0、readback=0、自然 return。随后跑 4K30/60 各 30 分钟和 Reviewer。
+
+### R7：建立真正的应用壳与 Player tab
+
+在 Phase 6 gate 通过后创建 `apps/veyra/veyra_app`，Win32 单进程、一个 render engine、三个 tab。先做 Player vertical slice：
+
+- `MediaFileSource`：MP4/MKV/MOV，H.264/HEVC，D3D12VA 优先和有提示的软件 fallback；
+- `EngineController`：UI command queue、source/render/audio 生命周期；
+- `D3D12PresentSink`：窗口/全屏、VSync/tearing、resize；
+- `WasapiAudioSink`：event mode、pause/seek/stop；
+- Player UI：open/play/pause/seek/loop/fullscreen、output extent、NR/SR/FG/quality；
+- 外置 SRT 和首条内嵌文本字幕；libass 合成在 FG 后；
+- Diagnostics：runtime identity、Feature state、guidance、reset、FPS、GPU ms、queue、drop、A/V drift；
+- 所有 fallback 在 UI 黄色显示，Feature failure 不得显示原图同时声称开启。
+
+Player tab 必须驱动与 probe 相同的 library，不接受 UI 内复制 pipeline。
+
+### R8：CaptureCardSource 与 Capture tab
+
+具体来源：FFmpeg `libavdevice` 的 `dshow`，设备列表优先用 DirectShow COM 枚举 friendly name；实际打开仍由 FFmpeg library 完成。
+
+实现顺序：
+
+1. CMake/vcpkg 确认 avdevice；
+2. 枚举 video/audio 和真实 media types；
+3. 打开用户选定的 1080p/2160p 30/60 SDR；回读并显示实际 codec/size/fps/color；
+4. video latest-frame mailbox 容量 1，覆盖计 drop 并触发 reset；audio ring 有界；
+5. 接同一个 EnhanceGraph 和 Present/Audio sink；
+6. UI 暴露三种延迟模式和 lookahead 帧/内部毫秒；
+7. P010/HDR fail closed；不支持的私有设备明确报告；
+8. 真实 4K60+HDMI audio 30 分钟验证。没有真实硬件时只能 BLOCKED，不能用虚拟摄像头过最终 gate。
+
+### R9：图片导出
+
+`ImageSource`/`ImageExportSink` 使用 WIC：PNG/JPEG decode、EXIF orientation、sRGB full；单帧 reset=1，motion/depth Zero，optional SR→Feature18；输出写唯一 `.partial`，decode-back 检查尺寸/非黑/hash 后原子 rename，默认不覆盖。图片模式仍调用共享 graph，禁止另写 Python/OpenCV pipeline。
+
+### R10：D3D12 NVENC 视频导出
+
+前置：用户从 NVIDIA 官方取得 Video Codec SDK 13.1 并放入 `third_party_local/nvidia/Video_Codec_SDK_13.1.0`。若缺失，R10 标 BLOCKED，但可继续不依赖它的 R7–R9/R11。
+
+实现文件：
+
+```text
+include/veyra/sink/NvencD3D12Encoder.h
+src/sink/NvencD3D12Encoder.cpp
+include/veyra/sink/VideoExportSink.h
+src/sink/VideoExportSink.cpp
+tests/integration/VideoExportProbe.cpp
+```
+
+必须严格使用系统 `C:\Windows\System32\nvEncodeAPI64.dll` 和 SDK 13.1 header：查询 H.264/HEVC/4K/async/input format；预分配 4–8 slot；注册 D3D12 NV12 resource；input/output fence point；每 slot map/encode/unmap，不能每帧 register；只读取压缩 bitstream；FFmpeg `libavformat` mux MP4/MKV；音频 remux 或 AAC；字幕复制/转换/明确拒绝。
+
+FG 2X 时 generated PTS 严格落在相邻 real PTS 中间。完成后 ffprobe+self-decode 检查 codec、3840×2160、FPS、帧数、duration、音轨、首尾非黑。cancel/crash 只删除本 job `.partial`，成功文件不动。
+
+### R11：产品行为与三页 UI 收尾
+
+- Capture/Player/Export 三 tab 全部调用同一个 controller；
+- `%LOCALAPPDATA%/Veyra` 保存设置，仓库 config 只提供默认；
+- 首次启动 dependency/capability 检查；
+- 最近文件/设备；
+- source reconnect、device lost recreate；
+- 残留 partial/job manifest 提示和恢复/清理；
+- 日志包导出时排除 runtime、SDK、用户媒体和模型；
+- 错误分类与可操作消息；
+- 不存在 runtime 时应用仍能打开设置/诊断，但 DLSS 开关 fail closed。
+
+### R12：Phase 7 联合 gate、Reviewer 与发布状态
+
+`phase7.ps1` 必须在一个 run manifest 中分别绑定：
+
+- 4K30/60 Player 各 30 分钟；
+- 真实 4K60 Capture 30 分钟；
+- PNG/JPEG corpus；
+- 4K H.264 和 HEVC export，含 audio/subtitle policy 和 optional FG；
+- 设置恢复、device lost/reconnect、cancel/partial recovery、日志导出；
+- Git/包内容不含专有 runtime、SDK、模型或用户素材。
+
+五组任何一组缺失均 exit 1。Reviewer PASS 后只能创建本地功能 checkpoint。分发权未解决时 STATE=`distribution_blocked`；禁止制作或上传含实验 DLL 的公开安装包。
 
 ## 1. 每次开工的固定动作
 
@@ -180,9 +465,10 @@ third_party_local/nvidia/DLSS_SDK_310.7.0/
   include/
   lib/Windows_x86_64/
 
-third_party_local/nvidia/Optical_Flow_SDK_5.0/
-  nvofapi/include/
-  Samples/NvOFBasic/...
+third_party_local/nvidia/Optical_Flow_SDK_5.0.7/
+  NvOFInterface/
+  Common/NvOFBase/
+  NvOFBasicSamples/...
 
 third_party_local/nvidia/Video_Codec_SDK_13.1.0/
   Interface/nvEncodeAPI.h
@@ -214,12 +500,13 @@ third_party_local/ffmpeg/bin/
 - 根目录 `nvngx_dlssnr.dll` 与 `runtime_local/nvidia/nvngx_dlssnr.dll`；
 - `runtime_local/nvidia/nvngx_dlss.dll`；
 - `third_party_local/nvidia/DLSS_SDK_310.7.0`；
-- SDK 内已有 `lib/Windows_x86_64/rel/nvngx_dlssg.dll`：7,519,856 bytes，version `310.7.0.0`，SHA256 `135EAF0733C1E37381A8C28ABCF7A862404A54132B81787C04E35D09EFC5E36F`，Authenticode `Valid / NVIDIA Corporation`。它尚未 stage，也尚未通过 Veyra 的 DLSSG Create/Evaluate；
+- `third_party_local/nvidia/Optical_Flow_SDK_5.0.7`，含 `NvOFInterface`、D3D12 header/sample 和 EULA；其代码已经构建并完成 NVOF 合成位移 probe，但仍不得提交；
+- SDK 内 `lib/Windows_x86_64/rel/nvngx_dlssg.dll`：7,519,856 bytes，version `310.7.0.0`，SHA256 `135EAF0733C1E37381A8C28ABCF7A862404A54132B81787C04E35D09EFC5E36F`，Authenticode `Valid / NVIDIA Corporation`；已 stage，DLSSG capability/Create/Evaluate 与 59/59 truth probe 已通过，产品 Phase 6 仍未通过；
 - vcpkg FFmpeg decode 依赖。
 
 ### 4.2 当前外部阻塞
 
-- Optical Flow SDK 5.0 与 Video Codec SDK 13.1 需要用户登录 NVIDIA Developer Program 并分别接受 EULA；Agent 不得替用户点击同意；
+- Optical Flow SDK 5.0.7 已存在；不要再把它写成外部阻塞。Video Codec SDK 13.1 仍缺失，需要用户从 NVIDIA Developer Program 正式取得；Agent 不得替用户点击同意；
 - depth model、Windows App SDK ML/ORT 包和 ffprobe binary 必须在使用前记录来源、版本、SHA256、许可证；
 - capture gate 需要一块 Windows 能枚举并提供 4K60 SDR + HDMI audio 的真实采集卡和回环信号。
 
@@ -444,7 +731,7 @@ Phase 5 首个质量任务把真实视频 `SR -> NR` 串起来，不能继续用
 
 ### 11.1 头文件与动态库
 
-- include 只从 `third_party_local/nvidia/Optical_Flow_SDK_5.0/nvofapi/include`；
+- include 只从 `third_party_local/nvidia/Optical_Flow_SDK_5.0.7/NvOFInterface` 与该包的 `Common/NvOFBase`；
 - runtime 只用 `C:\Windows\System32\nvofapi64.dll`；
 - `LoadLibraryExW(..., LOAD_LIBRARY_SEARCH_SYSTEM32)`；
 - 解析 `NvOFGetMaxSupportedApiVersion` 和 `NvOFAPICreateInstanceD3D12`；
@@ -817,6 +1104,8 @@ output probe: codec,size,fps,frames,duration,audio
 
 ## 21. Phase 5：统一质量核心
 
+本节描述目标形态；当前恢复执行以 0.3 的 R1–R5 为准。2026-09-03/04 的旧 gate/pass 不能代替下面任一项，只有重建后的 phase5 gate 与 Reviewer 才能重新关账。
+
 严格按 `loop/BACKLOG.md` 的第一个 TODO：
 
 1. 重建 fail-closed phase5 gate；先让它因实现缺失而失败；
@@ -833,6 +1122,8 @@ Phase 5 gate 必须失败于：只有 Zero、motion 全零、known translation �
 
 ## 22. Phase 6：DLSSG 与实时 engine
 
+已有 backend/probe 只作为输入资产。当前执行以 0.3 的 R6 为准；在 drift、GBV、共享 engine、30 分钟耐久全部通过前，Phase 6 状态保持 locked/not passed。
+
 1. 重建 fail-closed phase6 gate；
 2. DlssFgBackend capability/create/evaluate/release；
 3. known translation 证明 generated 非重复/非 blend；
@@ -845,6 +1136,8 @@ Phase 5 gate 必须失败于：只有 Zero、motion 全零、known translation �
 Phase 6 完成时可以有 CLI/probe，但必须已经是真实 display/audio/FG engine；不能只有 DLL 探测。
 
 ## 23. Phase 7：三个产品闭环
+
+当前执行以 0.3 的 R7–R12 为准。Phase 7 从未开始；不存在 UI 文件或命令行 probe 不能作为提前完成证据。
 
 1. `MediaFileSource + PresentSink + WASAPI` 完整 4K 播放器，含基础字幕、设置恢复和日志导出；
 2. `CaptureCardSource + PresentSink + WASAPI` 真实 4K60 采集卡，验证 NR Low Latency、FG Low Latency、Buffered Quality；

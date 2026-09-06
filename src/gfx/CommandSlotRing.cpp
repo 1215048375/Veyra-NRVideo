@@ -159,6 +159,39 @@ bool CommandSlotRing::submitAndSignal(uint32_t slot)
     return true;
 }
 
+bool CommandSlotRing::drainQueue()
+{
+    // s10: waitIdle() only waits for ALREADY-signaled values. The last
+    // Present is submitted after the final signal, so its queue operation is
+    // not covered by waitIdle. This enqueues a FRESH signal (queue-ordered
+    // after everything previously submitted, including the last Present) and
+    // waits for it. Without this, the D3D12 debug layer reports
+    // ID3D12Resource final-release with GPU operations in-flight at
+    // swapchain release (message id=921, RaiseException 0x87D via
+    // KERNELBASE; observed t10-L1 2026-09-04).
+    if (!initialized_) {
+        return true;
+    }
+    const uint64_t value = nextFenceValue_++;
+    const HRESULT signalResult = queue_->Signal(fence_, value);
+    if (FAILED(signalResult)) {
+        veyra::log::error("gfx", std::format("slot-ring: drainQueue signal failed hr={}", veyra::hresultString(signalResult)));
+        return false;
+    }
+    const HRESULT setResult = fence_->SetEventOnCompletion(value, fenceEvent_);
+    if (FAILED(setResult)) {
+        veyra::log::error("gfx", std::format("slot-ring: drainQueue SetEventOnCompletion failed hr={}", veyra::hresultString(setResult)));
+        return false;
+    }
+    const DWORD wait = WaitForSingleObject(fenceEvent_, 30000);
+    if (wait != WAIT_OBJECT_0) {
+        veyra::log::error("gfx", std::format("slot-ring: drainQueue wait={} fenceValue={}", wait, value));
+        return false;
+    }
+    veyra::log::info("gfx", std::format("slot-ring: drainQueue completed fenceValue={} (covers post-Present queue ops)", value));
+    return true;
+}
+
 bool CommandSlotRing::waitIdle()
 {
     if (!initialized_) {

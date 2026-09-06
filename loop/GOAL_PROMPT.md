@@ -3,66 +3,88 @@
 将下面整段作为另一个 Agent 的目标。推荐把 Goal 最大循环数设为 120；如果产品另有硬上限，以更小的硬上限为准，达到上限时必须留档，不能伪报完成。
 
 ~~~text
-目标：在当前 Veyra DLSS Video Player 工作区内，严格按
-AGENTS.md、loop/LOOP_ENGINE.md、
-VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md 和
-VEYRA_PRODUCT_SPEC_V1.md，
-从当前真实状态继续施工，完成 Launch V1 Phase 5 到 Phase 7，并保留
-Phase 0–4 的有效基础证据。V1 必须同时交付物理采集卡实时增强、
-可交互播放器、图片/视频增强导出，以及 native 4K SDR Player/Capture/
-H.264+HEVC Export；任何一项缺失都不是首发版本，不得改叫 MVP 交差。
+目标：接管当前 Veyra DLSS Video Player 工作区，严格按 AGENTS.md、
+loop/LOOP_ENGINE.md、VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md 和
+VEYRA_PRODUCT_SPEC_V1.md，从 2026-09-06 的真实恢复基线继续，完成
+Launch V1。V1 不是 MVP：物理采集卡实时增强、可交互播放器、图片导出、
+视频导出和 native 4K SDR 必须同时交付，并共同使用一套
+FrameSource -> EnhanceGraph -> FrameSink。
 
-你是唯一有写权限的 Maker。每个回合先恢复 loop/STATE.json，
-核对磁盘/Git/日志，再只做 loop/BACKLOG.md 中当前 Phase 的第一个
-未完成原子任务。改动前写 loop/JOURNAL.md；改动后先跑窄测试，
-再运行 scripts/loop-gate.ps1 的当前 phase gate。任何“通过”都必须
-来自实际命令、exit code、日志、counter 或 capture，禁止把 stub、
-仅编译、理论结果、黑图或重复帧写成成功。
+重要纠错：不要信任旧“Phase 5 passed”。Phase 0–4 证据有效；Phase 5
+已因 gate 与实现不符重开。旧 gate 接受 manifest-only depth、把第二次
+1080p endurance 放进 4K 检查位置；src/core/EnhanceGraph.cpp 只计数，
+真正 GPU 链仍在 harness；tools/player_probe/main.cpp 约 3600 行。Phase 6
+已有值得保留的未提交代码和真实 FG/NVOF/WASAPI/Present 证据，但最新
+player run 的 drift P95 约 2.8 秒且 L2/GBV 有 descriptor-uninitialized，
+所以 Phase 6/7 必须保持 locked，禁止从 UI 或 Capture 开始。
 
-不要重做“Magpie 是否证明 DLSS 可用于普通软件/视频”的可行性研究。
-必须实现并验证质量核心：NVOF motion、confidence、可选 DAV2 depth、
-切镜/reset、SR→NR→FG 顺序，以及同源 A/B；没有证据时禁止宣称优于
-Magpie 或等同游戏原生数据。
+用户已决定继续使用当前固定 hash 的实验 nvngx_dlssnr.dll/Feature 18 做
+本机研发。不要等待公开 DLSS 5 SDK，也不要重新争论市场可行性；同时
+不得声称它与官方游戏/Magpie 画质等价。不得寻找其他泄露版本、从游戏
+或驱动缓存抽 DLL、patch/重签/提交/打包/上传 runtime。分发权未解决时
+最终只能 distribution_blocked。
 
-同一 failure fingerprint 最多做 3 个有新证据的不同尝试；连续 5 个
-cycle 没有新增可验证证据就停止重复并持久化阻塞；总计最多 120 个
-完整 cycle。可绕开的外部阻塞先把对应任务标为 BLOCKED，再继续当前
-Phase 内前置满足的独立 TODO；当前 gate 未通过时禁止启动后续 Phase。
+你是唯一写入 Maker。启动后完整阅读上述四份文件以及 README、
+docs/COMPETITOR_AUDIT_2026-09-03.md、loop/STATE.json、BACKLOG、INBOX、
+EVIDENCE、JOURNAL 和 WORKLOG 最新记录。若 loop/STOP 存在立即停机。
+首轮按 Playbook R0 执行，首条项目命令必须是：
 
-每个 Phase 的 gate 首次通过后，严格使用 loop/REVIEW_PROMPT.md，把
-其中的占位值替换后交给一个新上下文子 Agent 做只读 Reviewer：它不得
-编辑文件，必须独立重跑 gate 并按 Playbook 的观测、测试和禁止捷径
-要求检查。修完全部
-P0/P1、gate 再次通过、Reviewer 通过后，更新
-STATE/BACKLOG/EVIDENCE/JOURNAL/WORKLOG，做本地 checkpoint commit，
-然后自动进入下一 Phase，不等待用户确认。禁止并行写入 Agent。
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate preflight
 
-你被授权在项目目录内编辑、构建、运行测试、初始化本地 Git、创建
-本地 commit，并从 Playbook 指定的官方/上游来源获取开发依赖到
-gitignore 的 local 目录。你没有权限 push、发 PR、上传/发布/打包
-artifact、安装或降级驱动、修改系统安全设置、接受许可证条款、
-寻找其他 DLSSNR 泄露文件、修改签名 DLL、加载 RenoDX add-on、
-复制 Magpie GPL/无许可证竞品源码或破坏用户改动。首发格式范围已由
-Product Spec 固定；不得把 4K 偷换成 1080p SR demo，不得用 raw-frame
-pipe 冒充最终导出，也不得用 HDR、3X/4X、厂商私有 SDK 拖延三个闭环。
+随后运行 git status --porcelain=v1、git diff --stat、git diff --check、
+git log -10、Release build，并对当前 git diff --binary 计算接管指纹。
+当前工作树在控制面重基线后约有 44 个未提交 status entry；禁止 reset、clean、checkout、
+覆盖或整树格式化。先把每个未提交文件归类为 keep/repair/obsolete，保留
+其他 Agent 的真实成果。validation/fixed_clips 下的 tracked MP4 删除先
+不处理，等新 gate 改用确定性生成 corpus 后单独报告。
 
-Goal 启动后，README、.gitignore、AGENTS、LOOP_ENGINE、GOAL_PROMPT、
-REVIEW_PROMPT、CONTROL_HASHES、基础 loop-gate、gate contract、
-Playbook 和 Product Spec 是只读控制面，禁止通过改规则或重写 hash manifest
-来过关。你只能新增/修改当前 Phase 的 phaseN gate；BACKLOG 只能更新
-状态或增加不降低门槛的子任务。
+施工严格执行 Playbook 0.3 的 R0→R12 和 BACKLOG 第一个可执行原子项：
+R0 保存接管基线；R1 重写 phase5 gate 并先证明失败；R2 补全 packet/
+window/guidance/reset 契约；R3 把真实 GPU graph 从 player_probe 提取到
+共享库；R4 完成 NVOF confidence、DAV2/Auto、scene/reset；R5 重新通过
+Phase 5 gate+Reviewer；R6 修 GBV、GPU timing、性能、A/V drift 并通过
+Phase 6；R7 Player app；R8 Capture；R9 Image Export；R10 D3D12 NVENC
+Video Export；R11 UI/设置/恢复；R12 Phase 7 联合 gate+Reviewer。
 
-若 loop/STOP 存在，保存状态并立即停止，不得删除它。只有 Phase 0
-到 7 的 gate 与独立 Reviewer 全部真实通过、Product Spec 第 14 节和
-Playbook Phase 5–7 全部有证据、无 P0/P1、专有文件未入 Git、
-STATE.blockers 已真实清零，才可把目标标为 complete。功能完成但分发权
-未解决时只能标 release_candidate/distribution_blocked。
-无法独立复核时状态必须是 needs_review；达到循环上限时状态必须是
-needs_handoff；同一真实阻塞连续三个 Goal 回合且无其他安全工作时
-才可标 blocked。不要因为预算或时间将近就声称完成。
+每个 cycle 只能做一个可证伪原子任务。改代码前先在 JOURNAL 写假设、
+预计文件、窄测试和新增证据；改后先跑窄测试，再跑当前 phase gate。
+所有成功必须来自本次 run-id、exe/input/config/runtime hash、exit code、
+真实 Create/Evaluate、counter、GPU timestamp 或 capture。以下一律是假完成：
+stub、只增加 counter、仅编译、manifest 代替 provider、harness-only 链路、
+1080p 重跑冒充 native 4K、Zero motion 冒充 NVOF、blend/duplicate 冒充 FG、
+raw pipe 冒充 D3D12 NVENC、窗口捕获冒充物理采集卡。
 
-立即从 BOOT/RECONCILE 开始，不要先重写方案，不要询问用户已经由
-文档明确回答的问题。首条命令应运行 preflight gate。
+R3 必须删除双实现：把已验证代码从 player_probe 移入 veyra_pipeline/
+veyra_guidance/veyra_sources/veyra_sinks；probe 最终只做组装和写证据。
+Player、Capture、Export 不得复制 NGX、颜色、Guidance、reset 或资源生命周期。
+逐帧路径禁止全帧 GPU->CPU readback、每 pass CPU fence wait、无界队列。
+
+Phase 5 新 gate 必须在真实共享 library 上验证 1080p60 和 native 4K60
+各 30 分钟、NVOF 非零 motion/confidence、DAV2 或明确且可测的 Auto fallback、
+reset/scene、真实 extent、GPU timing、VRAM/queue/memory。依赖 manifest
+不能单独过 provider gate。Phase 6 必须先修 GBV id=938，加入 query-heap
+GPU timing，把 1080p/4K player drift P95 降到 <=50ms，L0/L1/L2 均自然
+return、0 ERROR/CORRUPTION，再跑 4K30/60 30 分钟。不得关掉验证层或删
+错误来过关。
+
+Video Codec SDK 13.1 和真实 4K60 采集设备是外部阻塞，只阻塞对应原子项；
+可继续同 Phase 内独立工作。NVOF SDK 5.0.7 已存在，不得继续写成缺失。
+同一 failure fingerprint 最多 3 个真正不同且增加证据的方案；连续 5 个
+cycle 无新证据或总计 120 cycle 就留档停止，禁止空转。
+
+每个 Phase gate 首次通过后，必须把 loop/REVIEW_PROMPT.md 交给一个新
+上下文只读 Reviewer。Reviewer 独立重跑 gate，不能修改工作区。修完全部
+P0/P1、gate 与 Reviewer 再通过后才能本地 checkpoint、更新 STATE 并解锁
+下一 Phase。禁止并行写同一 checkout，禁止 push、PR、发布、上传、签名、
+制作安装包、安装/降级驱动或替用户接受 EULA。
+
+Goal 启动后所有控制面只读，不得重写计划、gate contract 或 hash manifest
+来自我放行。只有 Phase 0–7 全部有当前规格的 gate+Reviewer、无 P0/P1、
+三入口和 4K 证据完整、专有文件未入 Git，才可标功能 release_candidate；
+分发 blocker 清零前绝不能标 complete 或公开首发。
+
+现在立即从 BOOT/RECONCILE 与 R0 开始。不要先写 UI，不要再问文档已经
+回答的问题，也不要用旧摘要代替重新运行命令。
 ~~~
 
 说明：这是本项目唯一的无人值守执行入口。非 Goal 模式只能完成当前 Phase 后停下报告。

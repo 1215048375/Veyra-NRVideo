@@ -19,6 +19,11 @@ Launch V1 Phase 5–7 额外要求：
 - `phase6.ps1` 必须运行真实 DLSSG + 4K present/audio probe，证明 generated frame 不等于前后帧和 50/50 blend，并检查 A/B、A/B/C、PTS/cadence/latency/queue/VRAM；
 - `phase7.ps1` 是联合 gate，4K Player、真实 4K60 DirectShow/UVC Capture、Image Export、D3D12 NVENC 4K H.264/HEVC Video Export、产品 UI/恢复五组证据缺一即失败；
 - 硬件/SDK 不可用是诚实的 gate failure，不是跳过项。不得把 capability unavailable 自动改写为产品完成。
+- gate 必须证明被 Player/Capture/Export 链接的产品 library 执行了真实工作；仅在 `*_probe/main.cpp` 或 harness 中重写一套相似流程不能通过。
+- 每个运行 JSON 必须绑定本次 run-id、exe/input/config/runtime hash。4K 检查还必须记录实际 source/working/output extent 和资源格式；不能从文件名、窗口尺寸或最终 resize 推断。
+- Product Spec 要求 30 分钟时不得缩成 5 分钟。开发期可单独运行 5 分钟 smoke，但字段和 gate 名必须明确 `smoke`，不能满足 endurance check。
+- manifest 只能通过 dependency-identity check；不能单独通过 provider-created/evaluated/output-valid/quality check。
+- Debug layer/GBV/InfoQueue 必须记录 stored/retrieved/failure/saturation/error/corruption；检索不完整或 descriptor-uninitialized 均失败，不能过滤消息制造 0 error。
 
 基础 `scripts/loop-gate.ps1` 会在 phase gate 前后 hash 所有 Git 已跟踪和未忽略的
 项目文件；phase gate 只能让被测程序写入已忽略的 `logs/`、`captures/` 或 build
@@ -55,5 +60,8 @@ exit 0
 - motion/depth texture 存在但全零、恒定、过期或方向错误仍通过；
 - 把简单 blend、重复 present 或理论 2X counter 当成 DLSSG 生成帧。
 - 用 1080p→4K 的单次 SR harness 冒充 native 4K Player/Capture/Export；
+- 第二次运行同一 1080p 素材却把 JSON 字段命名为 4K/endurance；
+- `EnhanceGraph` 只计数、复制 packet，真正 GPU work 仍由 harness 私有代码执行；
+- 仅因 model/SDK manifest 存在就把 depth/NVENC/NVOF provider 标为完成；
 - 用整帧 GPU→CPU readback/raw pipe 冒充 D3D12 NVENC export；
 - 采集 A/B/C 窗口超过 Product Spec 上限，或不记录 deliberate lookahead 帧数/毫秒数。

@@ -25,6 +25,8 @@ STATE.phases[N-1].commit（后续 Phase）；先用 git cat-file -e 验证它
 
 重点查：
 - stub/仅编译/理论数值冒充运行通过；
+- `EnhanceGraph` 只复制 packet/增加 counter，而真实 GPU 工作仍只存在于 harness 或超大 probe；
+- Player/Capture/Export 没有链接同一产品 library，或从 `player_probe` 复制第二份 pipeline；
 - 返回 success 但黑图、恒定图或重复帧；
 - NGX 参数名正确但类型错误；
 - D3D12 resource state/subrect/format/lifetime/fence 错误；
@@ -33,9 +35,11 @@ STATE.phases[N-1].commit（后续 Phase）；先用 git cat-file -e 验证它
 - Raw NR 冒充 parity、Zero Motion 冒充 NVOF、重复 present 冒充 FG；
 - 窗口/桌面捕获冒充物理采集卡；只导出截图冒充视频导出；
 - estimated depth/motion 宣称为游戏原生；有 depth 但 age/residual 不受控；
+- 只有 depth/model manifest 就宣称 provider、GPU binding、reprojection 或 Auto 已实现；
 - Player/Capture/Export 复制三套 graph，行为与 reset 已经分叉；
 - 导出丢音轨、帧数/时长错误、取消后遗留假成功文件；
 - 只把 UI/解码器尺寸改成 3840×2160，实际 graph/capture/export 仍未跑 native 4K；
+- 用第二次 1080p endurance、文件名含 4K、窗口 4K 或最终 resize 冒充 source/working graph native 4K；必须交叉检查本次 JSON 和实际 D3D12 resource desc；
 - 用 raw RGBA/NV12 readback + pipe 冒充 D3D12 NVENC，或只验证 H.264 而漏掉 HEVC；
 - 把采集卡固有延迟当成免费 lookahead，A/B/C 窗口无界，或把 C 错当成 DLSSG 可直接接收的第三帧；
 - 没有首次运行依赖检查、设置持久化、device-lost/source reconnect、partial 恢复和日志导出却声称 release-ready；
@@ -43,6 +47,10 @@ STATE.phases[N-1].commit（后续 Phase）；先用 git cat-file -e 验证它
 - Maker 修改验收标准、测试或日志来制造通过。
 - Goal 开始后控制面文件被修改，或 phase gate 降低 Playbook 门槛。
 - CONTROL_HASHES 被改写，或 preflight 的控制面 hash 校验被绕过。
+- 把 Product Spec 的 30 分钟 endurance 私自缩成 5 分钟，或只跑旧日志；
+- A/V drift 只记录 max/理论值、不采样 P50/P95/P99，或者在 Player 丢真实源帧来制造 <=50ms；
+- GBV descriptor-uninitialized、InfoQueue saturation/retrieval failure 被过滤、关闭或从 verdict 排除；
+- failed/dirty working tree 被提交成 phase checkpoint，或 STATE 领先于 gate/Reviewer/Git。
 
 输出固定格式：
 GATE_EXIT: <preflight>/<phaseN>

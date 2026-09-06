@@ -27,6 +27,7 @@ preflight 报控制面 hash 漂移时必须停下，不得改 manifest 或 gate 
 - V1 直接调用 NGX；不要同时接入 Streamline。Streamline 仅作未来替换方案和文档参考。
 - 固定帧 harness 分两步：Phase 1 直接生成 RGBA8 Proxy → Feature 18 → Raw 抓帧；Phase 2 才加入 Original → Parity Encode → Feature 18 → Parity Decode。不是先做完整播放器。
 - `nvngx_dlssnr.dll` 是 DLSSNR 运行时；只从项目根目录的已知文件复制到 `runtime_local`，不得联网寻找“更新偷跑版”、不得修改、重签名或提交 Git。
+- NVIDIA 已正式发布 DLSS 5 消费者功能，但公开开发包尚未提供可直接替换当前路径的通用接口。用户于 2026-09-06 决定继续用固定身份的实验 Feature 18 做本机研发；这不证明画质与官方游戏/Magpie 等价，也不授予分发权。不得以“官方已上线”为由从游戏目录或驱动缓存抽取新 DLL。
 - `renodx-dlss5-1.addon64` 是未签名的 ReShade/RenoDX 二进制 add-on，不是配置文件。它只准用于隔离的参考/对照环境，最终程序不得加载、注入、链接或随包分发它。
 - 最终主线不依赖 ReShade。所谓“类似 ReShade”指独立复现它的前后颜色传递、参数映射和输出处理。
 - V1 必须同时完成采集卡实时增强、DLSS 5 播放器、图片/视频增强导出。删掉其中任何一条都属于擅自改产品，不得用“以后做”放行。
@@ -65,7 +66,7 @@ renodx-dlss5-1.addon64
 4. 没有把 proprietary runtime 或本地 SDK 提交进版本控制；
 5. 下一阶段没有建立在未验证假设上。
 
-Phase 0–4 的历史 checkpoint 只能证明各基础 harness 当时通过，不能冒充三种产品模式完成。Phase 7 的三条端到端 gate 全过前只能是开发中；功能 gate 通过但公开分发权未解决时只能写 `release_candidate / distribution_blocked`，不得写已公开首发或 complete。
+Phase 0–4 的历史 checkpoint 只能证明各基础 harness 当时通过，不能冒充三种产品模式完成。2026-09-06 审查已撤销历史 Phase 5 的产品级通过状态：旧 gate 接受 manifest-only depth、假 4K endurance，且共享 EnhanceGraph 只是计数壳；组件日志保留，Phase 5 必须重验。Phase 7 的三条端到端 gate 全过前只能是开发中；功能 gate 通过但公开分发权未解决时只能写 `release_candidate / distribution_blocked`，不得写已公开首发或 complete。
 
 ## 无人值守 Goal Loop
 
@@ -82,6 +83,7 @@ Phase 0–4 的历史 checkpoint 只能证明各基础 harness 当时通过，�
 
 - 先检查现状：`git status`、`rg --files`、hash、工具版本。不要覆盖用户已有改动。
 - 每次只实现当前阶段最小闭环，不顺手重构整个工程。
+- `tools/*_probe` 只能组装并验证产品库。禁止把核心实现永久堆在超大 `main.cpp` 中；当前约 3600 行的 `player_probe` 必须迁移到共享 engine，不能复制到 UI/Capture/Export。
 - 任何 NGX/NVOF 返回值、HRESULT、SEH、资源尺寸/格式和 GPU timestamp 都必须进入日志。
 - 所有历史型模块在 open/seek/resize/pause-resume/scene-cut/device-lost 时显式 reset。
 - 正常播放、采集和最终视频导出路径禁止 GPU→CPU 像素回读、每 pass CPU fence wait、无界帧队列和多份隐式颜色转换。视频导出必须用 Video Codec SDK 的 D3D12 NVENC input/fence；raw pipe 只准作诊断 fallback，不能通过首发 gate。
@@ -89,7 +91,7 @@ Phase 0–4 的历史 checkpoint 只能证明各基础 harness 当时通过，�
 - 所有来源先显式解析 range/matrix/transfer，进入统一 linear working texture；所有 sink 只做一次明确的输出转换。
 - Guidance motion 固定为 current→previous、单位为 post-SR `workingExtent` 像素；depth 为 R32F 相对深度；confidence 为 R8_UNORM。低置信度区域必须衰减/清零 motion，不能把坏向量硬塞给 NGX。
 - seek、scene cut、PTS discontinuity、capture drop、resize、source switch、pause/resume 和 device lost 必须原子 reset SR/NR/FG/depth/flow 的全部历史。
-- 创建 Feature 可以等待一次；逐帧执行用 3–4 个 command slots/fence values 轮转，不能每帧 `WaitForSingleObject`。
+- 创建 Feature 可以等待一次；逐帧执行 1080p 用 3–4 个、4K 用 4–6 个 command slots/fence values 轮转，不能每帧或每 pass `WaitForSingleObject`。
 - NGX 参数名和参数类型必须逐项照 Playbook；不要凭名字猜 `int`/`uint32_t`/`float`/resource。
 - 所有 DLL 用绝对路径、`LoadLibraryExW` 和受限 search flags 加载；禁止依赖当前工作目录搜索。
 - 不允许把 `renodx-dlss5-1.addon64` 改名为 DLL，不允许尝试从中 `GetProcAddress` 当普通库调用。
@@ -118,4 +120,4 @@ Phase 0–4 的历史 checkpoint 只能证明各基础 harness 当时通过，�
 
 ## 禁止用假完成糊弄
 
-以下均不算完成：只写接口桩、只编译未运行、仅显示理论 FPS、把 Raw NR 直接展示却声称完成 parity、以 Zero Motion 冒充 NVOF、以重复/线性混合帧冒充 DLSSG、仅枚举采集卡却没持续显示、仅导出图片却声称视频导出、丢音轨/时间戳不报告、或捕获到黑图仍把返回码 0 当成功。
+以下均不算完成：只写接口桩、只增加成功 counter 而实际工作仍由 harness 执行、只编译未运行、用 manifest 代替 provider、重复运行 1080p 冒充 native 4K、仅显示理论 FPS、把 Raw NR 直接展示却声称完成 parity、以 Zero Motion 冒充 NVOF、以重复/线性混合帧冒充 DLSSG、仅枚举采集卡却没持续显示、仅导出图片却声称视频导出、丢音轨/时间戳不报告、或捕获到黑图仍把返回码 0 当成功。

@@ -10,6 +10,14 @@
 4. **可迁移的不是逆编译行为，而是完整输入契约：** 正确颜色、current→previous motion、深度、曝光、reset、subrect、UI 分层和资源时序。Veyra 要独立实现这个契约。
 5. **首发不是最小 MVP。** 三个入口、4K SDR、真实硬件编码、恢复与诊断都属于发布门槛。HDR、3X/4X、VFR 原样输出和厂商私有采集 SDK 仍是独立能力，不能因为“4K”三个字被偷偷混进来，也不能拿它们拖延三个主入口。
 
+### 1.1 2026-09-06 官方状态补充
+
+- NVIDIA 已正式面向消费者发布 DLSS 5，并在 NBA 2K27 首发：<https://www.nvidia.com/en-us/geforce/news/dlss-5-3d-guided-neural-rendering/>。
+- NVIDIA Research 将它描述为使用当前渲染帧、引擎 motion vectors、时序状态和艺术控制的 3D-guided neural rendering：<https://research.nvidia.com/labs/adlr/DLSS5/>。
+- 截至本次审查，公开 DLSS Developer 页面仍未提供可供任意 D3D12 视频应用下载的 DLSS 5 feature/header/API：<https://developer.nvidia.com/rtx/dlss>；公开 Streamline 仓库也没有对应公共 feature：<https://github.com/NVIDIA-RTX/Streamline>。
+- 所以“正式上线”证明 NVIDIA 已把产品交付给合作游戏，不证明 Veyra 已获得正式 SDK、Application ID、任意视频输入契约或 runtime 分发权。
+- 用户决定不等待公开 SDK，继续用当前固定 hash 的实验 Feature 18 做本机研发。竞品结论不变：可调用不是壁垒，Veyra 的价值仍必须来自采集/播放/导出、时序、Guidance、质量诊断和离线未来帧。
+
 ## 2. 评论区方法的可迁移部分
 
 截图中的作者声称其项目通过逆向游戏渲染管线实现“原生 DLSS + 档位切换 + DLSS 5”。在没有仓库地址、调用日志和可复现实验的情况下，这句话本身不能当证据。但它指向了正确的工程原则。

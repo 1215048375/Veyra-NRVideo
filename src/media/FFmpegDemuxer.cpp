@@ -137,6 +137,12 @@ bool FFmpegDemuxer::readVideoPacket(bool& endOfFile)
         return false;
     }
     for (;;) {
+        // Explicit ownership: release the previous packet's buffers before
+        // reading the next one. av_read_frame would do this implicitly, but
+        // the demuxer owns packet_ and makes that release unconditional and
+        // observable here (Playbook: every path frees exactly once - the
+        // EOF/error paths below receive a blank packet either way).
+        av_packet_unref(packet_);
         const int result = av_read_frame(context_, packet_);
         if (result == AVERROR_EOF) {
             endOfFile = true;

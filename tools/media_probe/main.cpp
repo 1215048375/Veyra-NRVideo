@@ -193,6 +193,7 @@ bool dispatchYuvToRgb(veyra::gfx::D3D12DeviceContext& context,
     D3D12_SHADER_RESOURCE_VIEW_DESC lumaSrv{};
     lumaSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     lumaSrv.Format = DXGI_FORMAT_R8_UNORM;
+    lumaSrv.Texture2D.ResourceMinLODClamp = 0.0f;
     if (isArray) {
         lumaSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
         lumaSrv.Texture2DArray.MostDetailedMip = 0;
@@ -212,6 +213,7 @@ bool dispatchYuvToRgb(veyra::gfx::D3D12DeviceContext& context,
     D3D12_SHADER_RESOURCE_VIEW_DESC chromaSrv{};
     chromaSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     chromaSrv.Format = DXGI_FORMAT_R8G8_UNORM;
+    chromaSrv.Texture2D.ResourceMinLODClamp = 0.0f;
     if (isArray) {
         chromaSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
         chromaSrv.Texture2DArray.MostDetailedMip = 0;

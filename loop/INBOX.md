@@ -2,18 +2,11 @@
 
 这里仅记录 Agent 无权自行完成的许可、凭据、外部硬件或发布决定。普通 bug 不放这里。缺失项不阻止当前 Phase 中与它独立的工作，但相关 gate 不得伪造通过。
 
-## ACTIVE · NVIDIA Optical Flow SDK 5.0 package missing（用户已同意许可方向）
+## RESOLVED · NVIDIA Optical Flow SDK 5.0.7 已存在
 
-- 需要原因：Phase 5 必须接入真实 NVOF motion/cost、验证 current→previous、S10.5 `/32`、grid/densify 和 confidence。System32 只有 runtime DLL，不含可合法编译的 SDK header/sample。
-- 当前事实：`C:\Windows\System32\nvofapi64.dll` 已存在且 NVIDIA 签名；`third_party_local/nvidia/Optical_Flow_SDK_5.0/` 当前缺失。
-- 用户决定（2026-09-03）：用户明确表示接受 NVIDIA EULA，并授权 Veyra 在本机研发中使用该官方 SDK。不要再次询问用户是否愿意接受。
-- 尚未完成：聊天中的授权不能替代 NVIDIA Developer Portal 上由用户本人完成的 `Accept & Download`，当前也没有发现 SDK 文件。相关目录出现并通过结构/版本/hash 核对前，P5.5 仍是外部依赖阻塞。
-- Agent 已被禁止：代用户登录 Developer Program、点击接受 EULA、从无许可证/GPL 仓库抄 header。
-- 用户动作：访问 <https://developer.nvidia.com/opticalflow/download>，接受条款并将 SDK 5.0 解压到：
-
-  `third_party_local/nvidia/Optical_Flow_SDK_5.0/`
-
-- 放好后无需改文档，下一轮 preflight/P5.5 会核对结构、版本与 hash。
+- 实际目录：`third_party_local/nvidia/Optical_Flow_SDK_5.0.7/`，含 `NvOFInterface`、`Common/NvOFBase`、D3D12 sample、EULA 与 release notes。
+- 当前代码已经从该包构建，并在系统 `C:\Windows\System32\nvofapi64.dll` 上取得真实 NVOF capability/init/register/execute/cost 和合成位移证据。
+- 该目录仍必须 gitignore，不得提交或打包。新 Agent 不得继续把 NVOF SDK 写成缺失，也不得改回旧的 `Optical_Flow_SDK_5.0/` 路径。
 
 ## ACTIVE · 真实采集卡与测试信号
 
@@ -43,8 +36,11 @@
 
 - 当前只授权本机研发与本地 checkpoint。
 - 制作安装包、上传 release、分发 `nvngx_dlssnr.dll`、`nvngx_dlssg.dll`、NVOF SDK、模型或 FFmpeg binary 前，必须单独完成许可证审查并得到用户确认。
+- 2026-09-06 用户决定继续用当前实验 Feature 18 施工；这不是分发授权。即使 NVIDIA 已正式发布 DLSS 5，只要 Veyra 未获得公开 SDK/runtime 分发许可，功能完成状态仍必须是 `distribution_blocked`。
+- 如未来采用“用户自行提供 runtime”，必须让应用按精确 hash/签名检查并明确显示实验性质；这种设计只避免随安装包携带文件，不自动解决使用授权或平台风险。
 
 ## RESOLVED HISTORY
 
+- 2026-09-06 NVOF SDK：实际已存在的目录是 `third_party_local/nvidia/Optical_Flow_SDK_5.0.7/`；旧 ACTIVE 缺失记录作废。
 - 2026-09-03 DLSS SR：`SuperSampling.Available=0` 的根因是 NGX DLL 搜索路径；改为规范绝对路径后 `Available=1`，1080p→4K Create + 30 Evaluate + resize 通过。不是靠更新驱动解决。
 - 2026-09-02 D3D12 debug layer：用户已安装 Graphics Tools。

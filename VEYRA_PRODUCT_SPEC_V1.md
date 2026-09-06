@@ -1,9 +1,9 @@
 # Veyra V1 产品与技术规格
 
-版本：Launch V1.2
+版本：Launch V1.3（2026-09-06 接管重基线）
 
-日期：2026-09-03
-状态：用户已确认，替代此前“最小 MVP / 1080p 薄闭环”的 V1 边界。
+日期：2026-09-06
+状态：用户已确认三入口首发边界；历史 Phase 5 产品级通过结论因 gate 与实现不符而撤销，组件证据保留。
 
 ## 1. 产品定义
 
@@ -16,6 +16,18 @@ Veyra 是一个把同一套 DLSS 增强图应用到三种输入的 Windows 本�
 它解决的是“把最终像素组织成 DLSS 可消费的工程契约”，不是游戏 mod，也不承诺从视频像素恢复游戏引擎原生数据。
 
 V1 完成的唯一判据：三个入口都能由一个可执行程序实际完成端到端任务，共同使用真实 Feature 18，并通过 4K SDR、长时间运行、恢复、诊断和输出复核；任何一个入口或 4K 主路径缺失，V1 都不完成。内部实现仍按原子任务递进，但不得用内部里程碑对外冒充 MVP 已发布。
+
+### 1.1 2026-09-06 实现完整性补充
+
+“共享一套增强引擎”必须同时满足：
+
+- `EnhanceGraph::process` 或其明确拆分的 pass graph 自己提交真实 D3D12/NGX/NVOF 工作，而不是只增加 counter 后把工作留给 harness；
+- Player、Capture、Image Export、Video Export 只通过稳定的 source/graph/sink 接口调用，不得从 3000 行以上的 probe 复制代码；
+- probe 只能组装产品库和采集证据，不能成为唯一实现；
+- native 4K 证据必须在 JSON 中记录 source/working/output extent 均为实际 3840×2160 路径；第二次运行 1080p 素材不构成 4K；
+- 依赖 manifest 只能证明依赖身份或缺失后的显式 fallback，不能证明 provider 已实现或画质 gate 已通过。
+
+不满足上述任一项时，即使旧 gate 返回 0，也必须重开对应阶段。
 
 ## 2. 为什么现在仍值得做
 
@@ -358,6 +370,14 @@ A/V gate：4K30 与 4K60 各循环 30 分钟，drift 绝对值 ≤50 ms；P95 pr
 - NVOF SDK、DLSS SDK、ORT runtime、模型、FFmpeg binary 各自有 manifest、hash、license；
 - 公开发布/安装包/上传 artifact 前必须单独完成分发许可审查；本规格只授权本机研发。
 
+### 13.1 DLSS 5 官方发布后的项目决定
+
+- NVIDIA 已正式发布 DLSS 5 消费者功能，不代表公开 SDK 已向任意 Windows 视频应用开放；“驱动中存在 runtime”也不等于拥有 header、Application ID、调用契约或分发权。
+- 用户决定当前版本继续以固定身份的实验 `nvngx_dlssnr.dll`/Feature 18 为研发后端。该决定只改变开发优先级，不取消 hash、签名、绝对路径、可关闭和不得分发的约束。
+- 不得从游戏目录、驱动 OTA 缓存或第三方 release 抽取替换 DLL；不得把外置依赖改名、patch 或藏进安装资源。
+- 产品 UI 和日志必须显示 `Experimental local runtime`、实际版本/hash 与不可用原因。未找到精确 hash 时实验功能 fail closed，应用的非 DLSS 诊断/设置界面可以启动。
+- 公共 SDK 后续若真正提供，必须新增独立 `OfficialDlss5Backend` 或做一次有证据的后端替换；不得把未知 ABI 当成当前 Feature 18 的原位升级。
+
 ## 14. V1 Definition of Done
 
 同时满足：
@@ -375,3 +395,4 @@ A/V gate：4K30 与 4K60 各循环 30 分钟，drift 绝对值 ≤50 ms；P95 pr
 11. 4K30/60 Player、4K60 Capture、4K H.264/HEVC Export 的独立证据齐全；不能用 1080p→4K 的单次 SR harness 冒充 4K 产品支持；
 12. 设置、依赖诊断、设备丢失/重新打开、导出崩溃恢复和日志导出达到首发行为；
 13. 若 NVIDIA/模型/FFmpeg/编码器分发权尚未解决，只能标记 `release candidate / distribution blocked`，不能生成并公开上传带受限资产的安装包。
+14. 所有“passed”状态必须由当前 Product Spec 对应 gate 支持；发现 harness-only、假 4K、manifest-only 或阈值被缩短的旧 gate 时必须回滚状态并重验。

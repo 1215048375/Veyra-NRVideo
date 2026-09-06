@@ -4,10 +4,10 @@
   "objective": "Ship Launch V1, not an MVP: one shared engine, native 4K SDR capture/player/export, Feature 18, DLSSG 2X, bounded live lookahead, D3D12 NVENC H.264/HEVC, and product recovery/diagnostics.",
   "status": "ready",
   "phase": {
-    "id": 6,
-    "name": "DLSSG 2X, bounded lookahead, and 4K realtime engine",
-    "state": "not_started",
-    "gate": "phase6"
+    "id": 5,
+    "name": "Unified guidance and quality core",
+    "state": "in_progress",
+    "gate": "phase5"
   },
   "phases": [
     {
@@ -32,7 +32,7 @@
       "status": "passed",
       "gateEvidence": "loop/EVIDENCE.md#phase-2--phase2--2026-09-02t230500-0800",
       "reviewEvidence": "Reviewer PASS after P1 fix; independent rerun 304e1dda07784fa2b7c024ee5110289c",
-      "commit": "e025b5431ee6677a0917b97af821c5579e61d77"
+      "commit": "e0250b5431ee6677a0917b97af821c5579e61d77"
     },
     {
       "id": 3,
@@ -53,15 +53,15 @@
     {
       "id": 5,
       "name": "Unified guidance and quality core",
-      "status": "passed",
-      "gateEvidence": "logs/phase5/884d098ded3b48d5a07c19a7cb91f6ca (30/30; NVOF readback 6863 nonzero, endurance 1080p60+second-pass)",
-      "reviewEvidence": "Reviewer PASS (2nd round); independent rerun 5ab85b90; all P0/P1 fixed",
-      "commit": "c4ee3f351c02451b0c773d982b38ffeff1deab93"
+      "status": "in_progress",
+      "gateEvidence": null,
+      "reviewEvidence": null,
+      "commit": null
     },
     {
       "id": 6,
       "name": "DLSSG 2X, bounded lookahead, and 4K realtime engine",
-      "status": "not_started",
+      "status": "locked",
       "gateEvidence": null,
       "reviewEvidence": null,
       "commit": null
@@ -76,30 +76,36 @@
     }
   ],
   "cycle": {
-    "completed": 24,
+    "completed": 30,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "P6.1: Create scripts/gates/phase6.ps1 covering DLSSG 2X capability query, real generated frames (non-duplicate), present cadence, UI-after-FG, and seek/pause/reset stability.",
+  "currentTask": "R0 takeover complete (Cycle 030): preflight 70/70, Release build exit 0, takeover fingerprint 61feb89b38e32f589b5c2fb6750526e5ad90dc3c, 44 worktree entries classified (keep/repair/hold, none obsolete), four narrow probes re-run with fresh run-ids (NVOF PASS, FG 59/59 truth PASS, audio PASS, player FAIL driftP95=2858ms as expected), protective takeover checkpoint committed.",
   "lastGate": {
     "name": "phase5",
-    "status": "passed",
-    "exitCode": 0,
-    "evidence": "logs/phase5/884d098ded3b48d5a07c19a7cb91f6ca (30/30)"
+    "status": "invalidated_requires_rebuild",
+    "exitCode": 1,
+    "evidence": "2026-09-06 audit: old gate accepted manifest-only depth, used a second 1080p endurance run for the 4K slot, and did not prove that the product EnhanceGraph executed the GPU chain. Historical artifacts remain component evidence only."
   },
   "lastFailureFingerprint": null,
   "failureLedger": [],
   "baselineCommit": "2086282478ae5d1e07e8162d47148633b59882fe",
-  "lastGoodCommit": "c4ee3f351c02451b0c773d982b38ffeff1deab93",
-  "openP0P1Findings": [],
+  "lastGoodCommit": "8cdf1ea2f9b0bb1331f9219a2305cef5efd3c8d8",
+  "openP0P1Findings": [
+    "P0: scripts/gates/phase5.ps1 can pass without a real depth provider and without native-4K endurance; rebuild the gate and prove it fails before repairing implementation.",
+    "P0: src/core/EnhanceGraph.cpp is metrics-only while the real GPU chain lives in harness/player_probe; move the chain into a shared product library.",
+    "P1: current Phase 6 player runs fail driftP95 (about 2.8 seconds vs 50 ms) and L2 GBV reports descriptor-uninitialized errors."
+  ],
   "blockers": [
+    "Product-grade Phase 5 is reopened: the gate and shared EnhanceGraph must be rebuilt according to Playbook R1-R5 before Phase 6 can unlock.",
+    "L2 (GBV) runtime InfoQueue reports 1700+ ERROR id=938 GPU_BASED_VALIDATION_DESCRIPTOR_UNINITIALIZED (Dispatch accesses uninitialized descriptor-table slots). Fail-closed works (verdict=FAIL); the engine must initialize every slot covered by bound descriptor tables before L2 can go green. Teardown/final phases are already 0-error under GBV.",
     "User accepted the Video Codec SDK licensing direction on 2026-09-03, but third_party_local/nvidia/Video_Codec_SDK_13.1.0 is absent; official portal acceptance/download and package verification are still required before P7 native D3D12 NVENC integration.",
     "A real DirectShow/UVC 4K60 SDR capture device, HDMI audio, and 4K60 source signal are required before P7 capture gate can pass.",
     "Public distribution rights for the experimental DLSSNR runtime and all bundled NVIDIA/model/FFmpeg assets are unresolved; a local release candidate is allowed, public launch is blocked."
   ],
-  "nextAction": "Start Phase 6: create fail-closed phase6 gate, prove it exits 1, then implement DLSSG 2X.",
-  "updatedAt": "2026-09-04T04:30:00+08:00"
+  "nextAction": "Playbook R1.1: rewrite scripts/gates/phase5.ps1 as a fail-closed product-grade gate (no manifest-only depth, no second-1080p-as-4K, 30-minute endurance, product-library execution proof, extent/hash/timing/VRAM/reset JSON contract) and prove it exits 1 on the current metrics-only graph, then execute R1.2 deterministic corpus via veyra_clip_gen.",
+  "updatedAt": "2026-09-06T16:20:00+08:00"
 }

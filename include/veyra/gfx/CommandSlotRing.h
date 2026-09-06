@@ -49,8 +49,19 @@ public:
     // Closes, submits and signals the slot; advances the fence timeline.
     bool submitAndSignal(uint32_t slot);
 
+    // The fence value most recently signaled by this ring. Callers that need
+    // a GPU-side dependency on the just-submitted work (e.g. NVOF input
+    // fence points) use this value.
+    uint64_t lastSignaledValue() const { return nextFenceValue_ - 1; }
+
     // Blocks until every slot's work completed.
     bool waitIdle();
+
+    // Enqueues a FRESH fence signal after everything previously submitted
+    // (including the last Present, which waitIdle does not cover) and waits
+    // for it. Call before swapchain release, or the D3D12 debug layer
+    // reports final-release with GPU operations in-flight (id=921 -> 0x87D).
+    bool drainQueue();
 
     // Phase 0 skeleton proof: for each slot, acquire (wait+reset), record a
     // real begin/end timestamp query pair, submit, signal, then wait idle.

@@ -46,6 +46,7 @@ target_link_libraries(veyra_base PUBLIC bcrypt wintrust crypt32 version)
 add_library(veyra_gfx STATIC
   src/gfx/D3D12DeviceContext.cpp
   src/gfx/CommandSlotRing.cpp
+  src/gfx/PresentSink.cpp
 )
 veyra_apply_warnings(veyra_gfx)
 target_compile_features(veyra_gfx PUBLIC cxx_std_20)
@@ -67,6 +68,7 @@ add_library(veyra_ngx STATIC
   src/ngx/NgxCoreHost.cpp
   src/ngx/DlssNrRuntimeAdapter.cpp
   src/ngx/DlssSrBackend.cpp
+  src/ngx/DlssFgBackend.cpp
 )
   veyra_apply_warnings(veyra_ngx)
   target_compile_features(veyra_ngx PUBLIC cxx_std_20)
@@ -84,6 +86,19 @@ endif()
 add_executable(veyra_runtime_probe
   tools/runtime_probe/main.cpp
 )
+
+# Isolated descriptor/Present diagnosis probe (user directive 2026-09-04 s3).
+# No NGX/FFmpeg/NVOF/WASAPI. Uses PresentBlit shaders for cases F/G.
+add_executable(veyra_descriptor_present_probe
+  tools/descriptor_present_probe/main.cpp
+)
+veyra_apply_warnings(veyra_descriptor_present_probe)
+target_compile_features(veyra_descriptor_present_probe PRIVATE cxx_std_20)
+target_compile_definitions(veyra_descriptor_present_probe PRIVATE
+  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+  VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
+target_link_libraries(veyra_descriptor_present_probe PRIVATE d3d12 dxgi)
+add_dependencies(veyra_descriptor_present_probe veyra_shader_present_blit)
 veyra_apply_warnings(veyra_runtime_probe)
 target_compile_features(veyra_runtime_probe PRIVATE cxx_std_20)
 target_compile_definitions(veyra_runtime_probe PRIVATE
@@ -109,10 +124,31 @@ if(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR)
   target_link_libraries(veyra_nr_harness PRIVATE veyra_gfx veyra_ngx veyra_parity)
   add_dependencies(veyra_nr_harness veyra_shader_test_pattern
     veyra_shader_parity_encode veyra_shader_parity_decode)
+
+  # Phase 6: DLSSG truth harness + WASAPI audio probe.
+  add_executable(veyra_fg_harness
+    tools/fg_harness/main.cpp
+    tools/fg_harness/fg_test.cpp
+    tools/fg_harness/audio_test.cpp
+    tools/nr_harness/harness_util.cpp
+  )
+  veyra_apply_warnings(veyra_fg_harness)
+  target_compile_features(veyra_fg_harness PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_fg_harness PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_link_libraries(veyra_fg_harness PRIVATE veyra_gfx veyra_ngx ole32 mmdevapi avrt)
 endif()
 
 # YUV→RGB shader is shared between the media pipeline and the harness.
 veyra_add_compute_shader(veyra_shader_yuv_to_rgb YuvToLinearRgb)
+# ScaleBlit: working frame -> swapchain backbuffer (Phase 6 present path).
+veyra_add_compute_shader(veyra_shader_scale_blit ScaleBlit)
+# Nv12Upload: byte buffer -> luma/chroma planes (copy-free upload path).
+veyra_add_compute_shader(veyra_shader_nv12_upload Nv12Upload)
+# PresentBlit: fullscreen-triangle pixel blit onto flip-model back buffers.
+veyra_add_graphics_shader_pair(veyra_shader_present_blit PresentBlit)
+# NvofDensify: SHORT2 S10.5 raw flow -> workingExtent float2 + confidence.
+veyra_add_compute_shader(veyra_shader_nvof_densify NvofDensify)
 
 # ---------------------------------------------------------------------------
 # veyra_parity: RenoDX-equivalent codec reference (CPU golden + shaders later).
@@ -181,7 +217,26 @@ if(NOT VEYRA_NVOF_SDK_ROOT)
   endif()
 endif()
 if(VEYRA_NVOF_SDK_ROOT AND EXISTS "${VEYRA_NVOF_SDK_ROOT}/NvOFInterface/nvOpticalFlowCommon.h")
+  # Reusable NVOF D3D12 session (Phase 6 motion guidance for DLSSG).
+  add_library(veyra_nvof STATIC src/ngx/NvOfSession.cpp)
+  veyra_apply_warnings(veyra_nvof)
+  target_compile_features(veyra_nvof PUBLIC cxx_std_20)
+  target_include_directories(veyra_nvof PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    "${VEYRA_NVOF_SDK_ROOT}/NvOFInterface"
+    "${VEYRA_NVOF_SDK_ROOT}/Common/NvOFBase")
+  target_link_libraries(veyra_nvof PUBLIC veyra_base veyra_gfx)
+
   add_executable(veyra_nvof_probe tools/nvof_probe/main.cpp)
+
+  # s9-A3: table-driven null-argument fault injection for NvOfSession.
+  add_executable(veyra_nvof_fault_inject tools/nvof_fault_inject/main.cpp)
+  veyra_apply_warnings(veyra_nvof_fault_inject)
+  target_compile_options(veyra_nvof_fault_inject PRIVATE /WX-)
+  target_compile_features(veyra_nvof_fault_inject PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_nvof_fault_inject PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_link_libraries(veyra_nvof_fault_inject PRIVATE veyra_gfx veyra_nvof)
   veyra_apply_warnings(veyra_nvof_probe)
   target_compile_options(veyra_nvof_probe PRIVATE /WX-)
   target_compile_features(veyra_nvof_probe PRIVATE cxx_std_20)
@@ -229,6 +284,27 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
     VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
   target_link_libraries(veyra_media_probe PRIVATE veyra_media veyra_gfx veyra_ngx veyra_parity psapi)
   add_dependencies(veyra_media_probe veyra_shader_yuv_to_rgb)
+
+  # Phase 6 realtime engine probe: decode -> SR -> NR -> NVOF -> DLSSG -> present.
+  if(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR AND EXISTS "${VEYRA_NVOF_SDK_ROOT}/NvOFInterface/nvOpticalFlowCommon.h")
+    add_executable(veyra_player_probe
+      tools/player_probe/main.cpp
+      tools/nr_harness/harness_util.cpp
+    )
+    veyra_apply_warnings(veyra_player_probe)
+    target_compile_options(veyra_player_probe PRIVATE /WX-)
+    target_compile_features(veyra_player_probe PRIVATE cxx_std_20)
+    target_compile_definitions(veyra_player_probe PRIVATE
+      UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+      VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
+    target_link_libraries(veyra_player_probe PRIVATE
+      veyra_media veyra_gfx veyra_ngx veyra_nvof veyra_parity
+      ${FFMPEG_LIBRARIES} psapi ole32 mmdevapi avrt)
+    add_dependencies(veyra_player_probe
+      veyra_shader_yuv_to_rgb veyra_shader_parity_encode
+      veyra_shader_parity_decode veyra_shader_scale_blit veyra_shader_nv12_upload
+      veyra_shader_present_blit veyra_shader_nvof_densify)
+  endif()
 endif()
 
 # Clip generator: links the openh264-enabled toolchain FFmpeg ONLY.

@@ -124,4 +124,12 @@ void error(const char* component, const std::string& message)
 
 } // namespace log
 
+
+void Logger::flush()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (file_ != nullptr) {
+        std::fflush(file_);
+    }
+}
 } // namespace veyra

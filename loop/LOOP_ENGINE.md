@@ -1,4 +1,4 @@
-# Veyra Loop Engine v1
+# Veyra Loop Engine v1.1
 
 本文件把 Goal-based loop 落成 Veyra 项目的无人值守执行协议。它不是一句“持续工作直到完成”的提示词，而是一套可恢复、可验收、会停机的状态机。
 
@@ -52,6 +52,20 @@ Veyra 的 D3D12 device、资源状态、NGX 参数、history/reset、颜色传�
 
 STATE.json 不是事实的替代品。若它与 Git、文件或日志冲突，先执行 RECONCILE，修正状态后再工作。
 STATE.phases 必须始终保留 0 到 7 的完整 ledger。进入下一 Phase 时只解锁相邻项；gateEvidence、reviewEvidence 和 commit 不得填入推测值。
+
+### 3.1 已通过阶段的撤销协议
+
+若后续审查证明旧 gate 与当时 Product Spec 不一致，必须撤销阶段状态，不能以“已经有 checkpoint”为由继续：
+
+1. 保留旧 commit、日志和 EVIDENCE，标明它们只证明哪些组件；禁止改写历史；
+2. 将最早受影响阶段改为当前 `in_progress`，其 gate/review/commit 字段清空；
+3. `lastGoodCommit` 回退到前一有效阶段的内容 checkpoint；
+4. 所有后续阶段改为 `locked`，但后续未提交代码作为接管资产保留，不 reset；
+5. 在 BACKLOG 写明旧 gate 的具体假通过条件和新的 fail-closed 条件；
+6. 先让新 gate 在当前缺陷上失败，再修实现；
+7. 新 gate 与独立 Reviewer 都通过后，才能重新写 `passed`。
+
+2026-09-06 已按此协议重开 Phase 5：旧 gate 接受 manifest-only depth、第二次 1080p endurance 冒充 4K 位置证据，且 EnhanceGraph 仅计数。Phase 0–4 保持有效，Phase 6 实验代码保留但状态锁定。
 
 ## 4. 允许与禁止
 
@@ -217,6 +231,8 @@ failureLedger 必须按 fingerprint 累积 attempt、假设、命令和结果；
 - Git 未跟踪专有 runtime、local SDK、capture 或大日志；
 - 无已知 P0/P1 缺陷；
 - WORKLOG 已写实际命令、结果、失败和下一步。
+
+此外，gate 必须验证“产品库执行了工作”，不能只验证 harness 内存在一条相似链路。对于 4K，必须从本次资源描述符/JSON 证明 source/working/output extent；不能由文件名、窗口尺寸或第二次 1080p 运行推断。依赖 manifest 只证明身份，不能单独满足 provider/画质实现门槛。
 
 ### REVIEW
 

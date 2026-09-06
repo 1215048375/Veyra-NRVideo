@@ -76,6 +76,39 @@ if (Test-Path -LiteralPath $sdkRel -PathType Leaf) {
     }
 }
 
+# Stage the official DLSSG runtime DLL from the SDK (Playbook section 14/3.2).
+# Pinned identity from the Playbook lock: 7,519,856 bytes, 310.7.0.0,
+# SHA256 135EAF0733C1E37381A8C28ABCF7A862404A54132B81787C04E35D09EFC5E36F,
+# Authenticode Valid / NVIDIA Corporation. Only this known SDK path may be used.
+$dlssgExpectedSize = [long]7519856
+$dlssgExpectedSha256 = "135EAF0733C1E37381A8C28ABCF7A862404A54132B81787C04E35D09EFC5E36F"
+$dlssgRel = Join-Path $Root "third_party_local\nvidia\DLSS_SDK_310.7.0\lib\Windows_x86_64\rel\nvngx_dlssg.dll"
+$dlssgDll = Join-Path $runtimeDir "nvngx_dlssg.dll"
+$dlssgPinned = $true
+if (Test-Path -LiteralPath $dlssgRel -PathType Leaf) {
+    $dlssgItem = Get-Item -LiteralPath $dlssgRel
+    $dlssgHash = (Get-FileHash -LiteralPath $dlssgRel -Algorithm SHA256).Hash.ToUpperInvariant()
+    $dlssgSig = Get-AuthenticodeSignature -LiteralPath $dlssgRel
+    if ($dlssgItem.Length -ne $dlssgExpectedSize -or $dlssgHash -ne $dlssgExpectedSha256 -or [string]$dlssgSig.Status -ne "Valid") {
+        Write-Host ("stage-runtime.ps1: nvngx_dlssg.dll identity mismatch size={0} sha256={1} sig={2}; NOT staged" -f $dlssgItem.Length, $dlssgHash, [string]$dlssgSig.Status)
+        exit 4
+    }
+    if (-not (Test-Path -LiteralPath $dlssgDll -PathType Leaf)) {
+        Copy-Item -LiteralPath $dlssgRel -Destination $dlssgDll
+        Write-Host "stage-runtime.ps1: copied nvngx_dlssg.dll from SDK rel/ (pinned identity verified)"
+    }
+    else {
+        $stagedDlssgHash = (Get-FileHash -LiteralPath $dlssgDll -Algorithm SHA256).Hash.ToUpperInvariant()
+        if ($stagedDlssgHash -ne $dlssgExpectedSha256) {
+            Copy-Item -LiteralPath $dlssgRel -Destination $dlssgDll -Force
+            Write-Host "stage-runtime.ps1: staged nvngx_dlssg.dll drifted; replaced from SDK"
+        }
+    }
+}
+else {
+    Write-Host "stage-runtime.ps1: SDK nvngx_dlssg.dll not found; skipped (Phase 6 requires it)"
+}
+
 $manifestPath = Join-Path $runtimeDir "runtime-manifest.json"
 $srManifestEntry = ""
 if (Test-Path -LiteralPath $srDll -PathType Leaf) {
@@ -85,7 +118,12 @@ if (Test-Path -LiteralPath $srDll -PathType Leaf) {
     $srVersion = [string]$srItem.VersionInfo.FileVersion
     $srManifestEntry = ",`n    {`n      `"name`": `"nvngx_dlss.dll`",`n      `"size`": $($srItem.Length),`n      `"sha256`": `"$srHash`",`n      `"fileVersion`": `"$srVersion`",`n      `"authenticode`": `"$([string]$srSig.Status)`",`n      `"source`": `"official DLSS SDK 310.7.0 rel`",`n      `"redistributable`": false`n    }"
 }
-$manifestJson = "@'`n{`n  `"schema`": 1,`n  `"mode`": `"local-experimental-only`",`n  `"files`": [`n    {`n      `"name`": `"nvngx_dlssnr.dll`",`n      `"size`": 165840496,`n      `"sha256`": `"E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E`",`n      `"fileVersion`": `"310.8.0.0`",`n      `"authenticode`": `"Valid`",`n      `"source`": `"user-provided workspace file`",`n      `"redistributable`": false`n    }$srManifestEntry`n  ]`n}`n'@"
+$dlssgManifestEntry = ""
+if (Test-Path -LiteralPath $dlssgDll -PathType Leaf) {
+    $dlssgVersion = [string](Get-Item -LiteralPath $dlssgDll).VersionInfo.FileVersion
+    $dlssgManifestEntry = ",`n    {`n      `"name`": `"nvngx_dlssg.dll`",`n      `"size`": $dlssgExpectedSize,`n      `"sha256`": `"$dlssgExpectedSha256`",`n      `"fileVersion`": `"$dlssgVersion`",`n      `"authenticode`": `"Valid`",`n      `"source`": `"official DLSS SDK 310.7.0 rel (pinned)`",`n      `"redistributable`": false`n    }"
+}
+$manifestJson = "{`n  `"schema`": 1,`n  `"mode`": `"local-experimental-only`",`n  `"files`": [`n    {`n      `"name`": `"nvngx_dlssnr.dll`",`n      `"size`": 165840496,`n      `"sha256`": `"E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E`",`n      `"fileVersion`": `"310.8.0.0`",`n      `"authenticode`": `"Valid`",`n      `"source`": `"user-provided workspace file`",`n      `"redistributable`": false`n    }$srManifestEntry$dlssgManifestEntry`n  ]`n}"
 Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding utf8
 Write-Host "stage-runtime.ps1: runtime-manifest.json written"
 
