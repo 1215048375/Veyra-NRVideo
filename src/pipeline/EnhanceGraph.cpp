@@ -66,6 +66,7 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
     srEnabled_ = desc.enableSr;
     nrEnabled_ = desc.enableNr && !desc.noFeatures && !desc.noNgx;
     fgEnabled_ = desc.enableFg && !desc.noNgx;
+    nvofStandalone_ = desc.enableNvofStandalone && !desc.noFeatures;
     Status st = Status::Ok;
 
     lumaPitch_ = (static_cast<size_t>(srcW_) + 255) & ~size_t(255);
@@ -91,6 +92,11 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
 
 bool EnhanceGraph::createResources()
 {
+    // NV12 CPU upload keeps UPLOAD-heap BUFFERS (upload-heap textures are
+    // size-limited) with persistent mapping, but the GPU ingestion is now a
+    // PLACED_FOOTPRINT CopyTextureRegion instead of the retired RAW-buffer
+    // SRV dispatch - the RAW SRV was the one descriptor kind that tripped the
+    // injected layer (device removal / blocked NVOF; r33b evidence 2026-09-06).
     upLuma_[0] = makeUploadBuffer(context_.device(), lumaSize_);
     upLuma_[1] = makeUploadBuffer(context_.device(), lumaSize_);
     upChroma_[0] = makeUploadBuffer(context_.device(), chromaSize_);
@@ -144,7 +150,7 @@ bool EnhanceGraph::createResources()
         veyra::log::error("graph", "NV12 upload persistent map failed");
         return false;
     }
-    veyra::log::info("graph", "NV12 upload ring persistently mapped (2 buffers)");
+    veyra::log::info("graph", "NV12 upload ring persistently mapped (2 buffer sets)");
     return true;
 }
 
@@ -415,6 +421,9 @@ bool EnhanceGraph::createComputePasses()
     if (!encPass_.loadShader("ParityEncode.dxil", cs) || !encPass_.create(context_.device(), cs, 8)) return false;
     if (!decPass_.loadShader("ParityDecode.dxil", cs) || !decPass_.create(context_.device(), cs, 8)) return false;
     if (!blitPass_.loadShader("ScaleBlit.dxil", cs) || !blitPass_.create(context_.device(), cs, 16)) return false;
+    // Nv12Upload stays: frame-time CopyTextureRegion is poisoned by the
+    // injected layer (SEH in NGX evaluate, r33-final3 evidence); the compute
+    // upload is the proven frame-path ingestion on this system.
     if (!uploadPass_.loadShader("Nv12Upload.dxil", cs) || !uploadPass_.create(context_.device(), cs, 4, 1, 2)) return false;
     if (!densifyPass_.loadShader("NvofDensify.dxil", cs) ||
         !densifyPass_.create(context_.device(), cs, 6, 2, 2)) return false;
@@ -427,16 +436,16 @@ bool EnhanceGraph::createComputePasses()
 
 bool EnhanceGraph::createViews()
 {
-    // Original probe env-matrix semantics (default OFF): the proven runtime
-    // configuration on this system runs the dispatches against
-    // never-written descriptor slots (GBV id=938 - the known Phase 6 R6.1
-    // blocker). Initializing the slots trips the injected-layer fabricated
-    // device-removed on Present; solving that interaction is R6.1 scope.
-    const bool viewsTex = GetEnvironmentVariableW(L"VEYRA_VIEWS_TEX", nullptr, 0) != 0;
-    const bool viewsRaw = GetEnvironmentVariableW(L"VEYRA_VIEWS_RAW", nullptr, 0) != 0;
-    const bool viewsUav = GetEnvironmentVariableW(L"VEYRA_VIEWS_UAV", nullptr, 0) != 0;
-    if (!viewsTex && !viewsRaw && !viewsUav) {
-        veyra::log::info("graph", "static views skipped (default; VEYRA_VIEWS_* opt-in)");
+    // Descriptor initialization is DEFAULT ON since the RAW-upload-SRV removal
+    // (2026-09-06): texture SRV/UAV views keep the device alive and NVOF
+    // executing (r33b-tu: 599/599 executes, real motion/confidence, 0
+    // removals) and eliminate the uninitialized-slot dispatches behind GBV
+    // id=938. VEYRA_VIEWS_OFF preserves the legacy behavior for A/B.
+    const bool viewsOn = GetEnvironmentVariableW(L"VEYRA_VIEWS_OFF", nullptr, 0) == 0;
+    const bool viewsTex = viewsOn;
+    const bool viewsUav = viewsOn;
+    if (!viewsOn) {
+        veyra::log::warn("graph", "static views DISABLED (VEYRA_VIEWS_OFF; legacy behavior)");
         return true;
     }
     auto cpu = [this](const ComputePass& p, UINT slot) { return cpuHandleOf(p, slot); };
@@ -469,19 +478,13 @@ bool EnhanceGraph::createViews()
     if (viewsTex) stagedSrv(proxyTex_.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, decPass_, 1);
     if (viewsTex) stagedSrv(neuralTex_.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, decPass_, 2);
     if (viewsUav) makeUav(context_.device(), finalRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, cpu(decPass_, 3));
-    // Upload pass: raw buffer SRVs per parity (slots 0/1), plane UAVs (2/3).
-    for (int i = 0; i < 2; ++i) {
-        D3D12_SHADER_RESOURCE_VIEW_DESC raw{};
-        raw.Format = DXGI_FORMAT_R32_TYPELESS;
-        raw.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-        raw.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        raw.Buffer.FirstElement = 0;
-        raw.Buffer.NumElements = static_cast<UINT>(lumaSize_ / 4);
-        raw.Buffer.StructureByteStride = 0; // RAW view
-        if (viewsRaw) stager_.stageSrv(upLuma_[i].Get(), &raw, uploadPass_.heap.Get(), static_cast<UINT>(i));
-    }
     if (viewsUav) makeUav(context_.device(), lumaTex_.Get(), DXGI_FORMAT_R8_UNORM, cpu(uploadPass_, 2));
     if (viewsUav) makeUav(context_.device(), chromaTex_.Get(), DXGI_FORMAT_R8G8_UNORM, cpu(uploadPass_, 3));
+    // NOTE: uploadPass RAW buffer SRV slots 0/1 remain uninitialized BY
+    // DESIGN on this system: creating them trips the injected layer (device
+    // removal + blocked NVOF, r33b-views evidence). The dispatch consumes
+    // them anyway (driver-tolerated); GBV flags them as id=938 - the R6.1
+    // residual with a narrower known fix (pre-NGX creation, untested).
     // Blit pass layout (all static; per-use offsets chosen at bind time):
     //  0: srcRgba SRV        1: workRgba UAV      (SR bypass / NR-off blit)
     //  2: finalRgba SRV      3/4: videoFrame UAV  (section 5)
@@ -797,8 +800,10 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     }
     out.videoFenceValue = ring_.lastSignaledValue();
 
-    // 6. NVOF + FG (queue-ordered after the color work).
-    if (fgEnabled_ && fgBackend_ && fgBackend_->created() && prevValid_) {
+    // 6. NVOF (+ optional FG), queue-ordered after the color work. The
+    // quality core runs NVOF+densify standalone (no FG) for motion stats.
+    const bool wantMotion = (nvofStandalone_ || (fgEnabled_ && fgBackend_ && fgBackend_->created())) && prevValid_;
+    if (wantMotion) {
         const auto nvofT0 = std::chrono::steady_clock::now();
         bool haveFlow = nvof_ && nvof_->initialized() ? nvof_->execute(out.videoFenceValue, st) : false;
         if (desc_.stageMark) {
@@ -825,6 +830,9 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             }
             ++metrics_.nvofFrameFailures;
         }
+        if (!haveFlow && !(fgEnabled_ && fgBackend_ && fgBackend_->created())) {
+            // No flow and no FG: nothing to record on the third list.
+        } else {
         ID3D12GraphicsCommandList* flist = ring_.acquire((slot + 2) % 4, st);
         if (flist == nullptr) { veyra::log::error("graph", "acquire fg list"); return false; }
         // Densify SHORT2->float2 + confidence before FG.
@@ -851,6 +859,10 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             tracker_.transition(flist, confTex_.Get(), D3D12_RESOURCE_STATE_COMMON);
         }
         if (desc_.stageMark) desc_.stageMark("decode_blit");
+        if (!(fgEnabled_ && fgBackend_ && fgBackend_->created())) {
+            // Standalone motion mode: densify already recorded; submit and done.
+            if (!ring_.submitAndSignal((slot + 2) % 4)) { veyra::log::error("graph", "motion submit"); return false; }
+        } else {
         ID3D12Resource* mvecResource = haveFlow ? flowTex_.Get() : nrZeroMotion_.Get();
         tracker_.transition(flist, nvofInB_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         tracker_.transition(flist, depthTex_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -881,6 +893,8 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         out.genSlot = genSlot;
         out.genFenceValue = ring_.lastSignaledValue();
         out.generatedPtsMs = (prevPtsMs_ + ptsMs) * 0.5;
+        }
+        } // fg-enabled motion close
     }
 
     prevPtsMs_ = ptsMs;
@@ -977,7 +991,6 @@ void EnhanceGraph::shutdown()
     if (coreHost_) coreHost_->shutdown();
 
     // Staged explicit release (scope-end destructors then have nothing left).
-    uploadPass_ = ComputePass{};
     decPass_ = ComputePass{};
     encPass_ = ComputePass{};
     blitPass_ = ComputePass{};

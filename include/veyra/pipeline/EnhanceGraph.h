@@ -52,6 +52,7 @@ struct EnhanceGraphDesc {
     bool enableSr = false;       // upscale source -> work extent (1:1 bypass otherwise)
     bool enableNr = true;
     bool enableFg = true;
+    bool enableNvofStandalone = false; // run NVOF+densify per frame without FG (quality core)
     bool noFeatures = false;     // VEYRA_NO_FEATURES: NVOF/NGX objects skipped
     bool noNgx = false;          // VEYRA_NO_NGX: core/features skipped, NVOF only
     std::wstring runtimeAbsPath; // absolute runtime_local/nvidia path
@@ -121,6 +122,11 @@ public:
     // Present-side access to the produced frame slots (probe sink path).
     ID3D12Resource* videoFrameResource(uint32_t slot) const;
     ID3D12Resource* generatedFrameResource(uint32_t slot) const;
+    // Guidance outputs (quality statistics; diagnostic readback only).
+    ID3D12Resource* flowResource() const { return flowTex_.Get(); }
+    ID3D12Resource* confidenceResource() const { return confTex_.Get(); }
+    uint32_t nvofRawWidth() const { return rawW_; }
+    uint32_t nvofRawHeight() const { return rawH_; }
 
     // Teardown/diagnostics accessors: the s10 NVOF out-fence drain runs while
     // the ring/fence/event are alive, i.e. BEFORE shutdown().
@@ -152,7 +158,7 @@ private:
 
     uint32_t srcW_ = 0, srcH_ = 0, workW_ = 3840, workH_ = 2160;
     uint32_t nvofW_ = 0, nvofH_ = 0, rawW_ = 0, rawH_ = 0, nvofGrid_ = 4, selectedGrid_ = 4;
-    bool srEnabled_ = false, nrEnabled_ = false, fgEnabled_ = false;
+    bool srEnabled_ = false, nrEnabled_ = false, fgEnabled_ = false, nvofStandalone_ = false;
     size_t lumaPitch_ = 0, chromaPitch_ = 0, lumaSize_ = 0, chromaSize_ = 0, dPitch_ = 0;
 
     // Uploads + textures (creation order matters for teardown).

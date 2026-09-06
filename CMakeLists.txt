@@ -388,6 +388,27 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_include_directories(veyra_source_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(veyra_source_tests PRIVATE veyra_sources)
 
+  # Headless quality-core runner (Playbook R3.3): the phase5 gate's quality
+  # matrix executes through the shared product libraries only.
+  add_executable(veyra_quality_probe
+    tools/quality_probe/main.cpp
+    tools/nr_harness/harness_util.cpp
+  )
+  veyra_apply_warnings(veyra_quality_probe)
+  target_compile_options(veyra_quality_probe PRIVATE /WX-)
+  target_compile_features(veyra_quality_probe PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_quality_probe PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+    VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
+  target_include_directories(veyra_quality_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(veyra_quality_probe PRIVATE
+    veyra_pipeline veyra_sources veyra_media veyra_ngx veyra_nvof
+    ${FFMPEG_LIBRARIES} psapi dxgi)
+  add_dependencies(veyra_quality_probe
+    veyra_shader_yuv_to_rgb veyra_shader_parity_encode
+    veyra_shader_parity_decode veyra_shader_scale_blit
+    veyra_shader_nv12_upload veyra_shader_nvof_densify)
+
   # Phase 6 realtime engine probe: decode -> SR -> NR -> NVOF -> DLSSG -> present.
   if(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR AND EXISTS "${VEYRA_NVOF_SDK_ROOT}/NvOFInterface/nvOpticalFlowCommon.h")
     add_executable(veyra_player_probe

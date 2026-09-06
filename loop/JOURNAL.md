@@ -944,7 +944,48 @@ C staged teardown 定位崩溃=swapChain_.Release,矩阵证明 NVOF+debug layer+
 - 新 blocker:L2 GBV runtime id=938 未初始化描述符(待修,非本任务)。
 - 未执行:query-heap GPU timestamp(用户明令禁止);Reviewer/checkpoint(未授权)。
 
-## Cycle 037 — R3.2a GPU 辅助设施迁入 veyra_pipeline（2026-09-06 Goal）
+## Cycle 039 — R3.3b veyra_quality_probe + RAW-SRV 隔离与描述符默认初始化（2026-09-06 Goal）
+
+### Before
+
+- Phase: 5（重开，in_progress）
+- 唯一任务: headless `veyra_quality_probe`（链 veyra_pipeline+veyra_sources，无窗口/音频，corpus 或单输入循环模式，R1.1 JSON 契约输出：extents/frames/nr/nvof/provenance/nonZeroMotion/confidence 分位/depthMode+fallback/reset/gpu timing/readback/queue/VRAM/WS/hashes/runId/duration）；EnhanceGraph 增加 nvofStandalone（无 FG 的 NVOF+densify）与 flow/conf 访问器；诊断性 guidance 统计采样（60 帧一次，strided 64x36，ring slot 3）。
+- 可证伪假设: runner 输出真实非零 motion/confidence 且设备零移除；若采样或视图策略错误将以崩溃/全零暴露。
+- 预计修改文件: tools/quality_probe/main.cpp、include/veyra/pipeline/EnhanceGraph.{h,cpp}、CMakeLists.txt。
+- 快速检查命令: 构建→0；`--input translation_1080p60 --guidance motion`→exit 0 + nonZeroMotion>0。
+- 预期新增证据: headless 真实链路的 guidance 统计 + R1.1 契约 JSON。
+
+### After（系统发现密集轮，如实记录）
+
+- **交付**: tools/quality_probe/main.cpp（~440 行）建成；graph 增加 enableNvofStandalone/flowResource/confidenceResource/setNrEnabled 视图刷新/诊断访问器；CMake veyra_quality_probe target（链全部产品库）。
+- **--input 模式最终态（r33-final4）**: exit 0、600 帧、nr=600/sr=600/nvof=599、**guidanceProvenance=nvof、nonZeroMotionCount=11520、confidenceP05=P95=0.9765（真实 cost 反演）**、deviceRemoved=0、failures=0。
+- **完整 corpus 模式（r33-corpus-ok）**: **10 片 × 600 帧 = 6000 帧全部处理**、nr=6000/sr=3000（1080p 片 SR，4K 片 bypass——正确）/nvof=5990、**nonZeroMotion=115200**、10 个顺序 graph init/shutdown 生命周期零崩溃、deviceRemoved=0、exit 0。
+- **系统发现 1（重大）— RAW-SRV 是唯一毒源**: 分离试验证明 TEX+UAV 纹理视图全开时设备存活、NVOF 599/599、真实运动/置信度；只有 RAW buffer SRV（VIEWS_RAW，持久映射上传缓冲）触发假报 DEVICE_REMOVED + NVOF 全阻断。历史上"views 毒化 Present"的信念过宽。
+- **系统发现 2 — 帧内 Copy\* 仍被注入层毒化**: 尝试用 PLACED_FOOTPRINT CopyTextureRegion 替换 RAW-SRV 上传 → NGX SR evaluate 内 SEGV（0xC0000005→0xBAD00002），views ON/OFF 均崩——与 session-1"Copy* 毒化 Close"结论一致（这正是 Nv12Upload compute shader 存在的原因）。裁定：保留 dispatch 上传；uploadPass RAW SRV 槽**有意不初始化**（创建即触发毒化），GBV id=938 残留指向明确（R6.1 可试 pre-NGX 创建）。
+- **GBV id=938 大幅下降**: 1764+ →（TEX/UAV 默认开）1352 →（probe present SRV 解除 viewsTex 门控）**467**，0 Present FAILED，presents/mvecSource=nvof 不回归。
+- **Player 默认 views-on 全绿**: presents 957、nr=432/fg=460/nvof=460、mvecSource=nvof、underruns=0、exit 12 不变。
+- 调试杂项（诚实记录）: 采样器最初用 ring 外临时命令列表（竞态致设备移除）→ 改 ring slot 3 + conf 终态 COMMON 屏障修正 + staging footprint RowPitch 数学修正；上传纹理 64KB 上限（回滚到缓冲）；**corpus 模式 0xC0000409 假线索两轮**——先是 fprintf 换行字面量断裂导致陈旧二进制 127，真因是 manifest 扫描里 `(base+"/"+rel).begin()/end()` 跨临时对象迭代器 UB（堆越界 fail-fast），修复为单次构造；endurance 模式 extent 语义修正（working=source 1:1）。
+- 失败 fingerprint: quality|corpus|0xC0000409|cross-temporary-iterator-UB → 第 3 个真正不同的诊断（陈旧二进制→字面量→UB）后修复关闭。
+- 是否有进展，依据: 是——headless 质量核心运行器在完整 corpus 上真实产出 guidance 统计与契约 JSON；描述符默认初始化（TEX/UAV）落地且 GBV 错误降 73%；两个注入层毒源被精确隔离并文档化。
+- 下一唯一动作: phase5 gate 全量复跑（后台进行中：5 模式矩阵 + 双 30 分钟耐久），随后按结果推进 R4.1（NVOF flow 接入 NR MVec）或修补 runner 契约缺口。
+
+
+---
+
+## Cycle 038 — R3.3a bare-stage 诊断矩阵移出 player_probe（2026-09-06 Goal）
+
+### Before
+
+- Phase: 5（重开，in_progress）
+- 唯一任务: 删除 player_probe 的 bare-stage 隔离矩阵（~584 行，env 门控诊断，其调查已由 session-3 的 MipLevels=0 根因结论关闭；常设诊断工具 descriptor_present_probe 保留且 21/21 通过；git 历史完整保留该矩阵）。probe 目标继续向 <800 行推进（本轮 ~1971→~1390）。
+- 可证伪假设: 若场景路径意外依赖 bare 段符号，构建将失败；预期删除后双配置构建 0 且 player 冒烟行为不变（exit 12/计数/mvecSource）。
+- 预计修改文件: tools/player_probe/main.cpp。
+- 快速检查命令: `build` 双配置 → 0；player 冒烟 → 行为对等。
+- 预期新增证据: probe 行数下降 + 行为不变。
+
+---
+
+## Cycle 037 — R3.2a/b/c EnhanceGraph 真实 GPU 链迁移（2026-09-06 Goal）
 
 ### Before
 
