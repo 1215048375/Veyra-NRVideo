@@ -796,6 +796,28 @@ L2(GBV)runtime 扫描 1764+ ERROR,id=938 `GPU_BASED_VALIDATION_DESCRIPTOR_UNINIT
 ### 原始证据
 logs/phase6-manual/t10/{L0,L1,L2,NF}-{r1,r2}.{log,json}
 
+## 2026-09-06 Goal session 4（Cycle 038-039）：R3.3 质量运行器 + 毒源隔离
+
+### 执行摘要
+
+- **R3.3a**: bare-stage 诊断矩阵（~584 行，调查已由 MipLevels=0 根因关闭，常设诊断工具 descriptor_present_probe 保留）从 player_probe 移除，1971→1392 行，行为对等验证（exit 12/计数/mvecSource 不变）。
+- **R3.3b**: `veyra_quality_probe` headless 运行器（~440 行）建成：链 veyra_pipeline+veyra_sources 产品库，corpus/单输入循环双模式，R1.1 gate JSON 契约全字段输出。**完整 corpus 验证：6000/6000 帧、nr=6000/sr=3000（1080p SR+4K bypass 正确分流）/nvof=5990、nonZeroMotion=115200、confidence=0.9765、10 个顺序 graph 生命周期零崩溃、0 设备移除**。
+- **系统发现（两个注入层毒源精确隔离）**:
+  1. **RAW-buffer-SRV 创建**（持久映射上传缓冲的 R32_TYPELESS SRV）是设备移除+NVOF 阻断的唯一触发器；TEX/UAV 纹理视图全量初始化完全安全。→ 纹理描述符默认全量初始化。
+  2. **帧内 Copy\*（CopyTextureRegion）仍被毒化**（NGX evaluate 内 SEGV）——Nv12Upload compute dispatch 是唯一可行的帧路径上载方式（session-1 结论再确认）。
+- **GBV id=938 降 73%**: 1764+ → 467（残留=uploadPass RAW SRV 两槽有意不初始化，R6.1 精确指向）。0 Present FAILED；player 行为对等保持（presents 957/mvecSource=nvof/exit 12）。
+- **Gate 矩阵结果**（全量复跑中）: quality:run-*×5 全 PASS；extent-matrix/nr-per-frame/**nvof-nonzero-motion**/confidence-stats/gpu-timing/**hash-binding**/depth:provider-from-run 全 PASS；reset-contract 红（sceneCut=0，R4.5 场景分析器集成范围）。
+
+### 调试战记（诚实记录）
+
+- 采样器：ring 外临时命令列表竞态移除设备 → ring slot 3；conf 终态 COMMON 屏障；footprint RowPitch 数学。
+- corpus 模式 0xC0000409 两轮假线索（陈旧二进制 127 / fprintf 字面量断裂）→ 真因：manifest 扫描中 `(base+"/"+rel).begin()/end()` 跨临时对象迭代器 UB（堆越界 fail-fast）。
+- 上传纹理 64KB 限制 → 回滚缓冲+dispatch。
+
+### 下一步
+
+后台 gate 耐久（2×30 分钟）完成后按结果修补；R4.1（NVOF flow 接入 NR MVec——当前 NR 仍消费 zero motion）、R4.5（sceneCut 计数）是 reset-contract 转绿的路径。
+
 ## 2026-09-06 Goal session 3（Cycle 037）：R3.2 真实 GPU 链迁入 EnhanceGraph
 
 ### 执行摘要
