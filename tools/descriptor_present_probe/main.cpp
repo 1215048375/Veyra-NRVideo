@@ -614,5 +614,4 @@ int main(int argc, char** argv)
     // --no-debug exits 0). All D3D objects are already released above, so
     // terminate immediately with the real verdict code.
     ExitProcess(static_cast<UINT>(rc));
-    return rc;
 }

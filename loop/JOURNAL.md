@@ -944,6 +944,40 @@ C staged teardown 定位崩溃=swapChain_.Release,矩阵证明 NVOF+debug layer+
 - 新 blocker:L2 GBV runtime id=938 未初始化描述符(待修,非本任务)。
 - 未执行:query-heap GPU timestamp(用户明令禁止);Reviewer/checkpoint(未授权)。
 
+## Cycle 033 — R2.1 pipeline 数据契约迁移（2026-09-06 Goal）
+
+### Before
+
+- Phase: 5（重开，in_progress）
+- 唯一任务: 按 Playbook R2 建立 include/veyra/pipeline 契约族：FramePacket（Rational PTS/duration 可表达负值与未知、ColorDescription 含 format/range/matrix/transfer/primaries/rotation/SAR+assumed 标志、FrameFlags 十类事件位、GpuTextureHandle 携带 owner slot/expected state/ready fence/extent/format、SourceKind）、FrameWindow（固定 prev/current/next + lookaheadFrames 0/1/2，删除无界 vector）、GuidanceFrame（provenance/sourceSequence/depthAge）、ResetCoordinator（pending→帧边界消费的单调 epoch）；src/pipeline/ResetCoordinator.cpp + veyra_pipeline target + tests/unit/PipelineContractTests.cpp（8 类 reset、负/未知 PTS、跨 epoch 拒绝、窗口上限、fence 所有权）。旧 veyra/core 保留为迁移期兼容层。
+- 可证伪假设: 若契约或 ResetCoordinator 帧边界语义错误（如同一帧多次事件多次 bump、epoch 在帧中变化、窗口可超 2 lookahead），新单测将以真实断言失败。
+- 预计修改文件: include/veyra/pipeline/{FramePacket,FrameWindow,GuidanceFrame,ResetCoordinator}.h、src/pipeline/ResetCoordinator.cpp、tests/unit/PipelineContractTests.cpp、CMakeLists.txt。
+- 快速检查命令: `build x64-debug` → 0；`veyra_pipeline_tests.exe` → 0（全部断言过）；`veyra_unified_tests.exe` 仍 0（旧契约未破坏）。
+- 预期新增证据: 新契约单测全绿 + 旧测试无回归。
+
+### After
+
+- 实际修改: include/veyra/pipeline/{FramePacket,FrameWindow,GuidanceFrame,ResetCoordinator}.h（新契约族）、src/pipeline/ResetCoordinator.cpp、tests/unit/PipelineContractTests.cpp（50 断言）、CMakeLists.txt（veyra_pipeline STATIC + veyra_pipeline_tests；插在 unified_tests 之后）、tools/descriptor_present_probe/main.cpp（617 行 ExitProcess 后不可达 return 修复——debug W4/WX 下 C4702 阻塞构建的接管遗留修复）。
+- 契约要点落地:
+  - Rational（int64 num/int32 den/known 标志）：负 PTS 可表达、unknown 与已知 0 区分、交叉相乘相等、100ns 舍入（1/3→3333333、2/3→6666667 验证进位）；
+  - ColorDescription：SourcePixelFormat（含 P010→isHdrPath 供 V1 fail-closed）/range/matrix/transfer/primaries/rotation/SAR + 四个 assumed 标志；
+  - FrameFlags 十位（Open/Seek/Cut/Drop/Duplicate/Resize/Discontinuity/PauseResume/DeviceLost/Eos）+ breaksHistory 复合判定（Duplicate 不破坏历史）；
+  - GpuTextureHandle：resource/expectedState/ownerSlot/readyFenceValue/extent/format，present() 要求全部有效；
+  - FrameWindow：固定 prev/current/next + lookaheadFrames ≤2 上限（3 与 0xFFFFFFFF 均被拒），next==null 非错误，跨 epoch 拒绝；无 vector；
+  - GuidanceFrame：motion RG16F current→previous workingExtent 像素/depth R32F/confidence R8 + provenance/sourceSequence/sourceEpoch/depthAgeFrames/requiresReset + extentsMatch（消费者不静默缩放）；
+  - ResetCoordinator：notifyReset 暂存（多事件计次）→ beginFrame 帧边界恰好一次 bump；8 类理由各计次；无事件边界 epoch 不变；isStale 拒绝旧 epoch。
+- 实际命令与 exit code:
+  - `build x64-debug` → 首次 exit 6（FrameWindow 缺 <initializer_list>；descriptor_present_probe:617 C4702 不可达代码 debug WX 报错）→ 修复后 exit 0；
+  - `veyra_pipeline_tests.exe` Debug → **exit 0，50/50**（首版 1 失败：我的 1/3→3333334 期望算错，公式正确，测试改为 1/3→3333333 + 2/3→6666667 进位验证）；
+  - `veyra_unified_tests.exe` Debug → exit 0，51/51（旧 core 契约兼容层无回归）；
+  - `build x64-release` → exit 0；Release `veyra_pipeline_tests.exe` → exit 0，50/50。
+- 失败 fingerprint: build|debug|6|initializer_list+C4702 → 两处独立修复，第 1 轮关闭。
+- 是否有进展，依据: 是——产品级数据契约从"ptsUs 无符号/无颜色元数据/裸指针/无界 vector"升级为 Playbook R2 全字段契约，且新旧测试双配置全绿。
+- STATE/BACKLOG 更新: cycle.completed=33；BACKLOG R2.1 → DONE；nextAction → R2.2（FrameWindow/GuidanceFrame 消费侧接线与迁移层，随后 R2.3 ResetCoordinator 集成测试）。
+- 下一唯一动作: R2.2 — 把 player_probe/NvOfSession 的窗口语义对接新 FrameWindow（固定 A/B/C + lookaheadFrames），并让 GuidanceFrame 携带 provenance/age；迁移期兼容层保持旧测试绿。
+
+---
+
 ## Cycle 032 — R1.2 确定性 corpus 生成器（2026-09-06 Goal）
 
 ### Before

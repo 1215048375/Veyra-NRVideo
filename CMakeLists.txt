@@ -181,6 +181,27 @@ target_compile_definitions(veyra_unified_tests PRIVATE
 target_include_directories(veyra_unified_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(veyra_unified_tests PRIVATE d3d12 veyra_gfx veyra_ngx)
 
+# Pipeline product library (Playbook R2/R3): data contracts + reset coordinator.
+# Grows in R3 as the real GPU graph migrates out of the probes.
+add_library(veyra_pipeline STATIC
+  src/pipeline/ResetCoordinator.cpp
+)
+veyra_apply_warnings(veyra_pipeline)
+target_compile_features(veyra_pipeline PRIVATE cxx_std_20)
+target_compile_definitions(veyra_pipeline PRIVATE
+  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_include_directories(veyra_pipeline PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_executable(veyra_pipeline_tests
+  tests/unit/PipelineContractTests.cpp
+)
+veyra_apply_warnings(veyra_pipeline_tests)
+target_compile_features(veyra_pipeline_tests PRIVATE cxx_std_20)
+target_compile_definitions(veyra_pipeline_tests PRIVATE
+  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_include_directories(veyra_pipeline_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(veyra_pipeline_tests PRIVATE veyra_pipeline)
+
 add_executable(veyra_scene_tests
   tests/unit/SceneCadenceTests.cpp
   src/core/SceneCadenceAnalyzer.cpp

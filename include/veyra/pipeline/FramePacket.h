@@ -1,0 +1,166 @@
+#pragma once
+
+// Pipeline FramePacket - the product-grade frame contract (Playbook R2).
+// Fixes over the veyra::core draft: exact rational timestamps that can express
+// negative and unknown PTS, full color description with assumed flags, ten
+// frame event flags, and GPU textures that carry their own lifetime contract
+// (owner slot, expected state, ready fence value, extent, format).
+#include <cstdint>
+#include <d3d12.h>
+#include <dxgiformat.h>
+
+namespace veyra::pipeline {
+
+// Exact rational timestamp. den > 0. known=false means the container/source
+// did not provide a timestamp (never fabricate one; downstream must handle).
+struct Rational {
+    int64_t num = 0;
+    int32_t den = 1;
+    bool known = true;
+
+    static Rational unknown() { return Rational{0, 1, false}; }
+    bool isUnknown() const { return !known; }
+    bool isNegative() const { return known && num < 0; }
+    double toDouble() const { return den == 0 ? 0.0 : static_cast<double>(num) / den; }
+    // Rounded conversion to 100 ns units for logging/interop.
+    int64_t to100ns() const {
+        if (den == 0) { return 0; }
+        return static_cast<int64_t>(static_cast<long double>(num) * 10000000.0L
+            / static_cast<long double>(den) + (num >= 0 ? 0.5L : -0.5L));
+    }
+    bool equals(const Rational& o) const {
+        if (known != o.known) { return false; }
+        if (!known) { return true; }
+        // Cross-multiply to avoid requiring a canonical form.
+        return static_cast<long double>(num) * o.den == static_cast<long double>(o.num) * den;
+    }
+};
+
+enum class SourceKind : uint8_t {
+    Unknown = 0,
+    File,         // FFmpeg demux/decode (player, export)
+    CaptureCard,  // physical DirectShow/UVC capture
+    Image,        // WIC single image
+    TestPattern,  // synthetic harness input
+};
+
+inline const char* sourceKindName(SourceKind k) {
+    switch (k) {
+    case SourceKind::File: return "File";
+    case SourceKind::CaptureCard: return "CaptureCard";
+    case SourceKind::Image: return "Image";
+    case SourceKind::TestPattern: return "TestPattern";
+    default: return "Unknown";
+    }
+}
+
+enum class SourcePixelFormat : uint8_t {
+    Unknown = 0,
+    NV12,      // SDR limited 8-bit planar
+    P010,      // 10-bit HDR path - V1 must fail closed, not misread as SDR
+    Yuv420P,   // software decode planar
+    Yuy2,      // packed capture format
+    Bgra8,     // 8-bit BGRA
+    Rgba16F,   // canonical linear working format
+};
+
+enum class ColorRange : uint8_t { Unknown = 0, Limited, Full };
+enum class YuvMatrix : uint8_t { Unknown = 0, BT601, BT709, BT2020NCL, BT2020CL };
+enum class TransferFunction : uint8_t { Unknown = 0, SRGB, BT709, BT2020_10, Linear };
+enum class ColorPrimaries : uint8_t { Unknown = 0, BT601_525, BT601_625, BT709, BT2020 };
+
+struct SampleAspectRatio {
+    uint32_t num = 1;
+    uint32_t den = 1;
+};
+
+// Full ingress color metadata. Assumed flags must be set when a value was
+// derived from a documented default (SD->601, HD SDR->709) rather than the
+// container; the UI surfaces these.
+struct ColorDescription {
+    SourcePixelFormat pixelFormat = SourcePixelFormat::Unknown;
+    ColorRange range = ColorRange::Unknown;
+    YuvMatrix matrix = YuvMatrix::Unknown;
+    TransferFunction transfer = TransferFunction::Unknown;
+    ColorPrimaries primaries = ColorPrimaries::Unknown;
+    uint16_t rotationDegrees = 0;       // 0 / 90 / 180 / 270
+    SampleAspectRatio sar;
+
+    bool rangeAssumed = false;
+    bool matrixAssumed = false;
+    bool transferAssumed = false;
+    bool primariesAssumed = false;
+
+    bool isHdrPath() const {
+        return pixelFormat == SourcePixelFormat::P010
+            || transfer == TransferFunction::BT2020_10;
+    }
+};
+
+enum class FrameFlagBits : uint32_t {
+    None            = 0,
+    Open            = 1u << 0,   // first frame after open/start
+    Seek            = 1u << 1,
+    Cut             = 1u << 2,   // detected scene cut
+    Drop            = 1u << 3,   // capture mailbox dropped stale frame(s)
+    Duplicate       = 1u << 4,   // repeated source frame
+    Resize          = 1u << 5,   // extent change
+    Discontinuity   = 1u << 6,   // PTS jump / sequence gap
+    PauseResume     = 1u << 7,
+    DeviceLost      = 1u << 8,
+    Eos             = 1u << 9,
+};
+using FrameFlags = uint32_t;
+
+constexpr bool hasFrameFlag(FrameFlags flags, FrameFlagBits bit) {
+    return (flags & static_cast<uint32_t>(bit)) != 0;
+}
+// Any flag that invalidates temporal history (consumers must reset).
+constexpr FrameFlags historyBreakingFlags() {
+    return static_cast<uint32_t>(FrameFlagBits::Seek)
+        | static_cast<uint32_t>(FrameFlagBits::Cut)
+        | static_cast<uint32_t>(FrameFlagBits::Drop)
+        | static_cast<uint32_t>(FrameFlagBits::Resize)
+        | static_cast<uint32_t>(FrameFlagBits::Discontinuity)
+        | static_cast<uint32_t>(FrameFlagBits::PauseResume)
+        | static_cast<uint32_t>(FrameFlagBits::DeviceLost);
+}
+constexpr bool breaksHistory(FrameFlags flags) {
+    return (flags & historyBreakingFlags()) != 0;
+}
+
+// GPU texture with an explicit lifetime contract. The packet never owns the
+// resource; it names who owns the transition (command slot), the state the
+// content is in, and the fence value after which it is safe to consume.
+struct GpuTextureHandle {
+    ID3D12Resource* resource = nullptr;
+    D3D12_RESOURCE_STATES expectedState = D3D12_RESOURCE_STATE_COMMON;
+    uint32_t ownerSlot = 0;           // command slot responsible for writes/transitions
+    uint64_t readyFenceValue = 0;     // content ready at this fence value (0 = CPU/CPU-visible)
+    uint32_t width = 0;
+    uint32_t height = 0;
+    DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+
+    bool present() const {
+        return resource != nullptr && width > 0 && height > 0
+            && format != DXGI_FORMAT_UNKNOWN;
+    }
+};
+
+struct FramePacket {
+    uint64_t sequence = 0;        // monotonic per source (0 reserved as invalid)
+    Rational pts;
+    Rational duration;
+    SourceKind sourceKind = SourceKind::Unknown;
+    FrameFlags flags = 0;
+    ColorDescription colorInfo;
+    uint64_t sourceEpoch = 1;     // ResetCoordinator epoch at frame boundary
+
+    GpuTextureHandle color;       // canonical linear RGBA16F working texture
+
+    bool valid() const {
+        return sequence > 0 && color.present() && !pts.isUnknown();
+    }
+};
+
+} // namespace veyra::pipeline

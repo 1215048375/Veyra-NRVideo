@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 32,
+    "completed": 33,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "R1.2 complete (Cycle 032): veyra_clip_gen extended to five deterministic scenarios (translation/occlusion/cut-flash-duplicate/particles/ui-text), corpus of 10 clips (1080p60 + 4K60, 600 frames each) generated with SHA256 corpus-manifest.json. DLL-shadowing fixed via isolated clipgen runtime dir. Phase5 gate corpus:* x4 now PASS while implementation gaps stay red (30/42 fail, exit 1).",
+  "currentTask": "R2.1 complete (Cycle 033): include/veyra/pipeline contract family landed (Rational PTS with negative/unknown, ColorDescription with assumed flags + P010 HDR fail-closed path, 10-bit FrameFlags with breaksHistory, GpuTextureHandle with owner slot/expected state/ready fence, FrameWindow fixed prev/current/next + lookaheadFrames<=2 no vector, GuidanceFrame provenance/age/sourceSequence, ResetCoordinator frame-boundary epoch). PipelineContractTests 50/50 debug+release; legacy unified tests 51/51 no regression. veyra_pipeline static target created.",
   "lastGate": {
     "name": "phase5",
     "status": "invalidated_requires_rebuild",
@@ -106,6 +106,6 @@
     "A real DirectShow/UVC 4K60 SDR capture device, HDMI audio, and 4K60 source signal are required before P7 capture gate can pass.",
     "Public distribution rights for the experimental DLSSNR runtime and all bundled NVIDIA/model/FFmpeg assets are unresolved; a local release candidate is allowed, public launch is blocked."
   ],
-  "nextAction": "Playbook R2.1: migrate data contracts to include/veyra/pipeline (Rational PTS/duration, ColorDescription with assumed flags, FrameFlags 10 events, GpuTextureHandle with owner slot/expected state/ready fence, FrameWindow fixed prev/current/next + lookaheadFrames 0/1/2 without unbounded vector, GuidanceFrame provenance/age/sourceSequence, ResetCoordinator frame-boundary consumption) plus PipelineContractTests covering 8 reset events, negative/unknown PTS, cross-epoch rejection, window cap and fence ownership.",
-  "updatedAt": "2026-09-06T16:35:00+08:00"
+  "nextAction": "Playbook R2.2: wire NVOF/depth guidance production to the new GuidanceFrame contract (provenance, sourceSequence, depthAge, extentsMatch) and migrate probe window semantics onto FrameWindow fixed prev/current/next with lookaheadFrames modes; keep veyra::core compat layer compiling. Then R2.3 ResetCoordinator integration tests (open/seek/cut/drop/resize/source-switch/pause-resume/device-lost at real-frame boundaries).",
+  "updatedAt": "2026-09-06T16:55:00+08:00"
 }
