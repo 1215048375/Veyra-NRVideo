@@ -181,6 +181,31 @@ target_compile_definitions(veyra_unified_tests PRIVATE
 target_include_directories(veyra_unified_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(veyra_unified_tests PRIVATE d3d12 veyra_gfx veyra_ngx)
 
+# Guidance product library (Playbook R3/R4): providers produce the unified
+# GuidanceFrame. First real member: ZeroGuidanceProvider (honest fallback).
+# NvofGuidanceProvider moves in from player_probe during R3.2.
+add_library(veyra_guidance STATIC
+  src/guidance/ZeroGuidanceProvider.cpp
+)
+veyra_apply_warnings(veyra_guidance)
+target_compile_options(veyra_guidance PRIVATE /WX-)
+target_compile_features(veyra_guidance PRIVATE cxx_std_20)
+target_compile_definitions(veyra_guidance PRIVATE
+  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_include_directories(veyra_guidance PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(veyra_guidance PUBLIC veyra_pipeline veyra_gfx veyra_base d3d12 dxgi dxguid)
+
+add_executable(veyra_guidance_tests
+  tests/integration/GuidanceProviderTests.cpp
+)
+veyra_apply_warnings(veyra_guidance_tests)
+target_compile_options(veyra_guidance_tests PRIVATE /WX-)
+target_compile_features(veyra_guidance_tests PRIVATE cxx_std_20)
+target_compile_definitions(veyra_guidance_tests PRIVATE
+  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_include_directories(veyra_guidance_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(veyra_guidance_tests PRIVATE veyra_guidance)
+
 # Pipeline product library (Playbook R2/R3): data contracts + reset coordinator.
 # Grows in R3 as the real GPU graph migrates out of the probes.
 add_library(veyra_pipeline STATIC

@@ -944,6 +944,32 @@ C staged teardown 定位崩溃=swapChain_.Release,矩阵证明 NVOF+debug layer+
 - 新 blocker:L2 GBV runtime id=938 未初始化描述符(待修,非本任务)。
 - 未执行:query-heap GPU timestamp(用户明令禁止);Reviewer/checkpoint(未授权)。
 
+## Cycle 035 — R3.1b veyra_guidance：接口 + ZeroGuidanceProvider（2026-09-06 Goal）
+
+### Before
+
+- Phase: 5（重开，in_progress）
+- 唯一任务: 建立 `veyra_guidance` 产品库：IGuidanceProvider 接口（initialize/produce/reset/provenance，基于 pipeline 契约 FrameWindow/GuidanceFrame）+ GuidanceConfig + **ZeroGuidanceProvider 真实 GPU 实现**（创建 RG16F motion/R32F depth/R8 confidence 三纹理，upload-copy 零初始化——Phase 1 已验证路径；reset 后首帧强制零运动；provenance=Zero 诚实上报）+ GPU 集成测试（真实 D3D12 device，readback 验证全零与元数据——诊断性 readback 允许在测试中）。NvofGuidanceProvider 不在本轮：它将在 R3.2 从 player_probe 直接移入，避免复制出第二份 NVOF 实现。
+- 可证伪假设: 若零初始化或元数据语义错误，GPU 测试的 readback 断言将失败；若库是空壳，gate 的 product:veyra_guidance-target 检查虽绿但新增集成测试红——两者必须同时绿才算数。
+- 预计修改文件: include/veyra/guidance/{IGuidanceProvider,ZeroGuidanceProvider}.h、src/guidance/ZeroGuidanceProvider.cpp、tests/integration/GuidanceProviderTests.cpp、CMakeLists.txt。
+- 快速检查命令: `build x64-debug/-release` → 0；`veyra_guidance_tests.exe` 双配置 → 0；`phase5.ps1` → 仍 exit 1 但 product:veyra_guidance-target PASS。
+- 预期新增证据: GPU 集成测试全零断言 + provenance/epoch 元数据断言。
+
+### After
+
+- 实际修改: include/veyra/guidance/{IGuidanceProvider,ZeroGuidanceProvider}.h、src/guidance/ZeroGuidanceProvider.cpp、tests/integration/GuidanceProviderTests.cpp（真实 RTX device 集成测试，诊断性 readback 仅限测试）、CMakeLists.txt（veyra_guidance STATIC PUBLIC veyra_pipeline/veyra_gfx/veyra_base + veyra_guidance_tests）。
+- 实现要点: 接口 initialize/produce/reset/provenance 基于 pipeline 契约（FrameWindow/GuidanceFrame 均限定 pipeline::）；ZeroGuidanceProvider 创建 RG16F/R32F/R8 三纹理，upload-copy 零初始化（Phase 1 验证路径，非 ClearUAV），一次性 init fence wait（Playbook 允许 create 等待一次）；produce 填充完整 GpuTextureHandle（expectedState=SRV、extent、format）+ provenance=Zero + sourceSequence/sourceEpoch + epoch 边界 requiresReset 标志（resetReason 由 graph 从 coordinator 填，provider 不猜理由）。
+- 实际命令与 exit code:
+  - `build x64-debug/-release` → 修 4 轮编译错误后双 0（guidance 命名空间内 FrameWindow/GuidanceFrame 未限定；copy-location 枚举名误写 LOCATION；Status 命名空间；残留未限定 GuidanceFrame）。
+  - `veyra_guidance_tests.exe` Debug → 首轮 13/16：**3 个 GPU readback 检查失败，根因是测试自身 bug**（staging 只分配 8 行却复制整张 1080 行纹理=溢出读垃圾；provider 零初始化本身正确）；CopyTextureRegion 加 D3D12_BOX 限定后 **13/13 双配置 exit 0**（真实验证：RTX 5070、RG16F/R32F/R8 三纹理 GPU 内容全零、provenance/metadata/epoch 边界断言全过）。
+  - `phase5.ps1` → exit 1，**29/45**；product:veyra_guidance-target PASS（真实成员非空壳——GPU 测试是同时绿的前提）。
+- 失败 fingerprint: tests|guidance-readback|1|staging-undersized-for-full-texture-copy → box 限定复制区域，第 1 轮修复（测试 bug，非产品 bug）。
+- 是否有进展，依据: 是——产品 guidance 库从无到有，ZeroGuidanceProvider 在真实 GPU 上验证；R4 的 Zero 语义（诚实回退）有机器证据。
+- STATE/BACKLOG 更新: cycle.completed=35；nextAction → R3.1c veyra_sources。
+- 下一唯一动作: R3.1c — 建立 `veyra_sources`（MediaFileSource 组合现有产品库 veyra_media 的 FFmpegDemuxer+FFmpegVideoDecoder，输出 pipeline::FramePacket 契约；无第二份解码实现）。
+
+---
+
 ## Cycle 034 — R3.1a veyra_sinks：WASAPI 音频迁出 player_probe（2026-09-06 Goal）
 
 ### Before
