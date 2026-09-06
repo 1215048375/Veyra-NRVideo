@@ -318,6 +318,7 @@ if(VEYRA_CLIP_TOOLS_ROOT AND EXISTS "${VEYRA_CLIP_TOOLS_ROOT}/include/libavcodec
   target_include_directories(veyra_clip_gen PRIVATE "${VEYRA_CLIP_TOOLS_ROOT}/include")
   target_link_directories(veyra_clip_gen PRIVATE "${VEYRA_CLIP_TOOLS_ROOT}/lib")
   target_link_libraries(veyra_clip_gen PRIVATE
+    veyra_base
     "${VEYRA_CLIP_TOOLS_ROOT}/lib/avcodec.lib"
     "${VEYRA_CLIP_TOOLS_ROOT}/lib/avformat.lib"
     "${VEYRA_CLIP_TOOLS_ROOT}/lib/avutil.lib")

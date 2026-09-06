@@ -944,6 +944,33 @@ C staged teardown 定位崩溃=swapChain_.Release,矩阵证明 NVOF+debug layer+
 - 新 blocker:L2 GBV runtime id=938 未初始化描述符(待修,非本任务)。
 - 未执行:query-heap GPU timestamp(用户明令禁止);Reviewer/checkpoint(未授权)。
 
+## Cycle 032 — R1.2 确定性 corpus 生成器（2026-09-06 Goal）
+
+### Before
+
+- Phase: 5（重开，in_progress）
+- 唯一任务: 扩展 `tools/clip_generator/main.cpp` 为五场景确定性生成器（translation +8px/frame、occlusion 遮挡显露、cut-flash-duplicate 硬切/单帧闪光/重复帧、particles 半透明粒子、ui-text 固定文字+运动背景），新增 `--make-corpus` 模式生成 1080p60+4K60 共 10 片并写 SHA256 manifest（loop/local/fixed_clips/corpus-manifest.json + corpus/ 目录）；gate 不再依赖已删除的 tracked MP4。
+- 可证伪假设: 若场景内容退化（纯色/全零/无运动），quality gate 的 nonZeroMotion/confidence/sceneCut 检查将在 R4 揭露；本轮可证伪点是——生成的 10 片全部存在、非空、SHA256 与 manifest 一致，且重跑 phase5 gate 时 `corpus:*` 四项由红转绿而其余缺口保持红。
+- 预计修改文件: tools/clip_generator/main.cpp（重写）、CMakeLists.txt（clip_gen 链 veyra_base 取 SHA256）、scripts/gates/phase5.ps1（corpus 路径解析改为相对 manifest 目录）。
+- 快速检查命令: `build x64-release` → 0；`veyra_clip_gen --make-corpus loop/local/fixed_clips` → 0 且 manifest 10 条；`phase5.ps1 -Root .` → 仍 exit 1 但 corpus:* 四项 PASS。
+- 预期新增证据: corpus-manifest.json + 10 个 mp4（ignored 目录）+ gate 复跑输出。
+
+### After
+
+- 实际修改: tools/clip_generator/main.cpp 重写（五场景确定性渲染器 + --make-corpus + manifest 写出）；CMakeLists.txt（veyra_clip_gen 链 veyra_base 取文件 SHA256）；scripts/gates/phase5.ps1（corpus 路径改为相对 manifest 目录解析）。
+- 实际命令与 exit code:
+  - `build x64-release` → exit 0（两轮：首轮 2 个自有 warning 清理后 0 剩余自有 warning）。
+  - 首次 `veyra_clip_gen --make-corpus` → **exit 2（libopenh264 encoder not found）**: out/build/x64-release 旁的最小版 avcodec-63.dll（player_probe 运行时）遮蔽了 tools-installed 的含 openh264 版本（同 ABI 名）。修复：建立隔离运行目录 `out/build/x64-release/clipgen/`（exe 拷贝 + tools-installed 的 avcodec/avformat/avutil/openh264-7.dll），不动其他 probe 的运行时变量。
+  - 隔离目录重跑 `--make-corpus loop/local/fixed_clips` → **exit 0**：10 片全部生成（5 场景 × 1080p60/4K60，各 600 帧 10s，1080p 8Mbps / 4K 24Mbps）+ corpus-manifest.json（每片含 scenario/width/height/fps/path/sizeBytes/sha256/command，pathBase=manifest-dir）。
+- 复核: manifest 10 条目与 10 个文件一一对应；gate 重跑 → **corpus:manifest-present / manifest-complete / clip-files / clip-sha256 四项 PASS**（gate 独立重算 SHA256 与 manifest 一致，证明路径解析正确），其余 30 项保持红（product 库/runner/矩阵/depth/耐久缺口不变），整体仍 exit 1 — 与假设一致。
+- 场景设计要点: translation 棋盘 +8px/frame 高对比异色（luma+chroma 运动）；occlusion 对角纹理背景 + 三角波扫过实心前景（遮挡/显露）；cut-flash-duplicate 四段异构内容硬切 + 中段后单帧白闪 + 60% 处 3 帧重复；particles 48 个确定性半透明亮斑（alpha 混合）；ui-text 运动渐变背景 + 固定文字条块。全部为 (scenario,x,y,frame,extent) 的纯函数，可复现。
+- 失败 fingerprint: clip-gen|make-corpus|2|DLL shadowing（最小版 avcodec 遮蔽 tools 版）→ 隔离运行目录修复，第 1 次尝试关闭。
+- 是否有进展，依据: 是——gate 的 corpus 输入依赖从"已删除的 tracked MP4"变为确定性生成 + SHA256 锁定的 manifest，且四项检查由红转绿。
+- STATE/BACKLOG 更新: cycle.completed=32；BACKLOG R1.2 → DONE；nextAction → R2.1。
+- 下一唯一动作: R2.1 — 建立 include/veyra/pipeline 契约（Rational PTS、ColorDescription、FrameFlags、GpuTextureHandle、固定 prev/current/next + lookaheadFrames、GuidanceFrame provenance/age、ResetCoordinator 帧边界消费）与 PipelineContractTests。
+
+---
+
 ## Cycle 031 — R1.1 phase5 gate 重建并先红（2026-09-06 Goal）
 
 ### Before

@@ -112,6 +112,7 @@ Add-GateCheck "product:enhance-graph-submits-gpu" $enhanceOk "src/pipeline/Enhan
 # 3. Deterministic corpus (veyra_clip_gen; no dependency on deleted tracked MP4)
 # ---------------------------------------------------------------------------
 $corpusManifestPath = Join-Path $Root "loop\local\fixed_clips\corpus-manifest.json"
+$corpusManifestDir = Split-Path -Parent $corpusManifestPath
 $corpus = $null
 Add-GateCheck "corpus:manifest-present" (Test-Path -LiteralPath $corpusManifestPath -PathType Leaf) $corpusManifestPath
 if (Test-Path -LiteralPath $corpusManifestPath -PathType Leaf) {
@@ -140,7 +141,7 @@ if ($corpusEntries.Count -ge 10) {
         $clipPath = [string](Get-Field $entry "path")
         $sha = [string](Get-Field $entry "sha256")
         if ([string]::IsNullOrWhiteSpace($clipPath) -or ($sha -notmatch "^[0-9A-Fa-f]{64}$")) { $corpusComplete = $false; continue }
-        $absClip = if ([System.IO.Path]::IsPathRooted($clipPath)) { $clipPath } else { Join-Path $Root $clipPath }
+        $absClip = if ([System.IO.Path]::IsPathRooted($clipPath)) { $clipPath } else { Join-Path $corpusManifestDir $clipPath }
         if (-not (Test-Path -LiteralPath $absClip -PathType Leaf)) { $corpusFilesOk = $false; continue }
         $item = Get-Item -LiteralPath $absClip
         if ($item.Length -le 0) { $corpusFilesOk = $false; continue }
@@ -276,7 +277,7 @@ if ($corpusComplete) {
 $enduranceJsons = @{}
 if ($runnerPresent -and ($null -ne $translationHd)) {
     $hdPath = [string](Get-Field $translationHd "path")
-    if (-not [System.IO.Path]::IsPathRooted($hdPath)) { $hdPath = Join-Path $Root $hdPath }
+    if (-not [System.IO.Path]::IsPathRooted($hdPath)) { $hdPath = Join-Path $corpusManifestDir $hdPath }
     $ej = Join-Path $logDir "endurance-1080p60.json"
     Write-Host "[INFO] endurance:1080p60 running (30 minutes, shared graph)..."
     & $runnerExe --input $hdPath --duration-seconds 1800 --run-id ($runId + "-end-1080p60") --log-file (Join-Path $logDir "endurance-1080p60.log") --json-file $ej
@@ -289,7 +290,7 @@ else {
 
 if ($runnerPresent -and ($null -ne $translationUhd)) {
     $uhdPath = [string](Get-Field $translationUhd "path")
-    if (-not [System.IO.Path]::IsPathRooted($uhdPath)) { $uhdPath = Join-Path $Root $uhdPath }
+    if (-not [System.IO.Path]::IsPathRooted($uhdPath)) { $uhdPath = Join-Path $corpusManifestDir $uhdPath }
     $ej4 = Join-Path $logDir "endurance-4k60.json"
     Write-Host "[INFO] endurance:4k60-native running (30 minutes, shared graph)..."
     & $runnerExe --input $uhdPath --duration-seconds 1800 --run-id ($runId + "-end-4k60") --log-file (Join-Path $logDir "endurance-4k60.log") --json-file $ej4
