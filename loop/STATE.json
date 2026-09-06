@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 33,
+    "completed": 34,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "R2.1 complete (Cycle 033): include/veyra/pipeline contract family landed (Rational PTS with negative/unknown, ColorDescription with assumed flags + P010 HDR fail-closed path, 10-bit FrameFlags with breaksHistory, GpuTextureHandle with owner slot/expected state/ready fence, FrameWindow fixed prev/current/next + lookaheadFrames<=2 no vector, GuidanceFrame provenance/age/sourceSequence, ResetCoordinator frame-boundary epoch). PipelineContractTests 50/50 debug+release; legacy unified tests 51/51 no regression. veyra_pipeline static target created.",
+  "currentTask": "R3.1a complete (Cycle 034): WASAPI audio (AudioPipeline watermark ring + AudioRenderer event-driven PTS-anchored clock) extracted verbatim from player_probe into product library veyra_sinks. player_probe 3641->3128 lines, audio behavior verified unchanged (underruns=0 overruns=0 seekCount=11, exit 12 drift FAIL unchanged). Gate gained product:sinks/sources/player-links-sinks checks (45 total, 30 fail) and the player-links-pipeline false positive was fixed.",
   "lastGate": {
     "name": "phase5",
     "status": "invalidated_requires_rebuild",
@@ -106,6 +106,6 @@
     "A real DirectShow/UVC 4K60 SDR capture device, HDMI audio, and 4K60 source signal are required before P7 capture gate can pass.",
     "Public distribution rights for the experimental DLSSNR runtime and all bundled NVIDIA/model/FFmpeg assets are unresolved; a local release candidate is allowed, public launch is blocked."
   ],
-  "nextAction": "Playbook R3.1: establish the remaining product library targets with real members extracted from tools/player_probe (veyra_sinks: WasapiAudioSink from AudioPipeline/AudioRenderer lines ~194-690 + link D3D12PresentSink; veyra_guidance: NvofGuidanceProvider wrapping NvOfSession + ZeroGuidanceProvider + GuidanceValidator skeleton; veyra_sources: MediaFileSource wrapping FFmpegDemuxer/FFmpegVideoDecoder). No empty/interface-only targets; player_probe must keep compiling and reproduce the same probe behavior. Then R3.2 moves the real GPU chain into EnhanceGraph (src/pipeline/EnhanceGraph.cpp must submit command lists + NGX evaluate per the gate check).",
-  "updatedAt": "2026-09-06T17:10:00+08:00"
+  "nextAction": "Playbook R3.1b: create veyra_guidance product library with real members (ZeroGuidanceProvider, NvofGuidanceProvider wrapping the verified NvOfSession with B8G8R8A8/S10.5 grid-4 cost contract, GuidanceValidator with cost/luma-warp-residual/out-of-frame confidence inputs); then R3.1c veyra_sources MediaFileSource. After all four libraries exist: R3.2 move the real GPU chain (upload/YUV/SR/NVOF/parity/NR/FG) into EnhanceGraph so product:enhance-graph-submits-gpu can pass.",
+  "updatedAt": "2026-09-06T17:55:00+08:00"
 }

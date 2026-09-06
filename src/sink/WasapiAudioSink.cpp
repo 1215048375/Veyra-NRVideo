@@ -1,0 +1,423 @@
+// WasapiAudioSink implementation - moved verbatim from tools/player_probe
+// main.cpp (lines ~172-686, Phase 6 session evidence). Semantics preserved:
+// watermarked bounded production ring, event-driven pump, PTS-anchored master
+// clock, atomic seek re-sequence, player mode never drops decoded audio.
+#include "veyra/sink/WasapiAudioSink.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <format>
+
+extern "C" {
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
+#include <libswresample/swresample.h>
+}
+
+namespace veyra::sink {
+
+AudioPipeline::AudioPipeline()
+    : packet_(av_packet_alloc())
+{
+}
+
+AudioPipeline::~AudioPipeline()
+{
+    closeAll();
+    stopThread();
+}
+
+bool AudioPipeline::open(const std::wstring& path)
+{
+    std::string narrow;
+    narrow.assign(path.begin(), path.end());
+    if (avformat_open_input(&fmt_, narrow.c_str(), nullptr, nullptr) != 0) return false;
+    if (avformat_find_stream_info(fmt_, nullptr) < 0) return false;
+    const AVCodec* codec = nullptr;
+    const int si = av_find_best_stream(fmt_, AVMEDIA_TYPE_AUDIO, -1, -1, &codec, 0);
+    if (si < 0 || codec == nullptr) {
+        veyra::log::info("audio", "no audio stream in source");
+        return false;
+    }
+    streamIndex_ = si;
+    codecCtx_ = avcodec_alloc_context3(codec);
+    if (avcodec_parameters_to_context(codecCtx_, fmt_->streams[si]->codecpar) < 0) return false;
+    if (avcodec_open2(codecCtx_, codec, nullptr) < 0) return false;
+    stream_ = fmt_->streams[si];
+    veyra::log::info("audio", std::format("audio stream idx={} codec={} rate={}",
+        si, codec->name, codecCtx_->sample_rate));
+    return true;
+}
+
+double AudioPipeline::bufferedMs() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return 1000.0 * static_cast<double>(ringFrames_) / kAudioRate;
+}
+
+double AudioPipeline::headPtsMs() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (segments_.empty()) return -1.0;
+    return segments_.front().startPtsMs;
+}
+
+double AudioPipeline::tailPtsMs() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (segments_.empty()) return -1.0;
+    const Segment& t = segments_.back();
+    return t.startPtsMs + 1000.0 * static_cast<double>(t.frames) / kAudioRate;
+}
+
+uint64_t AudioPipeline::underruns() const { return underruns_.load(); }
+uint64_t AudioPipeline::overruns() const { return overruns_.load(); } // must stay 0
+uint64_t AudioPipeline::seekCount() const { return seekCount_.load(); }
+double AudioPipeline::lastPrefillMs() const { return lastPrefillMs_.load(); }
+double AudioPipeline::firstPtsAfterLastSeek() const { return firstPtsAfterSeek_.load(); }
+
+size_t AudioPipeline::pull(float* dst, size_t maxFrames, double* firstPtsMs)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (firstPtsMs) *firstPtsMs = segments_.empty() ? -1.0 : segments_.front().startPtsMs;
+    const size_t take = std::min(maxFrames, ringFrames_);
+    size_t copied = 0;
+    while (copied < take && !segments_.empty()) {
+        Segment& seg = segments_.front();
+        const size_t n = std::min(take - copied, seg.frames);
+        // Ring is a deque of float pairs: copy n frames.
+        for (size_t i = 0; i < n * 2; ++i) {
+            dst[copied * 2 + i] = ring_.front();
+            ring_.pop_front();
+        }
+        copied += n;
+        seg.frames -= n;
+        seg.startPtsMs += 1000.0 * static_cast<double>(n) / kAudioRate;
+        if (seg.frames == 0) segments_.pop_front();
+    }
+    ringFrames_ -= take;
+    return take;
+}
+
+void AudioPipeline::stopThread()
+{
+    stopFlag_ = true;
+    wake_.notify_all();
+    if (thread_.joinable()) thread_.join();
+}
+
+double AudioPipeline::requestSeek(double targetMs)
+{
+    std::unique_lock<std::mutex> lock(mutex_);
+    seekTargetMs_ = targetMs;
+    seekDone_ = false;
+    seekRequested_ = true;
+    wake_.notify_all();
+    // The audio thread signals when the ring is prefilled past target.
+    if (!seekDoneCv_.wait_for(lock, std::chrono::milliseconds(3000), [this] { return seekDone_; })) {
+        veyra::log::error("audio", "seek prefill timed out");
+    }
+    return segments_.empty() ? targetMs : segments_.front().startPtsMs;
+}
+
+void AudioPipeline::pushDecoded(const AVFrame* frame)
+{
+    // Convert to 48k stereo float in converted_.
+    if (swr_ == nullptr) {
+        AVChannelLayout outLayout = AV_CHANNEL_LAYOUT_STEREO;
+        AVChannelLayout inLayout = frame->ch_layout.nb_channels > 0
+            ? frame->ch_layout : outLayout;
+        swr_alloc_set_opts2(&swr_,
+            &outLayout, AV_SAMPLE_FMT_FLT, kAudioRate,
+            &inLayout, static_cast<AVSampleFormat>(frame->format), frame->sample_rate,
+            0, nullptr);
+        if (swr_ == nullptr || swr_init(swr_) < 0) return;
+    }
+    uint8_t* planes[1] = { reinterpret_cast<uint8_t*>(converted_.data()) };
+    const int outSamples = swr_convert(swr_, planes,
+        static_cast<int>(converted_.size() / 2),
+        const_cast<const uint8_t**>(frame->extended_data), frame->nb_samples);
+    if (outSamples <= 0) return;
+
+    std::unique_lock<std::mutex> lock(mutex_);
+    const size_t addFrames = static_cast<size_t>(outSamples);
+    if (ringFrames_ + addFrames > kMaxRingFrames) {
+        // Player mode: never drop. This is a hard error (bounded ring
+        // should never overflow because production is watermarked).
+        overruns_.fetch_add(1);
+        veyra::log::error("audio", "ring overflow despite watermarks (bug)");
+        return;
+    }
+    ring_.insert(ring_.end(), converted_.data(), converted_.data() + addFrames * 2);
+    ringFrames_ += addFrames;
+    if (!segments_.empty()) {
+        Segment& last = segments_.back();
+        const double lastEnd = last.startPtsMs + 1000.0 * static_cast<double>(last.frames) / kAudioRate;
+        if (std::fabs(lastEnd - nextPtsMs_) < 1.0) {
+            last.frames += addFrames;      // contiguous: extend
+        } else {
+            segments_.push_back({ nextPtsMs_, addFrames });
+        }
+    } else {
+        segments_.push_back({ nextPtsMs_, addFrames });
+    }
+    nextPtsMs_ += 1000.0 * static_cast<double>(addFrames) / kAudioRate;
+}
+
+void AudioPipeline::decodeBlock()
+{
+    // Decode until high watermark or EOF; called only when below high.
+    while (bufferedMsLocked() < kAudioHighWatermarkMs && !stopFlag_ && !seekRequested_) {
+        if (!havePacket_) {
+            if (av_read_frame(fmt_, packet_) < 0) {
+                demuxEof_ = true;
+                break;
+            }
+            havePacket_ = true;
+            if (packet_->stream_index != streamIndex_) {
+                av_packet_unref(packet_);
+                havePacket_ = false;
+                continue;
+            }
+        }
+        if (avcodec_send_packet(codecCtx_, havePacket_ ? packet_ : nullptr) == 0 && havePacket_) {
+            av_packet_unref(packet_);
+            havePacket_ = false;
+        }
+        AVFrame* frame = av_frame_alloc();
+        bool enough = false;
+        while (avcodec_receive_frame(codecCtx_, frame) == 0) {
+            const double ptsMs = 1000.0 * frame->pts * stream_->time_base.num / stream_->time_base.den;
+            nextPtsMs_ = ptsMs + 1000.0 * frame->nb_samples / kAudioRate;
+            if (discardUntilPtsMs_ < 0.0 || ptsMs >= discardUntilPtsMs_) {
+                pushDecoded(frame);
+            }
+            av_frame_unref(frame);
+            if (bufferedMsLocked() >= kAudioHighWatermarkMs) { enough = true; break; }
+        }
+        av_frame_free(&frame);
+        if (enough || demuxEof_) break;
+    }
+}
+
+double AudioPipeline::bufferedMsLocked() const
+{
+    return 1000.0 * static_cast<double>(ringFrames_) / kAudioRate;
+}
+
+void AudioPipeline::closeAll()
+{
+    if (swr_ != nullptr) swr_free(&swr_);
+    if (packet_ != nullptr) av_packet_free(&packet_);
+    if (codecCtx_ != nullptr) avcodec_free_context(&codecCtx_);
+    if (fmt_ != nullptr) avformat_close_input(&fmt_);
+}
+
+bool AudioRenderer::start()
+{
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    comInited_ = SUCCEEDED(hr);
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+        __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&enum_));
+    if (FAILED(hr)) return false;
+    hr = enum_->GetDefaultAudioEndpoint(eRender, eConsole, &device_);
+    if (FAILED(hr)) return false;
+    hr = device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
+        reinterpret_cast<void**>(&client_));
+    if (FAILED(hr)) return false;
+    WAVEFORMATEX* mix = nullptr;
+    if (FAILED(client_->GetMixFormat(&mix))) return false;
+    sampleRate_ = mix->nSamplesPerSec;
+    hr = client_->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+        10 * 10000, 0, mix, nullptr);
+    const bool initOk = SUCCEEDED(hr);
+    CoTaskMemFree(mix);
+    if (!initOk) return false;
+    if (FAILED(client_->GetBufferSize(&bufferFrames_))) return false;
+    event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (event_ == nullptr || FAILED(client_->SetEventHandle(event_))) return false;
+    if (FAILED(client_->GetService(__uuidof(IAudioRenderClient),
+            reinterpret_cast<void**>(&render_)))) return false;
+    if (FAILED(client_->GetService(__uuidof(IAudioClock),
+            reinterpret_cast<void**>(&clock_)))) return false;
+    UINT64 freq = 0;
+    if (SUCCEEDED(clock_->GetFrequency(&freq))) clockFrequency_ = freq;
+    running_ = true;
+    veyra::log::info("audio", std::format("renderer opened {}Hz event-mode buffer={} frames (not started; prefill first)",
+        sampleRate_, bufferFrames_));
+    return true;
+}
+
+bool AudioRenderer::startAnchored(double firstBufferPtsMs)
+{
+    // Prefill the whole endpoint buffer with REAL samples happens on the
+    // first pump() call; anchor NOW at the device position with the PTS
+    // of the first sample we are about to submit.
+    UINT64 pos = 0, qpc = 0;
+    (void)clock_->GetPosition(&pos, &qpc);
+    anchorPos_ = pos;
+    anchorPtsMs_.store(firstBufferPtsMs);
+    if (FAILED(client_->Start())) return false;
+    started_ = true;
+    veyra::log::info("audio", std::format("renderer STARTED anchored ptsMs={:.1f} devicePos={} freq={}",
+        firstBufferPtsMs, pos, clockFrequency_));
+    return true;
+}
+
+bool AudioRenderer::pumpOnce(AudioPipeline& pipeline, double* firstWrittenPtsMs)
+{
+    if (!running_ || !started_) return true;
+    if (WaitForSingleObject(event_, 50) != WAIT_OBJECT_0) return true;
+    UINT32 padding = 0;
+    if (FAILED(client_->GetCurrentPadding(&padding))) return false;
+    const UINT32 avail = bufferFrames_ - padding;
+    if (avail == 0) return true;
+    double firstPts = -1.0;
+    const size_t got = pipeline.pull(chunk_.data(), avail, &firstPts);
+    if (firstWrittenPtsMs) *firstWrittenPtsMs = firstPts;
+    BYTE* dest = nullptr;
+    if (FAILED(render_->GetBuffer(avail, &dest))) return false;
+    if (got > 0) {
+        std::memcpy(dest, chunk_.data(), got * 8);
+        if (got < avail) {
+            std::memset(dest + got * 8, 0, (avail - got) * 8);
+            underruns_.fetch_add(1);
+        }
+    } else {
+        std::memset(dest, 0, static_cast<size_t>(avail) * 8);
+        underruns_.fetch_add(1);
+    }
+    (void)render_->ReleaseBuffer(avail, 0);
+    framesWritten_ += avail;
+    return true;
+}
+
+double AudioRenderer::mediaTimeMs() const
+{
+    if (!running_ || !started_) return anchorPtsMs_.load();
+    UINT64 pos = 0, qpc = 0;
+    if (FAILED(clock_->GetPosition(&pos, &qpc)) || clockFrequency_ == 0) {
+        return anchorPtsMs_.load();
+    }
+    const double consumedMs = 1000.0 * static_cast<double>(pos - anchorPos_) /
+        static_cast<double>(clockFrequency_);
+    return anchorPtsMs_.load() + consumedMs;
+}
+
+void AudioRenderer::stopAndReset()
+{
+    if (!running_) return;
+    (void)client_->Stop();
+    (void)client_->Reset();
+    started_ = false;
+    framesWritten_ = 0;
+}
+
+bool AudioRenderer::started() const { return started_; }
+uint64_t AudioRenderer::underruns() const { return underruns_.load(); }
+uint64_t AudioRenderer::framesWritten() const { return framesWritten_; }
+
+void AudioRenderer::shutdown()
+{
+    if (!running_) return;
+    (void)client_->Stop();
+    (void)client_->Reset();
+    #define REL(x) if (x) { x->Release(); x = nullptr; }
+    REL(clock_); REL(render_); REL(client_); REL(device_); REL(enum_);
+    #undef REL
+    if (event_ != nullptr) { CloseHandle(event_); event_ = nullptr; }
+    running_ = false;
+    if (comInited_) CoUninitialize();
+}
+
+void AudioPipeline::runOnAudioThread(AudioRenderer* renderer)
+{
+    const auto t0 = std::chrono::steady_clock::now();
+    // Initial prefill (open case).
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        seekRequested_ = false;
+        discardUntilPtsMs_ = -1.0;
+    }
+    decodeBlock();
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (segments_.empty()) {
+            veyra::log::warn("audio", "no audio decoded at startup");
+        }
+    }
+    const double firstPts = headPtsMs();
+    if (renderer != nullptr && firstPts >= 0.0) {
+        renderer->startAnchored(firstPts);
+    }
+    lastPrefillMs_.store(std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - t0).count() * 1000.0);
+    veyra::log::info("audio", std::format("startup prefill done in {:.0f}ms firstPtsMs={:.1f} bufferedMs={:.0f}",
+        lastPrefillMs_.load(), firstPts, bufferedMs()));
+
+    while (!stopFlag_.load()) {
+        // Seek request? Atomic re-sequence.
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            if (seekRequested_) {
+                seekRequested_ = false;
+                const double target = seekTargetMs_;
+                seekCount_.fetch_add(1);
+                lock.unlock();
+                if (renderer != nullptr) renderer->stopAndReset();
+                {
+                    std::lock_guard<std::mutex> l2(mutex_);
+                    ring_.clear();
+                    ringFrames_ = 0;
+                    segments_.clear();
+                    if (havePacket_) { av_packet_unref(packet_); havePacket_ = false; }
+                    avcodec_flush_buffers(codecCtx_);
+                    const int64_t tbTarget = static_cast<int64_t>(
+                        target * stream_->time_base.den / 1000 / stream_->time_base.num);
+                    avformat_seek_file(fmt_, streamIndex_, INT64_MIN, tbTarget, INT64_MAX, 0);
+                    demuxEof_ = false;
+                    discardUntilPtsMs_ = target;
+                }
+                decodeBlock();  // drops pts < target, fills to high watermark
+                double startPts = headPtsMs();
+                if (startPts < 0.0) startPts = target;
+                firstPtsAfterSeek_.store(startPts);
+                if (renderer != nullptr) renderer->startAnchored(startPts);
+                {
+                    std::lock_guard<std::mutex> l2(mutex_);
+                    discardUntilPtsMs_ = -1.0;
+                    seekDone_ = true;
+                }
+                seekDoneCv_.notify_all();
+                veyra::log::info("audio", std::format("seek done targetMs={:.0f} startPtsMs={:.1f} bufferedMs={:.0f}",
+                    target, startPts, bufferedMs()));
+                continue;
+            }
+        }
+        // Regular cycle: pump the endpoint, then top up below high watermark.
+        if (renderer != nullptr) {
+            double firstPts = -1.0;
+            if (!renderer->pumpOnce(*this, &firstPts)) {
+                veyra::log::error("audio", "pumpOnce failed");
+                break;
+            }
+        }
+        if (bufferedMs() < kAudioHighWatermarkMs) {
+            decodeBlock();
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        if (demuxEof_ && bufferedMs() < 1.0) {
+            // End of media: park (engine loops the clip via its own seek).
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+}
+
+void AudioPipeline::startThread(AudioRenderer* renderer)
+{
+    thread_ = std::thread(&AudioPipeline::runOnAudioThread, this, renderer);
+}
+
+} // namespace veyra::sink

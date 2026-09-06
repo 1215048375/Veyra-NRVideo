@@ -944,6 +944,31 @@ C staged teardown 定位崩溃=swapChain_.Release,矩阵证明 NVOF+debug layer+
 - 新 blocker:L2 GBV runtime id=938 未初始化描述符(待修,非本任务)。
 - 未执行:query-heap GPU timestamp(用户明令禁止);Reviewer/checkpoint(未授权)。
 
+## Cycle 034 — R3.1a veyra_sinks：WASAPI 音频迁出 player_probe（2026-09-06 Goal）
+
+### Before
+
+- Phase: 5（重开，in_progress）
+- 唯一任务: 把 player_probe 中自包含的 AudioPipeline（FFmpeg demux/decode + 水位环形缓冲）与 AudioRenderer（事件驱动 WASAPI + PTS 锚定主时钟）整体迁入新产品库 `veyra_sinks`（include/veyra/sink/WasapiAudioSink.h + src/sink/WasapiAudioSink.cpp，namespace veyra::sink，代码逐字保留已验证语义）；player_probe 删除 172-686 行改为 include + 链接；CMake 在 FFmpeg guard 内建立 veyra_sinks；phase5 gate 增加 product:veyra_sinks-target 检查（只加不减）。
+- 可证伪假设: 若迁移引入行为差异，player probe 冒烟的音频计数/exit code 将变化；预期 exit 12（drift FAIL）不变、audioUnderruns/overruns 与迁移前同量级。若 veyra_sinks 只是空壳，gate 新检查暴露。
+- 预计修改文件: include/veyra/sink/WasapiAudioSink.h、src/sink/WasapiAudioSink.cpp、tools/player_probe/main.cpp（删音频段+include）、CMakeLists.txt、scripts/gates/phase5.ps1（加检查）。
+- 快速检查命令: `build x64-debug/-release` → 0；`veyra_player_probe --duration-seconds 20` → exit 12 且 audio 字段存在；`phase5.ps1` → 仍 exit 1 但 product:veyra_sinks-target PASS。
+- 预期新增证据: 双配置构建 + player 冒烟音频计数不回归 + gate 新检查绿。
+
+### After
+
+- 实际修改: include/veyra/sink/WasapiAudioSink.h（AudioPipeline/AudioRenderer 产品头，FFmpeg 类型前置声明）、src/sink/WasapiAudioSink.cpp（实现逐字迁移 + packet_ 构造/析构与 startThread 出类定义）、tools/player_probe/main.cpp（删除 172-686 音频段 → include + `veyra::sink::` 限定，3641→3128 行）、CMakeLists.txt（FFmpeg guard 内 add_library(veyra_sinks) PUBLIC veyra_base/ole32/mmdevapi/avrt + PRIVATE FFMPEG；player_probe 链接 veyra_sinks）、scripts/gates/phase5.ps1（新增 product:veyra_sinks-target / veyra_sources-target / player-links-sinks 三项检查——只增不减；并修复 player-links 检查的跨 target 假阳性：原宽松正则会把任意位置的 veyra_pipeline 误判为 player_probe 链接）。
+- 实际命令与 exit code:
+  - `build x64-release` → 首两轮 exit 6（veyra_sinks 缺 FFMPEG_INCLUDE_DIRS；startThread 声明后缺类外定义）→ 修复后 **exit 0**；`build x64-debug` → exit 0。
+  - player probe 冒烟（r3a-player-175416，1080p 20s）→ **exit 12（drift FAIL 不变）**；mvecSource=nvof；**audioUnderruns=0 audioOverruns=0 audioSeekCount=11** — 音频语义迁移无回归。
+  - `phase5.ps1` → **exit 1，30/45**；product:veyra_sinks-target + player-links-sinks PASS；player-links-pipeline 诚实保持红（player_probe 尚未链接 veyra_pipeline——R3.2/R3.3 任务）。
+- 失败 fingerprint: build|link|6|include-dirs+missing-definition → 两处独立修复，第 1 轮关闭。
+- 是否有进展，依据: 是——WASAPI 音频（事件模式、PTS 锚定主时钟、原子 seek、有界环形）从 probe 私有代码变为产品库 `veyra_sinks` 真实成员，player_probe 3128 行，且运行行为无回归；gate 检查面扩大且更严格。
+- STATE/BACKLOG 更新: cycle.completed=34；nextAction → R3.1b veyra_guidance。
+- 下一唯一动作: R3.1b — 建立 `veyra_guidance`（ZeroGuidanceProvider、NvofGuidanceProvider 包装已验证的 NvOfSession、GuidanceValidator 骨架），真实成员非空壳；nvof_probe/player_probe 改为消费产品库。
+
+---
+
 ## Cycle 033 — R2.1 pipeline 数据契约迁移（2026-09-06 Goal）
 
 ### Before

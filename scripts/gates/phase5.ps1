@@ -92,12 +92,23 @@ if (Test-Path -LiteralPath $cmakePath -PathType Leaf) {
 }
 $hasPipelineTarget = ($cmakeText -match "add_library\s*\(\s*veyra_pipeline\b")
 $hasGuidanceTarget = ($cmakeText -match "add_library\s*\(\s*veyra_guidance\b")
+$hasSinksTarget = ($cmakeText -match "add_library\s*\(\s*veyra_sinks\b")
+$hasSourcesTarget = ($cmakeText -match "add_library\s*\(\s*veyra_sources\b")
 $hasRunnerTarget = ($cmakeText -match "veyra_quality_probe\b")
-$playerLinksPipeline = ($cmakeText -match "(?s)veyra_player_probe.*?veyra_pipeline") -or ($cmakeText -match "(?s)veyra_pipeline.*?veyra_player_probe")
+# Extract the veyra_player_probe target block so link checks stay scoped to
+# it (a loose whole-file regex would match across unrelated targets).
+$playerBlock = ""
+$playerMatch = [regex]::Match($cmakeText, "(?s)add_executable\(veyra_player_probe.*?(?=\r?\n\s*(?:add_executable|add_library|endif|# ---))")
+if ($playerMatch.Success) { $playerBlock = $playerMatch.Value }
+$playerLinksPipeline = ($playerBlock -match "target_link_libraries\s*\(\s*veyra_player_probe.*?veyra_pipeline") -or ($playerBlock -match "veyra_pipeline")
+$playerLinksSinks = ($playerBlock -match "target_link_libraries\s*\(\s*veyra_player_probe.*?veyra_sinks") -or ($playerBlock -match "veyra_sinks")
 Add-GateCheck "product:veyra_pipeline-target" $hasPipelineTarget "CMakeLists add_library(veyra_pipeline ...) present=$hasPipelineTarget"
 Add-GateCheck "product:veyra_guidance-target" $hasGuidanceTarget "CMakeLists add_library(veyra_guidance ...) present=$hasGuidanceTarget"
+Add-GateCheck "product:veyra_sinks-target" $hasSinksTarget "CMakeLists add_library(veyra_sinks ...) present=$hasSinksTarget"
+Add-GateCheck "product:veyra_sources-target" $hasSourcesTarget "CMakeLists add_library(veyra_sources ...) present=$hasSourcesTarget"
 Add-GateCheck "product:quality-runner-target" $hasRunnerTarget "CMakeLists references veyra_quality_probe present=$hasRunnerTarget"
 Add-GateCheck "product:player-links-pipeline" $playerLinksPipeline "player_probe links veyra_pipeline present=$playerLinksPipeline"
+Add-GateCheck "product:player-links-sinks" $playerLinksSinks "player_probe links veyra_sinks present=$playerLinksSinks"
 
 $enhanceGraphSrc = Join-Path $Root "src\pipeline\EnhanceGraph.cpp"
 $enhanceOk = $false

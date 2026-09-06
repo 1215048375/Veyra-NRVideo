@@ -306,6 +306,22 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_link_libraries(veyra_media_probe PRIVATE veyra_media veyra_gfx veyra_ngx veyra_parity psapi)
   add_dependencies(veyra_media_probe veyra_shader_yuv_to_rgb)
 
+  # veyra_sinks: product output sinks (Playbook R3). First member is the
+  # WASAPI audio sink extracted verbatim from player_probe; D3D12PresentSink
+  # currently lives in veyra_gfx and moves here when the migration completes.
+  add_library(veyra_sinks STATIC
+    src/sink/WasapiAudioSink.cpp
+  )
+  veyra_apply_warnings(veyra_sinks)
+  target_compile_options(veyra_sinks PRIVATE /WX-)
+  target_compile_features(veyra_sinks PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_sinks PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_include_directories(veyra_sinks PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_include_directories(veyra_sinks PRIVATE ${FFMPEG_INCLUDE_DIRS})
+  target_link_libraries(veyra_sinks PUBLIC veyra_base ole32 mmdevapi avrt)
+  target_link_libraries(veyra_sinks PRIVATE ${FFMPEG_LIBRARIES})
+
   # Phase 6 realtime engine probe: decode -> SR -> NR -> NVOF -> DLSSG -> present.
   if(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR AND EXISTS "${VEYRA_NVOF_SDK_ROOT}/NvOFInterface/nvOpticalFlowCommon.h")
     add_executable(veyra_player_probe
@@ -319,7 +335,7 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
       UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
       VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
     target_link_libraries(veyra_player_probe PRIVATE
-      veyra_media veyra_gfx veyra_ngx veyra_nvof veyra_parity
+      veyra_media veyra_gfx veyra_ngx veyra_nvof veyra_parity veyra_sinks
       ${FFMPEG_LIBRARIES} psapi ole32 mmdevapi avrt)
     add_dependencies(veyra_player_probe
       veyra_shader_yuv_to_rgb veyra_shader_parity_encode
