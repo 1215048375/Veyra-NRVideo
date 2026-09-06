@@ -37,6 +37,7 @@ enum class SourceReadStatus : uint8_t {
     Frame = 0,  // packet metadata + decoded frame valid
     Eos,        // source fully drained
     Error,
+    Waiting,   // live capture has no new sample yet; poll cancellation then retry
 };
 
 class IFrameSource {

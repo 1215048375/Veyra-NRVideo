@@ -157,7 +157,7 @@ foreach ($requiredFile in $requiredFiles) {
 }
 
 $controlManifestPath = Join-Path $root "loop\CONTROL_HASHES.json"
-$expectedControlManifestHash = "45A54E674D32A8055B338C0AE9B77F4A6440D7BC08D4BCF00D27CE8E01D556BF"
+$expectedControlManifestHash = "26559334D3A520682A42B20FD8127F3F297E70686CF139DC9325087047FDC8FC"
 if (Test-Path -LiteralPath $controlManifestPath -PathType Leaf) {
     $actualControlManifestHash = (Get-FileHash -LiteralPath $controlManifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
     $manifestHashValid = $actualControlManifestHash -eq $expectedControlManifestHash
@@ -174,6 +174,7 @@ if (Test-Path -LiteralPath $controlManifestPath -PathType Leaf) {
                 "VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md",
                 "VEYRA_PRODUCT_SPEC_V1.md",
                 "docs/COMPETITOR_AUDIT_2026-09-03.md",
+                "docs/ACTIVE_DELIVERY_PLAN.md",
                 "loop/GOAL_PROMPT.md",
                 "loop/LOOP_ENGINE.md",
                 "loop/REVIEW_PROMPT.md",
@@ -188,7 +189,7 @@ if (Test-Path -LiteralPath $controlManifestPath -PathType Leaf) {
                     ([string]$_.sha256 -match '^[0-9A-Fa-f]{64}$')
             }).Count -eq $manifestEntries.Count
             $manifestSchemaValid = ($controlManifest.schemaVersion -eq 1) -and
-                ($manifestEntries.Count -eq 10) -and
+                ($manifestEntries.Count -eq 11) -and
                 $validManifestEntries -and
                 (($actualControlPaths -join "|") -ceq ($expectedControlPaths -join "|"))
             Add-Check "control-manifest-schema" $manifestSchemaValid "schemaVersion=$($controlManifest.schemaVersion) files=$($manifestEntries.Count) exactProtectedSet=$((($actualControlPaths -join '|') -ceq ($expectedControlPaths -join '|')))"

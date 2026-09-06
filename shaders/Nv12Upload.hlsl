@@ -27,14 +27,15 @@ void main(uint3 globalId : SV_DispatchThreadID)
     // Luma plane: one thread per luma pixel.
     if (globalId.x < sourceWidth && globalId.y < sourceHeight) {
         const uint offset = lumaByteOffset + globalId.y * lumaRowPitch + globalId.x;
-        lumaOut[globalId.xy] = asfloat(0x00000000 | nv12Bytes.Load(offset));
+        const uint word = nv12Bytes.Load(offset & ~3u);
+        lumaOut[globalId.xy] = float((word >> ((offset & 3u) * 8u)) & 255u) / 255.0;
     }
     // Chroma plane: threads in the top-left quadrant cover chroma pixels.
     const uint chromaW = sourceWidth / 2;
     const uint chromaH = sourceHeight / 2;
     if (globalId.x < chromaW && globalId.y < chromaH) {
         const uint offset = chromaByteOffset + globalId.y * chromaRowPitch + globalId.x * 2;
-        const uint two = nv12Bytes.Load(offset);
+        const uint two = nv12Bytes.Load(offset & ~3u) >> ((offset & 3u) * 8u);
         // R8_UNORM byte -> normalized float: divide by 255.
         const float u = float(two & 0xFF) / 255.0;
         const float v = float((two >> 8) & 0xFF) / 255.0;

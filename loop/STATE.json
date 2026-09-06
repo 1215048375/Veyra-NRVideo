@@ -2,11 +2,11 @@
   "schemaVersion": 1,
   "engineVersion": "veyra-loop-v1",
   "objective": "Ship Launch V1, not an MVP: one shared engine, native 4K SDR capture/player/export, Feature 18, DLSSG 2X, bounded live lookahead, D3D12 NVENC H.264/HEVC, and product recovery/diagnostics.",
-  "status": "ready",
+  "status": "needs_review",
   "phase": {
     "id": 5,
     "name": "Unified guidance and quality core",
-    "state": "in_progress",
+    "state": "review_passed",
     "gate": "phase5"
   },
   "phases": [
@@ -53,9 +53,9 @@
     {
       "id": 5,
       "name": "Unified guidance and quality core",
-      "status": "in_progress",
-      "gateEvidence": null,
-      "reviewEvidence": null,
+      "status": "review_passed",
+      "gateEvidence": "logs/delivery/d28879b01b5c44dd86cad33d6f386d90/result.json (consolidated current contract)",
+      "reviewEvidence": "docs/REVIEW_F6.md: independent final PASS; 9be0614da5d642e394a35c71d80f6207, 40.31s",
       "commit": null
     },
     {
@@ -76,36 +76,39 @@
     }
   ],
   "cycle": {
-    "completed": 40,
+    "completed": 48,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "Full phase5 gate executed end-to-end (run-id d61ba1ff88de401bb530b20953f6a35f): quality matrix green (run-x5, extents, nr-per-frame, nvof-nonzero 115200, confidence, gpu-timing, hash-binding, depth honest-fallback), BOTH 30-min endurance runs completed with exit 0 (1080p60: 1802s native 60112 frames; 4K60: 1802s native 66307 frames; VRAM headroom 11GB, wsGrowth<512MiB, queue<=4, deviceRemoved=0 on both). REMAINING RED: endurance-throughput (60112/66307 < 97000 - the runner serializes at ~33-37fps instead of 60fps real-time; needs pipelining, not threshold relief) and quality:reset-contract (sceneCut=0, R4.5). Gate script had a PS argument-parsing crash at the resources check (fixed, AST-clean); the crashed run's exit 0 was invalid - honest verdict remains gate NOT passed.",
+  "currentTask": "Independent final review passed; creating local checkpoint and handing off actual Veyra app.",
   "lastGate": {
-    "name": "phase5",
-    "status": "invalidated_requires_rebuild",
-    "exitCode": 1,
-    "evidence": "2026-09-06 audit: old gate accepted manifest-only depth, used a second 1080p endurance run for the 4K slot, and did not prove that the product EnhanceGraph executed the GPU chain. Historical artifacts remain component evidence only."
+    "name": "phase5 consolidated delivery",
+    "status": "passed",
+    "exitCode": 0,
+    "evidence": "logs/delivery/9be0614da5d642e394a35c71d80f6207/result.json"
   },
   "lastFailureFingerprint": null,
   "failureLedger": [],
   "baselineCommit": "2086282478ae5d1e07e8162d47148633b59882fe",
   "lastGoodCommit": "8cdf1ea2f9b0bb1331f9219a2305cef5efd3c8d8",
-  "openP0P1Findings": [
-    "P0: scripts/gates/phase5.ps1 can pass without a real depth provider and without native-4K endurance; rebuild the gate and prove it fails before repairing implementation.",
-    "P0: src/core/EnhanceGraph.cpp is metrics-only while the real GPU chain lives in harness/player_probe; move the chain into a shared product library.",
-    "P1: current Phase 6 player runs fail driftP95 (about 2.8 seconds vs 50 ms) and L2 GBV reports descriptor-uninitialized errors."
-  ],
+  "openP0P1Findings": [],
   "blockers": [
-    "Product-grade Phase 5 is reopened: the gate and shared EnhanceGraph must be rebuilt according to Playbook R1-R5 before Phase 6 can unlock.",
-    "L2 (GBV) runtime InfoQueue reports 1700+ ERROR id=938 GPU_BASED_VALIDATION_DESCRIPTOR_UNINITIALIZED (Dispatch accesses uninitialized descriptor-table slots). Fail-closed works (verdict=FAIL); the engine must initialize every slot covered by bound descriptor tables before L2 can go green. Teardown/final phases are already 0-error under GBV.",
-    "User accepted the Video Codec SDK licensing direction on 2026-09-03, but third_party_local/nvidia/Video_Codec_SDK_13.1.0 is absent; official portal acceptance/download and package verification are still required before P7 native D3D12 NVENC integration.",
-    "A real DirectShow/UVC 4K60 SDR capture device, HDMI audio, and 4K60 source signal are required before P7 capture gate can pass.",
-    "Public distribution rights for the experimental DLSSNR runtime and all bundled NVIDIA/model/FFmpeg assets are unresolved; a local release candidate is allowed, public launch is blocked."
+    "Capture hardware absent: awaiting user capture test.",
+    "Public proprietary runtime distribution rights unresolved; local delivery only."
   ],
-  "nextAction": "Phase 5 cannot pass yet: (1) pipeline the quality runner to >=60fps (remove per-frame serialization; the graph already uses the 4-slot ring - the runner's per-frame loop and serialized stage timing are the bottleneck), (2) R4.5 scene-cut detection/counting for reset-contract, (3) R4.1 wire NVOF flow into NR MVec, (4) rerun phase5 gate (script fixed) to exit 1 with ONLY known gaps or exit 0, then independent Reviewer per protocol. Phase 5 stays in_progress; no phase checkpoint.",
-  "updatedAt": "2026-09-06T21:05:00+08:00"
+  "nextAction": "Local checkpoint only; user performs physical capture acceptance. No automatic distribution or expansion.",
+  "updatedAt": "2026-09-06T17:01:46.004Z",
+  "deliveryPlan": "docs/ACTIVE_DELIVERY_PLAN.md",
+  "captureAcceptance": "awaiting_user_capture_test",
+  "testInvocationLimitSeconds": 300,
+  "currentEvidence": [
+    "logs/f6-diag.json: diagnostic native1080 12frames exit0 (prior to statistics stride correction rebuild)",
+    "logs/f4-encode-1080.mp4: actual D3D12 NVENC H264+audio",
+    "logs/f4-encode-4k-hevc-fg.mp4: actual D3D12 NVENC HEVC 4K120+audio 39frames",
+    "preflight 71 checks exit0"
+  ],
+  "reviewBaseCommit": "6f0ebaa687e3966d989bf138c86b6882380f20fb"
 }

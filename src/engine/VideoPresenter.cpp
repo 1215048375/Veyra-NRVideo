@@ -1,0 +1,42 @@
+#include "veyra/engine/VideoPresenter.h"
+#include "veyra/pipeline/EnhanceGraph.h"
+#include "veyra/gfx/D3D12DeviceContext.h"
+#include "veyra/gfx/CommandSlotRing.h"
+namespace veyra::engine {
+bool VideoPresenter::open(gfx::D3D12DeviceContext& ctx,HWND window,pipeline::EnhanceGraph& graph) {
+    window_=window;RECT rc{};GetClientRect(window,&rc);
+    gfx::PresentSink::Desc d;d.targetWindow=window;d.width=std::max(1L,rc.right);d.height=std::max(1L,rc.bottom);d.vsync=false;
+    Status st=Status::Ok;if(!sink_.initialize(ctx.device(),ctx.directQueue(),d,st))return false;
+    std::vector<uint8_t> vs,ps;
+    if(!pipeline::loadShaderBytes("PresentBlit_vs.dxil",vs)||!pipeline::loadShaderBytes("PresentBlit_ps.dxil",ps)||!pass_.create(ctx.device(),vs,ps,4))return false;
+    D3D12_DESCRIPTOR_HEAP_DESC hd{};hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;hd.NumDescriptors=3;
+    if(FAILED(ctx.device()->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&rtvs_))))return false;
+    inc_=ctx.device()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);refresh(ctx.device());
+    for(unsigned i=0;i<4;++i)pipeline::makeSrv(ctx.device(),i<2?graph.videoFrameResource(i):graph.generatedFrameResource(i-2),DXGI_FORMAT_R8G8B8A8_UNORM,{pass_.heap->GetCPUDescriptorHandleForHeapStart().ptr+size_t(i)*pass_.increment});
+    return true;
+}
+void VideoPresenter::refresh(ID3D12Device* device){for(unsigned i=0;i<3;++i){Microsoft::WRL::ComPtr<ID3D12Resource> bb;if(SUCCEEDED(sink_.swapChain()->GetBuffer(i,IID_PPV_ARGS(&bb))))device->CreateRenderTargetView(bb.Get(),nullptr,{rtvs_->GetCPUDescriptorHandleForHeapStart().ptr+size_t(i)*inc_});}}
+bool VideoPresenter::present(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotRing& ring,pipeline::EnhanceGraph& graph,unsigned slot,bool generated) {
+    RECT rc{};GetClientRect(window_,&rc);if(rc.right<1||rc.bottom<1)return true;
+    if(unsigned(rc.right)!=sink_.width()||unsigned(rc.bottom)!=sink_.height()) {if(!ring.drainQueue())return false;sink_.resize(rc.right,rc.bottom);refresh(ctx.device());}
+    Status st=Status::Ok;const auto commandSlot=ring.slotCount()-1;auto* list=ring.acquire(commandSlot,st);if(!list)return false;
+    auto* source=generated?graph.generatedFrameResource(slot):graph.videoFrameResource(slot);auto* bb=sink_.currentBackBuffer();if(!bb)return false;
+    D3D12_RESOURCE_BARRIER barriers[2]{};
+    for(auto& b:barriers){b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.StateBefore=D3D12_RESOURCE_STATE_COMMON;b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;}
+    barriers[0].Transition.pResource=source;barriers[0].Transition.StateAfter=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    barriers[1].Transition.pResource=bb;barriers[1].Transition.StateAfter=D3D12_RESOURCE_STATE_RENDER_TARGET;list->ResourceBarrier(2,barriers);
+    D3D12_CPU_DESCRIPTOR_HANDLE rtv{rtvs_->GetCPUDescriptorHandleForHeapStart().ptr+size_t(sink_.swapChain()->GetCurrentBackBufferIndex())*inc_};
+    const float black[4]={0,0,0,1};list->ClearRenderTargetView(rtv,black,0,nullptr);list->OMSetRenderTargets(1,&rtv,FALSE,nullptr);
+    const float scale=std::min(float(sink_.bufferWidth())/graph.workWidth(),float(sink_.bufferHeight())/graph.workHeight());
+    const float w=graph.workWidth()*scale,h=graph.workHeight()*scale;
+    D3D12_VIEWPORT viewport{(sink_.bufferWidth()-w)*0.5f,(sink_.bufferHeight()-h)*0.5f,w,h,0,1};
+    D3D12_RECT rect{0,0,LONG(sink_.bufferWidth()),LONG(sink_.bufferHeight())};list->RSSetViewports(1,&viewport);list->RSSetScissorRects(1,&rect);
+    ID3D12DescriptorHeap* heaps[]={pass_.heap.Get()};list->SetDescriptorHeaps(1,heaps);list->SetGraphicsRootSignature(pass_.rootSig.Get());list->SetPipelineState(pass_.pso.Get());
+    float dims[8]={float(graph.workWidth()),float(graph.workHeight()),0,0,float(sink_.bufferWidth()),float(sink_.bufferHeight()),0,0};list->SetGraphicsRoot32BitConstants(0,8,dims,0);
+    list->SetGraphicsRootDescriptorTable(1,{pass_.heap->GetGPUDescriptorHandleForHeapStart().ptr+size_t(slot+(generated?2:0))*pass_.increment});
+    list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);list->DrawInstanced(3,1,0,0);
+    for(auto& b:barriers)std::swap(b.Transition.StateBefore,b.Transition.StateAfter);list->ResourceBarrier(2,barriers);
+    return ring.submitAndSignal(commandSlot)&&sink_.present(st);
+}
+void VideoPresenter::close(){rtvs_.Reset();pass_={};sink_.shutdown();}
+}

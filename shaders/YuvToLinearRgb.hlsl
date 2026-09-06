@@ -25,8 +25,8 @@ float ExpandLimited(float c)
 float3 YuvToRgb(float y, float2 uv)
 {
     float yy = colorParams0.x > 0.5 ? ExpandLimited(y) : y;
-    float uu = (colorParams0.x > 0.5 ? ExpandLimited(uv.x) : uv.x) - 0.5;
-    float vv = (colorParams0.x > 0.5 ? ExpandLimited(uv.y) : uv.y) - 0.5;
+    float uu = (uv.x - 128.0/255.0) * (colorParams0.x > 0.5 ? 255.0/224.0 : 1.0);
+    float vv = (uv.y - 128.0/255.0) * (colorParams0.x > 0.5 ? 255.0/224.0 : 1.0);
 
     if (colorParams0.y > 0.5) {
         // BT.709.
@@ -57,8 +57,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     const float2 uv = chromaPlane[uint2(dispatchThreadId.x / 2, dispatchThreadId.y / 2)];
     float3 rgb = YuvToRgb(y, uv);
     rgb = saturate(rgb);
-    // The stream is SDR with sRGB transfer; decode to linear working space.
-    if (colorParams0.z > 0.5) {
+    if (colorParams0.z > 1.5) {
+        rgb = float3(rgb.r < 0.081 ? rgb.r / 4.5 : pow((rgb.r + 0.099) / 1.099, 1.0/0.45),
+                     rgb.g < 0.081 ? rgb.g / 4.5 : pow((rgb.g + 0.099) / 1.099, 1.0/0.45),
+                     rgb.b < 0.081 ? rgb.b / 4.5 : pow((rgb.b + 0.099) / 1.099, 1.0/0.45));
+    } else if (colorParams0.z > 0.5) {
         rgb = float3(SrgbDecode(rgb.r), SrgbDecode(rgb.g), SrgbDecode(rgb.b));
     }
     linearRgb[dispatchThreadId.xy] = float4(rgb, 1.0);

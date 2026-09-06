@@ -1,5 +1,27 @@
 # Veyra Loop Journal
 
+## Cycle 48 — independent review and local handoff
+
+Reviewer initial FAIL found3 P1: realtime affected still-image size; NVENC cancel callback outlived block-local captures; second audio source read failure silently dropped audio. Fixed !isImage, scoped EncoderCloser before callback captures die, fail-closed audio inspection. Added real4K image and cancel regression to short gate. Also Play after Stop/EOF now reopens source. Build exit0. Reviewer rerun preflight/phase5=0/0, PASS, logs/delivery/9be0614da5d642e394a35c71d80f6207/result.json,40.31s; cancel43 submitted NVENC pictures/exit3/partial only. Code frozen after PASS. See docs/REVIEW_F6.md. Preserve user-deleted test clip; stage only implementation/document files, local checkpoint only, no package/push.
+
+## Cycles 43–46 — product delivery implementation (2026-09-07)
+
+Implemented shared engine/controller/borrowed-window presenter, actual Win32 app, WIC PNG/JPEG, D3D12 NVENC H264/HEVC and MP4 audio remux, DirectShow capture device/format/audio UI plus bounded mailbox. No physical capture test. Actual short exports: logs/f4-encode-1080.mp4 (30 frames H264/audio), logs/f4-encode-4k-hevc-fg.mp4 (39 frames HEVC 4K120/audio), decode-back exit0. GUI smoke logs/f3-app.* exit0. Earlier NVENC initialization failed with status8 until required bufferFormat=NV12 was set; failed output is not acceptance evidence. One accidentally launched stale binary after a failed build was stopped by exact PID; no result from that process counts.
+
+F6 next: short combined software gate, UI seek/pause and audio format safety, WIC orientation, real GPU query metrics, independent read-only final review. Preflight 71/71 exit0. logs/f6-diag.json: 12 native1080 NR / 11 NVOF, 0 diagnostic errors, normal exit0; statistics sampler stride correction still needs rebuilt run. No 30-minute retests; no stage pass asserted.
+
+## Cycle 41 — F0/F1 direct takeover (2026-09-06)
+
+F1 Release build exit0; 10-frame off and 60-frame NR short runs exit0; WIC decode-back PNGs visually inspected, nonblack/source pattern retained. logs/f1-off-picture.*, logs/f1-nr-picture.*. NR60/NVOF59 are real calls but NVOF still not fed to NR. CPU timing renamed, unmeasured metrics null, actual working extent and in-run VRAM fixed.
+
+## Cycle 42 — F2 guidance order / bounded ownership
+
+Hypothesis: flow must precede NR using original post-SR color; old list indices overlap across frames and upload parity lacks a fence. Change shared graph only, sequential ring allocation and parity reuse ownership; first/reset suppress history; FG still follows enhanced color. Verify build + short video, then product controller. No frame-rate claims until real timestamps.
+
+User authorized documentation rebaseline, <=300s tests and personal capture acceptance. Preserve deleted tracked clip. Hypothesis: broken NV12 descriptor/upload shader invalidates old quality claims; repair byte ingestion/chroma extent first. Files: shared graph, Nv12Upload, quality runner. Narrow proof: Release build + short off/NR video run with diagnostic output; no 30-minute runs. Next F2/F3 per ACTIVE_DELIVERY_PLAN. No runtime success claimed yet.
+
+> 2026-09-06 用户授权接管修订：当前推进、五分钟短测与用户实卡验收以 `../docs/ACTIVE_DELIVERY_PLAN.md` 为准，取代下文旧的严格串行施工/30分钟测试/未接设备阻塞全部交付规则。历史记录不是当前通过证明。
+
 本文件记录推理的可审计摘要和实际命令，不记录虚构结果。大日志放 logs/，这里只写路径与摘要。
 
 ## Cycle 000 — Loop bootstrap

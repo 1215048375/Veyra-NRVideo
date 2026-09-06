@@ -7,6 +7,7 @@
 #include "veyra/pipeline/EnhanceGraph.h"
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -36,6 +37,7 @@ namespace veyra::pipeline {
 namespace {
 
 constexpr int64_t usPerSecond = 1000000;
+float uintBits(uint32_t v) { return std::bit_cast<float>(v); }
 
 } // namespace
 
@@ -47,8 +49,7 @@ EnhanceGraph::EnhanceGraph(gfx::D3D12DeviceContext& context, gfx::CommandSlotRin
 
 EnhanceGraph::~EnhanceGraph()
 {
-    // shutdown() must have run (features/NVOF/NGX need ordered teardown while
-    // the device is alive); ComPtr releases afterwards are then no-ops.
+    shutdown();
 }
 
 // ---------------------------------------------------------------------------
@@ -105,7 +106,7 @@ bool EnhanceGraph::createResources()
     upZeroDepth_ = makeUploadBuffer(context_.device(), dPitch_ * workH_);
     upZeroMotion_ = makeUploadBuffer(context_.device(), dPitch_ * workH_);
     lumaTex_ = makeTexture(context_.device(), srcW_, srcH_, DXGI_FORMAT_R8_UNORM, true);
-    chromaTex_ = makeTexture(context_.device(), srcW_, srcH_ / 2, DXGI_FORMAT_R8G8_UNORM, true);
+    chromaTex_ = makeTexture(context_.device(), srcW_ / 2, srcH_ / 2, DXGI_FORMAT_R8G8_UNORM, true);
     srcRgba_ = makeTexture(context_.device(), srcW_, srcH_, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
     workRgba_ = makeTexture(context_.device(), workW_, workH_, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
     proxyTex_ = makeTexture(context_.device(), workW_, workH_, DXGI_FORMAT_R8G8B8A8_UNORM, true);
@@ -417,10 +418,10 @@ bool EnhanceGraph::initNgxFeatures()
 bool EnhanceGraph::createComputePasses()
 {
     std::vector<uint8_t> cs;
-    if (!yuvPass_.loadShader("YuvToLinearRgb.dxil", cs) || !yuvPass_.create(context_.device(), cs, 8)) return false;
-    if (!encPass_.loadShader("ParityEncode.dxil", cs) || !encPass_.create(context_.device(), cs, 8)) return false;
+    if (!yuvPass_.loadShader("YuvToLinearRgb.dxil", cs) || !yuvPass_.create(context_.device(), cs, 8, 2, 1)) return false;
+    if (!encPass_.loadShader("ParityEncode.dxil", cs) || !encPass_.create(context_.device(), cs, 8, 1, 1)) return false;
     if (!decPass_.loadShader("ParityDecode.dxil", cs) || !decPass_.create(context_.device(), cs, 8)) return false;
-    if (!blitPass_.loadShader("ScaleBlit.dxil", cs) || !blitPass_.create(context_.device(), cs, 16)) return false;
+    if (!blitPass_.loadShader("ScaleBlit.dxil", cs) || !blitPass_.create(context_.device(), cs, 16, 1, 1)) return false;
     // Nv12Upload stays: frame-time CopyTextureRegion is poisoned by the
     // injected layer (SEH in NGX evaluate, r33-final3 evidence); the compute
     // upload is the proven frame-path ingestion on this system.
@@ -468,7 +469,8 @@ bool EnhanceGraph::createViews()
         stager_.stageSrv(resource, &srv, pass.heap.Get(), slot);
     };
 
-    // STATIC DESCRIPTOR VIEWS (LAST: system constraint).
+    stagedSrv(workRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, blitPass_, 15);
+    // Immutable per-resource views.
     if (viewsTex) stagedSrv(lumaTex_.Get(), DXGI_FORMAT_R8_UNORM, yuvPass_, 0);
     if (viewsTex) stagedSrv(chromaTex_.Get(), DXGI_FORMAT_R8G8_UNORM, yuvPass_, 1);
     if (viewsUav) makeUav(context_.device(), srcRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, cpu(yuvPass_, 2));
@@ -480,11 +482,7 @@ bool EnhanceGraph::createViews()
     if (viewsUav) makeUav(context_.device(), finalRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, cpu(decPass_, 3));
     if (viewsUav) makeUav(context_.device(), lumaTex_.Get(), DXGI_FORMAT_R8_UNORM, cpu(uploadPass_, 2));
     if (viewsUav) makeUav(context_.device(), chromaTex_.Get(), DXGI_FORMAT_R8G8_UNORM, cpu(uploadPass_, 3));
-    // NOTE: uploadPass RAW buffer SRV slots 0/1 remain uninitialized BY
-    // DESIGN on this system: creating them trips the injected layer (device
-    // removal + blocked NVOF, r33b-views evidence). The dispatch consumes
-    // them anyway (driver-tolerated); GBV flags them as id=938 - the R6.1
-    // residual with a narrower known fix (pre-NGX creation, untested).
+    // Software NV12 ingestion uses plane copies; no raw-SRV dispatch.
     // Blit pass layout (all static; per-use offsets chosen at bind time):
     //  0: srcRgba SRV        1: workRgba UAV      (SR bypass / NR-off blit)
     //  2: finalRgba SRV      3/4: videoFrame UAV  (section 5)
@@ -494,7 +492,7 @@ bool EnhanceGraph::createViews()
     // 13/14: genTex SRV (slot 2)
     if (viewsTex) stagedSrv(srcRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, blitPass_, 0);
     if (viewsUav) makeUav(context_.device(), workRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, cpu(blitPass_, 1));
-    if (viewsTex) stagedSrv(finalRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, blitPass_, 2);
+    if (viewsTex) stagedSrv(nrEnabled_ ? finalRgba_.Get() : workRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, blitPass_, 2);
     if (viewsUav) makeUav(context_.device(), videoFrame_[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, cpu(blitPass_, 3));
     if (viewsUav) makeUav(context_.device(), videoFrame_[1].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, cpu(blitPass_, 4));
     if (viewsTex) stagedSrv(nvofInB_.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, blitPass_, 5);
@@ -548,9 +546,11 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     out = FrameOutputs{};
     out.ptsMs = ptsMs;
     static const bool graphOff = GetEnvironmentVariableW(L"VEYRA_GRAPH_OFF", nullptr, 0) != 0;
-    if (frame->pts == AV_NOPTS_VALUE || frame->pts < 0) {
-        return true; // no timestamp: skip this frame entirely
+    if (!frame || !initialized_ || !std::isfinite(ptsMs)) return false;
+    if (frame->color_trc == AVCOL_TRC_SMPTE2084 || frame->color_trc == AVCOL_TRC_ARIB_STD_B67) {
+        veyra::log::error("graph", "HDR input is unsupported by the V1 SDR pipeline"); return false;
     }
+    if (reset) { prevValid_ = false; scene_.reset(); previousLuma_.clear(); }
 
     const uint32_t parity = static_cast<uint32_t>(realFrameIndex_ % 2);
     if (graphOff) {
@@ -562,7 +562,8 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         out.passthrough = true;
         return true;
     }
-    const uint32_t slot = static_cast<uint32_t>(realFrameIndex_ % 4);
+    uint32_t slot = nextListSlot_++ % ring_.slotCount();
+    if (uploadFences_[parity] && !context_.waitForFenceValue(uploadFences_[parity])) return false;
     Status st = Status::Ok;
 
     // 1. Source NV12: D3D12VA texture directly (GPU) or CPU upload.
@@ -633,25 +634,38 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             frame->width, frame->height, AV_PIX_FMT_NV12, SWS_POINT,
             nullptr, nullptr, nullptr);
         if (nv12Ctx_ == nullptr) { veyra::log::error("graph", "sws"); return false; }
+        const int colorSpace=(frame->colorspace==AVCOL_SPC_BT470BG||frame->colorspace==AVCOL_SPC_SMPTE170M)?SWS_CS_ITU601:SWS_CS_ITU709;
+        const int* coefficients=sws_getCoefficients(colorSpace);
+        const int full=frame->color_range==AVCOL_RANGE_JPEG?1:0;
+        if(sws_setColorspaceDetails(nv12Ctx_,coefficients,full,coefficients,full,0,1<<16,1<<16)<0)return false;
         uint8_t* planes[2] = { nv12Buf_.data(), nv12Buf_.data() + lumaSize_ };
         const int strides[2] = { static_cast<int>(lumaPitch_), static_cast<int>(chromaPitch_) };
         sws_scale(nv12Ctx_, frame->data, frame->linesize, 0, frame->height, planes, strides);
+        std::vector<uint8_t> sample;sample.reserve(64*36);std::vector<double> hist(256,0);double sad=0;
+        for(unsigned y=0;y<36;++y)for(unsigned x=0;x<64;++x){const uint8_t v=planes[0][size_t(y*srcH_/36)*lumaPitch_+x*srcW_/64];hist[v]+=1.0/(64*36);sample.push_back(v);}
+        if(previousLuma_.size()==sample.size())for(size_t i=0;i<sample.size();++i)sad+=std::abs(int(sample[i])-int(previousLuma_[i]))/(255.0*sample.size());
+        const auto analysis=scene_.analyze(realFrameIndex_,hist,sad,static_cast<uint64_t>(std::max(0.0,ptsMs)*1000));
+        if(analysis.isSceneCut||analysis.isCadenceBreak){reset=true;prevValid_=false;if(analysis.isSceneCut)++metrics_.sceneCutCount;}
+        previousLuma_=std::move(sample);
         for (uint32_t y = 0; y < srcH_; ++y)
             std::memcpy(mappedLuma_[parity] + y * lumaPitch_, planes[0] + y * lumaPitch_, srcW_);
         for (uint32_t y = 0; y < srcH_ / 2; ++y)
             std::memcpy(mappedChroma_[parity] + y * chromaPitch_, planes[1] + y * chromaPitch_, srcW_);
-        tracker_.transition(list, lumaTex_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        tracker_.transition(list, chromaTex_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        tracker_.transition(list, upLuma_[parity].Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        const float constants[8] = {
-            static_cast<float>(srcW_), static_cast<float>(srcH_),
-            static_cast<float>(lumaPitch_), static_cast<float>(chromaPitch_), 0, 0, 0, 0 };
-        uploadPass_.bind(list, constants,
-            gpuHandleOf(uploadPass_, parity).ptr, gpuHandleOf(uploadPass_, 2).ptr);
-        list->Dispatch((srcW_ + 31) / 32 * 2, (srcH_ + 31) / 32 * 2, 1);
-        tracker_.uavBarrier(list, lumaTex_.Get());
-        tracker_.uavBarrier(list, chromaTex_.Get());
-        tracker_.transition(list, upLuma_[parity].Get(), D3D12_RESOURCE_STATE_GENERIC_READ);
+        auto copyPlane = [&](ID3D12Resource* texture, ID3D12Resource* upload,
+                             DXGI_FORMAT format, UINT width, UINT height, UINT pitch) {
+            tracker_.transition(list, texture, D3D12_RESOURCE_STATE_COPY_DEST);
+            D3D12_TEXTURE_COPY_LOCATION dst{}, src{};
+            dst.pResource = texture;
+            dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            src.pResource = upload;
+            src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+            src.PlacedFootprint.Footprint = {format, width, height, 1, pitch};
+            list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+        };
+        copyPlane(lumaTex_.Get(), upLuma_[parity].Get(), DXGI_FORMAT_R8_UNORM,
+                  srcW_, srcH_, static_cast<UINT>(lumaPitch_));
+        copyPlane(chromaTex_.Get(), upChroma_[parity].Get(), DXGI_FORMAT_R8G8_UNORM,
+                  srcW_/2, srcH_/2, static_cast<UINT>(chromaPitch_));
         tracker_.transition(list, lumaTex_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         tracker_.transition(list, chromaTex_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     }
@@ -660,8 +674,10 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     // 2. YUV -> RGBA16F.
     tracker_.transition(list, srcRgba_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     {
-        const float constants[8] = { 1.0f, 1.0f, 1.0f, 0.0f,
-            static_cast<float>(srcW_), static_cast<float>(srcH_), 0.0f, 0.0f };
+        const float constants[8] = { frame->color_range == AVCOL_RANGE_JPEG ? 0.0f : 1.0f,
+            (frame->colorspace == AVCOL_SPC_BT470BG || frame->colorspace == AVCOL_SPC_SMPTE170M) ? 0.0f : 1.0f,
+            (frame->color_trc == AVCOL_TRC_BT709 || frame->color_trc == AVCOL_TRC_SMPTE170M) ? 2.0f : 1.0f, 0.0f,
+            uintBits(srcW_), uintBits(srcH_), 0.0f, 0.0f };
         yuvPass_.bind(list, constants, gpuHandleOf(yuvPass_, 0).ptr, gpuHandleOf(yuvPass_, 2).ptr);
         list->Dispatch((srcW_ + 15) / 16, (srcH_ + 15) / 16, 1);
     }
@@ -673,6 +689,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     if (desc_.stageMark) desc_.stageMark("yuv");
 
     // 3. SR into workRgba (or 1:1 blit bypass).
+    if(reset)++metrics_.resetCount;
     if (srEnabled_ && srBackend_ && srBackend_->created()) {
         tracker_.transition(list, workRgba_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         ngx::DlssSrBackend::EvalDesc ed{};
@@ -691,8 +708,8 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     } else {
         tracker_.transition(list, workRgba_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         const float constants[8] = {
-            static_cast<float>(srcW_), static_cast<float>(srcH_),
-            static_cast<float>(workW_), static_cast<float>(workH_), 0, 0, 0, 0 };
+            uintBits(srcW_), uintBits(srcH_),
+            uintBits(workW_), uintBits(workH_), 0, 0, 0, 0 };
         blitPass_.bind(list, constants, gpuHandleOf(blitPass_, 0).ptr, gpuHandleOf(blitPass_, 1).ptr);
         list->Dispatch((workW_ + 15) / 16, (workH_ + 15) / 16, 1);
         tracker_.uavBarrier(list, workRgba_.Get());
@@ -700,11 +717,58 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     }
     if (desc_.stageMark) desc_.stageMark("sr");
 
+
+    // Guidance from original post-SR color BEFORE NR. Queue waits are GPU-side.
+    bool haveFlow = false;
+    const bool runMotion = nvofStandalone_ || fgEnabled_;
+    if (runMotion && nvof_ && nvof_->initialized()) {
+        const float dims[8] = {uintBits(workW_),uintBits(workH_),uintBits(workW_),uintBits(workH_),0,0,0,0};
+        if (prevValid_) {
+            tracker_.transition(list,nvofInB_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            tracker_.transition(list,nvofInA_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            blitPass_.bind(list,dims,gpuHandleOf(blitPass_,5).ptr,gpuHandleOf(blitPass_,6).ptr);
+            list->Dispatch((workW_+15)/16,(workH_+15)/16,1);
+            tracker_.uavBarrier(list,nvofInA_.Get());
+            tracker_.transition(list,nvofInA_.Get(),D3D12_RESOURCE_STATE_COMMON);
+        }
+        tracker_.transition(list,nvofInB_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        const float encodedDims[8] = {uintBits(workW_),uintBits(workH_),uintBits(workW_),uintBits(workH_),1,0,0,0};
+        blitPass_.bind(list,encodedDims,gpuHandleOf(blitPass_,15).ptr,gpuHandleOf(blitPass_,9).ptr);
+        list->Dispatch((workW_+15)/16,(workH_+15)/16,1);
+        tracker_.uavBarrier(list,nvofInB_.Get());
+        tracker_.transition(list,nvofInB_.Get(),D3D12_RESOURCE_STATE_COMMON);
+        if (prevValid_) {
+            if(!ring_.submitAndSignal(slot))return false;
+            haveFlow=nvof_->execute(ring_.lastSignaledValue(),st);
+            if(!haveFlow) { ++metrics_.nvofFrameFailures; mvecSource_="zero-motion-fallback (NVOF execute failed)"; }
+            else {
+                ++metrics_.nvofExecuteCount;
+                if(FAILED(context_.directQueue()->Wait(nvofOutFence_.Get(),nvof_->nextOutValue()-1)))return false;
+            }
+            slot=nextListSlot_++%ring_.slotCount(); list=ring_.acquire(slot,st);if(!list)return false;
+            if(haveFlow) {
+                tracker_.transition(list,nvofRawTex_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                tracker_.transition(list,nvofCostTex_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                tracker_.transition(list,flowTex_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                tracker_.transition(list,confTex_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                const float dc[8]={uintBits(rawW_),uintBits(rawH_),uintBits(workW_),uintBits(workH_),
+                    uintBits(selectedGrid_),uintBits(0),uintBits(32),0};
+                densifyPass_.bind(list,dc,gpuHandleOf(densifyPass_,0).ptr,gpuHandleOf(densifyPass_,2).ptr);
+                list->Dispatch((workW_+15)/16,(workH_+15)/16,1);
+                tracker_.uavBarrier(list,flowTex_.Get());tracker_.uavBarrier(list,confTex_.Get());
+                tracker_.transition(list,nvofRawTex_.Get(),D3D12_RESOURCE_STATE_COMMON);
+                tracker_.transition(list,nvofCostTex_.Get(),D3D12_RESOURCE_STATE_COMMON);
+                tracker_.transition(list,flowTex_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                tracker_.transition(list,confTex_.Get(),D3D12_RESOURCE_STATE_COMMON);
+            }
+        }
+    }
+
     // 4a. Parity encode.
     if (nrEnabled_ && nrHandle_ != nullptr) {
         tracker_.transition(list, proxyTex_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         const float constants[8] = { 1.0f, 1.0f, 1.0f, 0.0f,
-            static_cast<float>(workW_), static_cast<float>(workH_), 0.0f, 0.0f };
+            uintBits(workW_), uintBits(workH_), 0.0f, 0.0f };
         encPass_.bind(list, constants, gpuHandleOf(encPass_, 0).ptr, gpuHandleOf(encPass_, 1).ptr);
         list->Dispatch((workW_ + 15) / 16, (workH_ + 15) / 16, 1);
         tracker_.uavBarrier(list, proxyTex_.Get());
@@ -713,14 +777,15 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
 
         // 4b. NR evaluate on a FRESH list (snippet constraint).
         if (!ring_.submitAndSignal(slot)) { veyra::log::error("graph", "submit before nr"); return false; }
-        ID3D12GraphicsCommandList* nlist = ring_.acquire((slot + 1) % 4, st);
+        slot = nextListSlot_++ % ring_.slotCount();
+        ID3D12GraphicsCommandList* nlist = ring_.acquire(slot, st);
         if (nlist == nullptr) { veyra::log::error("graph", "acquire nr list"); return false; }
         {
             namespace p = ngx::dlssnr;
             ngx::ParameterBlock pb(ngxParams_);
             pb.setD3D12Resource(p::kColor, proxyTex_.Get());
             pb.setD3D12Resource(p::kOutput, neuralTex_.Get());
-            pb.setD3D12Resource(p::kMVec, nrZeroMotion_.Get());
+            pb.setD3D12Resource(p::kMVec, haveFlow ? flowTex_.Get() : nrZeroMotion_.Get());
             pb.setD3D12Resource(p::kDepth, nrZeroDepth_.Get());
             pb.setU32(p::kColorSubrectWidth, workW_); pb.setU32(p::kColorSubrectHeight, workH_);
             pb.setU32(p::kOutputSubrectWidth, workW_); pb.setU32(p::kOutputSubrectHeight, workH_);
@@ -746,13 +811,21 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
                 return false;
             }
             ++metrics_.nrEvaluateCount;
+            if(haveFlow)++metrics_.nrMotionFrames;
             tracker_.uavBarrier(nlist, neuralTex_.Get());
             tracker_.transition(nlist, neuralTex_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
+            wchar_t profileFlag[2]{};
+            if(GetEnvironmentVariableW(L"VEYRA_PROFILE_SPLIT",profileFlag,2)&&profileFlag[0]==L'1'){
+                ring_.tag(slot,"nr-only");
+                if(!ring_.submitAndSignal(slot))return false;
+                slot=nextListSlot_++%ring_.slotCount();nlist=ring_.acquire(slot,st);if(!nlist)return false;
+                ring_.tag(slot,"decode-output-fg");
+            }
             // 4c. Parity decode.
             tracker_.transition(nlist, finalRgba_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             const float constants[8] = { 1.0f, 1.0f, 1.0f, 0.0f,
-                static_cast<float>(workW_), static_cast<float>(workH_), 0.0f, 0.0f };
+                uintBits(workW_), uintBits(workH_), 0.0f, 0.0f };
             decPass_.bind(nlist, constants, gpuHandleOf(decPass_, 0).ptr, gpuHandleOf(decPass_, 3).ptr);
             nlist->Dispatch((workW_ + 15) / 16, (workH_ + 15) / 16, 1);
             tracker_.uavBarrier(nlist, finalRgba_.Get());
@@ -770,132 +843,45 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         tracker_.transition(list, videoFrame_[parity].Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         const float constants[8] = {
-            static_cast<float>(workW_), static_cast<float>(workH_),
-            static_cast<float>(workW_), static_cast<float>(workH_), 0, 0, 0, 0 };
+            uintBits(workW_), uintBits(workH_),
+            uintBits(workW_), uintBits(workH_), 1, 0, 0, 0 };
         blitPass_.bind(list, constants, gpuHandleOf(blitPass_, srcSlot).ptr, gpuHandleOf(blitPass_, uavSlot).ptr);
         list->Dispatch((workW_ + 15) / 16, (workH_ + 15) / 16, 1);
         tracker_.uavBarrier(list, videoFrame_[parity].Get());
         tracker_.transition(list, videoFrame_[parity].Get(), D3D12_RESOURCE_STATE_COMMON);
 
-        // NVOF chain via blits: A := B, then B := this frame.
-        tracker_.transition(list, nvofInA_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        blitPass_.bind(list, constants, gpuHandleOf(blitPass_, 5).ptr, gpuHandleOf(blitPass_, 6).ptr);
-        list->Dispatch((workW_ + 15) / 16, (workH_ + 15) / 16, 1);
-        tracker_.uavBarrier(list, nvofInA_.Get());
-        tracker_.transition(list, nvofInA_.Get(), D3D12_RESOURCE_STATE_COMMON);
-        tracker_.transition(list, nvofInB_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        const float nvofConstants[8] = {
-            static_cast<float>(workW_), static_cast<float>(workH_),
-            static_cast<float>(nvofW_), static_cast<float>(nvofH_), 0, 0, 0, 0 };
-        blitPass_.bind(list, nvofConstants,
-            gpuHandleOf(blitPass_, 7 + parity).ptr, gpuHandleOf(blitPass_, 9).ptr);
-        list->Dispatch((nvofW_ + 15) / 16, (nvofH_ + 15) / 16, 1);
-        tracker_.uavBarrier(list, nvofInB_.Get());
-        tracker_.transition(list, nvofInB_.Get(), D3D12_RESOURCE_STATE_COMMON);
     }
-
-    if (!ring_.submitAndSignal((nrEnabled_ && nrHandle_ != nullptr) ? (slot + 1) % 4 : slot)) {
-        veyra::log::error("graph", "submit after color work");
-        return false;
-    }
+    if (!ring_.submitAndSignal(slot)) return false;
     out.videoFenceValue = ring_.lastSignaledValue();
 
-    // 6. NVOF (+ optional FG), queue-ordered after the color work. The
-    // quality core runs NVOF+densify standalone (no FG) for motion stats.
-    const bool wantMotion = (nvofStandalone_ || (fgEnabled_ && fgBackend_ && fgBackend_->created())) && prevValid_;
-    if (wantMotion) {
-        const auto nvofT0 = std::chrono::steady_clock::now();
-        bool haveFlow = nvof_ && nvof_->initialized() ? nvof_->execute(out.videoFenceValue, st) : false;
-        if (desc_.stageMark) {
-            const double nvofMs = std::chrono::duration<double, std::milli>(
-                std::chrono::steady_clock::now() - nvofT0).count();
-            (void)nvofMs; // caller-side timing aggregation uses stageMark
-        }
-        if (haveFlow) {
-            ++metrics_.nvofExecuteCount;
-            if (FAILED(context_.directQueue()->Wait(nvofOutFence_.Get(), nvof_->nextOutValue() - 1))) {
-                veyra::log::error("graph", "queue wait on nvof out fence");
-                return false;
-            }
-        } else {
-            // The injected D3D12 layer on this system blocks NVOF frame-time
-            // executes once descriptor views exist. Fall back to zero-guidance:
-            // DLSSG's internal optical flow still performs the interpolation.
-            // Reported honestly as mvecSource.
-            if (mvecSource_ == "nvof") {
-                mvecSource_ = "zero-motion-fallback (NVOF blocked by injected layer post-views; "
-                              "real NVOF proven in P5 probe and FG truth in P6.2)";
-                veyra::log::warn("graph", "NVOF frame execute blocked by injected layer; "
-                                       "FG falls back to zero-guidance mvec");
-            }
-            ++metrics_.nvofFrameFailures;
-        }
-        if (!haveFlow && !(fgEnabled_ && fgBackend_ && fgBackend_->created())) {
-            // No flow and no FG: nothing to record on the third list.
-        } else {
-        ID3D12GraphicsCommandList* flist = ring_.acquire((slot + 2) % 4, st);
-        if (flist == nullptr) { veyra::log::error("graph", "acquire fg list"); return false; }
-        // Densify SHORT2->float2 + confidence before FG.
-        if (haveFlow) {
-            tracker_.transition(flist, nvofRawTex_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            tracker_.transition(flist, nvofCostTex_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            tracker_.transition(flist, flowTex_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            tracker_.transition(flist, confTex_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            const float dc[8] = {
-                static_cast<float>(rawW_), static_cast<float>(rawH_),
-                static_cast<float>(nvofW_), static_cast<float>(nvofH_),
-                static_cast<float>(selectedGrid_),
-                1.0f,   // negate: single explicit direction flip (proven by displacement tests)
-                32.0f,  // costThreshold (cells below -> zero motion)
-                0.0f };
-            densifyPass_.bind(flist, dc,
-                gpuHandleOf(densifyPass_, 0).ptr, gpuHandleOf(densifyPass_, 2).ptr);
-            flist->Dispatch((nvofW_ + 15) / 16, (nvofH_ + 15) / 16, 1);
-            tracker_.uavBarrier(flist, flowTex_.Get());
-            tracker_.uavBarrier(flist, confTex_.Get());
-            tracker_.transition(flist, nvofRawTex_.Get(), D3D12_RESOURCE_STATE_COMMON);
-            tracker_.transition(flist, nvofCostTex_.Get(), D3D12_RESOURCE_STATE_COMMON);
-            tracker_.transition(flist, flowTex_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            tracker_.transition(flist, confTex_.Get(), D3D12_RESOURCE_STATE_COMMON);
-        }
-        if (desc_.stageMark) desc_.stageMark("decode_blit");
-        if (!(fgEnabled_ && fgBackend_ && fgBackend_->created())) {
-            // Standalone motion mode: densify already recorded; submit and done.
-            if (!ring_.submitAndSignal((slot + 2) % 4)) { veyra::log::error("graph", "motion submit"); return false; }
-        } else {
-        ID3D12Resource* mvecResource = haveFlow ? flowTex_.Get() : nrZeroMotion_.Get();
-        tracker_.transition(flist, nvofInB_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        tracker_.transition(flist, depthTex_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        const uint32_t genSlot = static_cast<uint32_t>(realFrameIndex_ % 2);
-        tracker_.transition(flist, genFrame_[genSlot].Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    // FG reads enhanced SDR color, not the pre-NR guidance input.
+    if (fgEnabled_ && fgBackend_ && fgBackend_->created()) {
+        slot=nextListSlot_++%ring_.slotCount();
+        auto* flist=ring_.acquire(slot,st); if(!flist)return false;
+        auto* motion=haveFlow?flowTex_.Get():nrZeroMotion_.Get();
+        tracker_.transition(flist,videoFrame_[parity].Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        tracker_.transition(flist,motion,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        tracker_.transition(flist,depthTex_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        tracker_.transition(flist,genFrame_[parity].Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         ngx::DlssFgBackend::EvalDesc fe{};
-        fe.backbuffer = nvofInB_.Get();
-        fe.depth = depthTex_.Get();
-        fe.mvecs = mvecResource;
-        fe.outputInterpolated = genFrame_[genSlot].Get();
-        fe.reset = reset;
-        fe.frameId = realFrameIndex_;
-        fe.mvecScaleX = haveFlow ? (1.0f / static_cast<float>(workW_)) : 1.0f;
-        fe.mvecScaleY = haveFlow ? (1.0f / static_cast<float>(workH_)) : 1.0f;
-        if (!fgBackend_->evaluate(flist, ngxParams_, fe, st)) {
-            veyra::log::error("graph", "fg evaluate failed");
-            return false;
-        }
-        tracker_.uavBarrier(flist, genFrame_[genSlot].Get());
-        tracker_.transition(flist, genFrame_[genSlot].Get(), D3D12_RESOURCE_STATE_COMMON);
-        tracker_.transition(flist, nvofInB_.Get(), D3D12_RESOURCE_STATE_COMMON);
-        tracker_.transition(flist, mvecResource, D3D12_RESOURCE_STATE_COMMON);
-        tracker_.transition(flist, depthTex_.Get(), D3D12_RESOURCE_STATE_COMMON);
-        if (!ring_.submitAndSignal((slot + 2) % 4)) { veyra::log::error("graph", "fg submit"); return false; }
-        if (desc_.stageMark) desc_.stageMark("fg");
-        ++metrics_.fgGeneratedFrames;
-        out.hasGenerated = true;
-        out.genSlot = genSlot;
-        out.genFenceValue = ring_.lastSignaledValue();
-        out.generatedPtsMs = (prevPtsMs_ + ptsMs) * 0.5;
-        }
-        } // fg-enabled motion close
+        fe.backbuffer=videoFrame_[parity].Get(); fe.depth=depthTex_.Get(); fe.mvecs=motion;
+        fe.outputInterpolated=genFrame_[parity].Get(); fe.reset=reset||!prevValid_;
+        fe.frameId=realFrameIndex_;
+        // FG consumer adapter: current->previous pixel flow -> normalized reverse flow.
+        fe.mvecScaleX=haveFlow?-1.0f/static_cast<float>(workW_):1.0f;
+        fe.mvecScaleY=haveFlow?-1.0f/static_cast<float>(workH_):1.0f;
+        if(!fgBackend_->evaluate(flist,ngxParams_,fe,st))return false;
+        tracker_.uavBarrier(flist,genFrame_[parity].Get());
+        tracker_.transition(flist,videoFrame_[parity].Get(),D3D12_RESOURCE_STATE_COMMON);
+        tracker_.transition(flist,genFrame_[parity].Get(),D3D12_RESOURCE_STATE_COMMON);
+        tracker_.transition(flist,depthTex_.Get(),D3D12_RESOURCE_STATE_COMMON);
+        if(!ring_.submitAndSignal(slot))return false;
+        out.hasGenerated=prevValid_&&!reset;
+        out.genSlot=parity; out.genFenceValue=ring_.lastSignaledValue();
+        out.generatedPtsMs=(prevPtsMs_+ptsMs)*0.5;
+        if(out.hasGenerated)++metrics_.fgGeneratedFrames;
     }
+    uploadFences_[parity]=ring_.lastSignaledValue();
 
     prevPtsMs_ = ptsMs;
     prevValid_ = true;
@@ -952,6 +938,8 @@ ID3D12Resource* EnhanceGraph::generatedFrameResource(uint32_t slot) const
 // ---------------------------------------------------------------------------
 void EnhanceGraph::shutdown()
 {
+    if (!initialized_ && !nrAdapter_ && !nvof_ && !srcRgba_) return;
+    (void)ring_.drainQueue();
     Status st = Status::Ok;
     if (nv12Ctx_ != nullptr) { sws_freeContext(nv12Ctx_); nv12Ctx_ = nullptr; }
 

@@ -11,7 +11,7 @@ cbuffer ScaleBlitConstants : register(b0)
     uint sourceHeight;
     uint outputWidth;
     uint outputHeight;
-    float _pad0;
+    float encodeSrgb; // 1 only at linear working -> SDR output boundary
     float _pad1;
     float _pad2;
     float _pad3;
@@ -44,7 +44,12 @@ void main(uint3 groupId : SV_GroupID, uint3 localId : SV_GroupThreadID, uint3 gl
     const float4 s11 = sourceTex[uint2(x1, y1)];
     const float4 top = lerp(s00, s10, fx);
     const float4 bottom = lerp(s01, s11, fx);
-    outputTex[globalId.xy] = lerp(top, bottom, fy);
+    float4 value = lerp(top, bottom, fy);
+    if (encodeSrgb > 0.5) {
+        const float3 c = max(value.rgb, 0.0);
+        value.rgb = select(c <= 0.0031308, c * 12.92, 1.055 * pow(c, 1.0/2.4) - 0.055);
+    }
+    outputTex[globalId.xy] = value;
     (void)groupId;
     (void)localId;
     (void)tile;

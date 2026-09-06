@@ -1,53 +1,36 @@
 # Veyra
 
-Veyra V1 是一个 Windows x64 / C++20 / D3D12 的本地首发产品候选，不以“最小 MVP”作为完成标准。首版必须同时交付三个入口、4K SDR 全链路和可恢复的产品行为，三者只共享一套增强引擎：
+Windows x64 / C++20 / Win32 / D3D12 的本机视频增强软件，三个入口共用 `FrameSource -> EnhanceGraph -> FrameSink`。直接 NGX 实验 Feature 18，不依赖 ReShade 注入。
 
-1. **采集卡实时模式**：读取 Windows DirectShow/UVC 采集设备，支持设备真实提供的 1080p/4K SDR 30/60 fps，提供低延迟与有界后帧缓冲两种模式，执行 DLSS SR（可选）→ Feature 18 → DLSSG 2X（可选）并播放 HDMI 音频。
-2. **播放器模式**：打开最高 3840×2160 的本地 H.264/HEVC 视频，保持正确 PTS、字幕和 A/V 同步，执行同一条增强链后播放。
-3. **导出模式**：对 PNG/JPEG 图片或最高 3840×2160 的 H.264/HEVC 视频应用增强；视频可选 2X 补帧，以原生 D3D12 NVENC 输出 H.264/HEVC，并保留或明确转换音频与基础元数据。
+**运行：双击 `Veyra.cmd`。** 使用说明见 [docs/USER_GUIDE.md](docs/USER_GUIDE.md)，最新实测与未完成项见 [docs/DELIVERY_STATUS.md](docs/DELIVERY_STATUS.md)。不再用旧 Phase 数量或百分比表示产品交付。
 
-这里的“DLSS 5”指项目根目录中用户提供的实验性 `nvngx_dlssnr.dll` 所暴露的 Feature 18。NVIDIA 已于 2026-09 正式面向游戏发布 DLSS 5，但截至本次重基线，公开 Developer 页面和公开 Streamline SDK 尚未提供可供本项目直接替换的通用 DLSS 5 开发接口。用户决定继续使用当前实验 runtime 做本机研发；这不构成 NVIDIA 授权，也不允许 Veyra 将该 DLL 打包、上传或分发。
+## 当前交付合同
 
-## 当前真实状态
+用户授权接管全部实现，自动联合测试不超过五分钟；当前采集卡没接入，由用户亲自验收。用户随后明确接受默认实时档、保留原生 4K 可选。
 
-- 2026-09-06 对抗式复核后的 Launch V1 交付进度约为 **40%（误差约 5%）**。Phase 数量不能当百分比；Phase 7 承担 UI、采集和两类导出，工作量远大于早期 harness。
-- Phase 0–4 的 D3D12、Feature 18、颜色 parity、FFmpeg 解码与 DLSS SR harness 有可复现实测证据，继续有效。
-- 历史 Phase 5 的组件证据保留：Frame/Reset 契约、scene/cadence、NVOF 合成位移与 endurance probe 已运行；但原 gate 把 manifest 当作 depth 完成、把第二次 1080p endurance 放在 4K 检查位置，而且 `src/core/EnhanceGraph.cpp` 只计数，真实 GPU 链仍由 harness 编排。因此 Phase 5 的产品级 `passed` 已撤销，必须重开修复。
-- Phase 6 已有未提交的实验资产：真实 DLSSG capability/Create/Evaluate、59/59 非重复/非 blend 中间帧、NVOF、WASAPI 和 PresentSink；但当前播放器 probe 的 A/V drift P95 约 2.8 秒（门槛 50 ms），L2/GBV 有大量 descriptor-uninitialized 错误，Phase 6 gate/Reviewer/checkpoint 均未通过。
-- 还没有可发布的共享 EngineController、播放器 UI、字幕、采集卡输入、DAV2 depth provider、图片导出、D3D12 NVENC 视频导出、设置/恢复/日志导出或安装交付闭环。
-- 当前工作树包含一组未提交的 Phase 6 改动。新 Agent 必须先审计和保存它们，禁止 reset、checkout 或从旧 checkpoint 覆盖。
-- 旧路线中“采集卡、Depth Anything 和导出不属于 V1”的决定已于 2026-09-03 被用户撤销；不要再按旧边界施工。
-- 旧路线中“只做 1080p 薄闭环、离线导出允许 raw pipe”的决定也已于 2026-09-03 被用户撤销；首发 gate 必须覆盖 4K SDR、原生硬件编码和产品级恢复/诊断。
-- 当前工作从“Phase 5 产品级修复”继续。唯一施工顺序见 `VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md` 的“2026-09-06 接管恢复计划”和 `loop/BACKLOG.md`；Phase 7 联合 gate 全通过才算功能 release candidate。
+- 播放/采集默认 **Live 1080**：4K 解码、1080 内部 NR/FG、按显示窗口缩放。状态显示真实输入/处理尺寸，不称原生 4K NR。
+- 原生 4K 与 SR 4K 可选；本机 RTX 5070 实测原生 4K NR 约 22–23ms/帧，无法承诺 4K60 实时。实时档的短测另行记录。
+- 视频导出不采用实时档降分辨率：4K 输入原生 4K NR，可选 FG2X，D3D12 NVENC H.264/HEVC MP4，兼容音轨保留；PNG/JPEG 图片增强保存。
+- DirectShow 实卡功能已接入，硬件测试状态始终为 `awaiting_user_capture_test`，不能冒充测试通过。
+- Depth provider 未实现，明确 Motion Only；HDR / 3X4X / AV1ProRes / 私有采集SDK不在本次承诺。
+- 仅本机研发交付，专有 DLL 分发未授权：`distribution_blocked`，不制作安装包或上传二进制。
 
-## 开工顺序
+## 文档唯一入口
 
-必须依次完整阅读：
+1. `AGENTS.md`：安全、许可、实现纪律。
+2. `docs/ACTIVE_DELIVERY_PLAN.md`：当前 F0–F6 推进与用户授权的短测合同，覆盖旧长测/严格串行施工规则。
+3. `VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md` / `VEYRA_PRODUCT_SPEC_V1.md`：技术参数与原始规格；旧状态文字仅作历史，最新状态看 DELIVERY_STATUS/STATE。
+4. `docs/COMPETITOR_AUDIT_2026-09-03.md`：竞品与许可事实。
+5. `docs/WORKLOG.md`、`loop/STATE.json`、`loop/EVIDENCE.md`、`loop/JOURNAL.md`：实际证据与恢复点。
 
-1. `AGENTS.md`
-2. `VEYRA_PRODUCT_SPEC_V1.md`
-3. `VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md`
-4. `docs/COMPETITOR_AUDIT_2026-09-03.md`
-5. `docs/WORKLOG.md`
-6. Goal 模式再读 `loop/LOOP_ENGINE.md`、`loop/STATE.json`、`loop/BACKLOG.md`、`loop/INBOX.md`
-
-然后运行：
+## 构建与短测
 
 ```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Root . -Preset x64-release
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate preflight
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\gates\delivery.ps1 -Root .
 ```
 
-## 二进制边界
+应用：`out/build/x64-release/veyra.exe`。依赖现有 `runtime_local/nvidia`、`third_party_local/nvidia` 与本机 FFmpeg；不把 SDK/runtime 提交 Git。NGX DLL 使用固定身份和绝对路径。Video Codec API 头文件来源/许可证见 `THIRD_PARTY_NOTICES.md`。
 
-- `nvngx_dlssnr.dll`：用户提供、NVIDIA 签名的本地实验 runtime。只能复制到已忽略的 `runtime_local/nvidia/`，不得修改、提交、上传或随安装包分发。
-- `renodx-dlss5-1.addon64`：未签名的 ReShade/RenoDX add-on，不是配置文件。只用于隔离对照；Veyra 主程序不得加载、注入、链接或分发它。
-- Veyra 直接调用 NGX，不以 Magpie/ReShade 为运行依赖。
-
-Magpie 已证明窗口/视频路径能调用这些能力，但没有替 Veyra 验证参数、资源状态、颜色、时序、延迟或画质。每一个“更好”结论仍需同源 A/B 证据。
-
-## 当前接管原则
-
-- 不重写已验证的 NGX/NVOF/FG backend；先把它们从 `tools/player_probe/main.cpp` 迁入真正共享的库。
-- 不先做漂亮 UI。先让共享 engine 在 1080p 与 native 4K 上通过正确性、GBV、GPU timing、A/V drift 和 teardown 门槛。
-- 不接受“probe 能跑”等于“产品完成”。Capture、Player、Export 必须由同一可执行程序调用同一 graph。
-- 泄露 runtime 只能是外置、可关闭、固定 hash 的实验依赖；功能完成但分发权未解决时状态只能是 `distribution_blocked`。
+历史 Phase 0–4 仅证明当时基础 harness。旧 Phase 5 的错误输入、假指标和未接 Guidance 结论已撤回并修复；本次独立 review 前不宣称新的阶段放行。不得再跑旧 30 分钟 gate 作为本次默认任务，也不得把短测写成耐久证明。

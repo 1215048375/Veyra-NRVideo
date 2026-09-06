@@ -1,5 +1,7 @@
 # Veyra Human Inbox
 
+> 2026-09-06 用户授权接管修订：当前推进、五分钟短测与用户实卡验收以 `../docs/ACTIVE_DELIVERY_PLAN.md` 为准，取代下文旧的严格串行施工/30分钟测试/未接设备阻塞全部交付规则。历史记录不是当前通过证明。
+
 这里仅记录 Agent 无权自行完成的许可、凭据、外部硬件或发布决定。普通 bug 不放这里。缺失项不阻止当前 Phase 中与它独立的工作，但相关 gate 不得伪造通过。
 
 ## RESOLVED · NVIDIA Optical Flow SDK 5.0.7 已存在

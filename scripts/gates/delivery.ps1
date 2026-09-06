@@ -1,0 +1,65 @@
+[CmdletBinding()]
+param([Parameter(Mandatory=$true)][string]$Root)
+# User-authorized local software acceptance, <=300s for this entire suite.
+# Native-4K realtime60 is NOT asserted: user selected an explicit 1080 working realtime profile.
+# Real capture acceptance and proprietary distribution are separate, never synthetic PASS.
+$ErrorActionPreference='Stop'
+$Root=(Resolve-Path -LiteralPath $Root).Path
+Set-Location -LiteralPath $Root
+$timer=[Diagnostics.Stopwatch]::StartNew()
+$run=[Guid]::NewGuid().ToString('N')
+$dir=Join-Path $Root ('logs/delivery/'+$run)
+[IO.Directory]::CreateDirectory($dir)|Out-Null
+$bin=Join-Path $Root 'out/build/x64-release'
+$checks=[Collections.Generic.List[object]]::new()
+function Check([string]$Name,[bool]$Passed,[string]$Detail){$checks.Add([pscustomobject]@{name=$Name;passed=$Passed;detail=$Detail});if(-not $Passed){throw "$Name : $Detail"}}
+function Run([string]$Name,[string]$Exe,[string[]]$Argv,[int]$Limit=30,[int]$ExpectedExit=0){
+    $remaining=290-[int]$timer.Elapsed.TotalSeconds
+    if($remaining -lt 1){throw 'Combined suite budget exhausted'}
+    $timeout=[Math]::Min($Limit,$remaining)
+    $p=Start-Process -FilePath $Exe -ArgumentList @($Argv|ForEach-Object{'"'+$_.Replace('"','\"')+'"'}) -PassThru -WindowStyle Hidden -RedirectStandardOutput "$dir/$Name.stdout.log" -RedirectStandardError "$dir/$Name.stderr.log"
+    $processHandle=$p.Handle
+    if(-not $p.WaitForExit($timeout*1000)){Stop-Process -Id $p.Id -Force;throw "$Name timeout"}
+    $exitCode=$p.ExitCode;Check "$Name-exit" ($null -ne $exitCode -and $exitCode -eq $ExpectedExit) "exit=$exitCode expected=$ExpectedExit"
+}
+try{
+    if(Test-Path -LiteralPath 'loop/STOP'){throw 'User STOP exists'}
+    $ffprobe=(Get-Command ffprobe -ErrorAction Stop).Source
+    $clip1080=(Resolve-Path 'loop/local/fixed_clips/test_av_1080p.mp4').Path
+    $clip4k=(Resolve-Path 'loop/local/fixed_clips/test_av_4k.mp4').Path
+    Run quality1080 "$bin/veyra_quality_probe.exe" @('--input',$clip1080,'--native','--guidance','motion','--frames','60','--diag','--json-file',"$dir/quality1080.json",'--dump',"$dir/enhanced.png") 45
+    $q=Get-Content "$dir/quality1080.json" -Raw|ConvertFrom-Json
+    Check core-correct ($q.failures -eq 0 -and $q.processedFrames -eq 60 -and $q.nrEvaluateCount -eq 60 -and $q.nrMotionFrames -gt 0 -and $q.nvofExecuteCount -gt 0 -and $q.nonZeroMotionCount -gt 0 -and $q.diagnosticsEnabled -and $q.d3dDiagErrors -eq 0 -and $q.normalPathReadbackCount -eq 0) 'actual NR/NVOF/motion/GBV/diagnostic PNG'
+    Run quality4k "$bin/veyra_quality_probe.exe" @('--input',$clip4k,'--native','--guidance','motion','--frames','12','--json-file',"$dir/quality4k.json",'--dump',"$dir/enhanced4k.png")
+    $q4=Get-Content "$dir/quality4k.json" -Raw|ConvertFrom-Json
+    Check native4k ($q4.failures -eq 0 -and $q4.sourceExtent.width -eq 3840 -and $q4.workingExtent.width -eq 3840 -and $q4.nrEvaluateCount -eq 12) 'native4K correctness only; not a realtime60 claim'
+    Run player "$bin/veyra.exe" @($clip4k,'--realtime','--fg','--smoke-seconds','6') 20
+    $log=Get-Content "$dir/player.stdout.log" -Raw
+    Check player-sync ($log -match 'smoke frames=(\d+).*generated=(\d+).*failed=false.*absLatenessP95Ms=([\d.]+)' -and [int]$Matches[1] -gt 60 -and [int]$Matches[2] -gt 0 -and [double]$Matches[3] -le 50) 'real-time profile 4K ingress, generated frames, observed abs lateness P95 <=50ms'
+    Run controls "$bin/veyra.exe" @($clip1080,'--realtime','--smoke-seconds','6','--smoke-controls','--smoke-save',"$dir/snapshot.jpg") 20
+    $controlLog=Get-Content "$dir/controls.stdout.log" -Raw
+    Check paused-seek ($controlLog -match 'seek done' -and $controlLog -match 'controlsStep=4' -and (Test-Path "$dir/snapshot.jpg")) 'pause / seek while paused / resume / real WIC JPEG'
+    Run image "$bin/veyra.exe" @("$dir/enhanced.png",'--smoke-seconds','3') 15
+    Run image4k "$bin/veyra.exe" @("$dir/enhanced4k.png",'--realtime','--smoke-seconds','6','--smoke-controls','--smoke-save',"$dir/image4k.jpg") 15
+    Run inspect-image4k $ffprobe @('-v','error','-show_streams','-of','json',"$dir/image4k.jpg") 10
+    $img=(Get-Content "$dir/inspect-image4k.stdout.log" -Raw|ConvertFrom-Json).streams[0]
+    Check native4k-image ($img.width -eq 3840 -and $img.height -eq 2160) 'realtime default must not shrink image export'
+    foreach($codec in @('h264','hevc')){
+        $file="$dir/$codec.mp4"
+        $a=@($clip4k,'--export-out',$file,'--max-frames','12','--fg');if($codec -eq 'hevc'){$a+='--hevc'}
+        Run "export-$codec" "$bin/veyra.exe" $a 30
+        Run "inspect-$codec" $ffprobe @('-v','error','-count_frames','-show_streams','-of','json',$file) 10
+        $streams=(Get-Content "$dir/inspect-$codec.stdout.log" -Raw|ConvertFrom-Json).streams
+        $v=@($streams|Where-Object codec_type -eq 'video')[0];$a=@($streams|Where-Object codec_type -eq 'audio')
+        Check "decode-$codec" ($v.width -eq 3840 -and $v.height -eq 2160 -and $v.codec_name -eq $codec -and [int]$v.nb_read_frames -eq 23 -and $a.Count -ge 1) 'all short exported frames decoded; native4K 2X CFR timeline + audio'
+    }
+    Run cancel "$bin/veyra.exe" @($clip4k,'--export-out',"$dir/cancel.mp4",'--cancel-after-ms','3000') 15 3
+    Check cancel-not-success ((-not (Test-Path "$dir/cancel.mp4")) -and (Test-Path "$dir/cancel.mp4.partial")) 'cancel drains with live callback; never promotes incomplete output'
+    Check test-budget ($timer.Elapsed.TotalSeconds -lt 300) "$($timer.Elapsed.TotalSeconds)s; short validation is not endurance proof"
+    $result=[ordered]@{runId=$run;status='software_short_gate_passed';capture='awaiting_user_capture_test';distribution='blocked';seconds=$timer.Elapsed.TotalSeconds;exeHash=(Get-FileHash "$bin/veyra.exe" -Algorithm SHA256).Hash;checks=$checks}
+    $result|ConvertTo-Json -Depth 8|Set-Content "$dir/result.json" -Encoding UTF8
+    Write-Host "DELIVERY SHORT GATE PASS: $dir/result.json";exit 0
+}catch{
+    [ordered]@{runId=$run;status='failed';seconds=$timer.Elapsed.TotalSeconds;error=$_.ToString();checks=$checks}|ConvertTo-Json -Depth 8|Set-Content "$dir/result.json" -Encoding UTF8
+    Write-Host "DELIVERY SHORT GATE FAIL: $_ ($dir/result.json)";exit 1
+}

@@ -7,6 +7,7 @@
 // readback on sampled frames - the normal playback path never reads back.
 #include <windows.h>
 #include <psapi.h>
+#include <d3d12sdklayers.h>
 
 #include <algorithm>
 #include <chrono>
@@ -27,6 +28,7 @@
 #include "veyra/gfx/D3D12DeviceContext.h"
 #include "veyra/pipeline/EnhanceGraph.h"
 #include "veyra/source/MediaFileSource.h"
+#include "veyra/sink/ImageExportSink.h"
 
 #include "../nr_harness/harness_util.h"
 
@@ -64,8 +66,8 @@ bool sampleGuidanceStats(veyra::gfx::D3D12DeviceContext& ctx,
     const uint32_t stepX = width / kCols, stepY = height / kRows;
 
     // Full-width row copies: flow needs width*8 bytes, confidence width*1.
-    const uint64_t flowPitch = (static_cast<uint64_t>(width) * 8 + 255) & ~255ull;
-    const uint64_t confPitch = (static_cast<uint64_t>(width) + 255) & ~255ull;
+    const uint64_t flowPitch = (static_cast<uint64_t>(width) * 4 + 511) & ~511ull;
+    const uint64_t confPitch = (static_cast<uint64_t>(width) + 511) & ~511ull;
     const uint64_t size = (flowPitch + confPitch) * kRows;
 
     D3D12_HEAP_PROPERTIES rp{};
@@ -142,8 +144,8 @@ bool sampleGuidanceStats(veyra::gfx::D3D12DeviceContext& ctx,
         for (uint32_t c = 0; c < kCols; ++c) {
             const uint32_t x = c * stepX;
             if (x >= width) continue;
-            const uint16_t m0 = *reinterpret_cast<const uint16_t*>(flowRowBytes + x * 8);
-            const uint16_t m1 = *reinterpret_cast<const uint16_t*>(flowRowBytes + x * 8 + 2);
+            const uint16_t m0 = *reinterpret_cast<const uint16_t*>(flowRowBytes + x * 4);
+            const uint16_t m1 = *reinterpret_cast<const uint16_t*>(flowRowBytes + x * 4 + 2);
             ++stats.sampledTexels;
             if (m0 != 0 || m1 != 0) ++stats.nonZeroMotion;
             stats.confidences.push_back(confRowBytes[x] / 255.0);
@@ -155,7 +157,7 @@ bool sampleGuidanceStats(veyra::gfx::D3D12DeviceContext& ctx,
         std::string line = "sample-dump flow[0..7]:";
         const uint8_t* f0 = mapped;
         for (int i = 0; i < 8; ++i) {
-            line += std::format(" {:04X}", *reinterpret_cast<const uint16_t*>(f0 + i * 8));
+            line += std::format(" {:04X}", *reinterpret_cast<const uint16_t*>(f0 + i * 4));
         }
         line += std::format(" | conf[0..7]:");
         const uint8_t* c0 = mapped + flowPitch * kRows;
@@ -204,10 +206,18 @@ int main(int argc, char** argv)
 {
     std::string corpusManifest, guidanceMode = "motion", runId = "quality-probe", jsonPath, logPath, inputPath;
     int durationSeconds = 0;
+    int maxFrames = 60;
+    bool native = false, diag = false;
+    std::string dumpPath;
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         auto value = [&]() -> std::string { return (i + 1 < argc) ? std::string(argv[++i]) : std::string(); };
-        if (arg == "--corpus") corpusManifest = value();
+        if (arg == "--diag") diag = true;
+        else if (arg == "--native") native = true;
+        else if (arg == "--frames") maxFrames = std::atoi(value().c_str());
+        else if (arg == "--dump") dumpPath = value();
+        else if (arg == "--corpus") corpusManifest = value();
         else if (arg == "--input") inputPath = value();
         else if (arg == "--guidance") guidanceMode = value();
         else if (arg == "--duration-seconds") durationSeconds = std::atoi(value().c_str());
@@ -216,6 +226,7 @@ int main(int argc, char** argv)
         else if (arg == "--json-file") jsonPath = value();
         else { std::fprintf(stderr, "unknown arg %s\n", arg.c_str()); return 2; }
     }
+    if (durationSeconds < 0 || durationSeconds > 240 || maxFrames <= 0) return 2;
     if (corpusManifest.empty() && inputPath.empty()) {
         std::fprintf(stderr, "--corpus or --input required\n");
         return 2;
@@ -260,6 +271,9 @@ int main(int argc, char** argv)
     veyra::gfx::D3D12DeviceContext ctx;
     veyra::gfx::DeviceContextDesc ddesc;
     ddesc.commandSlotCount = 4;
+    if(diag){ComPtr<ID3D12Debug> debug;ComPtr<ID3D12Debug1> gbv;
+        if(FAILED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)))||FAILED(debug.As(&gbv)))return 1;
+        debug->EnableDebugLayer();gbv->SetEnableGPUBasedValidation(TRUE);ddesc.enableDebugLayer=true;}
     Status st = Status::Ok;
     if (!ctx.initialize(ddesc, st)) { noteFail("device init failed"); return 1; }
     veyra::gfx::CommandSlotRing ring;
@@ -270,7 +284,7 @@ int main(int argc, char** argv)
 
     // Config string -> configHash (mode + extents + feature switches).
     const std::string configText = "guidance=" + guidanceMode
-        + ";workExtent=3840x2160;nrPerFrame=1;fg=0;nvofStandalone="
+        + (native ? ";workExtent=native;nrPerFrame=1;fg=0;nvofStandalone=" : ";workExtent=3840x2160;nrPerFrame=1;fg=0;nvofStandalone=")
         + (guidanceMode == "motion" || guidanceMode == "motion-depth" || guidanceMode == "auto" ? "1" : "0")
         + ";";
     const std::string configHash = veyra::sha256Hex(
@@ -290,13 +304,15 @@ int main(int argc, char** argv)
     // Aggregates for the JSON contract.
     uint64_t sourceFrames = 0, processedFrames = 0;
     uint64_t resetSeek = 0;
-    uint64_t aggNr = 0, aggSr = 0, aggNvof = 0, aggFg = 0;
+    uint64_t aggNr = 0, aggSr = 0, aggNvof = 0, aggFg = 0, aggNrMotion = 0, aggCuts = 0;
     uint32_t firstSourceW = 0, firstSourceH = 0;
     std::string guidanceProvenance = guidanceMode == "off" ? "off" : "zero";
     GuidanceStats stats;
     std::vector<double> gpuPassMs;
     uint64_t normalPathReadbackCount = 0; // diagnostic stats copies are not the normal path
     SIZE_T wsPeak = pmcStart.WorkingSetSize;
+    uint64_t vramHeadroom = UINT64_MAX;
+    uint32_t actualWorkW=0, actualWorkH=0;
 
     const bool nrOn = guidanceMode != "off";
     const bool nvofOn = guidanceMode == "motion" || guidanceMode == "motion-depth" || guidanceMode == "auto";
@@ -313,8 +329,9 @@ int main(int argc, char** argv)
         veyra::pipeline::EnhanceGraphDesc gd{};
         gd.sourceWidth = srcW;
         gd.sourceHeight = srcH;
-        gd.workWidth = 3840; gd.workHeight = 2160;
-        gd.enableSr = (srcW != 3840 || srcH != 2160);
+        gd.workWidth = native ? srcW : 3840; gd.workHeight = native ? srcH : 2160;
+        gd.enableSr = nrOn && (srcW != gd.workWidth || srcH != gd.workHeight);
+        actualWorkW = gd.workWidth; actualWorkH = gd.workHeight;
         gd.enableNr = nrOn;
         gd.enableFg = false;
         gd.enableNvofStandalone = nvofOn;
@@ -328,6 +345,7 @@ int main(int argc, char** argv)
         uint64_t framesThisClip = 0;
         const auto clipStart = std::chrono::steady_clock::now();
         bool resetNext = true;
+        veyra::pipeline::EnhanceGraph::FrameOutputs lastOut;
         for (;;) {
             if (durationSeconds > 0) {
                 const double elapsed = std::chrono::duration<double>(
@@ -360,19 +378,30 @@ int main(int argc, char** argv)
             }
             gpuPassMs.push_back(std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - mark0).count());
+            lastOut = out;
             resetNext = false;
+            PROCESS_MEMORY_COUNTERS pmc{};
+            if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) wsPeak = std::max(wsPeak, pmc.WorkingSetSize);
+            vramHeadroom = std::min(vramHeadroom, queryVramBudgetHeadroomMiB(ctx));
             ++processedFrames;
             ++framesThisClip;
 
             // Sample guidance statistics every 60th frame.
             if (nvofOn && framesThisClip % 60 == 0) {
-                if (!sampleGuidanceStats(ctx, ring, graph, 3840, 2160, stats)) {
+                if (!sampleGuidanceStats(ctx, ring, graph, gd.workWidth, gd.workHeight, stats)) {
                     veyra::log::warn("quality", "guidance stats sample failed");
                 }
             }
-            if (durationSeconds == 0 && framesThisClip >= 6000) break; // safety
+            if (durationSeconds == 0 && framesThisClip >= static_cast<uint64_t>(maxFrames)) break; // safety
+        }
+        if (!dumpPath.empty() && framesThisClip > 0) {
+            veyra::sink::RgbaImage image;
+            if (!veyra::sink::readRgba8(ctx, ring, graph.videoFrameResource(lastOut.videoSlot), image) ||
+                !veyra::sink::saveImage(std::wstring(dumpPath.begin(),dumpPath.end()), image)) noteFail("diagnostic image write failed");
         }
         aggNr += graph.metrics().nrEvaluateCount;
+        aggNrMotion += graph.metrics().nrMotionFrames;
+        aggCuts += graph.metrics().sceneCutCount;
         aggSr += graph.metrics().srEvaluateCount;
         aggNvof += graph.metrics().nvofExecuteCount;
         aggFg += graph.metrics().fgGeneratedFrames;
@@ -383,12 +412,17 @@ int main(int argc, char** argv)
         graph.shutdown();
     }
 
+    uint64_t diagErrors=0;
+    if(diag){ComPtr<ID3D12InfoQueue> iq;if(FAILED(ctx.device()->QueryInterface(IID_PPV_ARGS(&iq))))noteFail("InfoQueue missing");
+        else for(UINT64 i=0;i<iq->GetNumStoredMessages();++i){SIZE_T size=0;iq->GetMessage(i,nullptr,&size);std::vector<uint8_t> bytes(size);auto* msg=reinterpret_cast<D3D12_MESSAGE*>(bytes.data());if(FAILED(iq->GetMessage(i,msg,&size))){noteFail("InfoQueue retrieval failed");break;}if(msg->Severity<=D3D12_MESSAGE_SEVERITY_ERROR){++diagErrors;veyra::log::error("d3d",msg->pDescription);}}
+        if(diagErrors)noteFail("D3D12 validation errors");
+    }
     PROCESS_MEMORY_COUNTERS pmcEnd{};
     GetProcessMemoryInfo(GetCurrentProcess(), &pmcEnd, sizeof(pmcEnd));
     const double durationS = std::chrono::duration<double>(std::chrono::steady_clock::now() - tStart).count();
     uint32_t removedReason = 0;
     const bool deviceAlive = ctx.checkDeviceAlive(removedReason);
-    const uint64_t vramHeadroom = queryVramBudgetHeadroomMiB(ctx);
+    if (vramHeadroom == UINT64_MAX) vramHeadroom = 0;
     if (wsPeak < pmcEnd.WorkingSetSize) wsPeak = pmcEnd.WorkingSetSize;
 
     const uint64_t nrEvaluateCount = aggNr;
@@ -405,8 +439,8 @@ int main(int argc, char** argv)
     j += std::format("  \"configHash\": \"{}\",\n", configHash);
     j += std::format("  \"runtimeHash\": \"{}\",\n", runtimeHash.empty() ? "unavailable" : runtimeHash);
     j += std::format("  \"sourceExtent\": {{\"width\": {}, \"height\": {}}},\n", firstSourceW, firstSourceH);
-    const uint32_t workJsonW = durationSeconds > 0 ? firstSourceW : 3840;
-    const uint32_t workJsonH = durationSeconds > 0 ? firstSourceH : 2160;
+    const uint32_t workJsonW = actualWorkW;
+    const uint32_t workJsonH = actualWorkH;
     j += std::format("  \"workingExtent\": {{\"width\": {}, \"height\": {}}},\n", workJsonW, workJsonH);
     j += std::format("  \"outputExtent\": {{\"width\": {}, \"height\": {}}},\n", workJsonW, workJsonH);
     j += std::format("  \"sourceFrames\": {},\n", sourceFrames);
@@ -424,14 +458,20 @@ int main(int argc, char** argv)
         "DAV2 provider not implemented (R4.4 pending); motion-only/zero path");
     j += "  \"depthAgeP95\": 0.0,\n";
     j += std::format("  \"resetCountsByReason\": {{\"Open\": {}, \"Seek\": {}}},\n", clips.size(), resetSeek);
-    j += "  \"sceneCutCount\": 0,\n";
-    j += "  \"crossCutHistoryCount\": 0,\n";
-    j += std::format("  \"gpuPassP50Ms\": {:.3f},\n", percentile(gpuPassMs, 0.50));
-    j += std::format("  \"gpuPassP95Ms\": {:.3f},\n", percentile(gpuPassMs, 0.95));
+    j += std::format("  \"sceneCutCount\": {},\n",aggCuts);
+    j += std::format("  \"nrMotionFrames\": {},\n",aggNrMotion);
+    j += std::format("  \"d3dDiagErrors\": {},\n",diagErrors);
+    j += std::format("  \"diagnosticsEnabled\": {},\n",diag);
+    j += "  \"crossCutHistoryCount\": null,\n";
+    j += std::format("  \"cpuProcessP50Ms\": {:.3f},\n", percentile(gpuPassMs, 0.50));
+    j += std::format("  \"cpuProcessP95Ms\": {:.3f},\n", percentile(gpuPassMs, 0.95));
     j += std::format("  \"normalPathReadbackCount\": {},\n", normalPathReadbackCount);
-    j += "  \"cpuFenceWaitPerFrame\": 0,\n";
-    j += "  \"queueHighWater\": 4,\n";
-    j += "  \"resourcePoolPeakMiB\": 0,\n";
+    j += "  \"gpuPassP50Ms\": null,\n  \"gpuPassP95Ms\": null,\n";
+    j += std::format("  \"cpuFenceWaitCount\": {},\n",ring.cpuWaitCount());
+    j += std::format("  \"gpuCommandListP50Ms\": {:.4f},\n",percentile(ring.gpuCommandTimesMs(),0.5));
+    j += std::format("  \"gpuCommandListP95Ms\": {:.4f},\n",percentile(ring.gpuCommandTimesMs(),0.95));
+    j += "  \"queueHighWater\": null,\n";
+    j += "  \"resourcePoolPeakMiB\": null,\n";
     j += std::format("  \"vramBudgetHeadroomMiB\": {},\n", vramHeadroom);
     j += std::format("  \"workingSetStartMiB\": {:.1f},\n", pmcStart.WorkingSetSize / 1048576.0);
     j += std::format("  \"workingSetPeakMiB\": {:.1f},\n", wsPeak / 1048576.0);

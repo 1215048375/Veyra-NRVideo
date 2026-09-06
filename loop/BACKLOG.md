@@ -1,5 +1,17 @@
 # Veyra Launch V1 Backlog
 
+## 当前唯一队列（F6，2026-09-07）
+
+- [x] 真实共享输入/NR guidance/资源修复，Win32播放器、WIC图片、D3D12 NVENC视频、DirectShow输入实现。
+- [x] 用户确认默认实时内部处理档，保留原生4K可选/原生4K导出。
+- [x] 联合软件短测31.59秒通过，证据见DELIVERY_STATUS。
+- [x] 新上下文只读Reviewer：3个P1修复复验后PASS，见REVIEW_F6。
+- [x] 本机交付Veyra.cmd与文档；实卡交给用户，不等硬件接入、不假报实测。
+
+以下原阶段队列保留为历史规格，不得绕过上述用户授权新顺序重跑长测。
+
+> 2026-09-06 用户授权接管修订：当前推进、五分钟短测与用户实卡验收以 `../docs/ACTIVE_DELIVERY_PLAN.md` 为准，取代下文旧的严格串行施工/30分钟测试/未接设备阻塞全部交付规则。历史记录不是当前通过证明。
+
 状态：`TODO / DOING / BLOCKED / GATE_PASS / REVIEW_PASS / DONE`。Maker 每个 cycle 只处理当前 Phase 第一个前置满足的 TODO。若某项因外部许可/硬件明确标为 BLOCKED，可继续同一 Phase 后面与它独立的 TODO；该 Phase 最终 gate 仍不得通过。
 
 ## Phase 0–4 — 已验证基础

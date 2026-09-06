@@ -66,6 +66,7 @@ public:
     size_t pull(float* dst, size_t maxFrames, double* firstPtsMs);
 
     void stopThread();
+    void setPaused(bool value) { paused_.store(value); }
 
     // Seek protocol (engine thread calls; audio thread executes). Blocks
     // until the audio thread finished the atomic re-sequence and prefilled.
@@ -108,6 +109,7 @@ private:
     std::condition_variable wake_;
     std::condition_variable seekDoneCv_;
     std::atomic<bool> stopFlag_{false};
+    std::atomic<bool> paused_{false};
     bool seekRequested_ = false;
     bool seekDone_ = true;
     double seekTargetMs_ = 0.0;
@@ -129,6 +131,7 @@ public:
     // Called by the audio thread after prefill: begins playback anchored at
     // the PTS of the sample that will be written first.
     bool startAnchored(double firstBufferPtsMs);
+    void setPaused(bool value);
 
     // Event-driven pump for ONE event cycle. Writes real data when the ring
     // has it, silence otherwise (underrun counted). Returns false on hard
@@ -158,9 +161,9 @@ private:
     UINT32 bufferFrames_ = 0;
     uint32_t sampleRate_ = kAudioRate;
     UINT64 clockFrequency_ = 0;
-    UINT64 anchorPos_ = 0;
+    std::atomic<UINT64> anchorPos_{0};
     std::atomic<double> anchorPtsMs_{0.0};
-    bool started_ = false;
+    std::atomic<bool> started_{false};
     bool running_ = false;
     bool comInited_ = false;
     std::atomic<uint64_t> underruns_{0};

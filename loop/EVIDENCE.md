@@ -1,5 +1,17 @@
 # Veyra Gate Evidence
 
+## FINAL current binary / independent PASS — 2026-09-07
+
+Current EXE SHA256 70DD23C44337004FC734FBAE8BB6139E185C52370AE97CCE6C3432A3C6F30DE1. New-context Reviewer preflight/phase5 (consolidated delivery) exit0/0, PASS, no reviewer source mutations. logs/delivery/9be0614da5d642e394a35c71d80f6207/result.json,40.31s. Initial3 P1 fixed and independently reproduced correction: image4K dimensions, cancel callback lifetime43encodes exit3/partial only, audio fail-closed code review. Review persisted docs/REVIEW_F6.md. Local contract only; awaiting_user_capture_test and distribution_blocked remain.
+
+## F6 consolidated local delivery — 2026-09-07
+
+Build x64-release exit0. `scripts/gates/delivery.ps1 -Root .` exit0, run d28879b01b5c44dd86cad33d6f386d90, 31.59s, 16 checks. Full current evidence in logs/delivery/{run}/result.json and per-command stdout/stderr/JSON/media. Actual 1080 NR60 + NVOF motion + GBV0, native4K NR12, 4K-input realtime FG source264/generated263/absolute-latenessP95 14.88ms, paused seek/resume/JPEG, PNG application run, native4K H264 and HEVC23 frames each + audio fully decoded by ffprobe. EXE900DD752D749036EC482B3B9557AD23D12C60D58A58E37B44C1C960D5DC1B747. New read-only reviewer pending. No capture hardware or endurance PASS.
+
+Raw GPU segmentation logs/f6-profile-split.* proves NR22–23ms versus decode/output0.28ms. User explicitly accepted default realtime processing profile with optional native4K. New controls/doc hash rebaseline records this subsequent user authorization, not a hidden lowering of native4K quality/output correctness.
+
+> 2026-09-06 用户授权接管修订：当前推进、五分钟短测与用户实卡验收以 `../docs/ACTIVE_DELIVERY_PLAN.md` 为准，取代下文旧的严格串行施工/30分钟测试/未接设备阻塞全部交付规则。历史记录不是当前通过证明。
+
 这里只登记真实存在的门禁证据。格式固定：
 
 ## Phase 3 / phase3 / 2026-09-03T01:20:00+08:00

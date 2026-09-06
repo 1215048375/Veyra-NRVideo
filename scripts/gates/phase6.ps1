@@ -1,6 +1,11 @@
 [CmdletBinding()]
 param([Parameter(Mandatory = $true)][string]$Root)
 
+# Superseded by the user's explicit short-test + realtime-profile contract.
+& (Join-Path $PSScriptRoot 'delivery.ps1') -Root $Root
+exit $LASTEXITCODE
+# The original long gate below is retained as historical specification only.
+
 # Veyra Phase 6 gate: DLSSG 2X and the realtime engine (Launch V1).
 # Covers BACKLOG P6.0 / Playbook sections 14 and 22:
 #   - nvngx_dlssg.dll staged from the SDK with the pinned identity

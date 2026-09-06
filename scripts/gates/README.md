@@ -1,5 +1,7 @@
 # Phase gate contract
 
+> 2026-09-06 用户授权接管修订：当前推进、五分钟短测与用户实卡验收以 `../docs/ACTIVE_DELIVERY_PLAN.md` 为准，取代下文旧的严格串行施工/30分钟测试/未接设备阻塞全部交付规则。历史记录不是当前通过证明。
+
 每个 scripts/gates/phaseN.ps1 都必须：
 
 1. 接受必填参数 param([string]$Root)；

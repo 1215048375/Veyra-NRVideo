@@ -39,6 +39,7 @@ bool PresentSink::initialize(ID3D12Device* device, ID3D12CommandQueue* queue,
                              const Desc& desc, Status& status)
 {
     device_ = device;
+    shutdownCalled_ = false;
     desc_ = desc;
     width_ = desc.width;
     height_ = desc.height;
@@ -65,7 +66,7 @@ bool PresentSink::initialize(ID3D12Device* device, ID3D12CommandQueue* queue,
     const DWORD style = WS_OVERLAPPEDWINDOW;
     RECT rect{0, 0, static_cast<LONG>(width_), static_cast<LONG>(height_)};
     AdjustWindowRect(&rect, style, FALSE);
-    hwnd_ = CreateWindowExW(WS_EX_OVERLAPPEDWINDOW, kWindowClassName, desc_.title.c_str(),
+    hwnd_ = desc.targetWindow ? desc.targetWindow : CreateWindowExW(WS_EX_OVERLAPPEDWINDOW, kWindowClassName, desc_.title.c_str(),
         style, CW_USEDEFAULT, CW_USEDEFAULT,
         rect.right - rect.left, rect.bottom - rect.top,
         nullptr, nullptr, instance, nullptr);
@@ -74,7 +75,7 @@ bool PresentSink::initialize(ID3D12Device* device, ID3D12CommandQueue* queue,
         status = Status::WindowFailure;
         return false;
     }
-    ShowWindow(hwnd_, SW_SHOWNOACTIVATE); // background probe: never steal focus
+    if (!desc.targetWindow) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     UpdateWindow(hwnd_);
 
     // Factory with tearing awareness.
@@ -287,7 +288,7 @@ void PresentSink::shutdown()
     }
     swapChain_.Reset();
     log::info("present", "sink-shutdown: sub-step window-destroy-last");
-    if (hwnd_ != nullptr) {
+    if (hwnd_ != nullptr && !desc_.targetWindow) {
         DestroyWindow(hwnd_);
         hwnd_ = nullptr;
         MSG msg{};

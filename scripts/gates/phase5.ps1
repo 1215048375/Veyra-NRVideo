@@ -1,6 +1,11 @@
 [CmdletBinding()]
 param([Parameter(Mandatory = $true)][string]$Root)
 
+# Superseded by the user's explicit short-test + realtime-profile contract.
+& (Join-Path $PSScriptRoot 'delivery.ps1') -Root $Root
+exit $LASTEXITCODE
+# The original long gate below is retained as historical specification only.
+
 # Veyra Phase 5 gate (R1.1 rewrite, 2026-09-06): product-grade unified guidance
 # and quality core. This replaces the invalidated gate that (a) accepted a depth
 # manifest as provider completion, (b) ran a second 1080p endurance in the

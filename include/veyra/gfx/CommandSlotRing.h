@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <vector>
+#include <string>
 
 #include "veyra/Result.h"
 
@@ -48,6 +49,7 @@ public:
 
     // Closes, submits and signals the slot; advances the fence timeline.
     bool submitAndSignal(uint32_t slot);
+    void tag(uint32_t slot,const char* label){slots_.at(slot).label=label;}
 
     // The fence value most recently signaled by this ring. Callers that need
     // a GPU-side dependency on the just-submitted work (e.g. NVOF input
@@ -72,12 +74,16 @@ public:
 
     // Query heap for D3D12_QUERY_TYPE_TIMESTAMP entries (two per slot).
     ID3D12QueryHeap* timestampHeap() const { return timestampHeap_.Get(); }
+    uint64_t cpuWaitCount() const { return cpuWaitCount_; }
+    const std::vector<double>& gpuCommandTimesMs() const { return gpuCommandTimesMs_; }
 
 private:
     struct Slot {
         ComPtr<ID3D12CommandAllocator> allocator;
         ComPtr<ID3D12GraphicsCommandList> list;
         uint64_t fenceValue = 0; // 0 means "never submitted"
+        bool timed = false;
+        std::string label;
     };
 
     bool initialized_ = false;
@@ -89,6 +95,9 @@ private:
     uint64_t nextFenceValue_ = 1;
     ComPtr<ID3D12QueryHeap> timestampHeap_;
     std::vector<Slot> slots_;
+    ComPtr<ID3D12Resource> timingReadback_;
+    uint64_t timestampFrequency_ = 0, cpuWaitCount_ = 0;
+    std::vector<double> gpuCommandTimesMs_;
 };
 
 } // namespace veyra::gfx

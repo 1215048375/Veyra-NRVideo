@@ -23,6 +23,7 @@
 #include <d3d12.h>
 
 #include "veyra/pipeline/GpuPassUtils.h"
+#include "veyra/core/SceneCadenceAnalyzer.h"
 
 struct AVFrame;
 struct SwsContext;
@@ -105,6 +106,7 @@ public:
         uint64_t nvofExecuteCount = 0;
         uint64_t nvofFrameFailures = 0;
         uint64_t fgGeneratedFrames = 0;
+        uint64_t nrMotionFrames = 0, sceneCutCount = 0, resetCount = 0;
     };
     const Metrics& metrics() const { return metrics_; }
     const std::string& mvecSource() const { return mvecSource_; }
@@ -211,6 +213,10 @@ private:
 
     // Per-run state.
     uint64_t realFrameIndex_ = 0;
+    uint32_t nextListSlot_ = 0;
+    uint64_t uploadFences_[2] = {};
+    core::SceneCadenceAnalyzer scene_;
+    std::vector<uint8_t> previousLuma_;
     double prevPtsMs_ = -1.0;
     bool prevValid_ = false;
     Metrics metrics_{};

@@ -46,6 +46,11 @@ bool CommandSlotRing::initialize(ID3D12Device* device,
     }
     UINT64 frequency = 0;
     const HRESULT freqResult = queue_->GetTimestampFrequency(&frequency);
+    if(FAILED(freqResult)||frequency==0)return false;
+    timestampFrequency_=frequency;
+    D3D12_HEAP_PROPERTIES rh{};rh.Type=D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC rb{};rb.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;rb.Width=slotCount_*2*sizeof(uint64_t);rb.Height=1;rb.DepthOrArraySize=1;rb.MipLevels=1;rb.SampleDesc.Count=1;rb.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    if(FAILED(device_->CreateCommittedResource(&rh,D3D12_HEAP_FLAG_NONE,&rb,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&timingReadback_))))return false;
     veyra::log::info("gfx", std::format("slot-ring: timestamp heap created slots={} pairs={} frequencyHz={} freqQuery={}",
         slotCount_, timestampHeapDesc.Count, frequency, veyra::hresultString(freqResult)));
 
@@ -87,6 +92,7 @@ void CommandSlotRing::shutdown()
     (void)waitIdle();
     slots_.clear();
     timestampHeap_.Reset();
+    timingReadback_.Reset();
     initialized_ = false;
     veyra::log::info("gfx", "slot-ring: shutdown complete");
 }
@@ -109,6 +115,7 @@ ID3D12GraphicsCommandList* CommandSlotRing::acquire(uint32_t slot, Status& statu
                 veyra::log::error("gfx", std::format("slot-ring: SetEventOnCompletion slot={} failed hr={}", slot, veyra::hresultString(waitResult)));
                 return nullptr;
             }
+            ++cpuWaitCount_;
             const DWORD wait = WaitForSingleObject(fenceEvent_, 10000);
             if (wait != WAIT_OBJECT_0) {
                 status = Status::DeviceFailure;
@@ -118,6 +125,14 @@ ID3D12GraphicsCommandList* CommandSlotRing::acquire(uint32_t slot, Status& statu
         }
     }
 
+    if(target.timed && timingReadback_) {
+        uint64_t* data=nullptr;D3D12_RANGE range{slot*2*sizeof(uint64_t),(slot*2+2)*sizeof(uint64_t)};
+        if(SUCCEEDED(timingReadback_->Map(0,&range,reinterpret_cast<void**>(&data)))) {
+            const uint64_t begin=data[slot*2],end=data[slot*2+1];
+            if(end>=begin&&gpuCommandTimesMs_.size()<16384){const double ms=double(end-begin)*1000.0/timestampFrequency_;gpuCommandTimesMs_.push_back(ms);if(!target.label.empty())veyra::log::info("gpu-profile",std::format("{} {:.4f} ms",target.label,ms));}
+            D3D12_RANGE empty{0,0};timingReadback_->Unmap(0,&empty);
+        }target.timed=false;target.label.clear();
+    }
     HRESULT result = target.allocator->Reset();
     if (FAILED(result)) {
         status = Status::DeviceFailure;
@@ -130,6 +145,7 @@ ID3D12GraphicsCommandList* CommandSlotRing::acquire(uint32_t slot, Status& statu
         veyra::log::error("gfx", std::format("slot-ring: list reset slot={} failed hr={}", slot, veyra::hresultString(result)));
         return nullptr;
     }
+    target.list->EndQuery(timestampHeap_.Get(),D3D12_QUERY_TYPE_TIMESTAMP,slot*2);
     return target.list.Get();
 }
 
@@ -141,6 +157,9 @@ bool CommandSlotRing::submitAndSignal(uint32_t slot)
     }
     Slot& target = slots_[slot];
 
+    target.list->EndQuery(timestampHeap_.Get(),D3D12_QUERY_TYPE_TIMESTAMP,slot*2+1);
+    target.list->ResolveQueryData(timestampHeap_.Get(),D3D12_QUERY_TYPE_TIMESTAMP,slot*2,2,timingReadback_.Get(),slot*2*sizeof(uint64_t));
+    target.timed=true;
     const HRESULT closeResult = target.list->Close();
     if (FAILED(closeResult)) {
         veyra::log::error("gfx", std::format("slot-ring: close slot={} failed hr={}", slot, veyra::hresultString(closeResult)));

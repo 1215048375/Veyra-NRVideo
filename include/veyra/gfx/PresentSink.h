@@ -35,6 +35,7 @@ public:
         bool vsync = true;
         // Probe runs create their own window class name per process.
         std::wstring title = L"Veyra";
+        HWND targetWindow = nullptr; // borrowed UI-owned child HWND; never destroyed by sink
     };
 
     // Creates a Win32 window (not shown as foreground; background probe

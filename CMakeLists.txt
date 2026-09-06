@@ -149,6 +149,7 @@ veyra_add_compute_shader(veyra_shader_nv12_upload Nv12Upload)
 veyra_add_graphics_shader_pair(veyra_shader_present_blit PresentBlit)
 # NvofDensify: SHORT2 S10.5 raw flow -> workingExtent float2 + confidence.
 veyra_add_compute_shader(veyra_shader_nvof_densify NvofDensify)
+veyra_add_compute_shader(veyra_shader_rgb_nv12 RgbToNv12)
 
 # ---------------------------------------------------------------------------
 # veyra_parity: RenoDX-equivalent codec reference (CPU golden + shaders later).
@@ -302,7 +303,7 @@ endif()
 # EnhanceGraph (the real GPU chain) needs the NGX + NVOF backends; wire it
 # into veyra_pipeline only when both exist so bare contract builds still work.
 if(TARGET veyra_ngx AND TARGET veyra_nvof AND VEYRA_FFMPEG_ROOT)
-  target_sources(veyra_pipeline PRIVATE src/pipeline/EnhanceGraph.cpp)
+  target_sources(veyra_pipeline PRIVATE src/pipeline/EnhanceGraph.cpp src/core/SceneCadenceAnalyzer.cpp)
   target_include_directories(veyra_pipeline PRIVATE ${FFMPEG_INCLUDE_DIRS})
   target_link_libraries(veyra_pipeline PRIVATE veyra_ngx veyra_nvof ${FFMPEG_LIBRARIES})
   add_dependencies(veyra_pipeline
@@ -352,6 +353,8 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   # currently lives in veyra_gfx and moves here when the migration completes.
   add_library(veyra_sinks STATIC
     src/sink/WasapiAudioSink.cpp
+    src/sink/ImageExportSink.cpp
+    src/sink/NvencD3D12Encoder.cpp
   )
   veyra_apply_warnings(veyra_sinks)
   target_compile_options(veyra_sinks PRIVATE /WX-)
@@ -360,13 +363,17 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
     UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
   target_include_directories(veyra_sinks PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_include_directories(veyra_sinks PRIVATE ${FFMPEG_INCLUDE_DIRS})
-  target_link_libraries(veyra_sinks PUBLIC veyra_base ole32 mmdevapi avrt)
+  target_include_directories(veyra_sinks PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party_local/nvidia/nv-codec-headers/include")
+  target_compile_definitions(veyra_sinks PRIVATE VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
+  add_dependencies(veyra_sinks veyra_shader_rgb_nv12)
+  target_link_libraries(veyra_sinks PUBLIC veyra_base veyra_gfx ole32 windowscodecs mmdevapi avrt)
   target_link_libraries(veyra_sinks PRIVATE ${FFMPEG_LIBRARIES})
 
   # veyra_sources: product input sources (Playbook R3/R7). MediaFileSource
   # composes veyra_media; no second decode implementation exists.
   add_library(veyra_sources STATIC
     src/source/MediaFileSource.cpp
+    src/source/CaptureCardSource.cpp
   )
   veyra_apply_warnings(veyra_sources)
   target_compile_options(veyra_sources PRIVATE /WX-)
@@ -375,7 +382,7 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
     UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
   target_include_directories(veyra_sources PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(veyra_sources PUBLIC veyra_pipeline veyra_media veyra_base)
-  target_link_libraries(veyra_sources PRIVATE ${FFMPEG_LIBRARIES})
+  target_link_libraries(veyra_sources PRIVATE ${FFMPEG_LIBRARIES} strmiids ole32 oleaut32)
 
   add_executable(veyra_source_tests
     tests/integration/MediaFileSourceTests.cpp
@@ -389,6 +396,17 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_link_libraries(veyra_source_tests PRIVATE veyra_sources)
 
   # Headless quality-core runner (Playbook R3.3): the phase5 gate's quality
+  add_library(veyra_engine STATIC src/engine/EngineController.cpp src/engine/VideoPresenter.cpp src/engine/VideoExportJob.cpp src/engine/Subtitles.cpp)
+  target_compile_features(veyra_engine PUBLIC cxx_std_20)
+  target_compile_options(veyra_engine PRIVATE /utf-8)
+  target_compile_definitions(veyra_engine PUBLIC VEYRA_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}" VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
+  target_link_libraries(veyra_engine PUBLIC veyra_pipeline veyra_sources veyra_sinks veyra_ngx veyra_nvof)
+  add_executable(veyra WIN32 apps/veyra/main.cpp)
+  target_compile_features(veyra PRIVATE cxx_std_20)
+  target_compile_options(veyra PRIVATE /utf-8)
+  target_link_libraries(veyra PRIVATE veyra_engine comctl32 comdlg32 shell32)
+  add_dependencies(veyra veyra_shader_present_blit)
+
   # matrix executes through the shared product libraries only.
   add_executable(veyra_quality_probe
     tools/quality_probe/main.cpp
@@ -402,7 +420,7 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
     VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
   target_include_directories(veyra_quality_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(veyra_quality_probe PRIVATE
-    veyra_pipeline veyra_sources veyra_media veyra_ngx veyra_nvof
+    veyra_pipeline veyra_sources veyra_media veyra_ngx veyra_nvof veyra_sinks
     ${FFMPEG_LIBRARIES} psapi dxgi)
   add_dependencies(veyra_quality_probe
     veyra_shader_yuv_to_rgb veyra_shader_parity_encode

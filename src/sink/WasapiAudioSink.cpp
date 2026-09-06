@@ -24,14 +24,15 @@ AudioPipeline::AudioPipeline()
 
 AudioPipeline::~AudioPipeline()
 {
-    closeAll();
     stopThread();
+    closeAll();
 }
 
 bool AudioPipeline::open(const std::wstring& path)
 {
-    std::string narrow;
-    narrow.assign(path.begin(), path.end());
+    const int length=WideCharToMultiByte(CP_UTF8,0,path.data(),static_cast<int>(path.size()),nullptr,0,nullptr,nullptr);
+    std::string narrow(length,'\0');
+    WideCharToMultiByte(CP_UTF8,0,path.data(),static_cast<int>(path.size()),narrow.data(),length,nullptr,nullptr);
     if (avformat_open_input(&fmt_, narrow.c_str(), nullptr, nullptr) != 0) return false;
     if (avformat_find_stream_info(fmt_, nullptr) < 0) return false;
     const AVCodec* codec = nullptr;
@@ -226,13 +227,18 @@ bool AudioRenderer::start()
     hr = device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
         reinterpret_cast<void**>(&client_));
     if (FAILED(hr)) return false;
-    WAVEFORMATEX* mix = nullptr;
-    if (FAILED(client_->GetMixFormat(&mix))) return false;
-    sampleRate_ = mix->nSamplesPerSec;
-    hr = client_->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-        10 * 10000, 0, mix, nullptr);
+    WAVEFORMATEX mix{};
+    mix.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
+    mix.nChannels = 2;
+    mix.nSamplesPerSec = kAudioRate;
+    mix.wBitsPerSample = 32;
+    mix.nBlockAlign = 8;
+    mix.nAvgBytesPerSec = mix.nSamplesPerSec * mix.nBlockAlign;
+    sampleRate_ = kAudioRate;
+    hr = client_->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK |
+        AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+        10 * 10000, 0, &mix, nullptr);
     const bool initOk = SUCCEEDED(hr);
-    CoTaskMemFree(mix);
     if (!initOk) return false;
     if (FAILED(client_->GetBufferSize(&bufferFrames_))) return false;
     event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -307,9 +313,7 @@ double AudioRenderer::mediaTimeMs() const
 
 void AudioRenderer::stopAndReset()
 {
-    if (!running_) return;
-    (void)client_->Stop();
-    (void)client_->Reset();
+    if (client_) { (void)client_->Stop(); (void)client_->Reset(); }
     started_ = false;
     framesWritten_ = 0;
 }
@@ -320,15 +324,21 @@ uint64_t AudioRenderer::framesWritten() const { return framesWritten_; }
 
 void AudioRenderer::shutdown()
 {
-    if (!running_) return;
-    (void)client_->Stop();
-    (void)client_->Reset();
+    if (client_) { (void)client_->Stop(); (void)client_->Reset(); }
     #define REL(x) if (x) { x->Release(); x = nullptr; }
     REL(clock_); REL(render_); REL(client_); REL(device_); REL(enum_);
     #undef REL
     if (event_ != nullptr) { CloseHandle(event_); event_ = nullptr; }
     running_ = false;
-    if (comInited_) CoUninitialize();
+    started_ = false;
+    if (comInited_) { CoUninitialize(); comInited_ = false; }
+}
+
+void AudioRenderer::setPaused(bool value)
+{
+    if (!client_ || !started_) return;
+    const HRESULT hr = value ? client_->Stop() : client_->Start();
+    if (FAILED(hr)) veyra::log::error("audio", std::format("pause/resume failed hr=0x{:X}", static_cast<unsigned>(hr)));
 }
 
 void AudioPipeline::runOnAudioThread(AudioRenderer* renderer)
@@ -356,7 +366,11 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer)
     veyra::log::info("audio", std::format("startup prefill done in {:.0f}ms firstPtsMs={:.1f} bufferedMs={:.0f}",
         lastPrefillMs_.load(), firstPts, bufferedMs()));
 
+    bool pauseApplied = false;
     while (!stopFlag_.load()) {
+        const bool pauseNow = paused_.load();
+        if (pauseNow != pauseApplied && renderer) renderer->setPaused(pauseNow);
+        pauseApplied = pauseNow;
         // Seek request? Atomic re-sequence.
         {
             std::unique_lock<std::mutex> lock(mutex_);
@@ -383,7 +397,7 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer)
                 double startPts = headPtsMs();
                 if (startPts < 0.0) startPts = target;
                 firstPtsAfterSeek_.store(startPts);
-                if (renderer != nullptr) renderer->startAnchored(startPts);
+                if (renderer != nullptr) { renderer->startAnchored(startPts); if (pauseNow) renderer->setPaused(true); }
                 {
                     std::lock_guard<std::mutex> l2(mutex_);
                     discardUntilPtsMs_ = -1.0;
@@ -395,6 +409,7 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer)
                 continue;
             }
         }
+        if (pauseNow) { std::this_thread::sleep_for(std::chrono::milliseconds(5)); continue; }
         // Regular cycle: pump the endpoint, then top up below high watermark.
         if (renderer != nullptr) {
             double firstPts = -1.0;

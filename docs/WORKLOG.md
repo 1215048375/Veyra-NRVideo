@@ -1,5 +1,11 @@
 # Veyra Worklog
 
+## 2026-09-07 direct implementation delivery
+
+See docs/DELIVERY_STATUS.md for current software, tests and limits. Actual app/controller/presenter, DirectShow source, WIC and D3D12 NVENC export now exist; earlier “no UI/export” entries are historical. Fixed NV12/uint shader inputs, real guidance-before-NR, scene resets, audio format/paused seek, GPU timestamp semantics. CMake x64-release exit0; consolidated gate run d28879b01b5c44dd86cad33d6f386d90 exit0 in31.59s. No 30-minute retests. User accepted realtime internal-resolution option after GPU measurement. Independent review next; do not claim phase checkpoint yet.
+
+> 2026-09-06 用户授权接管修订：当前推进、五分钟短测与用户实卡验收以 `../docs/ACTIVE_DELIVERY_PLAN.md` 为准，取代下文旧的严格串行施工/30分钟测试/未接设备阻塞全部交付规则。历史记录不是当前通过证明。
+
 ## 2026-09-02 Phase 2 — RenoDX-equivalent parity codec (gate 35/35 + reviewer PASS)
 
 Goal:
