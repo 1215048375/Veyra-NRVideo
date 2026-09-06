@@ -69,6 +69,8 @@ extern "C" {
 #include "veyra/gfx/D3D12DeviceContext.h"
 #include "veyra/gfx/PresentSink.h"
 #include "veyra/sink/WasapiAudioSink.h"
+#include "veyra/pipeline/GpuPassUtils.h"
+#include "veyra/pipeline/EnhanceGraph.h"
 #include "veyra/media/FFmpegDemuxer.h"
 #include "veyra/media/FFmpegVideoDecoder.h"
 #include "veyra/ngx/DlssFgBackend.h"
@@ -98,326 +100,16 @@ struct EngineMetrics {
     int64_t maxInFlight = 0;
 };
 
-ComPtr<ID3D12Resource> makeTexture(ID3D12Device* device, uint32_t w, uint32_t h,
-                                   DXGI_FORMAT fmt, bool uav)
-{
-    D3D12_HEAP_PROPERTIES hp{};
-    hp.Type = D3D12_HEAP_TYPE_DEFAULT;
-    D3D12_RESOURCE_DESC td{};
-    td.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    td.Width = w; td.Height = h; td.DepthOrArraySize = 1; td.MipLevels = 1;
-    td.Format = fmt; td.SampleDesc.Count = 1;
-    td.Flags = uav ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_NONE;
-    ComPtr<ID3D12Resource> r;
-    const HRESULT hr = device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &td,
-        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&r));
-    if (FAILED(hr)) {
-        veyra::log::error("player", std::format("texture alloc failed {}x{} hr=0x{:X}",
-            w, h, static_cast<unsigned>(hr)));
-        return nullptr;
-    }
-    return r;
-}
-
-ComPtr<ID3D12Resource> makeUploadBuffer(ID3D12Device* device, uint64_t size)
-{
-    D3D12_HEAP_PROPERTIES hp{};
-    hp.Type = D3D12_HEAP_TYPE_UPLOAD;
-    D3D12_RESOURCE_DESC bd{};
-    bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    bd.Width = size; bd.Height = 1; bd.DepthOrArraySize = 1;
-    bd.MipLevels = 1; bd.SampleDesc.Count = 1;
-    bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    ComPtr<ID3D12Resource> r;
-    const HRESULT hr = device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &bd,
-        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&r));
-    if (FAILED(hr)) {
-        veyra::log::error("player", std::format("upload buffer alloc failed size={} hr=0x{:X}",
-            static_cast<uint64_t>(size), static_cast<unsigned>(hr)));
-        return nullptr;
-    }
-    return r;
-}
-
-class StateTracker {
-public:
-    void set(ID3D12Resource* r, D3D12_RESOURCE_STATES s) { states_[r] = s; }
-    D3D12_RESOURCE_STATES get(ID3D12Resource* r) const {
-        const auto it = states_.find(r);
-        return it != states_.end() ? it->second : D3D12_RESOURCE_STATE_COMMON;
-    }
-    void transition(ID3D12GraphicsCommandList* list, ID3D12Resource* r,
-                    D3D12_RESOURCE_STATES to) {
-        const D3D12_RESOURCE_STATES from = get(r);
-        if (from == to) return;
-        D3D12_RESOURCE_BARRIER b{};
-        b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        b.Transition.pResource = r;
-        b.Transition.StateBefore = from;
-        b.Transition.StateAfter = to;
-        b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        list->ResourceBarrier(1, &b);
-        set(r, to);
-    }
-    void uavBarrier(ID3D12GraphicsCommandList* list, ID3D12Resource* r) {
-        D3D12_RESOURCE_BARRIER b{};
-        b.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-        b.UAV.pResource = r;
-        list->ResourceBarrier(1, &b);
-    }
-
-private:
-    std::unordered_map<ID3D12Resource*, D3D12_RESOURCE_STATES> states_;
-};
-
-// Audio playback now lives in the veyra_sinks product library
-// (include/veyra/sink/WasapiAudioSink.h); the probe consumes it.
-
-// ---------------------------------------------------------------------------
-// Compute pass helper (8 constants + SRV table + UAV table; single heap).
-// ---------------------------------------------------------------------------
-struct ComputePass {
-    ComPtr<ID3D12RootSignature> rootSig;
-    ComPtr<ID3D12PipelineState> pso;
-    ComPtr<ID3D12DescriptorHeap> heap;
-    UINT increment = 0;
-
-    bool loadShader(const char* name, std::vector<uint8_t>& bytes) const
-    {
-        const std::string path = std::string(VEYRA_SHADER_DIR "/") + name;
-        HANDLE f = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
-            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (f == INVALID_HANDLE_VALUE) {
-            veyra::log::error("player", std::format("shader missing: {}", path));
-            return false;
-        }
-        LARGE_INTEGER sz{};
-        GetFileSizeEx(f, &sz);
-        bytes.resize(static_cast<size_t>(sz.QuadPart));
-        DWORD read = 0;
-        ReadFile(f, bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr);
-        CloseHandle(f);
-        return !bytes.empty();
-    }
-
-    bool create(ID3D12Device* device, const std::vector<uint8_t>& cs, UINT heapSlots,
-                UINT srvCount = 3, UINT uavCount = 1)
-    {
-        D3D12_DESCRIPTOR_RANGE1 srvRange{};
-        srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-        srvRange.NumDescriptors = srvCount;
-        srvRange.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
-        D3D12_DESCRIPTOR_RANGE1 uavRange{};
-        uavRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-        uavRange.NumDescriptors = uavCount;
-        uavRange.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
-        D3D12_ROOT_PARAMETER1 rp[3]{};
-        rp[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-        rp[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        rp[0].Constants.ShaderRegister = 0;
-        rp[0].Constants.Num32BitValues = 8;
-        rp[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-        rp[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        rp[1].DescriptorTable.NumDescriptorRanges = 1;
-        rp[1].DescriptorTable.pDescriptorRanges = &srvRange;
-        rp[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-        rp[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        rp[2].DescriptorTable.NumDescriptorRanges = 1;
-        rp[2].DescriptorTable.pDescriptorRanges = &uavRange;
-        D3D12_VERSIONED_ROOT_SIGNATURE_DESC rd{};
-        rd.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
-        rd.Desc_1_1.NumParameters = 3;
-        rd.Desc_1_1.pParameters = rp;
-        ComPtr<ID3DBlob> sig, err;
-        if (FAILED(D3D12SerializeVersionedRootSignature(&rd, &sig, &err))) return false;
-        if (FAILED(device->CreateRootSignature(0, sig->GetBufferPointer(),
-                sig->GetBufferSize(), IID_PPV_ARGS(&rootSig)))) return false;
-        D3D12_COMPUTE_PIPELINE_STATE_DESC pd{};
-        pd.pRootSignature = rootSig.Get();
-        pd.CS.pShaderBytecode = cs.data();
-        pd.CS.BytecodeLength = cs.size();
-        if (FAILED(device->CreateComputePipelineState(&pd, IID_PPV_ARGS(&pso)))) return false;
-        D3D12_DESCRIPTOR_HEAP_DESC hd{};
-        hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        hd.NumDescriptors = heapSlots;
-        hd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-        if (FAILED(device->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&heap)))) return false;
-        increment = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        return true;
-    }
-
-    void bind(ID3D12GraphicsCommandList* list, const float constants[8],
-              uint64_t srvGpu, uint64_t uavGpu) const
-    {
-        ID3D12DescriptorHeap* heaps[] = { heap.Get() };
-        list->SetDescriptorHeaps(1, heaps);
-        list->SetComputeRootSignature(rootSig.Get());
-        list->SetPipelineState(pso.Get());
-        list->SetComputeRoot32BitConstants(0, 8, constants, 0);
-        const D3D12_GPU_DESCRIPTOR_HANDLE srv{ srvGpu };
-        const D3D12_GPU_DESCRIPTOR_HANDLE uav{ uavGpu };
-        list->SetComputeRootDescriptorTable(1, srv);
-        list->SetComputeRootDescriptorTable(2, uav);
-    }
-};
-
-bool loadShaderBytes(const char* name, std::vector<uint8_t>& bytes)
-{
-    const std::string path = std::string(VEYRA_SHADER_DIR "/") + name;
-    HANDLE f = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
-        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (f == INVALID_HANDLE_VALUE) {
-        veyra::log::error("player", std::format("shader missing: {}", path));
-        return false;
-    }
-    LARGE_INTEGER sz{};
-    GetFileSizeEx(f, &sz);
-    bytes.resize(static_cast<size_t>(sz.QuadPart));
-    DWORD read = 0;
-    ReadFile(f, bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr);
-    CloseHandle(f);
-    return !bytes.empty();
-}
-
-void makeSrv(ID3D12Device* device, ID3D12Resource* resource, DXGI_FORMAT fmt,
-             const D3D12_CPU_DESCRIPTOR_HANDLE& handle)
-{
-    D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
-    srv.Format = fmt;
-    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srv.Texture2D.MostDetailedMip = 0;
-    srv.Texture2D.MipLevels = 1;
-    srv.Texture2D.PlaneSlice = 0;
-    srv.Texture2D.ResourceMinLODClamp = 0.0f;
-    device->CreateShaderResourceView(resource, &srv, handle);
-}
-
-void makeUav(ID3D12Device* device, ID3D12Resource* resource, DXGI_FORMAT fmt,
-             const D3D12_CPU_DESCRIPTOR_HANDLE& handle)
-{
-    D3D12_UNORDERED_ACCESS_VIEW_DESC uav{};
-    uav.Format = fmt;
-    uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    device->CreateUnorderedAccessView(resource, nullptr, &uav, handle);
-}
-
-// Driver workaround (evidenced by bare-present stages 5-9, 2026-09-04):
-// on this driver (RTX 5070, 616.56), CreateShaderResourceView writing
-// directly into a SHADER-VISIBLE CBV_SRV_UAV heap corrupts the flip-model
-// Present path (fabricated DXGI_ERROR_DEVICE_REMOVED, removedReason
-// DXGI_ERROR_INVALID_CALL, no DRED). Creating the SRV in a NON-shader-
-// visible staging heap and CopyDescriptorsSimple into the visible heap is
-// proven safe (stage 9: 600/600 presents). UAVs/CBVs direct into visible
-// heaps are safe (stages 7/8) and stay direct.
-class DescriptorStager {
-public:
-    bool initialize(ID3D12Device* device, UINT slots)
-    {
-        device_ = device;
-        D3D12_DESCRIPTOR_HEAP_DESC hd{};
-        hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        hd.NumDescriptors = slots;
-        hd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-        if (FAILED(device->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&heap_)))) return false;
-        increment_ = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        capacity_ = slots;
-        return true;
-    }
-
-    // Creates an SRV for `resource` via the staging heap and copies it into
-    // `targetSlot` of `visibleHeap`. srvDesc may be null for defaults.
-    void stageSrv(ID3D12Resource* resource, const D3D12_SHADER_RESOURCE_VIEW_DESC* srvDesc,
-                  ID3D12DescriptorHeap* visibleHeap, UINT targetSlot)
-    {
-        const UINT stagingSlot = next_ % capacity_;
-        next_ = (next_ + 1) % capacity_;
-        const D3D12_CPU_DESCRIPTOR_HANDLE staging{
-            heap_->GetCPUDescriptorHandleForHeapStart().ptr + stagingSlot * increment_ };
-        device_->CreateShaderResourceView(resource, srvDesc, staging);
-        const D3D12_CPU_DESCRIPTOR_HANDLE dst{
-            visibleHeap->GetCPUDescriptorHandleForHeapStart().ptr + targetSlot * increment_ };
-        device_->CopyDescriptorsSimple(1, dst, staging, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    }
-
-    ID3D12DescriptorHeap* heap() const { return heap_.Get(); }
-    UINT increment() const { return increment_; }
-
-private:
-    ID3D12Device* device_ = nullptr;
-    ComPtr<ID3D12DescriptorHeap> heap_;
-    UINT increment_ = 0;
-    UINT capacity_ = 0;
-    UINT next_ = 0;
-};
-
-// Graphics present pass: fullscreen triangle blit onto a flip back buffer
-// (flip buffers may only transition PRESENT <-> RENDER_TARGET).
-struct GraphicsPass {
-    veyra::gfx::ComPtr<ID3D12RootSignature> rootSig;
-    veyra::gfx::ComPtr<ID3D12PipelineState> pso;
-    veyra::gfx::ComPtr<ID3D12DescriptorHeap> heap;
-    UINT increment = 0;
-
-    bool create(ID3D12Device* device, const std::vector<uint8_t>& vs,
-                const std::vector<uint8_t>& ps, UINT heapSlots)
-    {
-        D3D12_DESCRIPTOR_RANGE1 srvRange{};
-        srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-        srvRange.NumDescriptors = 1;
-        srvRange.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
-        D3D12_STATIC_SAMPLER_DESC sampler{};
-        sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-        sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-        sampler.ShaderRegister = 0;
-        sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-        D3D12_ROOT_PARAMETER1 rp[2]{};
-        rp[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-        rp[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        rp[0].Constants.ShaderRegister = 0;
-        rp[0].Constants.Num32BitValues = 8;
-        rp[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-        rp[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-        rp[1].DescriptorTable.NumDescriptorRanges = 1;
-        rp[1].DescriptorTable.pDescriptorRanges = &srvRange;
-        D3D12_VERSIONED_ROOT_SIGNATURE_DESC rd{};
-        rd.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
-        rd.Desc_1_1.NumParameters = 2;
-        rd.Desc_1_1.pParameters = rp;
-        rd.Desc_1_1.NumStaticSamplers = 1;
-        rd.Desc_1_1.pStaticSamplers = &sampler;
-        veyra::gfx::ComPtr<ID3DBlob> sig, err;
-        if (FAILED(D3D12SerializeVersionedRootSignature(&rd, &sig, &err))) return false;
-        if (FAILED(device->CreateRootSignature(0, sig->GetBufferPointer(),
-                sig->GetBufferSize(), IID_PPV_ARGS(&rootSig)))) return false;
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC pd{};
-        pd.pRootSignature = rootSig.Get();
-        pd.VS.pShaderBytecode = vs.data();
-        pd.VS.BytecodeLength = vs.size();
-        pd.PS.pShaderBytecode = ps.data();
-        pd.PS.BytecodeLength = ps.size();
-        pd.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-        pd.SampleMask = UINT_MAX;
-        pd.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
-        pd.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-        pd.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        pd.NumRenderTargets = 1;
-        pd.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-        pd.SampleDesc.Count = 1;
-        if (FAILED(device->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&pso)))) return false;
-        D3D12_DESCRIPTOR_HEAP_DESC hd{};
-        hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        hd.NumDescriptors = heapSlots;
-        hd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-        if (FAILED(device->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&heap)))) return false;
-        increment = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        return true;
-    }
-};
-
+// GPU helper facilities now live in the veyra_pipeline product library.
+using veyra::pipeline::makeTexture;
+using veyra::pipeline::makeUploadBuffer;
+using veyra::pipeline::StateTracker;
+using veyra::pipeline::ComputePass;
+using veyra::pipeline::loadShaderBytes;
+using veyra::pipeline::makeSrv;
+using veyra::pipeline::makeUav;
+using veyra::pipeline::DescriptorStager;
+using veyra::pipeline::GraphicsPass;
 } // namespace
 
 namespace {
@@ -505,6 +197,8 @@ int main(int argc, char** argv)
     double driftMinMs = 0.0, driftP50Ms = 0.0, driftP95Ms = 1e9, driftP99Ms = 0.0, driftMaxMs = 0.0;
     uint64_t latenessSampleCount = 0;
     uint64_t g_droppedSourceFrames = 0, g_droppedGeneratedFrames = 0;
+    uint64_t g_graphNrEval = 0, g_graphSrEval = 0, g_graphNvofExec = 0, g_graphFgGen = 0, g_graphNvofFail = 0;
+    std::string g_graphMvecSource = "nvof";
     std::string mvecSource = "nvof";
     uint64_t droppedLatePresents = 0;
     bool g_d3dDiagEnabled = false;
@@ -538,14 +232,8 @@ int main(int argc, char** argv)
     veyra::gfx::D3D12DeviceContext context;
     veyra::gfx::CommandSlotRing ring;
     veyra::gfx::PresentSink sink;
-    veyra::ngx::NgxCoreHost coreHost;
-    veyra::ngx::DlssSrBackend srBackend;
-    veyra::ngx::DlssFgBackend fgBackend;
-    veyra::ngx::DlssNrRuntimeAdapter nrAdapter;
-    veyra::ngx::NvOfSession nvof;
-    ComPtr<ID3D12Fence> nvofOutFence;
-    NVSDK_NGX_Parameter* ngxParams = nullptr;
-    NVSDK_NGX_Handle* nrHandle = nullptr;
+    // The NGX/NVOF backend stack now lives inside the EnhanceGraph product
+    // library (R3.2); this probe only assembles, schedules, presents, reports.
     SwsContext* nv12Ctx = nullptr;
     HANDLE nvofOutEvent = nullptr;
 
@@ -663,6 +351,7 @@ int main(int argc, char** argv)
             return b[0] ? std::atoi(b) : 0;
         }();
         if (bareStage >= 1 || GetEnvironmentVariableW(L"VEYRA_BARE_PRESENT", nullptr, 0) != 0) {
+            veyra::ngx::NgxCoreHost bareCore;
             veyra::gfx::PresentSink bareSink;
             veyra::gfx::PresentSink::Desc bd{};
             bd.width = 1280; bd.height = 720;
@@ -708,7 +397,7 @@ int main(int argc, char** argv)
                 };
                 pid2 = scanJson("ngxProjectId");
                 ev2 = scanJson("engineVersion");
-                if (pid2.empty() || !coreHost.initialize(context.device(), absRt,
+                if (pid2.empty() || !bareCore.initialize(context.device(), absRt,
                         pid2.c_str(), ev2.c_str(), st)) {
                     veyra::log::error("player", "bare stage1: core init failed");
                     break;
@@ -728,17 +417,17 @@ int main(int argc, char** argv)
             }
             if (bareStage >= 3) {
                 veyra::ngx::DlssFgBackend::Capability capB{};
-                const bool avail = bareFg.queryCapability(coreHost, capB, st);
+                const bool avail = bareFg.queryCapability(bareCore, capB, st);
                 veyra::log::info("player", std::format("bare stage3: capability available={}", avail));
             }
             if (bareStage >= 4) {
-                bareParams = coreHost.allocateParameters(st);
+                bareParams = bareCore.allocateParameters(st);
                 ID3D12GraphicsCommandList* cl = ring.acquire(0, st);
                 veyra::ngx::DlssFgBackend::CreateDesc fd2{};
                 fd2.width = 1280; fd2.height = 720;
                 fd2.renderWidth = 1280; fd2.renderHeight = 720;
                 fd2.backbufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-                const bool fgOk = bareFg.create(coreHost, cl, bareParams, fd2, st);
+                const bool fgOk = bareFg.create(bareCore, cl, bareParams, fd2, st);
                 (void)ring.submitAndSignal(0);
                 (void)ring.waitIdle();
                 veyra::log::info("player", std::format("bare stage4: FG create ok={} result=0x{:X}",
@@ -881,7 +570,7 @@ int main(int argc, char** argv)
                 ComPtr<ID3D12Resource> d10 = makeTexture(context.device(), 1280, 720,
                     DXGI_FORMAT_R32_FLOAT, false);
                 if (!tex10 || !out10 || !m10 || !d10) break;
-                NVSDK_NGX_Parameter* p10 = coreHost.allocateParameters(st);
+                NVSDK_NGX_Parameter* p10 = bareCore.allocateParameters(st);
                 if (p10 == nullptr) break;
 
                 // One DLSS SR evaluate (in: tex10 -> out10).
@@ -897,7 +586,7 @@ int main(int argc, char** argv)
                     if (!outBig) break;
                     ID3D12GraphicsCommandList* l10 = ring.acquire(0, st);
                     if (l10 == nullptr) break;
-                    const bool created10 = sr10.create(coreHost, l10, p10, cd, st);
+                    const bool created10 = sr10.create(bareCore, l10, p10, cd, st);
                     (void)ring.submitAndSignal(0);
                     (void)ring.waitIdle();
                     veyra::log::info("player", std::format("bare stage10: SR create ok={} result=0x{:X}",
@@ -1113,8 +802,10 @@ int main(int argc, char** argv)
                     ComPtr<ID3D12Fence> f13;
                     context.device()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&f13));
                     context.directQueue()->Signal(f13.Get(), 1);
-                    f13->SetEventOnCompletion(1, nvofOutEvent);
-                    WaitForSingleObject(nvofOutEvent, 5000);
+                    HANDLE ev13 = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+                    f13->SetEventOnCompletion(1, ev13);
+                    WaitForSingleObject(ev13, 5000);
+                    CloseHandle(ev13);
                     veyra::log::info("player", "bare13: depth-style upload copy on");
                 }
                 if (mask & 8) {
@@ -1137,7 +828,7 @@ int main(int argc, char** argv)
                     };
                     const std::string pid13 = scan13("ngxProjectId");
                     const std::string ev13 = scan13("engineVersion");
-                    if (pid13.empty() || !coreHost.initialize(context.device(), absRt,
+                    if (pid13.empty() || !bareCore.initialize(context.device(), absRt,
                             pid13.c_str(), ev13.c_str(), st)) break;
                     veyra::log::info("player", "bare13: NGX core AFTER sink");
                 }
@@ -1151,18 +842,18 @@ int main(int argc, char** argv)
                 }
                 if (mask & 32) {
                     veyra::ngx::DlssFgBackend::Capability c13{};
-                    (void)bareFg.queryCapability(coreHost, c13, st);
+                    (void)bareFg.queryCapability(bareCore, c13, st);
                     veyra::log::info("player", "bare13: capability query on");
                 }
                 if (mask & 64) {
-                    if (coreHost.initialized()) {
-                        NVSDK_NGX_Parameter* p13 = coreHost.allocateParameters(st);
+                    if (bareCore.initialized()) {
+                        NVSDK_NGX_Parameter* p13 = bareCore.allocateParameters(st);
                         ID3D12GraphicsCommandList* l13 = ring.acquire(0, st);
                         veyra::ngx::DlssFgBackend::CreateDesc fd13{};
                         fd13.width = 1280; fd13.height = 720;
                         fd13.renderWidth = 1280; fd13.renderHeight = 720;
                         fd13.backbufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-                        (void)bareFg.create(coreHost, l13, p13, fd13, st);
+                        (void)bareFg.create(bareCore, l13, p13, fd13, st);
                         (void)ring.submitAndSignal(0);
                         (void)ring.waitIdle();
                     }
@@ -1236,9 +927,6 @@ int main(int argc, char** argv)
             break; // bare mode exits after the loop
         }
 
-        nvofOutEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-        if (FAILED(context.device()->CreateFence(0, D3D12_FENCE_FLAG_NONE,
-                IID_PPV_ARGS(&nvofOutFence)))) break;
 
         // Software decode is the working path: D3D12VA decodes are slowed to
         // ~8fps by the injected layer once descriptor views exist (pool
@@ -1288,325 +976,35 @@ int main(int argc, char** argv)
         const uint32_t workW = 3840, workH = 2160;
         const bool srNeeded = (srcW != workW) || (srcH != workH);
 
-        // --- NGX (core, capability, NR snippet, parameter block) -----------
+        // --- EnhanceGraph product library (R3.2): resources, NGX/NVOF backends,
+        // compute passes and static views are owned and ordered by the graph
+        // itself. The probe keeps scheduling, presenting, and reporting only.
+        const bool noFeatures = GetEnvironmentVariableW(L"VEYRA_NO_FEATURES", nullptr, 0) != 0;
+        const bool noNgx = GetEnvironmentVariableW(L"VEYRA_NO_NGX", nullptr, 0) != 0;
+        const bool srEnabled = srNeeded; // 1:1 bypass otherwise
+        const bool nrEnabled = GetEnvironmentVariableW(L"VEYRA_NR_OFF", nullptr, 0) == 0 &&
+                               (noFeatures || noNgx ? false : true);
+        const bool fgEnabled = GetEnvironmentVariableW(L"VEYRA_FG_OFF", nullptr, 0) == 0 &&
+                               !noNgx;
         wchar_t absRuntime[MAX_PATH * 2]{};
         GetFullPathNameW(runtimeDir.c_str(), MAX_PATH * 2, absRuntime, nullptr);
-        std::ifstream ids(std::wstring(absRuntime) + L"\\..\\config\\ngx-local.json", std::ios::binary);
-        std::string idText((std::istreambuf_iterator<char>(ids)), std::istreambuf_iterator<char>());
-        std::string projectId, engineVersion;
-        {
-            auto scan = [&idText](const char* key) {
-                const std::string needle = std::string("\"") + key + "\"";
-                size_t p = idText.find(needle);
-                if (p == std::string::npos) return std::string();
-                p = idText.find('"', idText.find(':', p + needle.size()));
-                if (p == std::string::npos) return std::string();
-                return idText.substr(p + 1, idText.find('"', p + 1) - p - 1);
-            };
-            projectId = scan("ngxProjectId");
-            engineVersion = scan("engineVersion");
-        }
-        if (projectId.empty()) { veyra::log::error("player", "ngx-local.json missing"); break; }
-        const bool noNgx = GetEnvironmentVariableW(L"VEYRA_NO_NGX", nullptr, 0) != 0;
-        if (noNgx) {
-            veyra::log::warn("player", "BISECT: NGX core+features skipped; NVOF only");
-        } else if (!coreHost.initialize(context.device(), absRuntime,
-                projectId.c_str(), engineVersion.c_str(), st)) break;
-
-        veyra::ngx::DlssFgBackend::Capability fgCaps{};
-        const bool fgAvailable = noNgx ? true : fgBackend.queryCapability(coreHost, fgCaps, st);
-        if (!noNgx && !fgAvailable) { veyra::log::error("player", "FG unavailable; fail closed"); break; }
-        veyra::log::info("player", std::format("FG capability available={} multiFrameMax={}",
-            fgCaps.available, fgCaps.multiFrameCountMax));
-        if (!fgAvailable) { veyra::log::error("player", "FG unavailable; fail closed"); break; }
-
-        uint64_t nrResult = 0; uint32_t nrSeh = 0;
-        if (noNgx) { /* skip NR snippet */ }
-        else if (!nrAdapter.load(absRuntime, st) || !nrAdapter.installCallerCompatibility(st) ||
-            !nrAdapter.snippetInitExt(context.device(), absRuntime, nrResult, nrSeh) ||
-            nrResult != static_cast<uint64_t>(NVSDK_NGX_Result_Success)) {
-            veyra::log::error("player", std::format("NR snippet init failed 0x{:X}", nrResult));
+        veyra::pipeline::EnhanceGraphDesc graphDesc{};
+        graphDesc.sourceWidth = srcW;
+        graphDesc.sourceHeight = srcH;
+        graphDesc.workWidth = workW;
+        graphDesc.workHeight = workH;
+        graphDesc.enableSr = srEnabled;
+        graphDesc.enableNr = nrEnabled;
+        graphDesc.enableFg = fgEnabled;
+        graphDesc.noFeatures = noFeatures;
+        graphDesc.noNgx = noNgx;
+        graphDesc.runtimeAbsPath = absRuntime;
+        veyra::pipeline::EnhanceGraph graph(context, ring);
+        if (!graph.initialize(graphDesc)) {
+            veyra::log::error("player", "EnhanceGraph initialize failed");
             break;
         }
-        if (!noNgx) {
-            ngxParams = coreHost.allocateParameters(st);
-            if (ngxParams == nullptr) break;
-        }
-
-        // --- ALL committed resources FIRST (system constraint, see header) --
-        const size_t lumaPitch = (static_cast<size_t>(srcW) + 255) & ~size_t(255);
-        const size_t chromaPitch = lumaPitch;
-        const size_t lumaSize = lumaPitch * srcH;
-        const size_t chromaSize = chromaPitch * (srcH / 2);
-        const size_t dPitch = (static_cast<size_t>(workW) * 4 + 255) & ~size_t(255);
-        const size_t dSize = dPitch * workH;
-
-        ComPtr<ID3D12Resource> upLuma[2] = {
-            makeUploadBuffer(context.device(), lumaSize),
-            makeUploadBuffer(context.device(), lumaSize)
-        };
-        ComPtr<ID3D12Resource> upChroma[2] = {
-            makeUploadBuffer(context.device(), chromaSize),
-            makeUploadBuffer(context.device(), chromaSize)
-        };
-        ComPtr<ID3D12Resource> upDepth = makeUploadBuffer(context.device(), dSize);
-        ComPtr<ID3D12Resource> upZeroDepth = makeUploadBuffer(context.device(), dSize);
-        ComPtr<ID3D12Resource> upZeroMotion = makeUploadBuffer(context.device(), dSize);
-        ComPtr<ID3D12Resource> lumaTex = makeTexture(context.device(), srcW, srcH, DXGI_FORMAT_R8_UNORM, true);
-        ComPtr<ID3D12Resource> chromaTex = makeTexture(context.device(), srcW, srcH / 2, DXGI_FORMAT_R8G8_UNORM, true);
-        ComPtr<ID3D12Resource> srcRgba = makeTexture(context.device(), srcW, srcH, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
-        ComPtr<ID3D12Resource> workRgba = makeTexture(context.device(), workW, workH, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
-        ComPtr<ID3D12Resource> proxyTex = makeTexture(context.device(), workW, workH, DXGI_FORMAT_R8G8B8A8_UNORM, true);
-        ComPtr<ID3D12Resource> neuralTex = makeTexture(context.device(), workW, workH, DXGI_FORMAT_R8G8B8A8_UNORM, true);
-        ComPtr<ID3D12Resource> finalRgba = makeTexture(context.device(), workW, workH, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
-        ComPtr<ID3D12Resource> videoFrame[2] = {
-            makeTexture(context.device(), workW, workH, DXGI_FORMAT_R8G8B8A8_UNORM, true),
-            makeTexture(context.device(), workW, workH, DXGI_FORMAT_R8G8B8A8_UNORM, true)
-        };
-        const uint32_t nvofW = workW, nvofH = workH;
-        // Densified flow (FG input) + confidence at working extent; the raw
-        // SHORT2/cost textures live above at grid extent (nvofRawTex/nvofCostTex).
-        ComPtr<ID3D12Resource> confTex = makeTexture(context.device(), nvofW, nvofH, DXGI_FORMAT_R8_UNORM, true);
-        ComPtr<ID3D12Resource> flowTex = makeTexture(context.device(), nvofW, nvofH, DXGI_FORMAT_R16G16_FLOAT, true);
-        if (!confTex || !flowTex) {
-            veyra::log::error("player", "densify output allocation failed (fail closed)");
-            break;
-        }
-        ComPtr<ID3D12Resource> depthTex = makeTexture(context.device(), workW, workH, DXGI_FORMAT_R32_FLOAT, false);
-        ComPtr<ID3D12Resource> genFrame[2] = {
-            makeTexture(context.device(), workW, workH, DXGI_FORMAT_R8G8B8A8_UNORM, true),
-            makeTexture(context.device(), workW, workH, DXGI_FORMAT_R8G8B8A8_UNORM, true)
-        };  // P0.3: generated-frame slots so consecutive FG outputs never
-            // overwrite an unconsumed present.
-        ComPtr<ID3D12Resource> nrZeroMotion = makeTexture(context.device(), workW, workH, DXGI_FORMAT_R16G16_FLOAT, false);
-        ComPtr<ID3D12Resource> nrZeroDepth = makeTexture(context.device(), workW, workH, DXGI_FORMAT_R32_FLOAT, false);
-        if (!upLuma[0] || !upLuma[1] || !upChroma[0] || !upChroma[1] ||
-            !upDepth || !upZeroDepth || !upZeroMotion ||
-            !lumaTex || !chromaTex || !srcRgba || !workRgba || !proxyTex ||
-            !neuralTex || !finalRgba || !videoFrame[0] || !videoFrame[1] ||
-            !flowTex || !depthTex || !genFrame[0] || !genFrame[1] ||
-            !nrZeroMotion || !nrZeroDepth) {
-            veyra::log::error("player", "resource allocation failed");
-            break;
-        }
-
-        // Persistent mapping of the NV12 upload ring (before any views).
-        uint8_t* mappedLuma[2] = {};
-        uint8_t* mappedChroma[2] = {};
-        bool uploadsMapped = true;
-        for (int i = 0; i < 2; ++i) {
-            if (FAILED(upLuma[i]->Map(0, nullptr, reinterpret_cast<void**>(&mappedLuma[i]))) ||
-                FAILED(upChroma[i]->Map(0, nullptr, reinterpret_cast<void**>(&mappedChroma[i])))) {
-                uploadsMapped = false;
-            }
-        }
-        if (!uploadsMapped) {
-            veyra::log::error("player", "NV12 upload persistent map failed");
-            break;
-        }
-        veyra::log::info("player", "NV12 upload ring persistently mapped (2 buffers)");
-
-        // Depth constants uploaded once (copies are safe before views exist).
-        {
-            uint8_t* d = nullptr; uint8_t* zd = nullptr; uint8_t* zm = nullptr;
-            upDepth->Map(0, nullptr, reinterpret_cast<void**>(&d));
-            upZeroDepth->Map(0, nullptr, reinterpret_cast<void**>(&zd));
-            upZeroMotion->Map(0, nullptr, reinterpret_cast<void**>(&zm));
-            for (uint32_t y = 0; y < workH; ++y) {
-                float* dRow = reinterpret_cast<float*>(d + y * dPitch);
-                float* zdRow = reinterpret_cast<float*>(zd + y * dPitch);
-                uint16_t* zmRow = reinterpret_cast<uint16_t*>(zm + y * dPitch);
-                for (uint32_t x = 0; x < workW; ++x) {
-                    dRow[x] = 0.9f;  // explicit constant far depth (video content)
-                    zdRow[x] = 0.5f; // NR zero-depth explicit fallback
-                    zmRow[x * 2] = 0; zmRow[x * 2 + 1] = 0;
-                }
-            }
-            upDepth->Unmap(0, nullptr);
-            upZeroDepth->Unmap(0, nullptr);
-            upZeroMotion->Unmap(0, nullptr);
-
-            ID3D12GraphicsCommandList* list = ring.acquire(0, st);
-            if (list == nullptr) break;
-            auto uploadTex = [&](ID3D12Resource* tex, const ComPtr<ID3D12Resource>& up, DXGI_FORMAT fmt) {
-                D3D12_RESOURCE_BARRIER b{};
-                b.Transition.pResource = tex;
-                b.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
-                b.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
-                b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                list->ResourceBarrier(1, &b);
-                D3D12_TEXTURE_COPY_LOCATION dst{}, src{};
-                dst.pResource = tex;
-                dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-                src.pResource = up.Get();
-                src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-                src.PlacedFootprint.Footprint.Format = fmt;
-                src.PlacedFootprint.Footprint.Width = workW;
-                src.PlacedFootprint.Footprint.Height = workH;
-                src.PlacedFootprint.Footprint.Depth = 1;
-                src.PlacedFootprint.Footprint.RowPitch = static_cast<UINT>(dPitch);
-                list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
-                D3D12_RESOURCE_BARRIER back{};
-                back.Transition.pResource = tex;
-                back.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-                back.Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
-                back.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                list->ResourceBarrier(1, &back);
-            };
-            uploadTex(depthTex.Get(), upDepth, DXGI_FORMAT_R32_FLOAT);
-            uploadTex(nrZeroDepth.Get(), upZeroDepth, DXGI_FORMAT_R32_FLOAT);
-            uploadTex(nrZeroMotion.Get(), upZeroMotion, DXGI_FORMAT_R16G16_FLOAT);
-            list->Close();
-            ID3D12CommandList* lists[] = { list };
-            context.directQueue()->ExecuteCommandLists(1, lists);
-            ComPtr<ID3D12Fence> initFence;
-            context.device()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&initFence));
-            context.directQueue()->Signal(initFence.Get(), 1);
-            initFence->SetEventOnCompletion(1, nvofOutEvent);
-            WaitForSingleObject(nvofOutEvent, 5000);
-            veyra::log::info("player", "depth/zero guidance textures initialized");
-        }
-
-        const bool noFeatures = GetEnvironmentVariableW(L"VEYRA_NO_FEATURES", nullptr, 0) != 0;
-
-        // --- NVOF + NGX features (before any descriptor view) ---------------
-        veyra::ngx::NvOfSession::Desc nd{};
-        nd.width = nvofW; nd.height = nvofH;
-        nd.inFence = context.fence();
-        nd.outFence = nvofOutFence.Get();
-        nd.gridSize = 4;
-        // P0.4/s6 contract: B8G8R8A8 inputs, raw R16G16_SINT + R8_UINT cost
-        // at grid extent, passed explicitly; allocation failure = fail closed.
-        const uint32_t nvofGrid = 4;
-        const uint32_t rawW = (nvofW + nvofGrid - 1) / nvofGrid;
-        const uint32_t rawH = (nvofH + nvofGrid - 1) / nvofGrid;
-        ComPtr<ID3D12Resource> nvofRawTex = makeTexture(context.device(), rawW, rawH, DXGI_FORMAT_R16G16_SINT, false);
-        ComPtr<ID3D12Resource> nvofCostTex = makeTexture(context.device(), rawW, rawH, DXGI_FORMAT_R8_UINT, false);
-        if (!nvofRawTex || !nvofCostTex) {
-            veyra::log::error("player", "NVOF raw/cost allocation failed (fail closed)");
-            break;
-        }
-        // NVOF inputs must be B8G8R8A8 (ABGR8 in SDK terms).
-        ComPtr<ID3D12Resource> nvofInA = makeTexture(context.device(), nvofW, nvofH, DXGI_FORMAT_B8G8R8A8_UNORM, true);
-        ComPtr<ID3D12Resource> nvofInB = makeTexture(context.device(), nvofW, nvofH, DXGI_FORMAT_B8G8R8A8_UNORM, true);
-        if (!nvofInA || !nvofInB) {
-            veyra::log::error("player", "NVOF B8G8R8A8 input allocation failed (fail closed)");
-            break;
-        }
-        if (!noFeatures && !nvof.initialize(context.device(), nvofInA.Get(), nvofInB.Get(),
-                nvofRawTex.Get(), nvofCostTex.Get(), nd, st)) {
-            veyra::log::error("player", "NVOF init failed");
-            break;
-        }
-        const uint32_t selectedGrid = nvof.caps().selectedGrid;
-        // The historical 20x warm-up on UNINITIALIZED A/B was removed (user
-        // directive s7 item 5): it was a workaround from the invalid-SRV era,
-        // not a contract. If a pre-allocation need ever re-emerges, it must
-        // be a documented duplicate-frame warm-up on deterministic content.
-
-        if (!noFeatures && !noNgx) {
-            namespace p = veyra::ngx::dlssnr;
-            veyra::ngx::ParameterBlock pb(ngxParams);
-            pb.setU32(p::kWidth, workW); pb.setU32(p::kHeight, workH);
-            pb.setU32(p::kInputWidth, workW); pb.setU32(p::kInputHeight, workH);
-            pb.setU32(p::kOutputWidth, workW); pb.setU32(p::kOutputHeight, workH);
-            pb.setU32(p::kOutputDotWidth, workW); pb.setU32(p::kOutputDotHeight, workH);
-            pb.setU32(p::kUpscaling, 0);
-            pb.setF32(p::kScale, 1.0f); pb.setF32(p::kScalingRatio, 1.0f);
-            pb.setVoid(p::kComputeScalingRatioCallback,
-                reinterpret_cast<void*>(&veyra::ngx::DlssNrRuntimeAdapter::scalingRatioCallback));
-            pb.setI32(p::kHintRenderPreset, 0);
-            pb.setU32(p::kStdWidth, workW); pb.setU32(p::kStdHeight, workH);
-            pb.setI32(p::kPerfQualityValue, 1);
-            pb.setU32(p::kCreationNodeMask, 1); pb.setU32(p::kVisibilityNodeMask, 1);
-            ID3D12GraphicsCommandList* list = ring.acquire(0, st);
-            if (list == nullptr) break;
-            if (!nrAdapter.snippetCreateFeature(list, ngxParams, &nrHandle, nrResult, nrSeh) ||
-                nrResult != static_cast<uint64_t>(NVSDK_NGX_Result_Success)) {
-                veyra::log::error("player", std::format("NR create failed 0x{:X}", nrResult));
-                break;
-            }
-            (void)ring.submitAndSignal(0);
-            (void)ring.waitIdle();
-        }
-
-        const bool srEnabled = srNeeded; // 1:1 bypass otherwise
-        bool nrEnabled = GetEnvironmentVariableW(L"VEYRA_NR_OFF", nullptr, 0) == 0 &&
-                         (noFeatures || noNgx ? false : true);  // no NR handle exists -> off
-        bool fgEnabled = GetEnvironmentVariableW(L"VEYRA_FG_OFF", nullptr, 0) == 0 &&
-                         !noNgx;  // no feature handle exists under NO_NGX
-
-        if (srEnabled && !noFeatures && !noNgx) {
-            veyra::ngx::DlssSrBackend::CreateDesc sd{};
-            sd.inputWidth = srcW; sd.inputHeight = srcH;
-            sd.outputWidth = workW; sd.outputHeight = workH;
-            sd.perfQuality = 1; sd.enableOutputSubrects = false;
-            ID3D12GraphicsCommandList* list = ring.acquire(0, st);
-            if (list == nullptr) break;
-            if (!srBackend.create(coreHost, list, ngxParams, sd, st) || !srBackend.created()) {
-                veyra::log::error("player", "SR create failed");
-                break;
-            }
-            (void)ring.submitAndSignal(0);
-            (void)ring.waitIdle();
-        }
-
-        if (!noFeatures && !noNgx) {
-            veyra::ngx::DlssFgBackend::CreateDesc fd{};
-            fd.width = workW; fd.height = workH;
-            fd.renderWidth = workW; fd.renderHeight = workH;
-            fd.backbufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-            ID3D12GraphicsCommandList* list = ring.acquire(0, st);
-            if (list == nullptr) break;
-            if (!fgBackend.create(coreHost, list, ngxParams, fd, st) || !fgBackend.created()) {
-                veyra::log::error("player", std::format("FG create failed 0x{:X}", fgBackend.createResult()));
-                break;
-            }
-            (void)ring.submitAndSignal(0);
-            (void)ring.waitIdle();
-
-            // FG warm-up evaluate before descriptor views (same injected-layer
-            // constraint as NVOF: the runtime allocates internals at the first
-            // evaluate and would fail after views exist).
-            {
-                ID3D12GraphicsCommandList* wlist = ring.acquire(0, st);
-                if (wlist == nullptr) break;
-                D3D12_RESOURCE_BARRIER b[4]{};
-                for (int i = 0; i < 4; ++i) {
-                    b[i].Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
-                    b[i].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                }
-                b[0].Transition.pResource = nvofInB.Get();
-                b[0].Transition.StateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-                b[1].Transition.pResource = nrZeroMotion.Get();
-                b[1].Transition.StateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-                b[2].Transition.pResource = depthTex.Get();
-                b[2].Transition.StateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-                b[3].Transition.pResource = genFrame[0].Get();
-                b[3].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-                wlist->ResourceBarrier(4, b);
-                veyra::ngx::DlssFgBackend::EvalDesc fe{};
-                fe.backbuffer = nvofInB.Get();
-                fe.depth = depthTex.Get();
-                fe.mvecs = nrZeroMotion.Get();
-                fe.outputInterpolated = genFrame[0].Get();
-                fe.reset = true;
-                fe.frameId = 0;
-                fe.mvecScaleX = 1.0f;
-                fe.mvecScaleY = 1.0f;
-                bool warmOk = fgBackend.evaluate(wlist, ngxParams, fe, st);
-                (void)warmOk;
-                for (int i = 0; i < 4; ++i) b[i].Transition.StateBefore = b[i].Transition.StateAfter;
-                b[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
-                b[1].Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
-                b[2].Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
-                b[3].Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
-                wlist->ResourceBarrier(4, b);
-                if (!ring.submitAndSignal(0) || !ring.waitIdle()) break;
-                veyra::log::info("player", std::format("FG warm-up evaluate done ok={} result=0x{:X}",
-                    warmOk ? 1 : 0, fgBackend.createResult()));
-            }
-        }
+        const auto& gmetrics = graph.metrics();
 
         // --- PresentSink (swapchain allocs also precede views) ---------------
         veyra::gfx::PresentSink::Desc sinkDesc{};
@@ -1623,53 +1021,10 @@ int main(int argc, char** argv)
         sinkDesc.title = L"Veyra Player Probe";
         if (!sink.initialize(context.device(), context.directQueue(), sinkDesc, st)) break;
 
-        // --- Compute passes (PSOs + heaps; still no views) -------------------
-        ComputePass yuvPass, encPass, decPass, blitPass, uploadPass;
+        // --- Present pass (probe-owned: blits graph output to backbuffers) ---
         const bool skipPasses = GetEnvironmentVariableW(L"VEYRA_SKIP_PASSES", nullptr, 0) != 0;
         const bool skipViews = GetEnvironmentVariableW(L"VEYRA_SKIP_VIEWS", nullptr, 0) != 0;
         const bool viewsTex  = GetEnvironmentVariableW(L"VEYRA_VIEWS_TEX", nullptr, 0) != 0;
-        const bool viewsRaw  = GetEnvironmentVariableW(L"VEYRA_VIEWS_RAW", nullptr, 0) != 0;
-        const bool viewsUav  = GetEnvironmentVariableW(L"VEYRA_VIEWS_UAV", nullptr, 0) != 0;
-        if (!skipPasses) {
-            std::vector<uint8_t> cs;
-            if (!yuvPass.loadShader("YuvToLinearRgb.dxil", cs) || !yuvPass.create(context.device(), cs, 8)) break;
-            if (!encPass.loadShader("ParityEncode.dxil", cs) || !encPass.create(context.device(), cs, 8)) break;
-            if (!decPass.loadShader("ParityDecode.dxil", cs) || !decPass.create(context.device(), cs, 8)) break;
-            if (!blitPass.loadShader("ScaleBlit.dxil", cs) || !blitPass.create(context.device(), cs, 16)) break;
-            if (!uploadPass.loadShader("Nv12Upload.dxil", cs) || !uploadPass.create(context.device(), cs, 4, 1, 2)) break;
-        }
-        ComputePass densifyPass;
-        {
-            std::vector<uint8_t> cs;
-            if (!densifyPass.loadShader("NvofDensify.dxil", cs) ||
-                !densifyPass.create(context.device(), cs, 6, 2, 2)) break;
-        }
-        DescriptorStager stager;
-        if (!stager.initialize(context.device(), 64)) {
-            veyra::log::error("player", "descriptor stager init failed");
-            break;
-        }
-        auto cpuHandle = [](const ComputePass& p, UINT slot) {
-            return D3D12_CPU_DESCRIPTOR_HANDLE{ p.heap->GetCPUDescriptorHandleForHeapStart().ptr + slot * p.increment };
-        };
-        // stagedSrv: SRV creation must go through the staging heap (driver
-        // workaround; see DescriptorStager).
-        auto stagedSrv = [&](ID3D12Resource* resource, DXGI_FORMAT fmt,
-                             ComputePass& pass, UINT slot) {
-            D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
-            srv.Format = fmt;
-            srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            srv.Texture2D.MostDetailedMip = 0;
-            srv.Texture2D.MipLevels = 1;
-            srv.Texture2D.PlaneSlice = 0;
-            srv.Texture2D.ResourceMinLODClamp = 0.0f;
-            makeSrv(context.device(), resource, fmt, cpuHandle(pass, slot));
-        };
-        auto gpuHandle = [](const ComputePass& p, UINT slot) {
-            return D3D12_GPU_DESCRIPTOR_HANDLE{ p.heap->GetGPUDescriptorHandleForHeapStart().ptr + slot * p.increment };
-        };
-
         GraphicsPass presentPass;
         ComPtr<ID3D12DescriptorHeap> rtvHeap;
         UINT rtvIncrement = 0;
@@ -1702,7 +1057,7 @@ int main(int argc, char** argv)
                 }
             }
         };
-
+        refreshBackbufferRtvs();
 
         // --- Audio start (after GPU init) ------------------------------------
         if (hasAudio) {
@@ -1713,112 +1068,23 @@ int main(int argc, char** argv)
             audioPipe.startThread(&audio);  // prefill + anchored Start on thread
         }
 
+        // --- Static descriptor views (graph's own, then present SRVs) ---------
         if (!skipPasses && !skipViews) {
-            // --- STATIC DESCRIPTOR VIEWS (LAST: system constraint) ----------------
-            if (viewsTex) stagedSrv(lumaTex.Get(), DXGI_FORMAT_R8_UNORM, yuvPass, 0);
-            if (viewsTex) stagedSrv(chromaTex.Get(), DXGI_FORMAT_R8G8_UNORM, yuvPass, 1);
-            if (viewsUav) makeUav(context.device(), srcRgba.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, cpuHandle(yuvPass, 2));
-            if (viewsTex) stagedSrv(workRgba.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, encPass, 0);
-            if (viewsUav) makeUav(context.device(), proxyTex.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, cpuHandle(encPass, 1));
-            if (viewsTex) stagedSrv(workRgba.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, decPass, 0);
-            if (viewsTex) stagedSrv(proxyTex.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, decPass, 1);
-            if (viewsTex) stagedSrv(neuralTex.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, decPass, 2);
-            if (viewsUav) makeUav(context.device(), finalRgba.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, cpuHandle(decPass, 3));
-            // Upload pass: raw buffer SRVs per parity (slots 0/1), plane UAVs (2/3).
-            for (int i = 0; i < 2; ++i) {
-                D3D12_SHADER_RESOURCE_VIEW_DESC raw{};
-                raw.Format = DXGI_FORMAT_R32_TYPELESS;
-                raw.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-                raw.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                raw.Buffer.FirstElement = 0;
-                raw.Buffer.NumElements = static_cast<UINT>(lumaSize / 4);
-                raw.Buffer.StructureByteStride = 0; // RAW view
-            
-                if (viewsRaw) context.device()->CreateShaderResourceView(upLuma[i].Get(), &raw, cpuHandle(uploadPass, i));
+            if (!graph.createViews()) {
+                veyra::log::error("player", "EnhanceGraph static views failed");
+                break;
             }
-            if (viewsUav) makeUav(context.device(), lumaTex.Get(), DXGI_FORMAT_R8_UNORM, cpuHandle(uploadPass, 2));
-            if (viewsUav) makeUav(context.device(), chromaTex.Get(), DXGI_FORMAT_R8G8_UNORM, cpuHandle(uploadPass, 3));
-            // Blit pass layout (all static; per-use offsets chosen at bind time):
-            //  0: srcRgba SRV        1: workRgba UAV      (SR bypass / NR-off blit)
-            //  2: finalRgba SRV      3/4: videoFrame UAV  (section 5)
-            //  5: nvofInB SRV        6: nvofInA UAV       (NVOF A:=B)
-            //  7/8: videoFrame SRV   9: nvofInB UAV       (NVOF B:=video)
-            // 10: genTex SRV        11/12: videoFrame SRV (presents)
-            // 13/14/15: swapchain backbuffer UAVs         (presents)
-            if (viewsTex) stagedSrv(srcRgba.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, blitPass, 0);
-            if (viewsUav) makeUav(context.device(), workRgba.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, cpuHandle(blitPass, 1));
-            if (!skipViews) if (viewsTex) stagedSrv(finalRgba.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, blitPass, 2);
-            if (viewsUav) makeUav(context.device(), videoFrame[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, cpuHandle(blitPass, 3));
-            if (viewsUav) makeUav(context.device(), videoFrame[1].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, cpuHandle(blitPass, 4));
-            if (viewsTex) stagedSrv(nvofInB.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, blitPass, 5);
-            if (viewsUav) makeUav(context.device(), nvofInA.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, cpuHandle(blitPass, 6));
-            if (viewsTex) stagedSrv(videoFrame[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass, 7);
-            if (viewsTex) stagedSrv(videoFrame[1].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass, 8);
-            if (viewsUav) makeUav(context.device(), nvofInB.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, cpuHandle(blitPass, 9));
-            if (viewsTex) stagedSrv(genFrame[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass, 10);
-        if (viewsTex) stagedSrv(genFrame[1].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass, 13);
-            if (viewsTex) stagedSrv(videoFrame[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass, 11);
-            if (viewsTex) stagedSrv(videoFrame[1].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass, 12);
-            for (UINT bb = 0; bb < 3; ++bb) {
-                ComPtr<ID3D12Resource> backBuffer;
-                if (SUCCEEDED(sink.swapChain()->GetBuffer(bb, IID_PPV_ARGS(&backBuffer)))) {
-                    context.device()->CreateRenderTargetView(backBuffer.Get(), nullptr,
-                        { rtvHeap->GetCPUDescriptorHandleForHeapStart().ptr + bb * rtvIncrement });
-                }
-            }
-
-            // Densify pass views (P0.4): 0=rawFlow SRV(int2) 1=cost SRV(uint)
-        // 2=flowOut UAV(float2) 3=confOut UAV(float).
-        {
-            D3D12_SHADER_RESOURCE_VIEW_DESC rf{};
-            rf.Format = DXGI_FORMAT_R16G16_SINT;
-            rf.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            rf.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            rf.Texture2D.MostDetailedMip = 0;
-            rf.Texture2D.MipLevels = 1;
-            rf.Texture2D.PlaneSlice = 0;
-            rf.Texture2D.ResourceMinLODClamp = 0.0f;
-            context.device()->CreateShaderResourceView(nvofRawTex.Get(), &rf, cpuHandle(densifyPass, 0));
-            D3D12_SHADER_RESOURCE_VIEW_DESC rc{};
-            rc.Format = DXGI_FORMAT_R8_UINT;
-            rc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            rc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            rc.Texture2D.MostDetailedMip = 0;
-            rc.Texture2D.MipLevels = 1;
-            rc.Texture2D.PlaneSlice = 0;
-            rc.Texture2D.ResourceMinLODClamp = 0.0f;
-            context.device()->CreateShaderResourceView(nvofCostTex.Get(), &rc, cpuHandle(densifyPass, 1));
-            D3D12_UNORDERED_ACCESS_VIEW_DESC uf{};
-            uf.Format = DXGI_FORMAT_R16G16_FLOAT;
-            uf.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-            context.device()->CreateUnorderedAccessView(flowTex.Get(), nullptr, &uf, cpuHandle(densifyPass, 2));
-            D3D12_UNORDERED_ACCESS_VIEW_DESC uc{};
-            uc.Format = DXGI_FORMAT_R8_UNORM;
-            uc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-            context.device()->CreateUnorderedAccessView(confTex.Get(), nullptr, &uc, cpuHandle(densifyPass, 3));
-        }
-
-        // Present pass SRVs: 0/1=genFrame[0/1], 2/3=videoFrame[0/1].
-            {
-                D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
-                srv.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                srv.Texture2D.MostDetailedMip = 0;
-                srv.Texture2D.MipLevels = 1;
-                srv.Texture2D.PlaneSlice = 0;
-                srv.Texture2D.ResourceMinLODClamp = 0.0f;
-                if (viewsTex) makeSrv(context.device(), genFrame[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM,
+            // Present pass SRVs: 0/1=genFrame[0/1], 2/3=videoFrame[0/1].
+            if (viewsTex) {
+                makeSrv(context.device(), graph.generatedFrameResource(0), DXGI_FORMAT_R8G8B8A8_UNORM,
                     { presentPass.heap->GetCPUDescriptorHandleForHeapStart().ptr });
-                if (viewsTex) makeSrv(context.device(), genFrame[1].Get(), DXGI_FORMAT_R8G8B8A8_UNORM,
+                makeSrv(context.device(), graph.generatedFrameResource(1), DXGI_FORMAT_R8G8B8A8_UNORM,
                     { presentPass.heap->GetCPUDescriptorHandleForHeapStart().ptr + presentPass.increment });
-                if (viewsTex) makeSrv(context.device(), videoFrame[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM,
+                makeSrv(context.device(), graph.videoFrameResource(0), DXGI_FORMAT_R8G8B8A8_UNORM,
                     { presentPass.heap->GetCPUDescriptorHandleForHeapStart().ptr + 2ull * presentPass.increment });
-                if (viewsTex) makeSrv(context.device(), videoFrame[1].Get(), DXGI_FORMAT_R8G8B8A8_UNORM,
+                makeSrv(context.device(), graph.videoFrameResource(1), DXGI_FORMAT_R8G8B8A8_UNORM,
                     { presentPass.heap->GetCPUDescriptorHandleForHeapStart().ptr + 3ull * presentPass.increment });
             }
-
-
         }
 
         // k-incremental staged-SRV experiment (present-path isolation).
@@ -1840,18 +1106,13 @@ int main(int argc, char** argv)
                 sk.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 sk.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
                 sk.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                for (int i = 0; i < k; ++i) {
-                    stager.stageSrv(texK.Get(), &sk, heapK.Get(), static_cast<UINT>(i));
+                DescriptorStager stagerK;
+                if (stagerK.initialize(context.device(), 64)) {
+                    for (int i = 0; i < k; ++i) {
+                        stagerK.stageSrv(texK.Get(), &sk, heapK.Get(), static_cast<UINT>(i));
+                    }
                 }
                 veyra::log::info("player", std::format("k-experiment: staged {} SRVs into a fresh visible heap", k));
-            }
-            if (GetEnvironmentVariableW(L"VEYRA_TEX_ENGINE", nullptr, 0) != 0 && !skipPasses && !skipViews) {
-                D3D12_SHADER_RESOURCE_VIEW_DESC sk2{};
-                sk2.Format = DXGI_FORMAT_R8_UNORM;
-                sk2.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                sk2.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                stager.stageSrv(lumaTex.Get(), &sk2, yuvPass.heap.Get(), 3);
-                veyra::log::info("player", "k-experiment: staged ONE lumaTex SRV into yuvPass heap slot 3");
             }
         }
 
@@ -1887,24 +1148,11 @@ int main(int argc, char** argv)
                 diagRetrievalComplete = false;
             }
         }
-        StateTracker tracker;
-        for (ID3D12Resource* r : { lumaTex.Get(), chromaTex.Get(), workRgba.Get(),
-             proxyTex.Get(), neuralTex.Get(), finalRgba.Get(), videoFrame[0].Get(),
-             videoFrame[1].Get(), nvofInA.Get(), nvofInB.Get(), flowTex.Get(),
-             depthTex.Get(), genFrame[0].Get(), genFrame[1].Get(), nrZeroMotion.Get(), nrZeroDepth.Get(),
-             srcRgba.Get() }) {
-            tracker.set(r, D3D12_RESOURCE_STATE_COMMON);
-        }
-        for (int i = 0; i < 2; ++i) {
-            tracker.set(upLuma[i].Get(), D3D12_RESOURCE_STATE_GENERIC_READ);
-            tracker.set(upChroma[i].Get(), D3D12_RESOURCE_STATE_GENERIC_READ);
-        }
-
-        std::vector<uint8_t> nv12Buf(lumaSize + chromaSize);
         // P0.3: bounded 6-slot display pool with explicit slot ownership.
         // genFrame[2] joins videoFrame[2] as dedicated slots (real frames use
         // slots 0..1, generated frames own gen slots); a 6-entry queue cap
         // provides backpressure - frames are never dropped for sync.
+        StateTracker presentTracker; // present-path source textures only
         uint64_t resetEpoch = 1;                 // bumped on seek/loop/reset
         std::vector<double> latenessSamples;     // P0.2 signed, pre-decision
         bool slotFree[2] = { true, true };       // P0.3 real-slot liveness
@@ -1978,349 +1226,32 @@ int main(int argc, char** argv)
             passTimings.clear();
         };
 
-        // --- Per-frame graph ------------------------------------------------
+        // --- Per-frame graph (thin wrapper: the chain lives in EnhanceGraph) -
         auto processOneFrame = [&](const AVFrame* frame) -> bool {
-            const int parity = static_cast<int>(realFrameIndex % 2);
-            static const bool graphOff = GetEnvironmentVariableW(L"VEYRA_GRAPH_OFF", nullptr, 0) != 0;
             if (frame->pts == AV_NOPTS_VALUE || frame->pts < 0) {
                 return true; // no timestamp: skip this frame entirely
             }
             const double ptsMs = 1000.0 * frame->pts * demuxer.videoTimeBaseNum() /
                 demuxer.videoTimeBaseDen();
-            if (graphOff) {
-                presentQueue.push_back({ ptsMs, 0, static_cast<uint64_t>(ptsMs),
-                realFrameIndex, static_cast<uint32_t>(parity), resetEpoch,
-                ring.lastSignaledValue() });
-                prevPtsMs = ptsMs;
-                prevValid = true;
-                ++realFrameIndex;
-                return true;
+            veyra::pipeline::EnhanceGraph::FrameOutputs out;
+            if (!graph.process(frame, ptsMs, !prevValid, out)) return false;
+            if (!out.passthrough && out.realFrameIndex == 0) {
+                return true; // frame skipped inside the graph (no timestamp)
             }
-            const uint32_t slot = static_cast<uint32_t>(realFrameIndex % 4);
-            const bool reset = !prevValid;
-
-            // 1. Source NV12: D3D12VA texture directly (GPU) or CPU upload.
-            ID3D12Resource* nv12Texture = nullptr;
-            ID3D12GraphicsCommandList* list = ring.acquire(slot, st);
-            if (list == nullptr) { veyra::log::error("player", "F4 ring acquire"); return false; }
-
-            if (frame->format == AV_PIX_FMT_D3D12) {
-                auto* d3dFrame = reinterpret_cast<AVD3D12VAFrame*>(frame->data[0]);
-                if (d3dFrame == nullptr || d3dFrame->texture == nullptr) {
-                    veyra::log::error("player", "F0 null d3d12va frame");
-                    return false;
-                }
-                nv12Texture = d3dFrame->texture;
-                const UINT nv12Slice = static_cast<UINT>(d3dFrame->subresource_index);
-                if (d3dFrame->sync_ctx.fence != nullptr) {
-                    if (FAILED(context.directQueue()->Wait(
-                            d3dFrame->sync_ctx.fence, d3dFrame->sync_ctx.fence_value))) {
-                        veyra::log::error("player", "F0b nv12 fence wait");
-                        return false;
-                    }
-                }
-                const bool isArray = nv12Texture->GetDesc().DepthOrArraySize > 1;
-                D3D12_CPU_DESCRIPTOR_HANDLE base = yuvPass.heap->GetCPUDescriptorHandleForHeapStart();
-                D3D12_SHADER_RESOURCE_VIEW_DESC lumaSrv{};
-                lumaSrv.Format = DXGI_FORMAT_R8_UNORM;
-                lumaSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                lumaSrv.Texture2D.MostDetailedMip = 0;
-                lumaSrv.Texture2D.MipLevels = 1;
-                lumaSrv.Texture2D.ResourceMinLODClamp = 0.0f;
-                if (isArray) {
-                    lumaSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
-                    lumaSrv.Texture2DArray.MostDetailedMip = 0;
-                    lumaSrv.Texture2DArray.MipLevels = 1;
-                    lumaSrv.Texture2DArray.FirstArraySlice = nv12Slice;
-                    lumaSrv.Texture2DArray.ArraySize = 1;
-                    lumaSrv.Texture2DArray.PlaneSlice = 0;
-                } else {
-                    lumaSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                    lumaSrv.Texture2D.MostDetailedMip = 0;
-                    lumaSrv.Texture2D.MipLevels = 1;
-                    lumaSrv.Texture2D.PlaneSlice = 0;
-                }
-                context.device()->CreateShaderResourceView(nv12Texture, &lumaSrv, cpuHandle(yuvPass, 0));
-                D3D12_SHADER_RESOURCE_VIEW_DESC chromaSrv{};
-                chromaSrv.Format = DXGI_FORMAT_R8G8_UNORM;
-                chromaSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                chromaSrv.Texture2D.MostDetailedMip = 0;
-                chromaSrv.Texture2D.MipLevels = 1;
-                chromaSrv.Texture2D.ResourceMinLODClamp = 0.0f;
-                if (isArray) {
-                    chromaSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
-                    chromaSrv.Texture2DArray.MostDetailedMip = 0;
-                    chromaSrv.Texture2DArray.MipLevels = 1;
-                    chromaSrv.Texture2DArray.FirstArraySlice = nv12Slice;
-                    chromaSrv.Texture2DArray.ArraySize = 1;
-                    chromaSrv.Texture2DArray.PlaneSlice = 1;
-                } else {
-                    chromaSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                    chromaSrv.Texture2D.MostDetailedMip = 0;
-                    chromaSrv.Texture2D.MipLevels = 1;
-                    chromaSrv.Texture2D.PlaneSlice = 1;
-                }
-                context.device()->CreateShaderResourceView(nv12Texture, &chromaSrv, cpuHandle(yuvPass, 1));
-                tracker.transition(list, nv12Texture, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            } else {
-                nv12Ctx = sws_getCachedContext(nv12Ctx, frame->width, frame->height,
-                    static_cast<AVPixelFormat>(frame->format),
-                    frame->width, frame->height, AV_PIX_FMT_NV12, SWS_POINT,
-                    nullptr, nullptr, nullptr);
-                if (nv12Ctx == nullptr) { veyra::log::error("player", "F1 sws"); return false; }
-                uint8_t* planes[2] = { nv12Buf.data(), nv12Buf.data() + lumaSize };
-                const int strides[2] = { static_cast<int>(lumaPitch), static_cast<int>(chromaPitch) };
-                sws_scale(nv12Ctx, frame->data, frame->linesize, 0, frame->height, planes, strides);
-                for (uint32_t y = 0; y < srcH; ++y)
-                    std::memcpy(mappedLuma[parity] + y * lumaPitch, planes[0] + y * lumaPitch, srcW);
-                for (uint32_t y = 0; y < srcH / 2; ++y)
-                    std::memcpy(mappedChroma[parity] + y * chromaPitch, planes[1] + y * chromaPitch, srcW);
-                tracker.transition(list, lumaTex.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                tracker.transition(list, chromaTex.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                tracker.transition(list, upLuma[parity].Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                const float constants[8] = {
-                    static_cast<float>(srcW), static_cast<float>(srcH),
-                    static_cast<float>(lumaPitch), static_cast<float>(chromaPitch), 0, 0, 0, 0 };
-                uploadPass.bind(list, constants,
-                    gpuHandle(uploadPass, parity).ptr, gpuHandle(uploadPass, 2).ptr);
-                list->Dispatch((srcW + 31) / 32 * 2, (srcH + 31) / 32 * 2, 1);
-                tracker.uavBarrier(list, lumaTex.Get());
-                tracker.uavBarrier(list, chromaTex.Get());
-                tracker.transition(list, upLuma[parity].Get(), D3D12_RESOURCE_STATE_GENERIC_READ);
-                tracker.transition(list, lumaTex.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                tracker.transition(list, chromaTex.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            if (out.hasGenerated) {
+                // Present order: previous real (already queued) -> generated -> current real.
+                presentQueue.push_back({ out.generatedPtsMs, 1,
+                    static_cast<uint64_t>(out.generatedPtsMs),
+                    out.realFrameIndex, out.genSlot, resetEpoch,
+                    out.genFenceValue });
             }
-
-            gpuMark("upload");
-            // 2. YUV -> RGBA16F.
-            tracker.transition(list, srcRgba.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            {
-                const float constants[8] = { 1.0f, 1.0f, 1.0f, 0.0f,
-                    static_cast<float>(srcW), static_cast<float>(srcH), 0.0f, 0.0f };
-                yuvPass.bind(list, constants, gpuHandle(yuvPass, 0).ptr, gpuHandle(yuvPass, 2).ptr);
-                list->Dispatch((srcW + 15) / 16, (srcH + 15) / 16, 1);
-            }
-            tracker.uavBarrier(list, srcRgba.Get());
-            tracker.transition(list, srcRgba.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            if (nv12Texture != nullptr) {
-                tracker.transition(list, nv12Texture, D3D12_RESOURCE_STATE_COMMON);
-            }
-
-            gpuMark("yuv");
-            // 3. SR into workRgba (or 1:1 blit bypass).
-            if (srEnabled) {
-                tracker.transition(list, workRgba.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                veyra::ngx::DlssSrBackend::EvalDesc ed{};
-                ed.color = srcRgba.Get();
-                ed.output = workRgba.Get();
-                ed.depth = nrZeroDepth.Get();
-                ed.motionVectors = nrZeroMotion.Get();
-                ed.reset = reset;
-                if (!srBackend.evaluate(list, ngxParams, ed, st)) { veyra::log::error("player", "F5 sr"); return false; }
-                ++metrics.srEvaluateCount;
-                tracker.uavBarrier(list, workRgba.Get());
-                tracker.transition(list, workRgba.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            } else {
-                tracker.transition(list, workRgba.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                const float constants[8] = {
-                    static_cast<float>(srcW), static_cast<float>(srcH),
-                    static_cast<float>(workW), static_cast<float>(workH), 0, 0, 0, 0 };
-                blitPass.bind(list, constants, gpuHandle(blitPass, 0).ptr, gpuHandle(blitPass, 1).ptr);
-                list->Dispatch((workW + 15) / 16, (workH + 15) / 16, 1);
-                tracker.uavBarrier(list, workRgba.Get());
-                tracker.transition(list, workRgba.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            }
-
-            gpuMark("sr");
-            // 4a. Parity encode.
-            if (nrEnabled) {
-                tracker.transition(list, proxyTex.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                const float constants[8] = { 1.0f, 1.0f, 1.0f, 0.0f,
-                    static_cast<float>(workW), static_cast<float>(workH), 0.0f, 0.0f };
-                encPass.bind(list, constants, gpuHandle(encPass, 0).ptr, gpuHandle(encPass, 1).ptr);
-                list->Dispatch((workW + 15) / 16, (workH + 15) / 16, 1);
-                tracker.uavBarrier(list, proxyTex.Get());
-                tracker.transition(list, proxyTex.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-
-                gpuMark("encode");
-                // 4b. NR evaluate on a FRESH list (snippet constraint).
-                if (!ring.submitAndSignal(slot)) { veyra::log::error("player", "F6a submit"); return false; }
-                ID3D12GraphicsCommandList* nlist = ring.acquire((slot + 1) % 4, st);
-                if (nlist == nullptr) { veyra::log::error("player", "F4a acquire nr"); return false; }
-                {
-                    namespace p = veyra::ngx::dlssnr;
-                    veyra::ngx::ParameterBlock pb(ngxParams);
-                    pb.setD3D12Resource(p::kColor, proxyTex.Get());
-                    pb.setD3D12Resource(p::kOutput, neuralTex.Get());
-                    pb.setD3D12Resource(p::kMVec, nrZeroMotion.Get());
-                    pb.setD3D12Resource(p::kDepth, nrZeroDepth.Get());
-                    pb.setU32(p::kColorSubrectWidth, workW); pb.setU32(p::kColorSubrectHeight, workH);
-                    pb.setU32(p::kOutputSubrectWidth, workW); pb.setU32(p::kOutputSubrectHeight, workH);
-                    pb.setU32(p::kMVecSubrectWidth, workW); pb.setU32(p::kMVecSubrectHeight, workH);
-                    pb.setU32(p::kDepthSubrectWidth, workW); pb.setU32(p::kDepthSubrectHeight, workH);
-                    pb.setF32(p::kMVecScaleX, 1.0f); pb.setF32(p::kMVecScaleY, 1.0f);
-                    pb.setI32(p::kDepthInverted, 1);
-                    pb.setI32(p::kIndicatorInvertX, 0);
-                    pb.setI32(p::kIndicatorInvertY, 0);
-                    pb.setI32(p::kEnabled, 1);
-                    pb.setI32(p::kReset, reset ? 1 : 0);
-                    pb.setI32(p::kStyle, 0);
-                    pb.setF32(p::kIntensity, 1.0f);
-                    pb.setF32(p::kLocalToneStrength, 1.0f);
-                    pb.setF32(p::kLocalStructureStrength, 1.0f);
-                    pb.setF32(p::kSkinStructureStrength, -1.0f);
-                    pb.setI32(p::kUseAutoMask, 0);
-                    pb.setI32(p::kUICorrection, 0);
-                    uint64_t er = 0; uint32_t es = 0;
-                    if (!nrAdapter.snippetEvaluateFeature(nlist, nrHandle, ngxParams, er, es) ||
-                        er != static_cast<uint64_t>(NVSDK_NGX_Result_Success)) {
-                        veyra::log::error("player", std::format("NR evaluate failed 0x{:X} seh={}", er, es));
-                        return false;
-                    }
-                    ++metrics.nrEvaluateCount;
-                    tracker.uavBarrier(nlist, neuralTex.Get());
-                    tracker.transition(nlist, neuralTex.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-
-                    // 4c. Parity decode.
-                    tracker.transition(nlist, finalRgba.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                    const float constants[8] = { 1.0f, 1.0f, 1.0f, 0.0f,
-                        static_cast<float>(workW), static_cast<float>(workH), 0.0f, 0.0f };
-                    decPass.bind(nlist, constants, gpuHandle(decPass, 0).ptr, gpuHandle(decPass, 3).ptr);
-                    nlist->Dispatch((workW + 15) / 16, (workH + 15) / 16, 1);
-                    tracker.uavBarrier(nlist, finalRgba.Get());
-                    tracker.transition(nlist, finalRgba.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                }
-                list = nlist; // continue recording on the NR list
-            }
-
-                gpuMark("nr");
-            // 5. Working frame -> SDR RGBA8 videoFrame[parity] + NVOF chain.
-            {
-                const UINT srcSlot = 2;
-                const UINT uavSlot = 3 + static_cast<UINT>(parity);
-                tracker.transition(list, nrEnabled ? finalRgba.Get() : workRgba.Get(),
-                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                tracker.transition(list, videoFrame[parity].Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                const float constants[8] = {
-                    static_cast<float>(workW), static_cast<float>(workH),
-                    static_cast<float>(workW), static_cast<float>(workH), 0, 0, 0, 0 };
-                blitPass.bind(list, constants, gpuHandle(blitPass, srcSlot).ptr, gpuHandle(blitPass, uavSlot).ptr);
-                list->Dispatch((workW + 15) / 16, (workH + 15) / 16, 1);
-                tracker.uavBarrier(list, videoFrame[parity].Get());
-                tracker.transition(list, videoFrame[parity].Get(), D3D12_RESOURCE_STATE_COMMON);
-
-                // NVOF chain via blits: A := B, then B := this frame.
-                tracker.transition(list, nvofInA.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                blitPass.bind(list, constants, gpuHandle(blitPass, 5).ptr, gpuHandle(blitPass, 6).ptr);
-                list->Dispatch((workW + 15) / 16, (workH + 15) / 16, 1);
-                tracker.uavBarrier(list, nvofInA.Get());
-                tracker.transition(list, nvofInA.Get(), D3D12_RESOURCE_STATE_COMMON);
-                tracker.transition(list, nvofInB.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                const float nvofConstants[8] = {
-                    static_cast<float>(workW), static_cast<float>(workH),
-                    static_cast<float>(nvofW), static_cast<float>(nvofH), 0, 0, 0, 0 };
-                blitPass.bind(list, nvofConstants,
-                    gpuHandle(blitPass, 7 + static_cast<UINT>(parity)).ptr, gpuHandle(blitPass, 9).ptr);
-                list->Dispatch((nvofW + 15) / 16, (nvofH + 15) / 16, 1);
-                tracker.uavBarrier(list, nvofInB.Get());
-                tracker.transition(list, nvofInB.Get(), D3D12_RESOURCE_STATE_COMMON);
-            }
-
-            if (!ring.submitAndSignal(nrEnabled ? (slot + 1) % 4 : slot)) {
-                veyra::log::error("player", "F6b submit");
-                return false;
-            }
-            const uint64_t colorFenceValue = ring.lastSignaledValue();
-
-            // 6. NVOF + FG (queue-ordered after the color work).
-            if (fgEnabled && fgBackend.created() && prevValid) {
-                const auto nvofT0 = std::chrono::steady_clock::now();
-                bool haveFlow = nvof.execute(colorFenceValue, st);
-                if (gpuTs) {
-                    const double nvofMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - nvofT0).count();
-                    passTimings.emplace_back("nvof_call", nvofMs);
-                }
-                if (haveFlow) {
-                    ++metrics.nvofExecuteCount;
-                    if (FAILED(context.directQueue()->Wait(nvofOutFence.Get(), nvof.nextOutValue() - 1))) {
-                        veyra::log::error("player", "F8 queue wait");
-                        return false;
-                    }
-                } else {
-                    // The injected D3D12 layer on this system blocks NVOF
-                    // frame-time executes once descriptor views exist (see
-                    // header). Fall back to zero-guidance: DLSSG's internal
-                    // optical flow still performs the interpolation. Reported
-                    // honestly as mvecSource in the JSON.
-                    if (mvecSource == "nvof") {
-                        mvecSource = "zero-motion-fallback (NVOF blocked by injected layer post-views; "
-                                     "real NVOF proven in P5 probe and FG truth in P6.2)";
-                        veyra::log::warn("player", "NVOF frame execute blocked by injected layer; "
-                                               "FG falls back to zero-guidance mvec");
-                    }
-                    ++nvofFrameFailures;
-                }
-                ID3D12GraphicsCommandList* flist = ring.acquire((slot + 2) % 4, st);
-                if (flist == nullptr) { veyra::log::error("player", "F9 acquire fg"); return false; }
-                // P0.4: densify SHORT2->float2 + confidence before FG.
-                if (haveFlow) {
-                    tracker.transition(flist, nvofRawTex.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                    tracker.transition(flist, nvofCostTex.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                    tracker.transition(flist, flowTex.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                    tracker.transition(flist, confTex.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                    const float dc[8] = {
-                        static_cast<float>(rawW), static_cast<float>(rawH),
-                        static_cast<float>(nvofW), static_cast<float>(nvofH),
-                        static_cast<float>(selectedGrid),
-                        1.0f,   // negate: single explicit direction flip (proven by displacement tests)
-                        32.0f,  // costThreshold (cells below -> zero motion)
-                        0.0f };
-                    densifyPass.bind(flist, dc,
-                        gpuHandle(densifyPass, 0).ptr, gpuHandle(densifyPass, 2).ptr);
-                    flist->Dispatch((nvofW + 15) / 16, (nvofH + 15) / 16, 1);
-                    tracker.uavBarrier(flist, flowTex.Get());
-                    tracker.uavBarrier(flist, confTex.Get());
-                    tracker.transition(flist, nvofRawTex.Get(), D3D12_RESOURCE_STATE_COMMON);
-                    tracker.transition(flist, nvofCostTex.Get(), D3D12_RESOURCE_STATE_COMMON);
-                    tracker.transition(flist, flowTex.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                    tracker.transition(flist, confTex.Get(), D3D12_RESOURCE_STATE_COMMON);
-                }
-                gpuMark("decode_blit");
-                ID3D12Resource* mvecResource = haveFlow ? flowTex.Get() : nrZeroMotion.Get();
-                tracker.transition(flist, nvofInB.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                tracker.transition(flist, depthTex.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                const uint32_t genSlot = static_cast<uint32_t>(realFrameIndex % 2);
-                tracker.transition(flist, genFrame[genSlot].Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                veyra::ngx::DlssFgBackend::EvalDesc fe{};
-                fe.backbuffer = nvofInB.Get();
-                fe.depth = depthTex.Get();
-                fe.mvecs = mvecResource;
-                fe.outputInterpolated = genFrame[genSlot].Get();
-                fe.reset = reset;
-                fe.frameId = realFrameIndex;
-                fe.mvecScaleX = haveFlow ? (1.0f / static_cast<float>(workW)) : 1.0f;
-                fe.mvecScaleY = haveFlow ? (1.0f / static_cast<float>(workH)) : 1.0f;
-                if (!fgBackend.evaluate(flist, ngxParams, fe, st)) { veyra::log::error("player", "F10 fg"); return false; }
-                tracker.uavBarrier(flist, genFrame[genSlot].Get());
-                tracker.transition(flist, genFrame[genSlot].Get(), D3D12_RESOURCE_STATE_COMMON);
-                tracker.transition(flist, nvofInB.Get(), D3D12_RESOURCE_STATE_COMMON);
-                tracker.transition(flist, mvecResource, D3D12_RESOURCE_STATE_COMMON);
-                tracker.transition(flist, depthTex.Get(), D3D12_RESOURCE_STATE_COMMON);
-                if (!ring.submitAndSignal((slot + 2) % 4)) { veyra::log::error("player", "F11 fg submit"); return false; }
-                gpuMark("fg");
-                ++metrics.fgGeneratedFrames;
-                presentQueue.push_back({ (prevPtsMs + ptsMs) * 0.5, 1,
-                    static_cast<uint64_t>((prevPtsMs + ptsMs) * 0.5),
-                    realFrameIndex, genSlot, resetEpoch, ring.lastSignaledValue() });
-            }
-
             presentQueue.push_back({ ptsMs, 0, static_cast<uint64_t>(ptsMs),
-                realFrameIndex, static_cast<uint32_t>(parity), resetEpoch,
-                ring.lastSignaledValue() });
+                out.realFrameIndex, out.videoSlot, resetEpoch,
+                out.videoFenceValue });
             prevPtsMs = ptsMs;
             prevValid = true;
-            lastParity = parity;
-            ++realFrameIndex;
+            lastParity = static_cast<int>(out.videoSlot);
+            realFrameIndex = out.realFrameIndex;
             metrics.maxInFlight = std::max<int64_t>(metrics.maxInFlight,
                 static_cast<int64_t>(presentQueue.size()));
             return true;
@@ -2342,8 +1273,8 @@ int main(int argc, char** argv)
 
                 // P0.3: display THIS item's own texture only.
                 ID3D12Resource* source = item.kind == 1
-                    ? genFrame[item.textureSlot].Get()
-                    : videoFrame[item.textureSlot].Get();
+                    ? graph.generatedFrameResource(item.textureSlot)
+                    : graph.videoFrameResource(item.textureSlot);
                 if (source == nullptr) {
                     veyra::log::error("player", "P5 null item texture");
                     return false;
@@ -2367,7 +1298,7 @@ int main(int argc, char** argv)
                     b[1].Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
                     b[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
                     list->ResourceBarrier(2, b);
-                    tracker.set(source, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                    presentTracker.set(source, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                 }
                 const bool clearPresent = GetEnvironmentVariableW(L"VEYRA_CLEAR_PRESENT", nullptr, 0) != 0;
                 if (!clearPresent) {
@@ -2409,7 +1340,7 @@ int main(int argc, char** argv)
                     b[1].Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
                     b[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
                     list->ResourceBarrier(2, b);
-                    tracker.set(source, D3D12_RESOURCE_STATE_COMMON);
+                    presentTracker.set(source, D3D12_RESOURCE_STATE_COMMON);
                 }
                 if (!ring.submitAndSignal(3)) { veyra::log::error("player", "P3 submit"); return false; }
                 if (!sink.present(st)) { veyra::log::error("player", "P4 present"); return false; }
@@ -2492,10 +1423,10 @@ int main(int argc, char** argv)
                     veyra::log::info("player", std::format("pace t={:.0f}s ws={}MB presents={}/10s fg={}/10s queue={}",
                         elapsed, pmc.WorkingSetSize / (1024 * 1024),
                         metrics.presentCount - lastSamplePresents,
-                        metrics.fgGeneratedFrames - lastSampleFg,
+                        g_graphFgGen - lastSampleFg,
                         presentQueue.size()));
                     lastSamplePresents = metrics.presentCount;
-                    lastSampleFg = metrics.fgGeneratedFrames;
+                    lastSampleFg = g_graphFgGen;
                     lastSampleSec = elapsed;
                 }
                 if (elapsed >= seconds) break;
@@ -2514,7 +1445,7 @@ int main(int argc, char** argv)
                     ++framesSinceRecycle;
                     if (frameStride > 1 && (strideCounter % frameStride) != 1) continue;
                     if (!processOneFrame(f)) return false;
-                    if (gpuTs && (metrics.fgGeneratedFrames % 120 == 0)) gpuReport();
+                    if (gpuTs && (g_graphFgGen % 120 == 0)) gpuReport();
                 }
                 static const bool presentOff = GetEnvironmentVariableW(L"VEYRA_PRESENT_OFF", nullptr, 0) != 0;
                 if (!presentOff && !pumpPresents()) return false;
@@ -2532,19 +1463,19 @@ int main(int argc, char** argv)
         if (endurance) {
             resyncToAudio();
             veyra::log::info("player", "endurance: 4K30 pass start");
-            const uint64_t p0 = metrics.presentCount, f0 = metrics.fgGeneratedFrames;
+            const uint64_t p0 = metrics.presentCount, f0 = g_graphFgGen;
             if (!runPlayback(static_cast<double>(durationSeconds), 2)) break;
             end4k30Duration = durationSeconds;
-            end4k30Fg = metrics.fgGeneratedFrames - f0;
+            end4k30Fg = g_graphFgGen - f0;
             end4k30Hz = static_cast<double>(metrics.presentCount - p0) / end4k30Duration;
             veyra::log::info("player", std::format("4K30: presents={} fg={} hz={:.1f}",
                 metrics.presentCount - p0, end4k30Fg, end4k30Hz));
             resyncToAudio();
             veyra::log::info("player", "endurance: 4K60 pass start");
-            const uint64_t p1 = metrics.presentCount, f1 = metrics.fgGeneratedFrames;
+            const uint64_t p1 = metrics.presentCount, f1 = g_graphFgGen;
             if (!runPlayback(static_cast<double>(durationSeconds), 1)) break;
             end4k60Duration = durationSeconds;
-            end4k60Fg = metrics.fgGeneratedFrames - f1;
+            end4k60Fg = g_graphFgGen - f1;
             end4k60Hz = static_cast<double>(metrics.presentCount - p1) / end4k60Duration;
             veyra::log::info("player", std::format("4K60: presents={} fg={} hz={:.1f}",
                 metrics.presentCount - p1, end4k60Fg, end4k60Hz));
@@ -2589,26 +1520,24 @@ int main(int argc, char** argv)
             // handle made the frame path call Evaluate(nullptr) (SEGV caught
             // by the adapter's SEH, run aborted, teardown skipped - t10-NF).
             nrToggleWorks = false;
-            if (nrHandle != nullptr) {
-                nrEnabled = false;
+            if (graph.nrCreated()) {
+                graph.setNrEnabled(false);
                 (void)ring.waitIdle();
-                if (!skipViews) stagedSrv(workRgba.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, blitPass, 2);
                 if (!runPlayback(1.0, 1)) break;
-                nrEnabled = true;
+                graph.setNrEnabled(true);
                 (void)ring.waitIdle();
-                if (!skipViews) if (viewsTex) stagedSrv(finalRgba.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, blitPass, 2);
                 if (!runPlayback(1.0, 1)) break;
-                nrToggleWorks = metrics.nrEvaluateCount > 0;
+                nrToggleWorks = g_graphNrEval > 0;
             }
 
             srToggleWorks = !srNeeded; // 1:1 bypass by definition; scaling toggle is Phase 7 UI scope
 
-            if (fgBackend.created()) {
-                fgEnabled = false;
+            if (graph.fgCreated()) {
+                graph.setFgEnabled(false);
                 if (!runPlayback(1.0, 1)) break;
-                fgEnabled = true;
+                graph.setFgEnabled(true);
                 if (!runPlayback(1.0, 1)) break;
-                fgToggleWorks = metrics.fgGeneratedFrames > 0;
+                fgToggleWorks = g_graphFgGen > 0;
             }
 
             audioUnderruns = audio.underruns();
@@ -2633,6 +1562,12 @@ int main(int argc, char** argv)
             }
             g_droppedSourceFrames = droppedSourceFrames;
             g_droppedGeneratedFrames = droppedGeneratedFrames;
+            g_graphNrEval = gmetrics.nrEvaluateCount;
+            g_graphSrEval = gmetrics.srEvaluateCount;
+            g_graphNvofExec = gmetrics.nvofExecuteCount;
+            g_graphFgGen = gmetrics.fgGeneratedFrames;
+            g_graphNvofFail = gmetrics.nvofFrameFailures;
+            g_graphMvecSource = graph.mvecSource();
             g_audioEndBufferedMs = audioPipe.bufferedMs();
             g_audioEndHeadPtsMs = audioPipe.headPtsMs();
             g_audioEndClockPtsMs = audio.mediaTimeMs();
@@ -2737,7 +1672,7 @@ int main(int argc, char** argv)
         // natural destruction after everything is released. GPU resources
         // (inputA/B/flow/cost ComPtrs) stay alive until nvof.shutdown()
         // has unregistered them.
-        lastNvofSignal = nvof.initialized() ? (nvof.nextOutValue() - 1) : 0;
+        lastNvofSignal = graph.lastNvofSignal();
         veyra::log::info("teardown", std::format("saved lastNvofSignal={}", lastNvofSignal));
 
         // s10-III: crash-honest evidence stub BEFORE teardown; only success
@@ -2751,7 +1686,7 @@ int main(int argc, char** argv)
 
         // 1. Stop producers / audio thread / new-frame submission.
         stage("sws-free");
-        if (nv12Ctx != nullptr) sws_freeContext(nv12Ctx);
+        // nv12Ctx is owned by EnhanceGraph; freed inside graph.shutdown().
         stageDone("sws-free");
         stage("audio-thread-stop");
         audioPipe.stopThread();
@@ -2767,30 +1702,30 @@ int main(int argc, char** argv)
 
         // 3. NVOF out-fence drain while session/fence/event are all valid.
         stage("nvof-out-fence-drain");
-        if (nvof.initialized() && nvofOutFence.Get() != nullptr && lastNvofSignal > 0) {
-            const UINT64 completedBefore = nvofOutFence->GetCompletedValue();
+        if (graph.nvofSessionInitialized() && graph.nvofOutFenceResource() != nullptr && lastNvofSignal > 0) {
+            const UINT64 completedBefore = graph.nvofOutFenceResource()->GetCompletedValue();
             DWORD waitResult = WAIT_OBJECT_0;
             if (completedBefore < lastNvofSignal) {
-                const HRESULT hrSet = nvofOutFence->SetEventOnCompletion(lastNvofSignal, nvofOutEvent);
+                const HRESULT hrSet = graph.nvofOutFenceResource()->SetEventOnCompletion(lastNvofSignal, graph.nvofOutEventHandle());
                 if (FAILED(hrSet)) {
                     veyra::log::error("teardown", std::format(
                         "SetEventOnCompletion FAILED hr=0x{:X} expected={} completed={}",
                         static_cast<unsigned>(hrSet), lastNvofSignal, completedBefore));
                     overall = false;
                 } else {
-                    waitResult = WaitForSingleObject(nvofOutEvent, 5000);
+                    waitResult = WaitForSingleObject(graph.nvofOutEventHandle(), 5000);
                     if (waitResult != WAIT_OBJECT_0) {
                         veyra::log::error("teardown", std::format(
                             "NVOF fence drain FAILED waitResult={} expected={} completed={}",
-                            waitResult, lastNvofSignal, nvofOutFence->GetCompletedValue()));
+                            waitResult, lastNvofSignal, graph.nvofOutFenceResource()->GetCompletedValue()));
                         overall = false;
                     }
                 }
             }
             veyra::log::info("teardown", std::format(
                 "nvof-out-fence-drain expected={} completedBefore={} completedAfter={} waitResult={}",
-                lastNvofSignal, completedBefore, nvofOutFence->GetCompletedValue(), waitResult));
-            if (nvofOutFence->GetCompletedValue() < lastNvofSignal) overall = false;
+                lastNvofSignal, completedBefore, graph.nvofOutFenceResource()->GetCompletedValue(), waitResult));
+            if (graph.nvofOutFenceResource()->GetCompletedValue() < lastNvofSignal) overall = false;
         }
         stageDone("nvof-out-fence-drain");
 
@@ -2807,111 +1742,19 @@ int main(int argc, char** argv)
         if (ring.initialized() && !ring.drainQueue()) overall = false;
         stageDone("queue-final-drain");
 
-        // 5. NGX features AFTER all GPU work is complete.
-        stage("nr-feature-release");
-        if (nrHandle != nullptr) {
-            uint64_t rr = 0; uint32_t rs = 0;
-            (void)nrAdapter.snippetReleaseFeature(nrHandle, rr, rs);
-        }
-        stageDone("nr-feature-release");
-        stage("fg-release");
-        fgBackend.release();
-        stageDone("fg-release");
-        stage("sr-release");
-        srBackend.release();
-        stageDone("sr-release");
+        // 5-7. Everything the graph owns (NGX features, NVOF three-phase
+        // teardown, NGX params/shim/core, compute passes, textures) is
+        // released by the graph in the proven s10 order.
+        stage("graph-shutdown");
+        graph.shutdown();
+        stageDone("graph-shutdown");
 
-        // 6. NVOF teardown in THREE phases (ownership rule proven by
-        //    t10-L0-r2: releasing an NVOF-registered resource AFTER
-        //    nvOFDestroy+FreeLibrary segfaults):
-        //    a. unregisterAll() while the textures are still alive;
-        //    b. release the four registered textures (DLL still loaded);
-        //    c. shutdown() = nvOFDestroy + FreeLibrary.
-        stage("nvof-unregister");
-        if (nvof.initialized()) {
-            veyra::Status us = veyra::Status::Ok;
-            if (!nvof.unregisterAll(us)) {
-                veyra::log::error("teardown", std::format(
-                    "nvof unregisterAll failed status={}", static_cast<int>(us)));
-                overall = false;
-            }
-        }
-        stageDone("nvof-unregister");
-        stage("release-nvof-resources");
-        nvofCostTex.Reset();
-        nvofRawTex.Reset();
-        nvofInB.Reset();
-        nvofInA.Reset();
-        stageDone("release-nvof-resources");
-        stage("nvof-shutdown");
-        nvof.shutdown();
-        stageDone("nvof-shutdown");
-
-        // 7. Only now close the NVOF event/fence.
-        stage("nvof-event-close");
-        if (nvofOutEvent != nullptr) { CloseHandle(nvofOutEvent); nvofOutEvent = nullptr; }
-        stageDone("nvof-event-close");
-
-        stage("ngx-params-destroy");
-        if (coreHost.initialized() && ngxParams != nullptr) coreHost.destroyParameters(ngxParams);
-        stageDone("ngx-params-destroy");
-        stage("iat-shim-restore");
-        nrAdapter.restoreCallerCompatibility();
-        nrAdapter.unload();
-        stageDone("iat-shim-restore");
-        stage("ngx-core-shutdown");
-        coreHost.shutdown();
-        stageDone("ngx-core-shutdown");
-
-        // s10: staged explicit release so the scope-end destructors have
-        // nothing left to destroy; a SEGV observed during implicit scope
-        // destruction is pinpointed by the first missing after-marker.
         stage("release-rtv-heap");
         rtvHeap.Reset();
         stageDone("release-rtv-heap");
         stage("release-present-pass");
         presentPass = GraphicsPass{};
         stageDone("release-present-pass");
-        stage("release-compute-passes");
-        uploadPass = ComputePass{};
-        decPass = ComputePass{};
-        encPass = ComputePass{};
-        blitPass = ComputePass{};
-        yuvPass = ComputePass{};
-        densifyPass = ComputePass{};
-        stageDone("release-compute-passes");
-        stage("release-guidance-textures");
-        confTex.Reset();
-        flowTex.Reset();
-        depthTex.Reset();
-        nrZeroMotion.Reset();
-        nrZeroDepth.Reset();
-        stageDone("release-guidance-textures");
-        stage("release-frame-textures");
-        genFrame[0].Reset();
-        genFrame[1].Reset();
-        videoFrame[0].Reset();
-        videoFrame[1].Reset();
-        stageDone("release-frame-textures");
-        stage("release-working-textures");
-        finalRgba.Reset();
-        neuralTex.Reset();
-        proxyTex.Reset();
-        workRgba.Reset();
-        srcRgba.Reset();
-        chromaTex.Reset();
-        lumaTex.Reset();
-        stageDone("release-working-textures");
-        stage("release-upload-staging");
-        upZeroMotion.Reset();
-        upZeroDepth.Reset();
-        upDepth.Reset();
-        upChroma[0].Reset();
-        upChroma[1].Reset();
-        upLuma[0].Reset();
-        upLuma[1].Reset();
-        stageDone("release-upload-staging");
-
         // ring/sink/context are NOT shut down here: their explicit teardown
         // runs AFTER this scope closes, because the scope-end destructors
         // Release every GPU resource ComPtr and those Release calls need the
@@ -3047,10 +1890,10 @@ int main(int argc, char** argv)
         j += std::format("  \"normalPathReadbackCount\": {},\n", metrics.normalPathReadbackCount);
         j += std::format("  \"presentCount\": {},\n", metrics.presentCount);
         j += std::format("  \"realFramesPresented\": {},\n", metrics.realFramesPresented);
-        j += std::format("  \"fgGeneratedFrames\": {},\n", metrics.fgGeneratedFrames);
-        j += std::format("  \"nrEvaluateCount\": {},\n", metrics.nrEvaluateCount);
-        j += std::format("  \"srEvaluateCount\": {},\n", metrics.srEvaluateCount);
-        j += std::format("  \"nvofExecuteCount\": {},\n", metrics.nvofExecuteCount);
+        j += std::format("  \"fgGeneratedFrames\": {},\n", g_graphFgGen);
+        j += std::format("  \"nrEvaluateCount\": {},\n", g_graphNrEval);
+        j += std::format("  \"srEvaluateCount\": {},\n", g_graphSrEval);
+        j += std::format("  \"nvofExecuteCount\": {},\n", g_graphNvofExec);
         j += std::format("  \"nvofFrameFailures\": {},\n", nvofFrameFailures);
         j += std::format("  \"nvofLastSignal\": {},\n", lastNvofSignal);
         j += std::format("  \"mvecSource\": \"{}\",\n", jsonEscape(mvecSource));
@@ -3119,8 +1962,8 @@ int main(int argc, char** argv)
         if (!jsonFile.empty()) (void)utilns::writeTextFileUtf8(jsonFile, j);
     }
     veyra::log::info("player", std::format("player-probe: {} presents={} fg={} nr={} sr={} driftP95={:.1f}ms",
-        overall ? "PASS" : "FAIL", metrics.presentCount, metrics.fgGeneratedFrames,
-        metrics.nrEvaluateCount, metrics.srEvaluateCount, driftP95Ms));
+        overall ? "PASS" : "FAIL", metrics.presentCount, g_graphFgGen,
+        g_graphNrEval, g_graphSrEval, driftP95Ms));
     veyra::Logger::instance().flush();
 
     veyra::log::info("player", "teardown-complete; process will return naturally");

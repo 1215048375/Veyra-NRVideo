@@ -1,0 +1,214 @@
+#pragma once
+
+// EnhanceGraph - the real unified processing graph (Playbook R3.2).
+// Chains, per real frame:
+//   NV12 source (D3D12VA texture or CPU upload) -> YUV->linear RGB ->
+//   SR upscale or 1:1 bypass -> parity encode -> Feature 18 evaluate ->
+//   parity decode -> videoFrame slot + NVOF A/B inputs ->
+//   NVOF execute + densify/confidence -> optional DLSSG 2X generate ->
+//   genFrame slot. The graph submits real command-list work through the
+//   shared CommandSlotRing; the probe/player/capture only assemble sources,
+//   schedule, and present.
+//
+// The ordering constraints baked into initialize() are load-bearing on this
+// system (injected-layer era evidence, 2026-09-04): all committed resources
+// and NGX/NVOF objects are created BEFORE any descriptor view; the FG
+// warm-up evaluate runs before views exist; static views are created last.
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include <d3d12.h>
+
+#include "veyra/pipeline/GpuPassUtils.h"
+
+struct AVFrame;
+struct SwsContext;
+struct NVSDK_NGX_Parameter;
+struct NVSDK_NGX_Handle;
+
+namespace veyra::gfx {
+class D3D12DeviceContext;
+class CommandSlotRing;
+}
+
+namespace veyra::ngx {
+class NgxCoreHost;
+class DlssSrBackend;
+class DlssFgBackend;
+class DlssNrRuntimeAdapter;
+class NvOfSession;
+}
+
+namespace veyra::pipeline {
+
+struct EnhanceGraphDesc {
+    uint32_t sourceWidth = 0;
+    uint32_t sourceHeight = 0;
+    uint32_t workWidth = 3840;
+    uint32_t workHeight = 2160;
+    bool enableSr = false;       // upscale source -> work extent (1:1 bypass otherwise)
+    bool enableNr = true;
+    bool enableFg = true;
+    bool noFeatures = false;     // VEYRA_NO_FEATURES: NVOF/NGX objects skipped
+    bool noNgx = false;          // VEYRA_NO_NGX: core/features skipped, NVOF only
+    std::wstring runtimeAbsPath; // absolute runtime_local/nvidia path
+    // Optional stage instrumentation hook (GPU timing experiments).
+    std::function<void(const char*)> stageMark;
+};
+
+class EnhanceGraph {
+public:
+    EnhanceGraph(gfx::D3D12DeviceContext& context, gfx::CommandSlotRing& ring);
+    ~EnhanceGraph();
+
+    EnhanceGraph(const EnhanceGraph&) = delete;
+    EnhanceGraph& operator=(const EnhanceGraph&) = delete;
+
+    // Two-phase initialization: the sink (swapchain allocations) must be
+    // created between the two phases - static descriptor views are only
+    // safe after every allocation in the process has happened.
+    bool initialize(const EnhanceGraphDesc& desc);
+    bool createViews();
+
+    struct FrameOutputs {
+        double ptsMs = 0.0;
+        uint32_t videoSlot = 0;            // videoFrame[videoSlot] holds this real frame
+        uint64_t videoFenceValue = 0;      // ring fence covering the video work
+        bool hasGenerated = false;
+        double generatedPtsMs = 0.0;       // strict midpoint of prev/current PTS
+        uint32_t genSlot = 0;              // genFrame[genSlot] holds the DLSSG output
+        uint64_t genFenceValue = 0;
+        uint64_t realFrameIndex = 0;
+        bool passthrough = false;          // VEYRA_GRAPH_OFF: metadata only, no GPU work
+    };
+
+    // Processes one decoded frame. `ptsMs` is the frame PTS in the source
+    // stream time base converted to milliseconds by the caller (the graph
+    // does not own the demuxer). `reset` marks the first frame of a new
+    // temporal epoch (open/seek/...): NVOF/FG history is not consumed.
+    // Returns false on hard failure (run verdict must FAIL).
+    bool process(const AVFrame* frame, double ptsMs, bool reset, FrameOutputs& out);
+
+    // s10 ownership-order teardown: NVOF fence drain must happen BEFORE this
+    // call (it needs the ring and out-fence alive). Releases features, NVOF
+    // (unregister -> textures -> destroy/unload), NGX params/shim/core, and
+    // all graph textures in the proven staged order.
+    void shutdown();
+
+    struct Metrics {
+        uint64_t nrEvaluateCount = 0;
+        uint64_t srEvaluateCount = 0;
+        uint64_t nvofExecuteCount = 0;
+        uint64_t nvofFrameFailures = 0;
+        uint64_t fgGeneratedFrames = 0;
+    };
+    const Metrics& metrics() const { return metrics_; }
+    const std::string& mvecSource() const { return mvecSource_; }
+    bool nrCreated() const { return nrHandle_ != nullptr; }
+    bool initialized() const { return initialized_; }
+    uint32_t sourceWidth() const { return srcW_; }
+    uint32_t sourceHeight() const { return srcH_; }
+    uint32_t workWidth() const { return workW_; }
+    uint32_t workHeight() const { return workH_; }
+    bool srEnabled() const { return srEnabled_; }
+    bool nrEnabled() const { return nrEnabled_; }
+    bool fgEnabled() const { return fgEnabled_; }
+    uint64_t lastNvofSignal() const;
+
+    // Present-side access to the produced frame slots (probe sink path).
+    ID3D12Resource* videoFrameResource(uint32_t slot) const;
+    ID3D12Resource* generatedFrameResource(uint32_t slot) const;
+
+    // Teardown/diagnostics accessors: the s10 NVOF out-fence drain runs while
+    // the ring/fence/event are alive, i.e. BEFORE shutdown().
+    ID3D12Fence* nvofOutFenceResource() const { return nvofOutFence_.Get(); }
+    HANDLE nvofOutEventHandle() const { return nvofOutEvent_; }
+    bool nvofSessionInitialized() const;
+    uint64_t nvofNextOutValue() const;
+    uint64_t nrCreateResult() const { return nrResult_; }
+    bool fgCapabilityAvailable() const { return fgCapsAvailable_; }
+    int fgMultiFrameCountMax() const { return fgMultiFrameMax_; }
+    // Scenario toggles (probe/UI): gates only; the feature handles stay alive.
+    // setNrEnabled also refreshes the section-5 blit SRV (slot 2) so the
+    // videoFrame source follows workRgba (NR off) or finalRgba (NR on).
+    void setNrEnabled(bool on);
+    void setFgEnabled(bool on) { fgEnabled_ = on; }
+    bool fgCreated() const;
+
+private:
+    bool createResources();
+    bool initZeroAndDepthTextures();
+    bool initNvof();
+    bool initNgxFeatures();
+    bool createComputePasses();
+
+    gfx::D3D12DeviceContext& context_;
+    gfx::CommandSlotRing& ring_;
+    EnhanceGraphDesc desc_{};
+    bool initialized_ = false;
+
+    uint32_t srcW_ = 0, srcH_ = 0, workW_ = 3840, workH_ = 2160;
+    uint32_t nvofW_ = 0, nvofH_ = 0, rawW_ = 0, rawH_ = 0, nvofGrid_ = 4, selectedGrid_ = 4;
+    bool srEnabled_ = false, nrEnabled_ = false, fgEnabled_ = false;
+    size_t lumaPitch_ = 0, chromaPitch_ = 0, lumaSize_ = 0, chromaSize_ = 0, dPitch_ = 0;
+
+    // Uploads + textures (creation order matters for teardown).
+    ComPtr<ID3D12Resource> upLuma_[2];
+    ComPtr<ID3D12Resource> upChroma_[2];
+    ComPtr<ID3D12Resource> upDepth_;
+    ComPtr<ID3D12Resource> upZeroDepth_;
+    ComPtr<ID3D12Resource> upZeroMotion_;
+    ComPtr<ID3D12Resource> lumaTex_;
+    ComPtr<ID3D12Resource> chromaTex_;
+    ComPtr<ID3D12Resource> srcRgba_;
+    ComPtr<ID3D12Resource> workRgba_;
+    ComPtr<ID3D12Resource> proxyTex_;
+    ComPtr<ID3D12Resource> neuralTex_;
+    ComPtr<ID3D12Resource> finalRgba_;
+    ComPtr<ID3D12Resource> videoFrame_[2];
+    ComPtr<ID3D12Resource> confTex_;
+    ComPtr<ID3D12Resource> flowTex_;
+    ComPtr<ID3D12Resource> depthTex_;
+    ComPtr<ID3D12Resource> genFrame_[2];
+    ComPtr<ID3D12Resource> nrZeroMotion_;
+    ComPtr<ID3D12Resource> nrZeroDepth_;
+    ComPtr<ID3D12Resource> nvofRawTex_;
+    ComPtr<ID3D12Resource> nvofCostTex_;
+    ComPtr<ID3D12Resource> nvofInA_;
+    ComPtr<ID3D12Resource> nvofInB_;
+    uint8_t* mappedLuma_[2] = {};
+    uint8_t* mappedChroma_[2] = {};
+    std::vector<uint8_t> nv12Buf_;
+
+    ComputePass yuvPass_, encPass_, decPass_, blitPass_, uploadPass_, densifyPass_;
+    DescriptorStager stager_;
+    StateTracker tracker_;
+    SwsContext* nv12Ctx_ = nullptr;
+
+    // NVOF + NGX (owned by the graph, render-thread only).
+    std::unique_ptr<ngx::NvOfSession> nvof_;
+    ComPtr<ID3D12Fence> nvofOutFence_;
+    HANDLE nvofOutEvent_ = nullptr;
+    std::unique_ptr<ngx::NgxCoreHost> coreHost_;
+    std::unique_ptr<ngx::DlssNrRuntimeAdapter> nrAdapter_;
+    std::unique_ptr<ngx::DlssSrBackend> srBackend_;
+    std::unique_ptr<ngx::DlssFgBackend> fgBackend_;
+    NVSDK_NGX_Parameter* ngxParams_ = nullptr;
+    NVSDK_NGX_Handle* nrHandle_ = nullptr;
+    uint64_t nrResult_ = 0;
+    uint32_t nrSeh_ = 0;
+    bool fgCapsAvailable_ = false;
+    int fgMultiFrameMax_ = 0;
+
+    // Per-run state.
+    uint64_t realFrameIndex_ = 0;
+    double prevPtsMs_ = -1.0;
+    bool prevValid_ = false;
+    Metrics metrics_{};
+    std::string mvecSource_ = "nvof";
+};
+
+} // namespace veyra::pipeline

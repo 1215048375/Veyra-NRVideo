@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 36,
+    "completed": 37,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "R3.1 complete (Cycles 034-036): all four product libraries established with real members and gate-verified - veyra_pipeline (contracts+ResetCoordinator), veyra_guidance (IGuidanceProvider+ZeroGuidanceProvider GPU-verified 13/13), veyra_sinks (WASAPI audio extracted, no regression), veyra_sources (MediaFileSource composing veyra_media, 23/23 corpus-driven contract tests). Phase5 gate 28/45: all product-target checks green; remaining = quality runner, player-links-pipeline, enhance-graph-submits-gpu + matrix/depth/endurance (R3.2+).",
+  "currentTask": "R3.2 complete (Cycle 037): the REAL GPU chain now lives in veyra_pipeline::EnhanceGraph (src/pipeline/EnhanceGraph.cpp, 1020 lines - ExecuteCommandLists + NGX evaluate + full per-frame chain + s10-ordered teardown). player_probe is assembly/scheduling/present/JSON only (3641->1971 lines) and genuinely links veyra_pipeline. Behavior parity verified: exit 12 unchanged, nr=432/sr=497/fg=461/nvof=461/mvecSource=nvof/presents=958/underruns=0, natural teardown. Gate: product:enhance-graph-submits-gpu + product:player-links-pipeline BOTH GREEN (26/45). System finding recorded: initialized descriptors + dispatch + Present trips the injected-layer fabricated removal; baseline views-off semantics preserved (R6.1 owns the descriptor-init fix).",
   "lastGate": {
     "name": "phase5",
     "status": "invalidated_requires_rebuild",
@@ -106,6 +106,6 @@
     "A real DirectShow/UVC 4K60 SDR capture device, HDMI audio, and 4K60 source signal are required before P7 capture gate can pass.",
     "Public distribution rights for the experimental DLSSNR runtime and all bundled NVIDIA/model/FFmpeg assets are unresolved; a local release candidate is allowed, public launch is blocked."
   ],
-  "nextAction": "Playbook R3.2: move the real GPU chain from tools/player_probe/main.cpp into src/pipeline/EnhanceGraph.cpp - ingress color conversion (NV12Upload/YUV->RGB), SR bypass-or-upscale decision, parity encode, Feature 18 evaluate, parity decode, NVOF guidance production (born as NvofGuidanceProvider in veyra_guidance), optional FG, bounded post mix. EnhanceGraph::process must submit real command lists (gate: ExecuteCommandLists + NGX evaluate in src/pipeline/EnhanceGraph.cpp). Then R3.3 slims player_probe below 800 lines as assembly+JSON only.",
-  "updatedAt": "2026-09-06T18:40:00+08:00"
+  "nextAction": "Playbook R3.3: deduplicate player_probe further (bare-stage diagnostic matrix ~570 lines -> separate diagnostic tool or fold into descriptor_present_probe), then build the headless quality runner base: veyra_quality_probe target that links veyra_pipeline + veyra_sources and runs the corpus through EnhanceGraph headlessly (offscreen, no window/audio), emitting the R1.1 gate JSON contract (extents/frames/counters/hashes). Target: player_probe <800 lines and quality:runner-exe check green.",
+  "updatedAt": "2026-09-06T19:00:00+08:00"
 }

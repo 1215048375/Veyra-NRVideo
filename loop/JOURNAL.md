@@ -944,6 +944,37 @@ C staged teardown 定位崩溃=swapChain_.Release,矩阵证明 NVOF+debug layer+
 - 新 blocker:L2 GBV runtime id=938 未初始化描述符(待修,非本任务)。
 - 未执行:query-heap GPU timestamp(用户明令禁止);Reviewer/checkpoint(未授权)。
 
+## Cycle 037 — R3.2a GPU 辅助设施迁入 veyra_pipeline（2026-09-06 Goal）
+
+### Before
+
+- Phase: 5（重开，in_progress）
+- 唯一任务: 把 player_probe 的 GPU 辅助设施逐字迁入 `include/veyra/pipeline/GpuPassUtils.h`（makeTexture/makeUploadBuffer/StateTracker/ComputePass/loadShaderBytes/makeSrv/makeUav/DescriptorStager/GraphicsPass + cpu/gpuHandle helper），player_probe 删除本地副本改用产品库版本；veyra_pipeline 定义 VEYRA_SHADER_DIR 并链接 d3d12；probe 链接 veyra_pipeline（本步即真实依赖）。
+- 可证伪假设: 若迁移引入行为差异，player probe 冒烟（exit 12/计数/mvecSource）将变化；预期完全不变。
+- 预计修改文件: include/veyra/pipeline/GpuPassUtils.h（新）、tools/player_probe/main.cpp（删 101-419 区段改 include）、CMakeLists.txt（veyra_pipeline 加 VEYRA_SHADER_DIR+d3d12；probe 已链 veyra_pipeline? 否——加链接）。
+- 快速检查命令: `build` 双配置 → 0；player 冒烟 exit 12 + driftP95 同量级 + mvecSource=nvof + NR/FG 计数非零；`phase5.ps1` → product:player-links-pipeline 转 PASS。
+- 预期新增证据: probe 用产品库辅助设施运行无回归 + gate 检查转绿。
+
+### After
+
+- 实际修改（三个子步骤一个 cycle，如实记录）:
+  - **R3.2a**: include/veyra/pipeline/GpuPassUtils.h（makeTexture/makeUploadBuffer/StateTracker/ComputePass/loadShaderBytes/makeSrv/makeUav/DescriptorStager/GraphicsPass + cpu/gpuHandleOf，357 行逐字迁移）；player_probe 删除本地副本改 using；veyra_pipeline 定义 VEYRA_SHADER_DIR 并链 d3d12/d3dcompiler。
+  - **R3.2b**: include/veyra/pipeline/EnhanceGraph.h（214 行）+ src/pipeline/EnhanceGraph.cpp（1020 行）——完整 GPU 链类：资源/零初始化上传（**直接 ExecuteCommandLists**）/NVOF init/NGX core+snippet+NR Create+SR Create+FG Create+warmup（**snippetEvaluateFeature/evaluate**）/五个 compute pass/静态 views/createViews 独立阶段（sink 之间）/process 全链（NV12 源→YUV→SR/bypass→parity→NR evaluate→parity decode→videoFrame+NVOF A/B→NVOF execute+densify→FG evaluate→genFrame）/shutdown（s10 三相 NVOF teardown + 逆序 NGX + 分阶段纹理释放）/场景 toggle setter（setNrEnabled 同步刷新 blit slot 2 SRV——原 probe 运行时行为）。
+  - **R3.2c**: player_probe 3641→**1971 行**：引擎初始化段→graph 构造；processOneFrame 500 行→薄包装（graph.process + presentQueue 推送，保持 previous→generated→current 呈现顺序）；teardown 拆分（NVOF fence drain 用 graph 访问器在 graph.shutdown() 前，audio/ring/queue-drain/sink/ring/context 留 probe）；bare-stage 诊断改用本地 NgxCoreHost；pumpPresents 用 graph 纹理访问器；JSON 计数经全局桥接。
+- 调试历程（4 个真问题 + 1 个测试期望）:
+  1. 首轮 Present 即 DEVICE_REMOVED（0x887A0005/DRIVER_INTERNAL_ERROR，无 DRED、debug layer 0 错误——注入层假报特征）。二分定位：**graph views 创建后首 Present 必挂**；VEYRA_GRAPH_VIEWS_OFF=1 则 958 presents 全过。曾试 SRV 全走 DescriptorStager（stage9 安全路径）仍挂——本机上"已初始化描述符+dispatch+Present"组合即触发，而**基线 r0/r32a 的 views 默认从未创建**（VEYRA_VIEWS_* 门控默认关），dispatch 一直消费未写槽位（这正是 GBV id=938 blocker 的来源）。裁定：createViews 复刻原始 env 门控（默认 OFF），保持与全部 t10/r0 证据一致的运行时行为；描述符初始化与注入层的交互是 **R6.1 的既定范围**。
+  2. 计数全零但链路实际在跑（插桩证明 nr/sr/fg 递增）：我的批量改名把 JSON 桥接捕获行 RHS 也改成自赋值（g_graphNrEval = g_graphNrEval）。修复后计数恢复。
+  3. sink 顺序约束：graph views 必须在 swapchain 分配之后——拆出 createViews() 独立阶段，probe 在 sink+audio 后调用。
+  4. 编译轮次：FFmpeg include 缺失（加 FFMPEG guard 条件）、hwcontext_d3d12va 头、/WX- 第三方头、createViews 链接名、bareCore 声明位置、残留释放段/gmetrics 作用域——各一次修复。
+- 最终验证（默认 env，r32final-185450）: **exit 12（已知 drift FAIL 不变）**；driftP95=2827ms（基线 2803-2858 同量级）；presents=958、**nr=432、sr=497、fg=461、nvof=461、mvecSource=nvof**（真实 NVOF 引导）、audioUnderruns=0、自然 teardown——与迁移前基线完全对等，**零行为回归**。
+- Gate: `phase5.ps1` → exit 1，**26/45**；**product:enhance-graph-submits-gpu 与 product:player-links-pipeline 双双转绿**（EnhanceGraph.cpp 真含 ExecuteCommandLists+NGX evaluate；probe 真链接并调用 veyra_pipeline）。剩余红项 = quality-runner（R3.3/R4）+ 矩阵/depth/耐久（R4/R5）。
+- 失败 fingerprint: player|present-removed|1|views-initialized-trips-injected-layer → 按证据回退到基线门控语义，R6.1 负责 descriptor 初始化。第 1 次尝试关闭。
+- 是否有进展，依据: 是——撤销 Phase 5 的核心 P0（"EnhanceGraph 只计数，真实 GPU 链在 harness"）已修复：真实链现在在产品库内执行，probe 只做组装/调度/呈现/JSON；且行为对等有机器证据。
+- STATE/BACKLOG 更新: cycle.completed=37；BACKLOG R3.2 → DONE；R3.3（probe<800 行 + headless 同 hash 验证）为下一动作。
+- 下一唯一动作: R3.3 — player_probe 1971 行继续去重（bare-stage 诊断矩阵 ~570 行可移入独立诊断工具或删除其二义段），加 headless integration test 与 probe 对同一 300 帧输入产生相同 output/config hash 与 Evaluate 计数（R3 最窄证明），使 quality-runner 具备基础。
+
+---
+
 ## Cycle 036 — R3.1c veyra_sources：MediaFileSource（2026-09-06 Goal）
 
 ### Before

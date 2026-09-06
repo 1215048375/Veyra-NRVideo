@@ -212,10 +212,14 @@ add_library(veyra_pipeline STATIC
   src/pipeline/ResetCoordinator.cpp
 )
 veyra_apply_warnings(veyra_pipeline)
+# FFmpeg/NVOF headers are third-party: /WX stays off for this target.
+target_compile_options(veyra_pipeline PRIVATE /WX-)
 target_compile_features(veyra_pipeline PRIVATE cxx_std_20)
-target_compile_definitions(veyra_pipeline PRIVATE
-  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_definitions(veyra_pipeline PUBLIC
+  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+  VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
 target_include_directories(veyra_pipeline PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(veyra_pipeline PUBLIC veyra_base veyra_gfx d3d12 dxgi dxguid d3dcompiler)
 
 add_executable(veyra_pipeline_tests
   tests/unit/PipelineContractTests.cpp
@@ -293,6 +297,18 @@ if(VEYRA_NVOF_SDK_ROOT AND EXISTS "${VEYRA_NVOF_SDK_ROOT}/NvOFInterface/nvOptica
     "${VEYRA_NVOF_SDK_ROOT}/NvOFInterface"
     "${VEYRA_NVOF_SDK_ROOT}/Common/NvOFBase")
   target_link_libraries(veyra_nvof_probe PRIVATE veyra_gfx veyra_base)
+endif()
+
+# EnhanceGraph (the real GPU chain) needs the NGX + NVOF backends; wire it
+# into veyra_pipeline only when both exist so bare contract builds still work.
+if(TARGET veyra_ngx AND TARGET veyra_nvof AND VEYRA_FFMPEG_ROOT)
+  target_sources(veyra_pipeline PRIVATE src/pipeline/EnhanceGraph.cpp)
+  target_include_directories(veyra_pipeline PRIVATE ${FFMPEG_INCLUDE_DIRS})
+  target_link_libraries(veyra_pipeline PRIVATE veyra_ngx veyra_nvof ${FFMPEG_LIBRARIES})
+  add_dependencies(veyra_pipeline
+    veyra_shader_yuv_to_rgb veyra_shader_parity_encode
+    veyra_shader_parity_decode veyra_shader_scale_blit
+    veyra_shader_nv12_upload veyra_shader_nvof_densify)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -385,7 +401,7 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
       UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
       VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
     target_link_libraries(veyra_player_probe PRIVATE
-      veyra_media veyra_gfx veyra_ngx veyra_nvof veyra_parity veyra_sinks
+      veyra_media veyra_gfx veyra_ngx veyra_nvof veyra_parity veyra_sinks veyra_pipeline
       ${FFMPEG_LIBRARIES} psapi ole32 mmdevapi avrt)
     add_dependencies(veyra_player_probe
       veyra_shader_yuv_to_rgb veyra_shader_parity_encode
