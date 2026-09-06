@@ -796,6 +796,30 @@ L2(GBV)runtime 扫描 1764+ ERROR,id=938 `GPU_BASED_VALIDATION_DESCRIPTOR_UNINIT
 ### 原始证据
 logs/phase6-manual/t10/{L0,L1,L2,NF}-{r1,r2}.{log,json}
 
+## 2026-09-06 Goal session 3（Cycle 037）：R3.2 真实 GPU 链迁入 EnhanceGraph
+
+### 执行摘要
+
+撤销 Phase 5 的核心 P0 缺陷已修复——"EnhanceGraph 只计数、真实 GPU 链在 harness"不复存在：
+
+- **R3.2a**: GPU 辅助设施（ComputePass/GraphicsPass/DescriptorStager/StateTracker/makeTexture 等 357 行）迁入 veyra_pipeline 的 GpuPassUtils.h；probe 改用产品库版本，行为零回归（r32a 冒烟验证）。
+- **R3.2b**: `src/pipeline/EnhanceGraph.cpp`（1020 行）承载完整真实链：资源/零初始化（直接 ExecuteCommandLists）/NVOF/NGX core+NR Create+SR+FG+warmup（snippetEvaluateFeature/evaluate）/五 compute pass/静态 views/逐帧 process（NV12→YUV→SR/bypass→parity→NR evaluate→parity decode→videoFrame+NVOF A/B→NVOF execute+densify→FG evaluate→genFrame）/s10 顺序 shutdown。createViews 独立阶段（swapchain 分配之后）。
+- **R3.2c**: player_probe 3641→**1971 行**：引擎初始化→graph 构造；processOneFrame 500 行→薄包装（保持 previous→generated→current 呈现序）；teardown 按所有权拆分；JSON 计数全局桥接。
+
+### 系统发现（重要，供 R6.1）
+
+初始化的描述符 + dispatch + Present 组合在本机触发注入层假报 DEVICE_REMOVED（0x887A0005/DRIVER_INTERNAL_ERROR，无 DRED、debug layer 0 错误；stager 路径同样触发）。**基线 r0/t10 的全部证据运行在 views 默认未创建状态**（dispatch 消费未写槽位=GBV id=938 的来源）。裁定：graph createViews 复刻原始 env 门控（默认 OFF）保持行为一致；描述符初始化与注入层交互是 R6.1 既定范围。
+
+### 最终验证
+
+- 双配置构建 exit 0。
+- 默认 env 冒烟（r32final-185450）：**exit 12（已知 drift FAIL 不变）**、driftP95=2827ms、presents=958、nr=432/sr=497/fg=461/nvof=461、**mvecSource=nvof**、underruns=0、自然 teardown——与迁移前完全对等。
+- phase5 gate 26/45：**product:enhance-graph-submits-gpu + product:player-links-pipeline 双绿**。
+
+### 下一条唯一任务
+
+R3.3：probe 继续去重（bare-stage 诊断矩阵移出）+ headless `veyra_quality_probe` 骨架（链 veyra_pipeline+veyra_sources，无窗口跑 corpus，产出 gate JSON 契约），使 quality:runner-exe 具备通过条件。
+
 ## 2026-09-06 Goal session 2（Cycle 034-036）：产品库 R3.1 全部建立
 
 ### 执行摘要
