@@ -944,6 +944,32 @@ C staged teardown 定位崩溃=swapChain_.Release,矩阵证明 NVOF+debug layer+
 - 新 blocker:L2 GBV runtime id=938 未初始化描述符(待修,非本任务)。
 - 未执行:query-heap GPU timestamp(用户明令禁止);Reviewer/checkpoint(未授权)。
 
+## Cycle 036 — R3.1c veyra_sources：MediaFileSource（2026-09-06 Goal）
+
+### Before
+
+- Phase: 5（重开，in_progress）
+- 唯一任务: 建立 `veyra_sources` 产品库：IFrameSource 接口（open/info/read/seek/close，基于 pipeline 契约）+ MediaFileSource 组合现有 veyra_media 的 FFmpegDemuxer+FFmpegVideoDecoder（**不写第二份解码实现**），read() 产出 FramePacket 元数据（Rational PTS 来自真实流时基、duration、SourceKind=File、Open/Seek 帧 flags、单调 epoch）+ 解码 AVFrame 视图供 graph ingress 转换；SourceInfo 含 extent/duration/fps/ColorDescription（从 codecpar color_* 解析，SD→601/HD→709 assumed 默认按 Playbook §9）；seek 原子（demuxer seek + decoder flush + Seek flag）。FFmpegVideoDecoder 补 frameTimeBase getter（纯增量）。集成测试用确定性 corpus 的 translation_1080p60.mp4。
+- 可证伪假设: 若 PTS/时基/color 解析或 seek 语义错误，corpus 驱动的集成测试将以真实断言失败（PTS 单调、seek 后 ≥ 目标、epoch 递增、颜色 709-assumed）。
+- 预计修改文件: include/veyra/source/{IFrameSource,MediaFileSource}.h、src/source/MediaFileSource.cpp、include/veyra/media/FFmpegVideoDecoder.h（getter）、tests/integration/MediaFileSourceTests.cpp、CMakeLists.txt。
+- 快速检查命令: `build` 双配置 → 0；`veyra_source_tests.exe` 双配置 → 0；`phase5.ps1` → 仍 exit 1 但 product:veyra_sources-target PASS。
+- 预期新增证据: 文件驱动的真实解码 + PTS/color/seek 契约断言。
+
+### After
+
+- 实际修改: include/veyra/source/{IFrameSource,MediaFileSource}.h、src/source/MediaFileSource.cpp、include/veyra/media/FFmpegVideoDecoder.h（frameTimeBaseNum/Den getter，纯增量）、tests/integration/MediaFileSourceTests.cpp（corpus 驱动 23 断言）、CMakeLists.txt（veyra_sources + veyra_source_tests）。
+- 实现要点: MediaFileSource 组合 FFmpegDemuxer+FFmpegVideoDecoder（无第二份解码实现）；read() 产出完整 FramePacket 元数据——Rational PTS 用真实流时基（1/15360，ptsUs 0/16667/33333 实测单调）、duration 优先 frame->duration 回退 avgFps、Open/Seek/Discontinuity（PTS 回跳）flags、单调 epoch（open/seek 各 +1）；ColorDescription 从 codecpar color_* 解析 + SD→601/HD→709 documented-assumed 默认（1080p 实测 BT709+Limited 全 assumed 正确）；seek 原子（demuxer seekToUs + decoder flushBuffers + 下帧 Seek flag）；PTS 未知时 Rational::unknown 不伪造；drain 到 EOS 语义完整。
+- 实际命令与 exit code:
+  - `build x64-debug/-release` → 修 3 轮（AVCOL_TRC_SRGB→IEC61966_2_1；std::format 占位符 11 个实参 10 个→运行时 format_error abort exit 3；EOS 期望值算错）后双 0。
+  - `veyra_source_tests.exe`（corpus translation_1080p60.mp4，软件解码路径）→ **23/23 Debug+Release exit 0**。
+  - `phase5.ps1` → exit 1，**28/45**；四个产品库 target 检查全部 PASS。
+- 失败 fingerprint: build/test|source-tests|3或断言|TRC 常量名/format 参数数/EOS 期望 → 三个不同缺陷各一次修复关闭。
+- 是否有进展，依据: 是——Playbook R3.1 的四个产品库（veyra_pipeline/veyra_guidance/veyra_sources/veyra_sinks）全部以真实成员建立并被 gate 检查放行；文件→FramePacket 契约转换层有 corpus 驱动的机器证据。
+- STATE/BACKLOG 更新: cycle.completed=36；BACKLOG R3.1 → DONE；nextAction → R3.2。
+- 下一唯一动作: R3.2 — 把 player_probe 的真实 GPU 链（upload/YUV/SR bypass/parity/NR/parity/optional FG/合成）迁入 `src/pipeline/EnhanceGraph.cpp`，使 `product:enhance-graph-submits-gpu` 与 `player-links-pipeline` 检查具备通过条件；NvofGuidanceProvider 同批从 probe 移入 veyra_guidance。
+
+---
+
 ## Cycle 035 — R3.1b veyra_guidance：接口 + ZeroGuidanceProvider（2026-09-06 Goal）
 
 ### Before

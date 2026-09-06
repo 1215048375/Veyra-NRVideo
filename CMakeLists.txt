@@ -347,6 +347,31 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_link_libraries(veyra_sinks PUBLIC veyra_base ole32 mmdevapi avrt)
   target_link_libraries(veyra_sinks PRIVATE ${FFMPEG_LIBRARIES})
 
+  # veyra_sources: product input sources (Playbook R3/R7). MediaFileSource
+  # composes veyra_media; no second decode implementation exists.
+  add_library(veyra_sources STATIC
+    src/source/MediaFileSource.cpp
+  )
+  veyra_apply_warnings(veyra_sources)
+  target_compile_options(veyra_sources PRIVATE /WX-)
+  target_compile_features(veyra_sources PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_sources PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_include_directories(veyra_sources PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(veyra_sources PUBLIC veyra_pipeline veyra_media veyra_base)
+  target_link_libraries(veyra_sources PRIVATE ${FFMPEG_LIBRARIES})
+
+  add_executable(veyra_source_tests
+    tests/integration/MediaFileSourceTests.cpp
+  )
+  veyra_apply_warnings(veyra_source_tests)
+  target_compile_options(veyra_source_tests PRIVATE /WX-)
+  target_compile_features(veyra_source_tests PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_source_tests PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_include_directories(veyra_source_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(veyra_source_tests PRIVATE veyra_sources)
+
   # Phase 6 realtime engine probe: decode -> SR -> NR -> NVOF -> DLSSG -> present.
   if(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR AND EXISTS "${VEYRA_NVOF_SDK_ROOT}/NvOFInterface/nvOpticalFlowCommon.h")
     add_executable(veyra_player_probe

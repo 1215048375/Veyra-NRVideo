@@ -24,7 +24,7 @@
 - [x] **R2.2 FrameWindow/GuidanceFrame**：固定 prev/current/next 与 lookaheadFrames 0/1/2，删除无界 vector；motion=current→previous working pixels、depth R32F、confidence R8、provenance/age/sourceSequence/reset reason。
 - [x] **R2.3 ResetCoordinator tests**：open/seek/cut/drop/resize/source-switch/pause-resume/device-lost 八类事件同一 epoch；负/缺失 PTS、跨 epoch history、窗口上限和 fence ownership 测试 Debug/Release 通过。
 <!-- 2026-09-06 Goal cycles 030-033: R0.1 takeover fingerprint 61feb89b + probes r0-*; R1.1 gate 42-check fail-closed proven red 34/42; R1.2 corpus 10 clips + SHA256 manifest (corpus:* green); R2.1-R2.3 delivered as one contract family include/veyra/pipeline + PipelineContractTests 50/50 debug+release (rational PTS, 8 reset reasons at frame boundaries, cross-epoch rejection, window cap, fence ownership). Checkpoints: bb9c5361/7ec1e0c/c7d6414/07eb66d. -->
-- [ ] **R3.1 CMake 产品库**：建立并实际链接 `veyra_pipeline`、`veyra_guidance`、`veyra_sources`、`veyra_sinks`；不允许空 target 或只含接口。
+- [x] **R3.1 CMake 产品库**：建立并实际链接 `veyra_pipeline`、`veyra_guidance`、`veyra_sources`、`veyra_sinks`；不允许空 target 或只含接口。
 - [ ] **R3.2 真 EnhanceGraph**：把 D3D12VA/YUV、SR、scene、NVOF/confidence、parity encode、Feature18、parity decode、optional FG、post mix 的真实提交从 `player_probe`/harness 迁入共享 graph；主路径 readback=0。
 - [ ] **R3.3 probe 去重**：`player_probe` 只做参数、组装、scenario、JSON；目标小于 800 行且不保留第二套 NGX/NVOF/barrier/resource lifetime。headless test 与 player probe 对 300 帧产生同计数/输出 hash。
 - [ ] **R4.1 NVOF provider**：复用已存在 SDK 5.0.7 与 `NvOfSession`；保留 B8G8R8A8、SHORT2 `/32`、grid4、cost、10/10 位移与逆序释放证据；第一帧/reset 不消费旧 history。

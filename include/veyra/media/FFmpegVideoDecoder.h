@@ -66,6 +66,11 @@ public:
     const DecoderStats& stats() const { return stats_; }
 
     // True when the decoder is producing AV_PIX_FMT_D3D12 frames.
+    // Time base the decoded frames' PTS are expressed in (the demuxer stream
+    // time base, applied when the codec context carries none).
+    int frameTimeBaseNum() const { return frameTimeBaseNum_; }
+    int frameTimeBaseDen() const { return frameTimeBaseDen_; }
+
     bool usingD3D12Frames() const { return hwAccelActive_ && context_ != nullptr && lastFrameFormat_ != -1; }
     int lastFrameFormat() const { return lastFrameFormat_; }
     uint64_t gpuQueueWaitCount() const { return gpuQueueWaitCount_; }
