@@ -335,7 +335,8 @@ foreach ($pair in @(@("hd", "endurance:1080p60", 1920, 1080), @("uhd", "enduranc
     $wsEnd = [double](Get-Field $j "workingSetEndMiB")
     $vram = [double](Get-Field $j "vramBudgetHeadroomMiB")
     $queue = [int64](Get-Field $j "queueHighWater")
-    Add-GateCheck ($name + "-resources") ((($wsEnd - $wsStart) -lt 512) -and ($vram -ge 1536) -and ($queue -le 6)) "wsGrowth=" + [math]::Round($wsEnd - $wsStart, 1) + "MiB vramHeadroom=$vram MiB queueHighWater=$queue"
+    $wsGrowth = [math]::Round($wsEnd - $wsStart, 1)
+    Add-GateCheck ($name + "-resources") ((($wsEnd - $wsStart) -lt 512) -and ($vram -ge 1536) -and ($queue -le 6)) ("wsGrowth={0}MiB vramHeadroom={1}MiB queueHighWater={2}" -f $wsGrowth, $vram, $queue)
 }
 
 # Main-path discipline (from whichever endurance JSON exists; motion JSON used as fallback).

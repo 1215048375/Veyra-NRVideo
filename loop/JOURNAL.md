@@ -967,7 +967,10 @@ C staged teardown 定位崩溃=swapChain_.Release,矩阵证明 NVOF+debug layer+
 - 调试杂项（诚实记录）: 采样器最初用 ring 外临时命令列表（竞态致设备移除）→ 改 ring slot 3 + conf 终态 COMMON 屏障修正 + staging footprint RowPitch 数学修正；上传纹理 64KB 上限（回滚到缓冲）；**corpus 模式 0xC0000409 假线索两轮**——先是 fprintf 换行字面量断裂导致陈旧二进制 127，真因是 manifest 扫描里 `(base+"/"+rel).begin()/end()` 跨临时对象迭代器 UB（堆越界 fail-fast），修复为单次构造；endurance 模式 extent 语义修正（working=source 1:1）。
 - 失败 fingerprint: quality|corpus|0xC0000409|cross-temporary-iterator-UB → 第 3 个真正不同的诊断（陈旧二进制→字面量→UB）后修复关闭。
 - 是否有进展，依据: 是——headless 质量核心运行器在完整 corpus 上真实产出 guidance 统计与契约 JSON；描述符默认初始化（TEX/UAV）落地且 GBV 错误降 73%；两个注入层毒源被精确隔离并文档化。
-- 下一唯一动作: phase5 gate 全量复跑（后台进行中：5 模式矩阵 + 双 30 分钟耐久），随后按结果推进 R4.1（NVOF flow 接入 NR MVec）或修补 runner 契约缺口。
+- **Gate 全量复跑（run-id d61ba1ff88de401bb530b20953f6a35f，进行中→结果见 logs/takeover-20260906/gate-r33-full.log）**:
+  - quality:run-* ×5 全 PASS；extent-matrix/nr-per-frame/**nvof-nonzero-motion**(5990/115200/nvof)/confidence-stats/gpu-timing/**hash-binding**/depth:provider-from-run 全 PASS；reset-contract 红（sceneCut=0，R4.5）。
+  - **1080p60 耐久完成（exit 0）**: duration=1802.2s ✓、native extent 1920x1080 ✓、nr==processed=60112 ✓、queue=4 ✓、VRAM headroom=11026MiB ✓、wsGrowth≈217MiB ✓、deviceRemoved=0 ✓——**但 60112 < 97000 帧门槛（当前串行化节奏 ~33fps < 60fps 实时处理）→ endurance:1080p60-throughput 预期红**。真实性能缺口：runner 逐帧串行（gpuPassP50 25.7ms + 每帧环等待），需流水化（这是 R5 性能收尾的真实工作项，非可通过降低阈值解决）。
+  - 4K60 耐久运行中（后台任务继续）。
 
 
 ---

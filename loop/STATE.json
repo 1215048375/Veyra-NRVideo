@@ -76,14 +76,14 @@
     }
   ],
   "cycle": {
-    "completed": 39,
+    "completed": 40,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "R3.3 complete (Cycles 038-039): bare-stage matrix removed (probe 1971->1392 lines); veyra_quality_probe headless runner built on the shared product libraries emitting the full R1.1 gate JSON contract. Full corpus run: 6000/6000 frames, nr=6000/sr=3000/nvof=5990, REAL guidance (nonZeroMotion=115200, confidence 0.9765, provenance=nvof), 10 sequential graph lifecycles, 0 device removals. TWO injection-layer poison sources isolated: RAW-buffer-SRV creation (device removal + NVOF block) and frame-time Copy* (SEGV in NGX evaluate) - texture SRV/UAV views are now DEFAULT-ON which cut GBV id=938 from 1764+ to 467 with presents/mvecSource unchanged. Player probe behavior parity maintained.",
+  "currentTask": "Full phase5 gate executed end-to-end (run-id d61ba1ff88de401bb530b20953f6a35f): quality matrix green (run-x5, extents, nr-per-frame, nvof-nonzero 115200, confidence, gpu-timing, hash-binding, depth honest-fallback), BOTH 30-min endurance runs completed with exit 0 (1080p60: 1802s native 60112 frames; 4K60: 1802s native 66307 frames; VRAM headroom 11GB, wsGrowth<512MiB, queue<=4, deviceRemoved=0 on both). REMAINING RED: endurance-throughput (60112/66307 < 97000 - the runner serializes at ~33-37fps instead of 60fps real-time; needs pipelining, not threshold relief) and quality:reset-contract (sceneCut=0, R4.5). Gate script had a PS argument-parsing crash at the resources check (fixed, AST-clean); the crashed run's exit 0 was invalid - honest verdict remains gate NOT passed.",
   "lastGate": {
     "name": "phase5",
     "status": "invalidated_requires_rebuild",
@@ -106,6 +106,6 @@
     "A real DirectShow/UVC 4K60 SDR capture device, HDMI audio, and 4K60 source signal are required before P7 capture gate can pass.",
     "Public distribution rights for the experimental DLSSNR runtime and all bundled NVIDIA/model/FFmpeg assets are unresolved; a local release candidate is allowed, public launch is blocked."
   ],
-  "nextAction": "Phase5 gate full rerun in progress (5-mode matrix + 2x30min endurance, background). On completion: fix any runner contract gaps it exposes, then R4.1 wire the densified NVOF flow into NR evaluate MVec (NR currently consumes zero motion; provenance reports nvof for NVOF production only) + R4.5 scene-cut counting so quality:reset-contract can pass. The upload-pass RAW SRV slots remain intentionally uninitialized (creation trips the layer) - R6.1 may try pre-NGX creation.",
-  "updatedAt": "2026-09-06T19:50:00+08:00"
+  "nextAction": "Phase 5 cannot pass yet: (1) pipeline the quality runner to >=60fps (remove per-frame serialization; the graph already uses the 4-slot ring - the runner's per-frame loop and serialized stage timing are the bottleneck), (2) R4.5 scene-cut detection/counting for reset-contract, (3) R4.1 wire NVOF flow into NR MVec, (4) rerun phase5 gate (script fixed) to exit 1 with ONLY known gaps or exit 0, then independent Reviewer per protocol. Phase 5 stays in_progress; no phase checkpoint.",
+  "updatedAt": "2026-09-06T21:05:00+08:00"
 }
