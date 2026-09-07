@@ -13,7 +13,10 @@ struct PlayerOptions { bool nr=true,sr=false,fg=false,realtime=true; uint32_t fg
     EnhancementSettings snapshot()const{auto s=settings;s.nr=nr;s.sr=sr;s.multiplier=fg?fgMultiplier:1;s.nrPolicy=realtime?pipeline::NrSizePolicy::Realtime:pipeline::NrSizePolicy::Native;return s;}
     static PlayerOptions from(EnhancementSettings s){PlayerOptions o;o.nr=s.nr;o.sr=s.sr;o.fg=s.multiplier>1;o.fgMultiplier=std::max(2u,s.multiplier);o.realtime=s.nrPolicy==pipeline::NrSizePolicy::Realtime;o.settings=s;return o;}
 };
+enum class TransportState { Empty, Opening, Playing, Paused, Ended, Stopping, Failed };
 struct PlayerSnapshot {
+    TransportState transport=TransportState::Empty;
+    uint64_t sessionId=0,rejectedRevision=0;float volume=1;bool muted=false,audioAvailable=false;
     std::wstring status=L"请打开视频或图片";
     EnhancementSettings desired,applied;bool applying=false;
     double position=0,duration=0,fps=0,lateMs=0,lateP95Ms=0;
@@ -35,7 +38,8 @@ public:
     void open(HWND video,const std::wstring& path,PlayerOptions options);
     void stop();
     void comparison(int mode,bool base,float split=.5f){comparisonMode_=mode;comparisonBase_=base;comparisonSplit_=std::clamp(split,0.0f,1.0f);}
-    void pause(bool p){paused_.store(p);}
+    void pause(bool p);
+    void setVolume(float gain,bool mute);
     void seek(double seconds){seekSeconds_.store(seconds);}
     void saveFrame(const std::wstring& path);
     void startExport(const std::wstring& input,const std::wstring& output,PlayerOptions,bool hevc);
@@ -51,7 +55,8 @@ private:
     std::thread worker_;
     std::condition_variable wake_;std::function<void()> pending_;bool shutdown_=false,busy_=false;
     EnhancementSettings desired_;uint64_t nextRevision_=1;
-    std::atomic<bool> stop_{false},paused_{false};
+    std::atomic<bool> stop_{false},paused_{false},muted_{false};
+    std::atomic<float> volume_{1};uint64_t sessionId_=0;
     std::atomic<double> seekSeconds_{-1};
     std::atomic<int> comparisonMode_{0};std::atomic<bool> comparisonBase_{false};std::atomic<float> comparisonSplit_{.5f};
 };

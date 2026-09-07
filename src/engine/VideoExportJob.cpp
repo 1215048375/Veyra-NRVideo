@@ -17,7 +17,7 @@ extern "C" {
 }
 namespace veyra::engine {
 namespace { std::string utf8(const std::wstring& s){const int n=WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),nullptr,0,nullptr,nullptr);std::string r(n,0);WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),r.data(),n,nullptr,nullptr);return r;} }
-bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOptions options,bool hevc,std::atomic<bool>& cancel,const std::function<void(double,const std::wstring&)>& progress,unsigned maxFrames){
+bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOptions options,bool hevc,std::atomic<bool>& cancel,const std::function<void(double,const std::wstring&)>& progress,unsigned maxFrames,const std::function<bool()>& frameBoundary,const std::function<void(const ExportCounts&)>& counts){
     if(std::filesystem::exists(output)||std::filesystem::exists(output+L".partial")){progress(0,L"目标或partial文件已存在，请使用其他名称");return false;}
     gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;source::MediaFileSource source;pipeline::EnhanceGraph graph(ctx,ring);sink::NvencD3D12Encoder enc;
     AVFormatContext *mux=nullptr,*audioInput=nullptr;AVStream* videoStream=nullptr;AVStream* audioStream=nullptr;AVPacket* audioPacket=av_packet_alloc();
@@ -70,7 +70,7 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
         auto headers=enc.headers();cp->extradata=static_cast<uint8_t*>(av_mallocz(headers.size()+AV_INPUT_BUFFER_PADDING_SIZE));if(!cp->extradata)break;memcpy(cp->extradata,headers.data(),headers.size());cp->extradata_size=int(headers.size());
         if(avio_open(&mux->pb,utf8(partial).c_str(),AVIO_FLAG_WRITE)<0||avformat_write_header(mux,nullptr)<0)break;headerWritten=true;
         uint64_t sourceCount=0,generatedCount=0,holdCount=0;int64_t outputIndex=0;bool error=false;std::shared_ptr<pipeline::FrameLease> lastReal;
-        while(!cancel){pipeline::FramePacket packet;const AVFrame* frame=nullptr;const auto rs=source.read(packet,&frame);if(rs==source::SourceReadStatus::Eos)break;if(rs!=source::SourceReadStatus::Frame||packet.pts.isUnknown()){error=true;break;}
+        while(!cancel){if(frameBoundary&&!frameBoundary())break;pipeline::FramePacket packet;const AVFrame* frame=nullptr;const auto rs=source.read(packet,&frame);if(rs==source::SourceReadStatus::Eos)break;if(rs!=source::SourceReadStatus::Frame||packet.pts.isUnknown()){error=true;break;}
             if(sourceCount==0)videoOriginSeconds=packet.pts.toDouble();
             const double expectedPts=timeline.expected(sourceCount);
             if(!timeline.accepts(sourceCount,packet.pts.toDouble())){
@@ -96,7 +96,7 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
             auto& real=out.batch.frames[out.batch.count-1];
             if(!enc.encode(real.lease->slot,false,outputIndex++)){error=true;break;}
             real.lease->consumerFence=ring.lastSignaledValue();lastReal=real.lease;
-            ++sourceCount;progress(info.duration.toDouble()>0?packet.pts.toDouble()/info.duration.toDouble():0,std::format(L"正在导出：{}张源帧 / {}张编码帧（D3D12 NVENC）",sourceCount,outputIndex));
+            ++sourceCount;if(counts)counts({sourceCount,generatedCount,holdCount,uint64_t(written)});progress(info.duration.toDouble()>0?std::clamp((packet.pts.toDouble()-videoOriginSeconds)/info.duration.toDouble(),0.0,.99):0,std::format(L"正在导出：{}张源帧 / {}张编码帧（D3D12 NVENC）",sourceCount,outputIndex));
             if(maxFrames&&sourceCount>=maxFrames)break;
         }
         if(error||cancel)break;
@@ -104,11 +104,11 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
         if(error)break;
         veyra::log::info("export-counts",std::format("source={} generated={} hold={} output={} multiplier={} (CFR holds are not DLSSG)",sourceCount,generatedCount,holdCount,outputIndex,options.fg?options.fgMultiplier:1));
         if(!enc.finish()||!writeAudioUntil(audioEndSeconds)||av_write_trailer(mux)<0)break;
-        ok=written>0;
+        ok=written>0;if(counts)counts({sourceCount,generatedCount,holdCount,uint64_t(written)});
     }while(false); }catch(const std::exception&){progress(0,L"导出异常，已保留partial，请查看诊断");ok=false;}
     enc.close();if(mux){if(mux->pb)avio_closep(&mux->pb);avformat_free_context(mux);}if(audioInput)avformat_close_input(&audioInput);av_packet_free(&audioPacket);
     ring.drainQueue();graph.shutdown();source.close();ring.shutdown();ctx.shutdown();
-    if(ok){source::MediaFileSource check;source::SourceOpenDesc od;od.path=partial;od.preferHardwareDecode=false;pipeline::FramePacket pkt;const AVFrame* frame=nullptr;ok=check.open(od)&&check.read(pkt,&frame)==source::SourceReadStatus::Frame;check.close();if(ok)ok=MoveFileExW(partial.c_str(),output.c_str(),MOVEFILE_WRITE_THROUGH)!=FALSE;}
+    if(ok){progress(.999,L"正在封装和验证输出");source::MediaFileSource check;source::SourceOpenDesc od;od.path=partial;od.preferHardwareDecode=false;pipeline::FramePacket pkt;const AVFrame* frame=nullptr;ok=check.open(od)&&check.read(pkt,&frame)==source::SourceReadStatus::Frame;check.close();if(ok)ok=MoveFileExW(partial.c_str(),output.c_str(),MOVEFILE_WRITE_THROUGH)!=FALSE;}
     progress(ok?1:0,ok?L"视频导出完成，解码回读成功":cancel?L"导出已取消，partial文件已保留":L"视频导出失败，partial文件已保留，请查看诊断");return ok;
 }
 }

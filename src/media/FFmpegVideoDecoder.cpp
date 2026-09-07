@@ -10,6 +10,7 @@ extern "C" {
 }
 
 #include <format>
+#include <algorithm>
 
 #include "veyra/Log.h"
 
@@ -36,7 +37,7 @@ FFmpegVideoDecoder::~FFmpegVideoDecoder()
 }
 
 bool FFmpegVideoDecoder::openSoftware(const AVCodecParameters* codecParameters,
-    int streamTimeBaseNum, int streamTimeBaseDen)
+    int streamTimeBaseNum, int streamTimeBaseDen, unsigned softwareThreads)
 {
     if (context_ != nullptr) {
         close();
@@ -62,10 +63,12 @@ bool FFmpegVideoDecoder::openSoftware(const AVCodecParameters* codecParameters,
         avcodec_free_context(&context_);
         return false;
     }
-    // Single-threaded decode: frame-threading adds a ~thread-count output
-    // delay, which deadlocks bounded in-flight pumps like the Phase 3
-    // pipeline (Playbook: decoded-ready queue cap 1..4).
-    context_->thread_count = 1;
+    // Legacy bounded packet pumps keep the default single thread. The file
+    // source can supply compressed lookahead until receiveFrame succeeds and
+    // explicitly opts into at most four codec workers; no application frame
+    // queue and no capture lookahead are introduced.
+    context_->thread_count = int(std::clamp(softwareThreads,1u,4u));
+    context_->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
     if (avcodec_open2(context_, codec, nullptr) < 0) {
         log::error("media", "decoder: avcodec_open2 failed");
         avcodec_free_context(&context_);
@@ -79,8 +82,8 @@ bool FFmpegVideoDecoder::openSoftware(const AVCodecParameters* codecParameters,
     }
 
     stats_ = DecoderStats{};
-    log::info("media", std::format("decoder: software decoder opened codec={} {}x{} pixFmt={}",
-        codec->name, context_->width, context_->height, static_cast<int>(context_->pix_fmt)));
+    log::info("media", std::format("decoder: software decoder opened codec={} {}x{} pixFmt={} threads={} activeThreadType={}",
+        codec->name, context_->width, context_->height, static_cast<int>(context_->pix_fmt),context_->thread_count,context_->active_thread_type));
     return true;
 }
 

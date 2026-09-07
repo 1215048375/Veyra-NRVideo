@@ -430,7 +430,7 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_link_libraries(veyra_repair_fg_tests PRIVATE veyra_pipeline veyra_sinks veyra_nvof)
 
   # Headless quality-core runner (Playbook R3.3): the phase5 gate's quality
-  add_library(veyra_engine STATIC src/engine/EngineController.cpp src/engine/PresetStore.cpp src/engine/VideoPresenter.cpp src/engine/VideoExportJob.cpp src/engine/Subtitles.cpp)
+  add_library(veyra_engine STATIC src/engine/EngineController.cpp src/engine/PresetStore.cpp src/engine/VideoPresenter.cpp src/engine/VideoExportJob.cpp src/engine/ExportJobManager.cpp src/engine/Subtitles.cpp)
   target_compile_features(veyra_engine PUBLIC cxx_std_20)
   target_compile_options(veyra_engine PRIVATE /utf-8)
   target_compile_definitions(veyra_engine PUBLIC VEYRA_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}" VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
@@ -440,7 +440,12 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_compile_options(veyra_repair_preset_tests PRIVATE /utf-8)
   target_compile_definitions(veyra_repair_preset_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
   target_include_directories(veyra_repair_preset_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-  add_executable(veyra WIN32 apps/veyra/main.cpp apps/veyra/SettingsWindow.cpp apps/veyra/TelemetryWindow.cpp)
+  add_executable(veyra_ui_contract_tests tests/unit/UiContractTests.cpp src/engine/PresetStore.cpp)
+  target_compile_features(veyra_ui_contract_tests PRIVATE cxx_std_20)
+  target_compile_options(veyra_ui_contract_tests PRIVATE /utf-8)
+  target_compile_definitions(veyra_ui_contract_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_include_directories(veyra_ui_contract_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_executable(veyra WIN32 apps/veyra/main.cpp apps/veyra/ui/AppShell.cpp apps/veyra/ui/CapturePanel.cpp apps/veyra/ui/SubtitleOverlay.cpp apps/veyra/SettingsWindow.cpp apps/veyra/TelemetryWindow.cpp)
   target_compile_features(veyra PRIVATE cxx_std_20)
   target_compile_options(veyra PRIVATE /utf-8)
   target_link_libraries(veyra PRIVATE veyra_engine comctl32 comdlg32 shell32)
@@ -504,3 +509,6 @@ if(VEYRA_CLIP_TOOLS_ROOT AND EXISTS "${VEYRA_CLIP_TOOLS_ROOT}/include/libavcodec
     "${VEYRA_CLIP_TOOLS_ROOT}/lib/avformat.lib"
     "${VEYRA_CLIP_TOOLS_ROOT}/lib/avutil.lib")
 endif()
+
+# Layered child subtitle windows require a modern-Windows compatibility manifest.
+target_link_options(veyra PRIVATE "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/apps/veyra/veyra.manifest")

@@ -117,7 +117,7 @@ bool MediaFileSource::open(const SourceOpenDesc& desc)
     }
     if (!decoderOpen) {
         decoderOpen = decoder_.openSoftware(params, demuxer_.videoTimeBaseNum(),
-            demuxer_.videoTimeBaseDen());
+            demuxer_.videoTimeBaseDen(), params->width>1920||params->height>1080?4u:1u);
     }
     if (!decoderOpen) {
         veyra::log::error("source-file", "decoder open failed");

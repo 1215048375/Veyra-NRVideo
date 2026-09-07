@@ -695,11 +695,15 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         const int* coefficients=sws_getCoefficients(colorSpace);
         const int full=frame->color_range==AVCOL_RANGE_JPEG?1:0;
         if(sws_setColorspaceDetails(nv12Ctx_,coefficients,full,coefficients,full,0,1<<16,1<<16)<0)return false;
-        uint8_t* planes[2] = { nv12Buf_.data(), nv12Buf_.data() + lumaSize_ };
+        // Planar 8-bit YUV already exposes CPU luma for cadence analysis.
+        // Convert directly into the fenced upload slot instead of writing and
+        // copying another full NV12 frame. Never sample write-combined memory.
+        const bool directUpload=frame->format==AV_PIX_FMT_YUV420P||frame->format==AV_PIX_FMT_YUVJ420P||frame->format==AV_PIX_FMT_NV12;
+        uint8_t* planes[2] = { directUpload?mappedLuma_[parity]:nv12Buf_.data(), directUpload?mappedChroma_[parity]:nv12Buf_.data() + lumaSize_ };
         const int strides[2] = { static_cast<int>(lumaPitch_), static_cast<int>(chromaPitch_) };
         sws_scale(nv12Ctx_, frame->data, frame->linesize, 0, frame->height, planes, strides);
         std::vector<uint8_t> sample;sample.reserve(64*36);std::vector<double> hist(256,0);double sad=0;
-        for(unsigned y=0;y<36;++y)for(unsigned x=0;x<64;++x){const uint8_t v=planes[0][size_t(y*srcH_/36)*lumaPitch_+x*srcW_/64];hist[v]+=1.0/(64*36);sample.push_back(v);}
+        for(unsigned y=0;y<36;++y)for(unsigned x=0;x<64;++x){const uint8_t v=directUpload?frame->data[0][ptrdiff_t(y*srcH_/36)*frame->linesize[0]+x*srcW_/64]:planes[0][size_t(y*srcH_/36)*lumaPitch_+x*srcW_/64];hist[v]+=1.0/(64*36);sample.push_back(v);}
         if(previousLuma_.size()==sample.size())for(size_t i=0;i<sample.size();++i)sad+=std::abs(int(sample[i])-int(previousLuma_[i]))/(255.0*sample.size());
         cadence_.observe(ptsMs,sad,previousLuma_.size()==sample.size());
         out.measuredContentRate=cadence_.confirmedRate(desc_.contentRate);
@@ -708,10 +712,10 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         const auto analysis=scene_.analyze(realFrameIndex_,hist,sad,static_cast<uint64_t>(std::max(0.0,ptsMs)*1000));
         if(analysis.isSceneCut||analysis.isCadenceBreak){reset=true;prevValid_=false;if(analysis.isSceneCut)++metrics_.sceneCutCount;}
         previousLuma_=std::move(sample);
-        for (uint32_t y = 0; y < srcH_; ++y)
+        if(!directUpload){for (uint32_t y = 0; y < srcH_; ++y)
             std::memcpy(mappedLuma_[parity] + y * lumaPitch_, planes[0] + y * lumaPitch_, srcW_);
         for (uint32_t y = 0; y < srcH_ / 2; ++y)
-            std::memcpy(mappedChroma_[parity] + y * chromaPitch_, planes[1] + y * chromaPitch_, srcW_);
+            std::memcpy(mappedChroma_[parity] + y * chromaPitch_, planes[1] + y * chromaPitch_, srcW_);}
         auto copyPlane = [&](ID3D12Resource* texture, ID3D12Resource* upload,
                              DXGI_FORMAT format, UINT width, UINT height, UINT pitch) {
             tracker_.transition(list, texture, D3D12_RESOURCE_STATE_COPY_DEST);

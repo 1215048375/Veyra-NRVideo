@@ -36,16 +36,18 @@ EngineController::~EngineController(){ {std::lock_guard lock(mutex_);shutdown_=t
 void EngineController::dispatch(){
     for(;;){std::function<void()> task;{std::unique_lock lock(mutex_);wake_.wait(lock,[&]{return shutdown_||bool(pending_);});if(shutdown_)break;task=std::move(pending_);pending_={};busy_=true;stop_=false;}
         try{task();}catch(const std::exception&){status(L"任务异常，已停止；请查看诊断",true);}
-        {std::lock_guard lock(mutex_);busy_=false;snapshot_.running=false;}
+        {std::lock_guard lock(mutex_);busy_=false;snapshot_.running=false;if(snapshot_.transport==TransportState::Stopping)snapshot_.transport=TransportState::Empty;}
     }
 }
 void EngineController::post(std::function<void()> task){ {std::lock_guard lock(mutex_);stop_=true;pending_=std::move(task);}wake_.notify_one(); }
 bool EngineController::idle()const{std::lock_guard lock(mutex_);return !busy_&&!pending_;}
 void EngineController::open(HWND video,const std::wstring& path,PlayerOptions opts){
-    {std::lock_guard lock(mutex_);snapshot_={};savePath_.clear();desired_=opts.snapshot();desired_.revision=++nextRevision_;snapshot_.desired=desired_;opts=PlayerOptions::from(desired_);}
+    {std::lock_guard lock(mutex_);snapshot_={};snapshot_.sessionId=++sessionId_;snapshot_.transport=TransportState::Opening;savePath_.clear();desired_=opts.snapshot();desired_.revision=++nextRevision_;snapshot_.desired=desired_;opts=PlayerOptions::from(desired_);}
     post([this,video,path,opts]{paused_=false;seekSeconds_=-1;run(video,path,opts);});
 }
-void EngineController::stop(){std::lock_guard lock(mutex_);stop_=true;pending_={};}
+void EngineController::stop(){std::lock_guard lock(mutex_);stop_=true;pending_={};snapshot_.transport=busy_?TransportState::Stopping:TransportState::Empty;}
+void EngineController::pause(bool p){paused_=p;std::lock_guard lock(mutex_);if(snapshot_.running)snapshot_.transport=p?TransportState::Paused:TransportState::Playing;}
+void EngineController::setVolume(float gain,bool mute){if(!std::isfinite(gain))return;volume_=std::clamp(gain,0.0f,1.0f);muted_=mute;}
 bool EngineController::requestSettings(EnhancementSettings s){
     if(!s.validate().empty()){veyra::log::warn("settings","invalid whole settings transaction rejected");status(L"整套设置无效，未应用任何字段",false);return false;}
     std::lock_guard lock(mutex_);s.revision=++nextRevision_;desired_=s;snapshot_.desired=s;snapshot_.applying=true;return true;
@@ -54,8 +56,8 @@ void EngineController::saveFrame(const std::wstring& path){std::lock_guard lock(
 void EngineController::startExport(const std::wstring& input,const std::wstring& output,PlayerOptions opts,bool hevc){
     const auto frozen=opts.snapshot();post([this,input,output,frozen,hevc]{CoInitializeEx(nullptr,COINIT_MULTITHREADED);bool ok=exportVideo(input,output,PlayerOptions::from(frozen),hevc,stop_,[this](double p,const std::wstring& s){std::lock_guard lock(mutex_);snapshot_.status=s;snapshot_.position=p;snapshot_.duration=1;snapshot_.running=true;});{std::lock_guard lock(mutex_);snapshot_.running=false;snapshot_.failed=!ok&&!stop_;}CoUninitialize();});
 }
-PlayerSnapshot EngineController::snapshot()const{std::lock_guard lock(mutex_);return snapshot_;}
-void EngineController::status(const std::wstring& s,bool failed){std::lock_guard lock(mutex_);snapshot_.status=s;snapshot_.failed=failed;}
+PlayerSnapshot EngineController::snapshot()const{std::lock_guard lock(mutex_);auto copy=snapshot_;copy.volume=volume_;copy.muted=muted_;return copy;}
+void EngineController::status(const std::wstring& s,bool failed){std::lock_guard lock(mutex_);snapshot_.status=s;snapshot_.failed=failed;if(failed)snapshot_.transport=TransportState::Failed;}
 void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
     CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     status(L"正在初始化GPU与本地运行时…");
@@ -93,15 +95,17 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             gd.runtimeAbsPath=std::filesystem::path(VEYRA_PROJECT_ROOT).wstring()+L"\\runtime_local\\nvidia";
             if(!graph.initialize(gd)||!presenter.open(ctx,window,graph)||!graph.createViews()){status(L"增强初始化失败，请核对本地运行时",true);break;}
             if(isCapture&&!captureSource.start()){status(L"无法启动采集，请查看诊断",true);break;}
-            {std::lock_guard lock(mutex_);snapshot_.duration=duration;snapshot_.running=true;snapshot_.image=isImage;snapshot_.capture=isCapture;snapshot_.applied=options.snapshot();snapshot_.desired=desired_;}
+            {std::lock_guard lock(mutex_);snapshot_.duration=duration;snapshot_.running=true;snapshot_.transport=TransportState::Playing;snapshot_.image=isImage;snapshot_.capture=isCapture;snapshot_.applied=options.snapshot();snapshot_.desired=desired_;}
             status(isImage?L"图片已增强，可保存PNG/JPEG":std::format(L"{} | 输入 {}×{} / 底图 {}×{} / NR {}×{} / 光流 {}×{} / FG与输出 {}×{} | {}",isCapture?L"实时采集":L"播放",width,height,gd.workWidth,gd.workHeight,gd.nrWidth,gd.nrHeight,width,height,gd.workWidth,gd.workHeight,gd.nrWidth<gd.workWidth?L"实时NR变化回填":L"原生NR（性能成本较高）"));
             pipeline::EnhanceGraph::FrameOutputs out;bool reset=true,hasOutput=false;std::deque<double> latenessSamples;
-            TimingWindow captureAges,scheduleWaits,processTimes,presentTimes;auto nextTimingLog=Clock::now()+std::chrono::seconds(1);
+            TimingWindow captureAges,scheduleWaits,processTimes,presentTimes,decodeTimes,gpuReadyTimes;auto nextTimingLog=Clock::now()+std::chrono::seconds(1);
             auto anchor=Clock::now(),statsStart=anchor;double anchorMs=0;uint64_t frames=0,sourceFrames=0;bool wasPaused=false;double discardBefore=0;
             PresentationScheduler liveTimeline;uint64_t submitted=0,expired=0;std::deque<int64_t> submissionTimes;
             DeadlineWait deadlineWait;
             auto host100ns=[](){return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count()/100;};
             while(!stop_){
+                const float gain=muted_?0.0f:volume_.load();audio.setGain(gain);
+                if(isCapture){const bool available=captureSource.setAudioGain(gain);std::lock_guard lock(mutex_);snapshot_.audioAvailable=available;}
                 EnhancementSettings requested;{std::lock_guard lock(mutex_);requested=desired_;}
                 const auto previous=options.snapshot();const auto previousDesc=gd;bool transaction=false;
                 if(requested.revision!=previous.revision){
@@ -116,7 +120,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                         if(!accepted){presenter.close();graph.shutdown();if(!graph.initialize(gd)||!presenter.open(ctx,window,graph)||!graph.createViews()){status(L"设置失败且旧资源恢复失败，已停止",true);break;}}
                     }else if(accepted)accepted=graph.applySettings(requested);
                     if(accepted){options=next;gd=nextDesc;transaction=true;reset=true;}
-                    else {std::lock_guard lock(mutex_);if(desired_.revision==requested.revision)desired_=previous;snapshot_.desired=desired_;snapshot_.applying=false;snapshot_.status=L"设置应用失败，已恢复上一套参数";}
+                    else {std::lock_guard lock(mutex_);if(desired_.revision==requested.revision)desired_=previous;snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.applying=desired_.revision!=previous.revision;snapshot_.status=L"设置应用失败，已恢复上一套参数";}
                 }
                 std::wstring save;{std::lock_guard lock(mutex_);save.swap(savePath_);}
                 if(!save.empty()&&hasOutput){sink::RgbaImage result;const auto e=std::filesystem::path(save).extension().wstring();
@@ -135,11 +139,11 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 const auto decodeStart=Clock::now();
                 pipeline::FramePacket pkt;const AVFrame* frame=imageFrame;
                 if(transaction&&cachedFrame){frame=cachedFrame;pkt=cachedPacket;}
-                else if(!isImage){auto rs=activeSource->read(pkt,&frame);if(rs==source::SourceReadStatus::Waiting)continue;if(rs==source::SourceReadStatus::Eos){status(L"视频已播放完毕");paused_=true;continue;}if(rs!=source::SourceReadStatus::Frame||pkt.pts.isUnknown()){status(L"视频解码或时间戳错误",true);break;}}
+                else if(!isImage){auto rs=activeSource->read(pkt,&frame);if(rs==source::SourceReadStatus::Waiting)continue;if(rs==source::SourceReadStatus::Eos){status(L"视频已播放完毕");paused_=true;{std::lock_guard lock(mutex_);snapshot_.transport=TransportState::Ended;}continue;}if(rs!=source::SourceReadStatus::Frame||pkt.pts.isUnknown()){status(isCapture?L"采集信号中断，请检查设备连接或格式":L"视频解码或时间戳错误",true);break;}}
                 const bool rereadCached=transaction&&frame==cachedFrame;
                 if(isImage)pkt.sequence=1;
                 if(!rereadCached)++sourceFrames;
-                const double decodeMs=elapsedMs(decodeStart);
+                const double decodeMs=elapsedMs(decodeStart);decodeTimes.add(decodeMs);
                 const double pts=isImage?0:pkt.pts.toDouble()*1000;
                 if(isCapture&&frames==0){anchor=Clock::now();anchorMs=pts;}
                 if(pts+0.1<discardBefore)continue;
@@ -152,7 +156,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                         ring.drainQueue();out={};presenter.close();graph.shutdown();options=PlayerOptions::from(previous);
                         gd=previousDesc;
                         if(graph.initialize(gd)&&presenter.open(ctx,window,graph)&&graph.createViews()&&graph.process(frame,pts,true,out,pkt.sequence)){
-                            std::lock_guard lock(mutex_);if(desired_.revision==requested.revision)desired_=previous;snapshot_.desired=desired_;snapshot_.applying=false;snapshot_.status=L"参数执行失败，已整套回滚";transaction=false;
+                            std::lock_guard lock(mutex_);if(desired_.revision==requested.revision)desired_=previous;snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.applying=desired_.revision!=previous.revision;snapshot_.status=L"参数执行失败，已整套回滚";transaction=false;
                         }else{status(L"参数回滚失败，已停止",true);break;}
                     }else{status(L"增强执行失败；请查看日志",true);break;}
                 }
@@ -164,17 +168,17 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     const auto duration100ns=pkt.duration.isUnknown()?200000:std::clamp<int64_t>(pkt.duration.to100ns(),83333,1000000);
                     liveTimeline.reset(out.batch.identity.epoch,out.batch.b100ns,std::chrono::duration_cast<std::chrono::nanoseconds>(processStart.time_since_epoch()).count()/100,options.fg?duration100ns:0);
                 }
-                if(!audioStarted&&!isImage&&!isCapture&&frames==0){if(audioPipe.open(path)&&audio.start()){audioPipe.startThread(&audio);audioStarted=true;}anchor=Clock::now();anchorMs=pts;}
+                if(!audioStarted&&!isImage&&!isCapture&&frames==0){if(audioPipe.open(path)&&audio.start()){audioPipe.startThread(&audio);audioStarted=true;{std::lock_guard lock(mutex_);snapshot_.audioAvailable=true;}}anchor=Clock::now();anchorMs=pts;}
                 auto nowMs=[&](){const double a=audioStarted?audio.mediaTimeMs():-1;return a>=0?a:anchorMs+std::chrono::duration<double,std::milli>(Clock::now()-anchor).count();};
                 double frameWaitMs=0,framePresentMs=0;
                 const auto readyStart=Clock::now();
                 while(!stop_&&!paused_&&seekSeconds_<0&&!graph.resolveGeneration(out)){
                     if(elapsedMs(readyStart)>2000){status(L"补帧 GPU 就绪超时",true);stop_=true;break;}
-                    deadlineWait.slice();
+                    deadlineWait.slice(.2);
                 }
                 if(stop_)break;
                 if(paused_||seekSeconds_>=0){reset=true;veyra::log::info("submit",std::format("batch={} cancelled before submit (pause/seek)",out.batch.batchId));continue;}
-                const double gpuWaitMs=elapsedMs(readyStart);
+                const double gpuWaitMs=elapsedMs(readyStart);gpuReadyTimes.add(gpuWaitMs);
                 bool interrupted=false,presentFailed=false;
                 for(uint32_t i=0;i<out.batch.count;++i){
                     auto& item=out.batch.frames[i];const bool generated=item.kind==pipeline::FrameKind::Generated;
@@ -205,6 +209,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     snapshot_.captureReceived=captureStats.received;snapshot_.captureDropped=captureStats.dropped;snapshot_.captureFps=captureStats.callbackFps;snapshot_.captureReadAgeMs=captureStats.readAgeMs;snapshot_.captureAgeMs=captureStats.frameAgeMs;snapshot_.captureAgeP95Ms=captureAges.p95();
                     snapshot_.schedulingWaitP95Ms=scheduleWaits.p95();snapshot_.processCpuP95Ms=processTimes.p95();snapshot_.presentCpuP95Ms=presentTimes.p95();
                 }
+                if(!isCapture&&Clock::now()>=nextTimingLog){veyra::log::info("player-timing",std::format("decodeP95Ms={:.3f} graphSubmitP95Ms={:.3f} gpuReadyP95Ms={:.3f} presentP95Ms={:.3f} processed={}",decodeTimes.p95(),processTimes.p95(),gpuReadyTimes.p95(),presentTimes.p95(),sourceFrames));nextTimingLog=Clock::now()+std::chrono::seconds(1);}
                 if(isCapture&&Clock::now()>=nextTimingLog){
                     veyra::log::info("capture-timing",std::format("received={} processed={} dropped={} callbackFps={:.2f} readAgeMs={:.3f} callbackToPresentReturnP95Ms={:.3f} processCpuP95Ms={:.3f} schedulingWaitP95Ms={:.3f} presentCpuP95Ms={:.3f} nr={} nvof={} generated={} (not HDMI-to-display latency)",captureStats.received,frames,captureStats.dropped,captureStats.callbackFps,captureStats.readAgeMs,captureAges.p95(),processTimes.p95(),scheduleWaits.p95(),presentTimes.p95(),graph.metrics().nrEvaluateCount,graph.metrics().nvofExecuteCount,graph.metrics().fgGeneratedFrames));
                     nextTimingLog=Clock::now()+std::chrono::seconds(1);

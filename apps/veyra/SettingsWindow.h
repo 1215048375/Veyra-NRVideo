@@ -1,4 +1,13 @@
 #pragma once
-#include <windows.h>
 #include "veyra/engine/EngineController.h"
-namespace veyra::ui { void showSettings(HWND,engine::EngineController&);engine::EnhancementSettings defaultSettings(); }
+#include "veyra/engine/ExportJobManager.h"
+#include <vector>
+namespace veyra::ui {
+engine::EnhancementSettings defaultSettings();
+std::vector<std::wstring> presetNames();
+bool presetAt(size_t,engine::EnhancementSettings&);
+HWND createSettingsPanel(HWND,engine::EngineController&,std::function<void(engine::EnhancementSettings)>);
+void settingsEnabled(bool,const engine::EnhancementSettings&);
+void settingsVisibility(bool);void settingsPage(int);void settingsDpi();
+void exportPanelStatus(const engine::ExportJobSnapshot&,bool canExport,bool canSave);
+}

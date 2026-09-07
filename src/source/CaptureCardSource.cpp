@@ -38,6 +38,7 @@ struct CaptureCardSource::Impl:ISampleGrabberCB {
     uint64_t received=0,dropped=0,lastDrop=0,sequence=0;
     Clock::time_point pendingArrival{},readArrival{},firstArrival{},latestArrival{};
     ComPtr<IGraphBuilder> graph;ComPtr<ICaptureGraphBuilder2> builder;ComPtr<IBaseFilter> device,grabFilter,nullFilter,audioFilter;ComPtr<IAMStreamConfig> config;ComPtr<ISampleGrabber> grab;ComPtr<IMediaControl> control;ComPtr<IMediaEvent> events;
+    float lastAudioGain=-1;bool audioGainSupported=false;
     SourceInfo info;bool bottomUp=true;unsigned stride=0;Clock::time_point lastFrame;
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** pp)override{if(!pp)return E_POINTER;*pp=nullptr;if(id==IID_IUnknown||id==__uuidof(ISampleGrabberCB)){*pp=static_cast<ISampleGrabberCB*>(this);AddRef();return S_OK;}return E_NOINTERFACE;}
     ULONG STDMETHODCALLTYPE AddRef()override{return ++refs;}ULONG STDMETHODCALLTYPE Release()override{return --refs;}
@@ -71,8 +72,15 @@ std::vector<std::wstring> CaptureCardSource::devices(bool audio){std::vector<std
 std::vector<CaptureFormat> CaptureCardSource::formats(unsigned device){ComPtr<IGraphBuilder> g;ComPtr<ICaptureGraphBuilder2>b;ComPtr<IBaseFilter>f;ComPtr<IAMStreamConfig>c;std::vector<CaptureFormat> out;if(!configuration(device,g,b,f,c))return out;int count=0,size=0;if(FAILED(c->GetNumberOfCapabilities(&count,&size))||size<1||size>65536)return out;std::vector<BYTE> caps(size);for(int i=0;i<count;++i){AM_MEDIA_TYPE* t=nullptr;if(FAILED(c->GetStreamCaps(i,&t,caps.data())))continue;BITMAPINFOHEADER* bm=nullptr;REFERENCE_TIME duration=0;if(t->formattype==FORMAT_VideoInfo&&t->cbFormat>=sizeof(VIDEOINFOHEADER)){auto* vi=reinterpret_cast<VIDEOINFOHEADER*>(t->pbFormat);bm=&vi->bmiHeader;duration=vi->AvgTimePerFrame;}else if(t->formattype==FORMAT_VideoInfo2&&t->cbFormat>=sizeof(VIDEOINFOHEADER2)){auto* vi=reinterpret_cast<VIDEOINFOHEADER2*>(t->pbFormat);bm=&vi->bmiHeader;duration=vi->AvgTimePerFrame;}
         if(bm&&bm->biWidth>0&&bm->biWidth<=3840&&abs(bm->biHeight)<=2160&&duration>0){unsigned w=bm->biWidth,h=abs(bm->biHeight);double fps=1e7/duration;if((w==1920&&h==1080||w==3840&&h==2160)&&fps>=29&&fps<=61)out.push_back({i,w,h,fps,std::format(L"{} x {} @ {:.2f} fps [format {}]",w,h,fps,i)});}freeType(t);}return out;}
 const SourceInfo& CaptureCardSource::info()const{return p_->info;}
+bool CaptureCardSource::setAudioGain(float gain){
+    auto& p=*p_;if(!p.graph||!p.audioFilter)return false;
+    if(gain==p.lastAudioGain)return p.audioGainSupported;
+    ComPtr<IBasicAudio> audio;HRESULT hr=p.graph.As(&audio);
+    if(SUCCEEDED(hr)){long attenuation=gain<=0?-10000:long(std::clamp(2000.0*std::log10(double(gain)),-10000.0,0.0));hr=audio->put_Volume(attenuation);}
+    p.lastAudioGain=gain;p.audioGainSupported=SUCCEEDED(hr);log::info("capture-audio",std::format("application gain={} hr=0x{:X}",gain,unsigned(hr)));return p.audioGainSupported;
+}
 bool CaptureCardSource::open(const SourceOpenDesc& desc){return configure(desc)&&start();}
-bool CaptureCardSource::configure(const SourceOpenDesc& desc){close();auto& p=*p_;unsigned index=0;int format=0,audio=-1;if(swscanf_s(desc.path.c_str(),L"capture:%u:%d:%d",&index,&format,&audio)!=3)return false;
+bool CaptureCardSource::configure(const SourceOpenDesc& desc){close();p_->lastAudioGain=-1;auto& p=*p_;unsigned index=0;int format=0,audio=-1;if(swscanf_s(desc.path.c_str(),L"capture:%u:%d:%d",&index,&format,&audio)!=3)return false;
     if(!configuration(index,p.graph,p.builder,p.device,p.config))return false;
     int count=0,size=0;if(FAILED(p.config->GetNumberOfCapabilities(&count,&size))||format<0||format>=count||size<=0||size>65536)return false;std::vector<BYTE> caps(size);AM_MEDIA_TYPE* native=nullptr;if(FAILED(p.config->GetStreamCaps(format,&native,caps.data())))return false;HRESULT hr=p.config->SetFormat(native);freeType(native);if(FAILED(hr))return false;
     if(FAILED(CoCreateInstance(SampleGrabberClass,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&p.grabFilter)))||FAILED(p.grabFilter.As(&p.grab))||FAILED(p.graph->AddFilter(p.grabFilter.Get(),L"Latest frame mailbox")))return false;

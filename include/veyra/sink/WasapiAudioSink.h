@@ -127,6 +127,7 @@ private:
 class AudioRenderer {
 public:
     bool start();
+    void setGain(float value){gain_.store(value);}
 
     // Called by the audio thread after prefill: begins playback anchored at
     // the PTS of the sample that will be written first.
@@ -152,6 +153,7 @@ public:
     void shutdown();
 
 private:
+    std::atomic<float> gain_{1};float smoothedGain_=1,loggedGain_=-1;
     IMMDeviceEnumerator* enum_ = nullptr;
     IMMDevice* device_ = nullptr;
     IAudioClient* client_ = nullptr;

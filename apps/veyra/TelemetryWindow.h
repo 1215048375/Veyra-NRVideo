@@ -1,4 +1,4 @@
 #pragma once
 #include <windows.h>
 #include "veyra/engine/EngineController.h"
-namespace veyra::ui {void showTelemetry(HWND,engine::EngineController&);}
+namespace veyra::ui {HWND createTelemetryPanel(HWND,engine::EngineController&);void telemetryDpi();}

@@ -1,3 +1,4 @@
+#include "veyra/sink/AudioGain.h"
 // WasapiAudioSink implementation - moved verbatim from tools/player_probe
 // main.cpp (lines ~172-686, Phase 6 session evidence). Semantics preserved:
 // watermarked bounded production ring, event-driven pump, PTS-anchored master
@@ -285,6 +286,9 @@ bool AudioRenderer::pumpOnce(AudioPipeline& pipeline, double* firstWrittenPtsMs)
     BYTE* dest = nullptr;
     if (FAILED(render_->GetBuffer(avail, &dest))) return false;
     if (got > 0) {
+        const float target=std::clamp(gain_.load(),0.0f,1.0f);
+        applyStereoGain(chunk_.data(),got,target,smoothedGain_);
+        if(target!=loggedGain_&&std::abs(smoothedGain_-target)<.00001f){loggedGain_=target;log::info("audio-gain",std::format("target={} reached={} framesWritten={} clockPreserved=true applicationPCM=true",target,smoothedGain_,framesWritten_));}
         std::memcpy(dest, chunk_.data(), got * 8);
         if (got < avail) {
             std::memset(dest + got * 8, 0, (avail - got) * 8);

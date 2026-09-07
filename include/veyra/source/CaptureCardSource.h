@@ -18,6 +18,7 @@ public:
     // or start audio until the presenter and enhancement graph are ready.
     bool configure(const SourceOpenDesc&);
     bool start();
+    bool setAudioGain(float); // call on the graph owner thread; never system volume
     CaptureMetrics metrics()const;
     const SourceInfo& info()const override;
     SourceReadStatus read(pipeline::FramePacket&,const AVFrame**)override;

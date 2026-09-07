@@ -133,9 +133,9 @@
     ]
   },
   "uiRedesign": {
-    "status": "design_approved_implementation_not_started",
+    "status": "local_software_checks_passed_user_acceptance_pending",
     "plan": "docs/UI_DUAL_MODE_EXECUTION_PLAN_2026-09-08.md",
-    "currentDeliverable": "execution_document_only",
+    "currentDeliverable": "native_dual_mode_app",
     "defaultMode": "daily",
     "professionalScope": [
       "fine settings",
@@ -147,10 +147,37 @@
     "invariants": [
       "same preview source and video host on mode switch",
       "no implicit settings change",
-      "existing app unchanged in documentation turn"
+      "daily on normal restart",
+      "capture stream reserved for user",
+      "protected controls unchanged"
     ],
-    "nextAction": "On implementation request, start UI0 inventory then UI1 shared state and stable video host",
+    "nextAction": "User accepts UI and capture audio/latency using Veyra.cmd; no further unattended product expansion",
     "testLimitScope": "per_invocation",
-    "testLimitSeconds": 300
+    "testLimitSeconds": 300,
+    "report": "docs/UI_DUAL_MODE_DELIVERY_2026-09-08.md",
+    "baselineCommit": "ddc515d",
+    "exeSha256": "2DE33230CD3A6556BC8E1399DD93BB8959B8EF37B2BACEF23D1486590AA4D3C6",
+    "updatedAt": "2026-09-07T19:38:07.275382+00:00",
+    "softwareEvidence": [
+      "logs/ui-dual-mode/de337338b71e43618c4beaa488d54afb/result.json",
+      "logs/repair-v2/joint-91436d0b0f4145c2b6fe6794ff146c68/result.json",
+      "logs/ui-dual-mode/4k-f764b1a5ef894f46b050cbbf728103ec/result.json"
+    ],
+    "protectedDeliveryGate": {
+      "status": "failed_obsolete_23_frame_assertion",
+      "evidence": "logs/delivery/39c5c9d100234c92beaf7eb5d5cab1c0/result.json",
+      "modified": false,
+      "doesNotAdvanceOldPhase": true
+    },
+    "review": "review_dual_mode independent readonly; see docs/REVIEW_UI_DUAL_MODE_2026-09-08.md",
+    "remainingLimits": [
+      "user visual acceptance",
+      "actual capture video/audio/disconnect",
+      "physical scanout/photon latency",
+      "physical multi-monitor DPI",
+      "long stability",
+      "all SR4K+4X realtime combinations",
+      "proprietary distribution blocked"
+    ]
   }
 }
