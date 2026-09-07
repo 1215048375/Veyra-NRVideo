@@ -106,6 +106,7 @@ bool DlssSrBackend::create(NgxCoreHost& coreHost,
         ngxResultString(createResult_), handle_ != nullptr ? "non-null" : "null", sehCode));
 
     if (result != NVSDK_NGX_Result_Success) {
+        log::error("ngx", std::format("sr-backend failed result=0x{:X} seh=0x{:X}", static_cast<unsigned>(result), sehCode));
         // Query FeatureInitResult for diagnostic detail (user directive).
         int featureInitResult = 0;
         const NVSDK_NGX_Result gir = params->Get(NVSDK_NGX_Parameter_SuperSampling_FeatureInitResult, &featureInitResult);
@@ -122,7 +123,7 @@ void DlssSrBackend::release()
     if (handle_ != nullptr) {
         // SR is a core NGX feature; release through the core API.
         const NVSDK_NGX_Result result = NVSDK_NGX_D3D12_ReleaseFeature(handle_);
-        log::info("ngx", std::format("sr-backend: ReleaseFeature result={}", ngxResultString(static_cast<uint64_t>(result))));
+        (result == NVSDK_NGX_Result_Success ? log::info : log::error)("ngx", std::format("sr-backend: ReleaseFeature result={}", ngxResultString(static_cast<uint64_t>(result))));
         handle_ = nullptr;
     }
 }
@@ -164,6 +165,7 @@ bool DlssSrBackend::evaluate(ID3D12GraphicsCommandList* cmdList,
         evaluateCount_ + 1, ngxResultString(static_cast<uint64_t>(result)), sehCode));
 
     if (result != NVSDK_NGX_Result_Success) {
+        log::error("ngx", std::format("sr-backend failed result=0x{:X} seh=0x{:X}", static_cast<unsigned>(result), sehCode));
         status = Status::DeviceFailure;
         return false;
     }

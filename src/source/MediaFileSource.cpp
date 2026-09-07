@@ -137,6 +137,9 @@ bool MediaFileSource::open(const SourceOpenDesc& desc)
         info_.duration = pipeline::Rational::unknown();
     }
     info_.averageFps = demuxer_.averageFps();
+    info_.nominalRateNum = demuxer_.nominalRateNum();
+    info_.nominalRateDen = demuxer_.nominalRateDen();
+    info_.timestampQuantum = demuxer_.videoTimeBaseDen() > 0 ? double(demuxer_.videoTimeBaseNum()) / demuxer_.videoTimeBaseDen() : 0;
     info_.hardwareDecodeActive = decoder_.usingD3D12Frames();
     info_.color = parseColor(params);
 

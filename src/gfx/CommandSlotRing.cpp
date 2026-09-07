@@ -27,6 +27,7 @@ bool CommandSlotRing::initialize(ID3D12Device* device,
     fence_ = fence;
     fenceEvent_ = fenceEvent;
     slotCount_ = slotCount;
+    nextSlot_ = 0;
 
     if (device_ == nullptr || queue_ == nullptr || fence_ == nullptr || fenceEvent_ == nullptr || slotCount_ == 0) {
         status = Status::InvalidArgument;
@@ -145,7 +146,7 @@ ID3D12GraphicsCommandList* CommandSlotRing::acquire(uint32_t slot, Status& statu
         veyra::log::error("gfx", std::format("slot-ring: list reset slot={} failed hr={}", slot, veyra::hresultString(result)));
         return nullptr;
     }
-    target.list->EndQuery(timestampHeap_.Get(),D3D12_QUERY_TYPE_TIMESTAMP,slot*2);
+    target.recording=true;target.list->EndQuery(timestampHeap_.Get(),D3D12_QUERY_TYPE_TIMESTAMP,slot*2);
     return target.list.Get();
 }
 
@@ -160,7 +161,7 @@ bool CommandSlotRing::submitAndSignal(uint32_t slot)
     target.list->EndQuery(timestampHeap_.Get(),D3D12_QUERY_TYPE_TIMESTAMP,slot*2+1);
     target.list->ResolveQueryData(timestampHeap_.Get(),D3D12_QUERY_TYPE_TIMESTAMP,slot*2,2,timingReadback_.Get(),slot*2*sizeof(uint64_t));
     target.timed=true;
-    const HRESULT closeResult = target.list->Close();
+    const HRESULT closeResult = target.list->Close();target.recording=false;
     if (FAILED(closeResult)) {
         veyra::log::error("gfx", std::format("slot-ring: close slot={} failed hr={}", slot, veyra::hresultString(closeResult)));
         return false;
@@ -178,6 +179,9 @@ bool CommandSlotRing::submitAndSignal(uint32_t slot)
     return true;
 }
 
+bool CommandSlotRing::discardRecording(){
+    bool ok=true;for(uint32_t i=0;i<slots_.size();++i){auto& s=slots_[i];if(s.recording){const HRESULT hr=s.list->Close();s.recording=false;s.timed=false;s.label.clear();veyra::log::info("gfx",std::format("discard unsubmitted command list slot={} hr=0x{:X}",i,unsigned(hr)));if(FAILED(hr)){s.list.Reset();const HRESULT created=device_->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,s.allocator.Get(),nullptr,IID_PPV_ARGS(&s.list));if(FAILED(created)||FAILED(s.list->Close()))ok=false;}}}return ok;
+}
 bool CommandSlotRing::drainQueue()
 {
     // s10: waitIdle() only waits for ALREADY-signaled values. The last

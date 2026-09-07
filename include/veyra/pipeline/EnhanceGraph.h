@@ -24,6 +24,10 @@
 
 #include "veyra/pipeline/GpuPassUtils.h"
 #include "veyra/core/SceneCadenceAnalyzer.h"
+#include "veyra/pipeline/FrameBatch.h"
+#include "veyra/engine/EnhancementSettings.h"
+#include "veyra/engine/ContentCadence.h"
+#include "veyra/diagnostics/GpuTimer.h"
 
 struct AVFrame;
 struct SwsContext;
@@ -56,6 +60,13 @@ struct EnhanceGraphDesc {
     bool enableNvofStandalone = false; // run NVOF+densify per frame without FG (quality core)
     bool noFeatures = false;     // VEYRA_NO_FEATURES: NVOF/NGX objects skipped
     bool noNgx = false;          // VEYRA_NO_NGX: core/features skipped, NVOF only
+    uint32_t nrWidth=0,nrHeight=0; // zero preserves legacy native working extent
+    uint32_t fgMultiplier=2;
+    uint64_t settingsRevision=1;
+    engine::FlowQuality flowQuality=engine::FlowQuality::Balanced;
+    engine::ContentRate contentRate=engine::ContentRate::Transport;
+    engine::NrSettings model;
+    engine::ResidualSettings residual;
     std::wstring runtimeAbsPath; // absolute runtime_local/nvidia path
     // Optional stage instrumentation hook (GPU timing experiments).
     std::function<void(const char*)> stageMark;
@@ -76,6 +87,8 @@ public:
     bool createViews();
 
     struct FrameOutputs {
+        FrameBatch batch;
+        bool contentDuplicate=false;int measuredContentRate=0;
         double ptsMs = 0.0;
         uint32_t videoSlot = 0;            // videoFrame[videoSlot] holds this real frame
         uint64_t videoFenceValue = 0;      // ring fence covering the video work
@@ -92,7 +105,11 @@ public:
     // does not own the demuxer). `reset` marks the first frame of a new
     // temporal epoch (open/seek/...): NVOF/FG history is not consumed.
     // Returns false on hard failure (run verdict must FAIL).
-    bool process(const AVFrame* frame, double ptsMs, bool reset, FrameOutputs& out);
+    bool process(const AVFrame* frame, double ptsMs, bool reset, FrameOutputs& out, uint64_t sourceFrameId = 0);
+    // Nonblocking. The scheduler polls at a GPU-ready/deadline boundary; no
+    // full image readback and no waits inside the graph's individual passes.
+    bool resolveGeneration(FrameOutputs& out);
+    bool applySettings(const engine::EnhancementSettings&);
 
     // s10 ownership-order teardown: NVOF fence drain must happen BEFORE this
     // call (it needs the ring and out-fence alive). Releases features, NVOF
@@ -106,6 +123,7 @@ public:
         uint64_t nvofExecuteCount = 0;
         uint64_t nvofFrameFailures = 0;
         uint64_t fgGeneratedFrames = 0;
+        uint64_t fgSubmittedCandidates = 0, fgDisabledFrames = 0;
         uint64_t nrMotionFrames = 0, sceneCutCount = 0, resetCount = 0;
     };
     const Metrics& metrics() const { return metrics_; }
@@ -116,6 +134,13 @@ public:
     uint32_t sourceHeight() const { return srcH_; }
     uint32_t workWidth() const { return workW_; }
     uint32_t workHeight() const { return workH_; }
+    uint32_t nrWidth() const {return nrW_;}
+    uint32_t nrHeight() const {return nrH_;}
+    uint32_t actualFlowPerf() const;
+    diagnostics::FrameMetrics gpuMetrics(){gpuTimer_.collect(contextFence());return gpuTimer_.last();}
+    ID3D12Fence* contextFence() const;
+    ID3D12Resource* baseReference(unsigned slot=0)const{return baseReferences_[slot%2].Get();}
+    ID3D12Resource* sourceReference(unsigned slot=0)const{return sourceReferences_[slot%2].Get();}
     bool srEnabled() const { return srEnabled_; }
     bool nrEnabled() const { return nrEnabled_; }
     bool fgEnabled() const { return fgEnabled_; }
@@ -159,6 +184,7 @@ private:
     bool initialized_ = false;
 
     uint32_t srcW_ = 0, srcH_ = 0, workW_ = 3840, workH_ = 2160;
+    uint32_t nrW_=0,nrH_=0;
     uint32_t nvofW_ = 0, nvofH_ = 0, rawW_ = 0, rawH_ = 0, nvofGrid_ = 4, selectedGrid_ = 4;
     bool srEnabled_ = false, nrEnabled_ = false, fgEnabled_ = false, nvofStandalone_ = false;
     size_t lumaPitch_ = 0, chromaPitch_ = 0, lumaSize_ = 0, chromaSize_ = 0, dPitch_ = 0;
@@ -173,6 +199,7 @@ private:
     ComPtr<ID3D12Resource> chromaTex_;
     ComPtr<ID3D12Resource> srcRgba_;
     ComPtr<ID3D12Resource> workRgba_;
+    ComPtr<ID3D12Resource> nrInput_,residualRgba_,nrFlow_,baseFlow_;
     ComPtr<ID3D12Resource> proxyTex_;
     ComPtr<ID3D12Resource> neuralTex_;
     ComPtr<ID3D12Resource> finalRgba_;
@@ -180,7 +207,8 @@ private:
     ComPtr<ID3D12Resource> confTex_;
     ComPtr<ID3D12Resource> flowTex_;
     ComPtr<ID3D12Resource> depthTex_;
-    ComPtr<ID3D12Resource> genFrame_[2];
+    ComPtr<ID3D12Resource> genFrame_[6];
+    ComPtr<ID3D12Resource> fgDisable_[6],fgDisableReadback_[6],fgDisableInit_;
     ComPtr<ID3D12Resource> nrZeroMotion_;
     ComPtr<ID3D12Resource> nrZeroDepth_;
     ComPtr<ID3D12Resource> nvofRawTex_;
@@ -192,8 +220,12 @@ private:
     std::vector<uint8_t> nv12Buf_;
 
     ComputePass yuvPass_, encPass_, decPass_, blitPass_, uploadPass_, densifyPass_;
+    ComputePass downsamplePass_,residualPass_,flowAdaptPass_;
     DescriptorStager stager_;
+    Microsoft::WRL::ComPtr<ID3D12Resource> sourceReferences_[2],baseReferences_[2];
     StateTracker tracker_;
+    engine::ContentCadence cadence_;
+    diagnostics::GpuTimer gpuTimer_;
     SwsContext* nv12Ctx_ = nullptr;
 
     // NVOF + NGX (owned by the graph, render-thread only).
@@ -213,6 +245,8 @@ private:
 
     // Per-run state.
     uint64_t realFrameIndex_ = 0;
+    uint64_t epoch_ = 0;
+    std::weak_ptr<FrameLease> realLeases_[2],generatedLeases_[6];
     uint32_t nextListSlot_ = 0;
     uint64_t uploadFences_[2] = {};
     core::SceneCadenceAnalyzer scene_;

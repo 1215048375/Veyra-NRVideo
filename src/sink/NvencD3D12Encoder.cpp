@@ -53,9 +53,9 @@ bool NvencD3D12Encoder::open(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotRing& 
     if(!p.check(p.api.nvEncGetSequenceParams(p.encoder,&seq),"GetSequenceParams"))return false;p.sequence.resize(size);
     if(FAILED(ctx.device()->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&p.fence))))return false;p.event=CreateEventW(nullptr,FALSE,FALSE,nullptr);if(!p.event)return false;
     p.y=makeTexture(ctx.device(),p.w,p.h,DXGI_FORMAT_R8_UNORM,true);p.uv=makeTexture(ctx.device(),p.w/2,p.h/2,DXGI_FORMAT_R8G8_UNORM,true);if(!p.y||!p.uv)return false;
-    std::vector<uint8_t> cs;if(!p.convert.loadShader("RgbToNv12.dxil",cs)||!p.convert.create(ctx.device(),cs,6,1,2))return false;
-    for(unsigned i=0;i<4;++i)makeSrv(ctx.device(),i<2?graph.videoFrameResource(i):graph.generatedFrameResource(i-2),DXGI_FORMAT_R8G8B8A8_UNORM,cpuHandleOf(p.convert,i));
-    makeUav(ctx.device(),p.y.Get(),DXGI_FORMAT_R8_UNORM,cpuHandleOf(p.convert,4));makeUav(ctx.device(),p.uv.Get(),DXGI_FORMAT_R8G8_UNORM,cpuHandleOf(p.convert,5));
+    std::vector<uint8_t> cs;if(!p.convert.loadShader("RgbToNv12.dxil",cs)||!p.convert.create(ctx.device(),cs,10,1,2))return false;
+    for(unsigned i=0;i<8;++i)makeSrv(ctx.device(),i<2?graph.videoFrameResource(i):graph.generatedFrameResource(i-2),DXGI_FORMAT_R8G8B8A8_UNORM,cpuHandleOf(p.convert,i));
+    makeUav(ctx.device(),p.y.Get(),DXGI_FORMAT_R8_UNORM,cpuHandleOf(p.convert,8));makeUav(ctx.device(),p.uv.Get(),DXGI_FORMAT_R8G8_UNORM,cpuHandleOf(p.convert,9));
     for(auto& s:p.slots){
         s.input=makeTexture(ctx.device(),p.w,p.h,DXGI_FORMAT_NV12,false);if(!s.input)return false;
         D3D12_HEAP_PROPERTIES hp{};hp.Type=D3D12_HEAP_TYPE_READBACK;D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=(uint64_t(p.w)*p.h*4+4095)&~4095ull;bd.Height=1;bd.DepthOrArraySize=1;bd.MipLevels=1;bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
@@ -69,10 +69,10 @@ bool NvencD3D12Encoder::open(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotRing& 
     }return true;
 }
 bool NvencD3D12Encoder::encode(unsigned frameSlot,bool generated,int64_t pts){auto& p=*p_;auto& s=p.slots[p.submitted%4];if(!p.drain(s))return false;
-    Status st=Status::Ok;const auto slot=p.ring->slotCount()-1;auto* list=p.ring->acquire(slot,st);if(!list)return false;
+    Status st=Status::Ok;uint32_t slot=0;auto* list=p.ring->acquireNext(slot,st);if(!list)return false;
     auto* color=generated?p.graph->generatedFrameResource(frameSlot):p.graph->videoFrameResource(frameSlot);
     p.states.transition(list,color,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);p.states.transition(list,p.y.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);p.states.transition(list,p.uv.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    const float dims[8]={std::bit_cast<float>(p.w),std::bit_cast<float>(p.h),0,0,0,0,0,0};p.convert.bind(list,dims,gpuHandleOf(p.convert,frameSlot+(generated?2:0)).ptr,gpuHandleOf(p.convert,4).ptr);list->Dispatch((p.w+15)/16,(p.h+15)/16,1);
+    const float dims[8]={std::bit_cast<float>(p.w),std::bit_cast<float>(p.h),0,0,0,0,0,0};p.convert.bind(list,dims,gpuHandleOf(p.convert,frameSlot+(generated?2:0)).ptr,gpuHandleOf(p.convert,8).ptr);list->Dispatch((p.w+15)/16,(p.h+15)/16,1);
     p.states.uavBarrier(list,p.y.Get());p.states.uavBarrier(list,p.uv.Get());p.states.transition(list,p.y.Get(),D3D12_RESOURCE_STATE_COPY_SOURCE);p.states.transition(list,p.uv.Get(),D3D12_RESOURCE_STATE_COPY_SOURCE);p.states.transition(list,s.input.Get(),D3D12_RESOURCE_STATE_COPY_DEST);
     for(unsigned plane=0;plane<2;++plane){D3D12_TEXTURE_COPY_LOCATION a{},b{};a.pResource=plane?p.uv.Get():p.y.Get();a.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;b.pResource=s.input.Get();b.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;b.SubresourceIndex=plane;list->CopyTextureRegion(&b,0,0,0,&a,nullptr);}
     p.states.transition(list,s.input.Get(),D3D12_RESOURCE_STATE_COMMON);p.states.transition(list,color,D3D12_RESOURCE_STATE_COMMON);if(!p.ring->submitAndSignal(slot))return false;

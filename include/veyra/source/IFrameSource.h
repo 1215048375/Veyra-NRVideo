@@ -29,6 +29,8 @@ struct SourceInfo {
     uint32_t height = 0;
     pipeline::Rational duration;
     double averageFps = 0.0;         // informational only; the pipeline is PTS-driven
+    int nominalRateNum = 0, nominalRateDen = 0; // candidate, not proof of CFR
+    double timestampQuantum = 0.0;
     bool hardwareDecodeActive = false;
     pipeline::ColorDescription color;
 };

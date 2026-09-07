@@ -37,6 +37,7 @@ add_library(veyra_base STATIC
   src/base/FileIdentity.cpp
 )
 veyra_apply_warnings(veyra_base)
+target_compile_options(veyra_base PUBLIC /utf-8)
 target_compile_features(veyra_base PUBLIC cxx_std_20)
 target_compile_definitions(veyra_base PUBLIC
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -149,6 +150,9 @@ veyra_add_compute_shader(veyra_shader_nv12_upload Nv12Upload)
 veyra_add_graphics_shader_pair(veyra_shader_present_blit PresentBlit)
 # NvofDensify: SHORT2 S10.5 raw flow -> workingExtent float2 + confidence.
 veyra_add_compute_shader(veyra_shader_nvof_densify NvofDensify)
+veyra_add_compute_shader(veyra_shader_nr_downsample NrDownsample)
+veyra_add_compute_shader(veyra_shader_nr_residual NrResidualComposite)
+veyra_add_compute_shader(veyra_shader_flow_adapt FlowAdapt)
 veyra_add_compute_shader(veyra_shader_rgb_nv12 RgbToNv12)
 
 # ---------------------------------------------------------------------------
@@ -371,6 +375,7 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
 
   # veyra_sources: product input sources (Playbook R3/R7). MediaFileSource
   # composes veyra_media; no second decode implementation exists.
+  add_dependencies(veyra_pipeline veyra_shader_nr_downsample veyra_shader_nr_residual veyra_shader_flow_adapt)
   add_library(veyra_sources STATIC
     src/source/MediaFileSource.cpp
     src/source/CaptureCardSource.cpp
@@ -395,13 +400,47 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_include_directories(veyra_source_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(veyra_source_tests PRIVATE veyra_sources)
 
+  add_executable(veyra_capture_tests tests/integration/CaptureSourceTests.cpp)
+  target_compile_features(veyra_capture_tests PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_capture_tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_link_libraries(veyra_capture_tests PRIVATE veyra_sources)
+
+  add_executable(veyra_live_timing_tests tests/unit/LivePresentationTimingTests.cpp)
+  target_compile_features(veyra_live_timing_tests PRIVATE cxx_std_20)
+  target_include_directories(veyra_live_timing_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+  add_executable(veyra_repair_contract_tests tests/unit/RepairContractTests.cpp)
+  target_link_libraries(veyra_repair_contract_tests PRIVATE veyra_base)
+  target_compile_features(veyra_repair_contract_tests PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_repair_contract_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_include_directories(veyra_repair_contract_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+  add_executable(veyra_repair_parameter_tests tests/integration/RepairParameterTests.cpp)
+  target_compile_features(veyra_repair_parameter_tests PRIVATE cxx_std_20)
+  target_include_directories(veyra_repair_parameter_tests PRIVATE ${FFMPEG_INCLUDE_DIRS})
+  target_compile_definitions(veyra_repair_parameter_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN VEYRA_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(veyra_repair_parameter_tests PRIVATE veyra_pipeline veyra_sinks veyra_nvof)
+  add_executable(veyra_repair_fg_tests tests/integration/RepairFgTests.cpp)
+  add_executable(veyra_repair_shader_tests tests/integration/RepairShaderTests.cpp)
+  target_compile_features(veyra_repair_shader_tests PRIVATE cxx_std_20)
+  target_link_libraries(veyra_repair_shader_tests PRIVATE veyra_pipeline)
+  target_include_directories(veyra_repair_fg_tests PRIVATE ${FFMPEG_INCLUDE_DIRS})
+  target_compile_features(veyra_repair_fg_tests PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_repair_fg_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN VEYRA_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(veyra_repair_fg_tests PRIVATE veyra_pipeline veyra_sinks veyra_nvof)
+
   # Headless quality-core runner (Playbook R3.3): the phase5 gate's quality
-  add_library(veyra_engine STATIC src/engine/EngineController.cpp src/engine/VideoPresenter.cpp src/engine/VideoExportJob.cpp src/engine/Subtitles.cpp)
+  add_library(veyra_engine STATIC src/engine/EngineController.cpp src/engine/PresetStore.cpp src/engine/VideoPresenter.cpp src/engine/VideoExportJob.cpp src/engine/Subtitles.cpp)
   target_compile_features(veyra_engine PUBLIC cxx_std_20)
   target_compile_options(veyra_engine PRIVATE /utf-8)
   target_compile_definitions(veyra_engine PUBLIC VEYRA_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}" VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
   target_link_libraries(veyra_engine PUBLIC veyra_pipeline veyra_sources veyra_sinks veyra_ngx veyra_nvof)
-  add_executable(veyra WIN32 apps/veyra/main.cpp)
+  add_executable(veyra_repair_preset_tests tests/unit/RepairPresetTests.cpp src/engine/PresetStore.cpp)
+  target_compile_features(veyra_repair_preset_tests PRIVATE cxx_std_20)
+  target_compile_options(veyra_repair_preset_tests PRIVATE /utf-8)
+  target_compile_definitions(veyra_repair_preset_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_include_directories(veyra_repair_preset_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_executable(veyra WIN32 apps/veyra/main.cpp apps/veyra/SettingsWindow.cpp apps/veyra/TelemetryWindow.cpp)
   target_compile_features(veyra PRIVATE cxx_std_20)
   target_compile_options(veyra PRIVATE /utf-8)
   target_link_libraries(veyra PRIVATE veyra_engine comctl32 comdlg32 shell32)

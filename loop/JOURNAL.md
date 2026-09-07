@@ -1261,3 +1261,25 @@ C staged teardown 定位崩溃=swapChain_.Release,矩阵证明 NVOF+debug layer+
 - 产品代码动作：无。未 reset、未恢复 tracked clip、未提交旧 Agent 的 dirty tree。
 - 下一任务：新 Maker R0.1 接管指纹，然后 R1.1 重建 phase5 gate 并先红。
 - 收尾验证：10 个 control hash 与 manifest hardcode 已同步；修改后 preflight 70/70 exit 0，STATE phase sequence/current phase/Git links 全绿。
+# 2026-09-07 Capture latency repair (user explicitly requested implementation)
+
+Task: repair the reproduced live-capture scheduling defect, not change drivers or external apps. Evidence: `logs/capture-diag-20260907/FINDINGS.md`; original PTS pacing produced 29 frames / 4 s without GPU, removing that wait produced 185. Preserve the user's deleted validation clip and settings.
+
+Plan: (1) owned two-buffer/capacity-one capture mailbox, configure/start split and explicit timing/reset metadata; (2) live arrival-based scheduling with bounded FG half-interval, retaining file audio/PTS scheduling; (3) rotating presentation command slots and honest capture timing display; (4) short real-card off/NR/FG runs and file/image regressions, all test invocations under 300 s; (5) independent read-only review and update real delivery evidence. No production fix was applied in the preceding diagnosis. No proprietary binaries will be modified/distributed.
+
+Result: implemented; source8/8 and timing7/7, real-card~49.4–49.8fps/0drops, finalNR195/NVOF193/FG193, visible combined regression21checks/47.309s exit0. Evidence `docs/CAPTURE_LATENCY_FIX_2026-09-07.md`. Independent reviewer attempt did not complete; STATE needs_review, no checkpoint. Original user INI hash unchanged after tests; physical photon latency/audio/FG display cadence are not claimed. Next is user experience confirmation and independent review, not more blind performance loops.
+
+## 2026-09-07 repair-v2 R0 / R1 started (ordinary authorized task)
+
+User attachment explicitly authorizes R0–R9, native MFG 3X/4X and B1–B5. Preserve needs_review and historical phase fields; no Goal or protected control edits. Baseline dirty diff SHA256 7CEB994CBAA1D48B64F2E019AD686F9CE9BF630F7A2F0125282B20C6B4E75661, HEAD d8f1964. Baseline EXE 4A9BA4B321DEEC17C5E3562AF03EF75A316856200A8708FA8E692475A05B59C9. Root NR/add-on identities match; staged NR matches. Existing tracked edits and untracked additions are keep/repair assets; deleted tracked test_h264_1080p.mp4 stays deleted. No obsolete assets removed. Baseline status, binary diff and protected hashes: logs/repair-v2/r0-20260907. git diff --check exit 0. CMake absent from interactive PATH; use existing VS build wrapper.
+
+R1 intent: add bounded FrameBatch identity/lease contract, separate resolution plan, validated settings, nullable GPU/display metrics and bounded diagnostics. Production wiring follows; headers alone are not completed features. Runtime test budget consumed: 0 seconds so far. No capture use, runtime execution, downloads, commits or publication.
+
+## 2026-09-08 Repair v2 — user-requested handoff
+User stopped this session for a new conversation. No further code/build/tests. Saved docs/REPAIR_PROGRESS_2026-09-08.md; status remains needs_review. Joint 15 checks passed before final reviewer found quantized CFR, incomplete Desc rollback, and missing diagnostic failure-code issues. Runtime budget spent 260.5401069 / 300 seconds; do not reset.
+
+## 2026-09-08 Resume: per-invocation test limit and reviewer fixes
+User explicitly clarified 300 seconds means each test invocation, not lifetime aggregate. Kept cumulative ledger; repaired the standalone acceptance timer. Implemented timestamp-consistent CFR candidate/quantizer validation, full previousDesc rollback, NVOF/NGX failure diagnostics, cached source identity/count separation. First MKV test exposed incorrect container declaration 29990/499; it was not accepted as correct output. Updated to bounded metadata-only sampling with continued per-frame validation; negative PTS uses export preflight close/open, not UI seek. Fractional rounding unit initially failed; endpoint tolerance plus exact integral tick verification fixed it. Independent read-only reviewer review_known_fixes is checking the final code/evidence. No protected gate/control/runtime edits or capture activity.
+
+## Repair v2 final known-fix delivery 2026-09-08
+Joint joint-a077b89fd39348e4a49f4195c9d4e416: 18/18 software checks, 71.0278864s. EXE 1DFE9A6A6963A73350B7677392516DFB23E6C208FABF4514388457183DDDA266. Read-only review_known_fixes PASS in scoped fixes; global needs_review and old Phase fields unchanged. Per-invocation <=300 seconds; cumulative 346.3985650s preserved. Full evidence, failures and performance limits: docs/REPAIR_V2_DELIVERY_2026-09-08.md. No capture or publication.

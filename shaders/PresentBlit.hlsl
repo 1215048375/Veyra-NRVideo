@@ -32,5 +32,7 @@ float4 psMain(VSOut input) : SV_Target
 {
     (void)srcDims;
     (void)dstDims;
-    return sourceTex.SampleLevel(linearClamp, input.uv, 0);
+    float4 color=sourceTex.SampleLevel(linearClamp,input.uv,0);
+    if(srcDims.z>0.5){float3 c=max(color.rgb,0);color.rgb=lerp(1.055*pow(c,1.0/2.4)-0.055,c*12.92,step(c,0.0031308));}
+    return color;
 }

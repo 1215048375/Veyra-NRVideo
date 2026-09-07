@@ -1,6 +1,10 @@
 # Veyra Gate Evidence
 
-## FINAL current binary / independent PASS — 2026-09-07
+## Current capture fix candidate — 2026-09-07 (not independently approved)
+
+EXE4A9BA4B321DEEC17C5E3562AF03EF75A316856200A8708FA8E692475A05B59C9. Actual real-card source FPS~49.4–49.8 atMJPEG1080p50,0capture drops; final NR195/NVOF193/FG193. Logs `logs/capture-fix-20260907/`. Visible file/image/export gate `logs/delivery/01b72df768524af9ab0aa8d2e3dbb59e/result.json`,47.309s,21 checks. Full evidence/caveats `docs/CAPTURE_LATENCY_FIX_2026-09-07.md`. Reviewer attempt ended without verdict, needs_review; old PASS below only applies to its old binary. Do not mark physical latency/audio/FG display cadence verified.
+
+## Historical delivered binary / independent PASS — 2026-09-07
 
 Current EXE SHA256 70DD23C44337004FC734FBAE8BB6139E185C52370AE97CCE6C3432A3C6F30DE1. New-context Reviewer preflight/phase5 (consolidated delivery) exit0/0, PASS, no reviewer source mutations. logs/delivery/9be0614da5d642e394a35c71d80f6207/result.json,40.31s. Initial3 P1 fixed and independently reproduced correction: image4K dimensions, cancel callback lifetime43encodes exit3/partial only, audio fail-closed code review. Review persisted docs/REVIEW_F6.md. Local contract only; awaiting_user_capture_test and distribution_blocked remain.
 
@@ -355,3 +359,9 @@ INCOMPLETE stub 崩溃样本。
 - State action: Phase 5 reopened; Phase 6/7 locked; lastGoodCommit restored to Phase 4 content checkpoint `8cdf1ea2f9b0bb1331f9219a2305cef5efd3c8d8`.
 - No new RTX runtime test, phase gate, Reviewer or checkpoint was claimed in this audit.
 - Post-rebaseline preflight: 70/70, exit 0; final control manifest hash `45A54E674D32A8055B338C0AE9B77F4A6440D7BC08D4BCF00D27CE8E01D556BF`; phase sequence/state/evidence/Git-pointer checks all passed.
+
+## Repair v2 handoff — 2026-09-08
+Current evidence and unresolved review findings: docs/REPAIR_PROGRESS_2026-09-08.md. Latest joint: logs/repair-v2/joint-bb22bfa233ee455ca030ba0eccdf5a86/result.json (15 software cases exit0; final static review NOT passed). Budget ledger: logs/repair-v2/runtime-budget.json, 260.5401069 seconds spent. User requested stop and new-session continuation; no new Phase pass.
+
+## Repair v2 final known-fix delivery 2026-09-08
+Joint joint-a077b89fd39348e4a49f4195c9d4e416: 18/18 software checks, 71.0278864s. EXE 1DFE9A6A6963A73350B7677392516DFB23E6C208FABF4514388457183DDDA266. Read-only review_known_fixes PASS in scoped fixes; global needs_review and old Phase fields unchanged. Per-invocation <=300 seconds; cumulative 346.3985650s preserved. Full evidence, failures and performance limits: docs/REPAIR_V2_DELIVERY_2026-09-08.md. No capture or publication.

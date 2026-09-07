@@ -106,6 +106,13 @@ double FFmpegDemuxer::averageFps() const
     return static_cast<double>(stream->avg_frame_rate.num) / stream->avg_frame_rate.den;
 }
 
+int FFmpegDemuxer::nominalRateNum() const {
+    return context_ && videoStreamIndex_ >= 0 ? context_->streams[videoStreamIndex_]->r_frame_rate.num : 0;
+}
+int FFmpegDemuxer::nominalRateDen() const {
+    return context_ && videoStreamIndex_ >= 0 ? context_->streams[videoStreamIndex_]->r_frame_rate.den : 0;
+}
+
 const AVCodecParameters* FFmpegDemuxer::videoCodecParameters() const
 {
     if (context_ == nullptr || videoStreamIndex_ < 0) {

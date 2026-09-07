@@ -78,6 +78,7 @@ bool NvOfSession::initialize(ID3D12Device* device,
     log::info("nvof-session", std::format("maxApiVersion status={} version=0x{:X}",
         static_cast<int>(vst), maxVer));
     if (vst != NV_OF_SUCCESS) {
+        log::error("nvof-session", std::format("GetMaxSupportedApiVersion failed status={}", int(vst)));
         status = Status::DeviceFailure;
         return false;
     }
@@ -95,6 +96,7 @@ bool NvOfSession::initialize(ID3D12Device* device,
     if (ist != NV_OF_SUCCESS || fn_->list.nvCreateOpticalFlowD3D12 == nullptr ||
         fn_->list.nvOFInit == nullptr || fn_->list.nvOFExecuteD3D12 == nullptr ||
         fn_->list.nvOFRegisterResourceD3D12 == nullptr || fn_->list.nvOFDestroy == nullptr) {
+        log::error("nvof-session", std::format("CreateInstance/function table failed status={}", int(ist)));
         status = Status::DeviceFailure;
         return false;
     }
@@ -105,6 +107,7 @@ bool NvOfSession::initialize(ID3D12Device* device,
     log::info("nvof-session", std::format("CreateOpticalFlowD3D12 status={} handle={}",
         static_cast<int>(cst), ofHandle != nullptr ? "non-null" : "null"));
     if (cst != NV_OF_SUCCESS || ofHandle == nullptr) {
+        log::error("nvof-session", std::format("CreateOpticalFlow failed status={} nullHandle={}", int(cst), ofHandle == nullptr));
         status = Status::DeviceFailure;
         return false;
     }
@@ -228,7 +231,12 @@ bool NvOfSession::initialize(ID3D12Device* device,
     init.height = desc.height;
     init.outGridSize = static_cast<NV_OF_OUTPUT_VECTOR_GRID_SIZE>(grid);
     init.mode = NV_OF_MODE_OPTICALFLOW;
-    init.perfLevel = NV_OF_PERF_LEVEL_MEDIUM;
+    if(desc.quality>2){status=Status::InvalidArgument;return false;}
+    // SDK nvOpticalFlowCommon.h: FAST=20, MEDIUM=10, SLOW=5.
+    // No perf-level capability query exists; nvOFInit acceptance is required.
+    init.perfLevel = desc.quality==0?NV_OF_PERF_LEVEL_FAST:desc.quality==1?NV_OF_PERF_LEVEL_MEDIUM:NV_OF_PERF_LEVEL_SLOW;
+    caps_.requestedQuality=desc.quality;caps_.appliedQuality=desc.quality;caps_.actualPerfLevel=init.perfLevel;
+    log::info("nvof-quality",std::format("requested={} SDK-perf={} grid={} extent={}x{}; nvOFInit will validate support; no silent fallback",desc.quality,int(init.perfLevel),grid,desc.width,desc.height));
     init.enableExternalHints = NV_OF_FALSE;
     init.enableOutputCost = NV_OF_TRUE;  // cost is mandatory (explicit costOut param)
     init.hPrivData = nullptr;
@@ -241,6 +249,7 @@ bool NvOfSession::initialize(ID3D12Device* device,
     log::info("nvof-session", std::format("nvOFInit status={} ({}x{} grid{} fwd ABGR8 flowExtent={}x{})",
         static_cast<int>(initSt), desc.width, desc.height, grid, gridW_, gridH_));
     if (initSt != NV_OF_SUCCESS) {
+        log::error("nvof-session", std::format("nvOFInit failed status={}", int(initSt)));
         status = Status::DeviceFailure;
         return false;
     }
@@ -254,7 +263,7 @@ bool NvOfSession::initialize(ID3D12Device* device,
         NV_OF_UNREGISTER_RESOURCE_PARAMS_D3D12 up{};
         up.hOFGpuBuffer = reinterpret_cast<NvOfBufferT>(h);
         const NV_OF_STATUS us = fn_->list.nvOFUnregisterResourceD3D12(&up);
-        log::info("nvof-session", std::format("rollback unregister {} status={}", name, (int)us));
+        (us == NV_OF_SUCCESS ? log::info : log::error)("nvof-session", std::format("rollback unregister {} status={}", name, (int)us));
         if (us == NV_OF_SUCCESS) h = nullptr;
     };
     auto rollbackAll = [&]() {
@@ -356,7 +365,7 @@ bool NvOfSession::unregisterAll(Status& status)
         NV_OF_UNREGISTER_RESOURCE_PARAMS_D3D12 p{};
         p.hOFGpuBuffer = reinterpret_cast<NvOfBufferT>(h);
         const NV_OF_STATUS st = fn_->list.nvOFUnregisterResourceD3D12(&p);
-        log::info("nvof-session", std::format("unregister {} status={}", name, static_cast<int>(st)));
+        (st == NV_OF_SUCCESS ? log::info : log::error)("nvof-session", std::format("unregister {} status={}", name, static_cast<int>(st)));
         if (st == NV_OF_SUCCESS) h = nullptr;
         else allOk = false;
     };
@@ -379,7 +388,7 @@ void NvOfSession::shutdown()
         NV_OF_UNREGISTER_RESOURCE_PARAMS_D3D12 p{};
         p.hOFGpuBuffer = reinterpret_cast<NvOfBufferT>(h);
         const NV_OF_STATUS st = fn_->list.nvOFUnregisterResourceD3D12(&p);
-        log::info("nvof-session", std::format("unregister {} status={}", name, static_cast<int>(st)));
+        (st == NV_OF_SUCCESS ? log::info : log::error)("nvof-session", std::format("unregister {} status={}", name, static_cast<int>(st)));
         if (st == NV_OF_SUCCESS) h = nullptr;
     };
     unregister(hCost_, "costOut");
@@ -388,7 +397,7 @@ void NvOfSession::shutdown()
     unregister(hInputA_, "inputA");
     if (ofHandle_ != nullptr && fn_ != nullptr && fn_->list.nvOFDestroy != nullptr) {
         const NV_OF_STATUS st = fn_->list.nvOFDestroy(reinterpret_cast<NvOfHandleT>(ofHandle_));
-        log::info("nvof-session", std::format("nvOFDestroy status={} executes={}",
+        (st == NV_OF_SUCCESS ? log::info : log::error)("nvof-session", std::format("nvOFDestroy status={} executes={}",
             static_cast<int>(st), executeCount_));
         ofHandle_ = nullptr;
     }

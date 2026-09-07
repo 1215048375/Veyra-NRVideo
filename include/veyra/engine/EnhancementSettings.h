@@ -1,0 +1,41 @@
+#pragma once
+#include <cmath>
+#include <cstdint>
+#include <string>
+#include "veyra/pipeline/ResolutionPlan.h"
+namespace veyra::engine {
+enum class FlowQuality { Performance, Balanced, Quality };
+enum class ContentRate { Transport, Auto, Fps30, Fps50, Fps60 };
+struct NrSettings {
+    float intensity=1,tone=1,structure=1,skin=-1;
+    int32_t style=0,autoMask=0,uiCorrection=0;
+    bool operator==(const NrSettings&) const = default;
+};
+struct ResidualSettings {
+    float total=1,darken=1,brighten=1,color=1,luminance=1;
+    bool operator==(const ResidualSettings&) const = default;
+};
+struct EnhancementSettings {
+    uint64_t revision=1;
+    NrSettings model;
+    ResidualSettings residual;
+    bool nr=true,sr=false;
+    uint32_t multiplier=1;
+    pipeline::NrSizePolicy nrPolicy=pipeline::NrSizePolicy::Realtime;
+    FlowQuality flow=FlowQuality::Balanced;
+    ContentRate content=ContentRate::Transport;
+    bool operator==(const EnhancementSettings&) const = default;
+    std::string validate() const {
+        auto range=[](float v,float hi){return std::isfinite(v)&&v>=0&&v<=hi;};
+        if(!revision)return "settingsRevision must be nonzero";
+        if(!range(model.intensity,1)||!range(model.tone,1)||!range(model.structure,1))return "model parameter out of range";
+        if(model.skin!=-1&&!range(model.skin,2))return "skin parameter out of range";
+        if(model.style<0||model.style>2||model.autoMask<0||model.autoMask>1||model.uiCorrection<0||model.uiCorrection>1)return "invalid experimental parameter";
+        for(float v:{residual.total,residual.darken,residual.brighten,residual.color,residual.luminance})if(!range(v,2))return "residual parameter out of range";
+        if(multiplier<1||multiplier>4)return "unsupported multiplier";
+        if(nrPolicy!=pipeline::NrSizePolicy::Realtime&&nrPolicy!=pipeline::NrSizePolicy::Native)return "invalid NR size policy";
+        if(flow<FlowQuality::Performance||flow>FlowQuality::Quality||content<ContentRate::Transport||content>ContentRate::Fps60)return "invalid flow/content mode";
+        return {};
+    }
+};
+}

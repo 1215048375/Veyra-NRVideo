@@ -2,11 +2,11 @@
   "schemaVersion": 1,
   "engineVersion": "veyra-loop-v1",
   "objective": "Ship Launch V1, not an MVP: one shared engine, native 4K SDR capture/player/export, Feature 18, DLSSG 2X, bounded live lookahead, D3D12 NVENC H.264/HEVC, and product recovery/diagnostics.",
-  "status": "distribution_blocked",
+  "status": "needs_review",
   "phase": {
     "id": 7,
-    "name": "Local player/capture/export delivery (user hardware acceptance pending)",
-    "state": "passed",
+    "name": "Capture latency repair; physical throughput retested, review/user experience pending",
+    "state": "gate_passed",
     "gate": "phase7"
   },
   "phases": [
@@ -68,10 +68,10 @@
     },
     {
       "id": 7,
-      "name": "Local player/capture/export delivery (user hardware acceptance pending)",
-      "status": "passed",
-      "gateEvidence": "logs/delivery/9be0614da5d642e394a35c71d80f6207/result.json: shared delivery body invoked by independent phase5 wrapper; consolidated user-authorized F6 scope (not original full specification)",
-      "reviewEvidence": "docs/REVIEW_F6.md: independent read-only PASS; covers current Phase5-7 local delivery together",
+      "name": "Capture latency repair; physical throughput retested, review/user experience pending",
+      "status": "gate_passed",
+      "gateEvidence": "logs/delivery/01b72df768524af9ab0aa8d2e3dbb59e/result.json plus logs/capture-fix-20260907/final-nr-fg.log; capture latency repair candidate",
+      "reviewEvidence": "Current repair attempt ended without a final reviewer verdict. docs/REVIEW_F6.md applies only to the historical checkpoint below.",
       "commit": "d681541a8fca77e3bfd5f496c8ee2dfe2d6a9031"
     }
   ],
@@ -83,12 +83,12 @@
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "Local software delivered; independent reviewed short contract passed. No autonomous expansion or publication.",
+  "currentTask": "Repair v2 known defects fixed and read-only reviewed; broader physical/performance acceptance remains.",
   "lastGate": {
-    "name": "phase5 consolidated delivery",
+    "name": "visible consolidated delivery regression",
     "status": "passed",
     "exitCode": 0,
-    "evidence": "logs/delivery/9be0614da5d642e394a35c71d80f6207/result.json"
+    "evidence": "logs/delivery/01b72df768524af9ab0aa8d2e3dbb59e/result.json"
   },
   "lastFailureFingerprint": null,
   "failureLedger": [],
@@ -96,13 +96,14 @@
   "lastGoodCommit": "d681541a8fca77e3bfd5f496c8ee2dfe2d6a9031",
   "openP0P1Findings": [],
   "blockers": [
-    "Capture hardware absent: awaiting user capture test.",
+    "Read-only reviewer attempt failed without final verdict; needs_review, no new checkpoint.",
+    "Current USB2 1080p50 physical throughput passed; user perceived latency/audio/actual FG display cadence still need confirmation.",
     "Public proprietary runtime distribution rights unresolved; local delivery only."
   ],
-  "nextAction": "User connects physical capture card and follows docs/USER_GUIDE.md. Public packaging requires separate explicit license/distribution approval.",
-  "updatedAt": "2026-09-06T17:02:49.809Z",
+  "nextAction": "User accepts current EXE on capture hardware; see docs/REPAIR_V2_DELIVERY_2026-09-08.md for measured performance limits.",
+  "updatedAt": "2026-09-07T13:20:00Z",
   "deliveryPlan": "docs/ACTIVE_DELIVERY_PLAN.md",
-  "captureAcceptance": "awaiting_user_capture_test",
+  "captureAcceptance": "throughput_short_test_passed_user_latency_audio_pending",
   "testInvocationLimitSeconds": 300,
   "currentEvidence": [
     "logs/f6-diag.json: diagnostic native1080 12frames exit0 (prior to statistics stride correction rebuild)",
@@ -111,6 +112,45 @@
     "preflight 71 checks exit0"
   ],
   "reviewBaseCommit": "6f0ebaa687e3966d989bf138c86b6882380f20fb",
-  "localDelivery": "delivered",
-  "acceptanceScope": "User-approved short local software contract, default realtime4K-input/1080working, optional native4K playback, native4K exports; capture hardware acceptance reserved for user."
+  "localDelivery": "capture_fix_candidate_needs_review",
+  "acceptanceScope": "User-approved short local software contract, default realtime4K-input/1080working, optional native4K playback, native4K exports; capture hardware acceptance reserved for user.",
+  "repairV2": {
+    "status": "known_fixes_review_passed",
+    "execution": "local_repair_delivered_user_acceptance_pending",
+    "report": "docs/REPAIR_V2_DELIVERY_2026-09-08.md",
+    "testLimitScope": "per_invocation",
+    "testLimitSeconds": 300,
+    "runtimeSpentSeconds": 346.3985649999999,
+    "jointRuntimeSeconds": 71.02788640000001,
+    "jointEvidence": "logs/repair-v2/joint-a077b89fd39348e4a49f4195c9d4e416/result.json",
+    "reviewer": "review_known_fixes: readonly PASS within known-fix scope",
+    "exeSha256": "1DFE9A6A6963A73350B7677392516DFB23E6C208FABF4514388457183DDDA266",
+    "remainingLimits": [
+      "user capture acceptance",
+      "physical display/photon latency",
+      "long stability",
+      "SR4K+4X not proven 60 source fps"
+    ]
+  },
+  "uiRedesign": {
+    "status": "design_approved_implementation_not_started",
+    "plan": "docs/UI_DUAL_MODE_EXECUTION_PLAN_2026-09-08.md",
+    "currentDeliverable": "execution_document_only",
+    "defaultMode": "daily",
+    "professionalScope": [
+      "fine settings",
+      "presets management",
+      "same-frame comparison",
+      "performance diagnostics",
+      "image and video export"
+    ],
+    "invariants": [
+      "same preview source and video host on mode switch",
+      "no implicit settings change",
+      "existing app unchanged in documentation turn"
+    ],
+    "nextAction": "On implementation request, start UI0 inventory then UI1 shared state and stable video host",
+    "testLimitScope": "per_invocation",
+    "testLimitSeconds": 300
+  }
 }

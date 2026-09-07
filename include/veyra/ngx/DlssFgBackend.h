@@ -64,6 +64,7 @@ public:
         uint64_t frameId;                        // monotonically increasing real-frame id
         float mvecScaleX;                        // convention under test (Playbook 14.2)
         float mvecScaleY;
+        uint32_t multiFrameCount=1,multiFrameIndex=1;
     };
 
     // Queries FrameGeneration capability through NVSDK_NGX_GetCapabilityParameters.

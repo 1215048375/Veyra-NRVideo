@@ -1,5 +1,34 @@
 # Veyra Worklog
 
+## 2026-09-08 Dual-mode UI execution document only
+
+User approved the two-mode design based on their references: Daily default for video/capture; Professional for fine controls, comparison, telemetry/diagnostics and export. Added docs/UI_DUAL_MODE_EXECUTION_PLAN_2026-09-08.md with verified code map, shared-session invariants, responsive DIP layout, controls/shortcut rules, UI0–UI9 tasks and test matrix. Read-only inspection identified necessary backend work: current startExport replaces the playback worker and audio volume is not exposed. The plan explicitly includes a bounded independent export worker using shared product libraries and real per-application audio controls; these are planned, not claimed implemented. User-rejected design skill was not used.
+
+No app code, runtime, protected gate, user media or EXE changed; no build/GPU/capture test, Goal, commit or upload. EXE remains 1DFE9A6A6963A73350B7677392516DFB23E6C208FABF4514388457183DDDA266. Static checks: document links exist, code fences balanced, UI0–UI9 present, 7 protected hashes unchanged, deleted fixture remains absent. Test limit remains per invocation <=300 seconds. UI status is design_approved / implementation_not_started. Next implementation task, when requested: UI0 inventory and UI1 shared state/stable video HWND.
+
+## 2026-09-08 Repair v2 final known-fix review
+
+User corrected test budget to per invocation <=300s. Implemented timestamp-quantization CFR validation and candidate selection, full Desc rollback, failure-code diagnostic capture, and cached source identity/count preservation. Final build exit0 (3.9694163s); joint joint-a077b89fd39348e4a49f4195c9d4e416 18 cases exit0 in 71.0278864s runtime. Historical cumulative 346.3985650s includes failures; not reset. Read-only fresh reviewer review_known_fixes passed this limited fix scope, verified EXE 1DFE9A6A6963A73350B7677392516DFB23E6C208FABF4514388457183DDDA266. No old Phase pass updated; global needs_review retained. Full evidence, modified files, intermediate failures, performance limitations and user capture next action: docs/REPAIR_V2_DELIVERY_2026-09-08.md. Protected hashes unchanged, runtime identity matches, no capture/commit/upload. SR4K+4X smoke39.75sourcefps/2.17s lateness remains an explicit performance limitation, not a functional transaction failure hidden as realtime pass.
+
+
+## 2026-09-07 B1–B5 selected; planning/handoff only
+
+User selected B1–B5 for the next implementation scope: same-frame comparison, per-stage performance UI, transactional user presets, shared optical-flow quality profiles, and a local privacy-aware diagnostics center. The repair plan now contains their precise data ownership, state transition, UI, failure and acceptance contracts; the Magpie backlog marks them selected. Added a paste-ready next-conversation handoff that explicitly refuses to treat the historical shared Phase5–7 gate as new release proof and forbids modifying protected hashes/gates to manufacture a pass.
+
+This entry is documentation only. No application code, gate, CONTROL_HASHES, review prompt, SDK/runtime, driver, external app, capture device or user media was changed or executed. No build/test/Goal/checkpoint/publication was performed. Current software remains needs_review with SR4K/FG user-visible defects unresolved.
+
+## 2026-09-07 SR4K / FG / parameters planning only
+
+User requested detailed documents and a Magpie feature shortlist before implementation. Added `C:/Users/123/Desktop/Veyra DLSS Video Player/docs/REPAIR_EXECUTION_PLAN_2026-09-07.md` and `C:/Users/123/Desktop/Veyra DLSS Video Player/docs/MAGPIE_FEATURE_BACKLOG_2026-09-07.md`; updated DELIVERY_STATUS with the unresolved SR4K/FG feedback and planning links. The plan covers resolution separation, real generated-frame ownership/content/pacing, SDK MFG 2/3/4, export timing, typed NR controls, independent residual controls, live settings, Chinese/fullscreen UI, and a shared 300-second future runtime-test budget. Other competitor features remain user-selectable candidates, not automatic implementation tasks.
+
+Evidence this turn: read-only current code inspection plus Magpie 0.6.6/0.6.5 release and parameter/frame-sync documents; no Magpie GPU benchmark. No application code, SDK/runtime, protected control file, control hash, user configuration or existing deleted fixture was changed. No build, GPU test, app/device operation, Goal, checkpoint, driver/remote-software operation or publication. Documentation static checks are recorded with this turn's tool results; prior EXE and needs_review state remain unchanged. Next action: user selection/implementation confirmation, then resolve protected-document scope before any new Goal.
+
+Static verification: `git diff --check` exit 0 (existing LF/CRLF notices only); all absolute local Markdown links in the two new documents and DELIVERY_STATUS resolve; no Unicode replacement characters; all 11 protected manifest file hashes match. No gate was run and no manifest was edited.
+
+## 2026-09-07 capture latency repair
+
+User explicitly requested implementation after the physical-card diagnosis. Owned bounded capture AVFrames + deferred Run + live-specific bounded pacing remove the stale-PTS wait; ring/presenter use one rotating cursor; live metrics no longer masquerade as photon latency. Code/files/commands/results are recorded in `docs/CAPTURE_LATENCY_FIX_2026-09-07.md`. Release build exit0; timing7/7, source8/8, physical 1080p50 off/NR/NR+FG ~49.4–49.8fps and0drops; final NR195/NVOF193/generated193. Visible-player consolidated gate21/21 exit0 in47.309s, run01b72df768524af9ab0aa8d2e3dbb59e, final EXE4A9BA4B321DEEC17C5E3562AF03EF75A316856200A8708FA8E692475A05B59C9. Preflight71/71. No proprietary files, external apps, driver, user settings or deleted user clip changed. Read-only reviewer attempt failed without final verdict; needs_review, no new checkpoint. User perceived latency/audio and actual generated-frame display cadence remain unverified.
+
 ## 2026-09-07 direct implementation delivery
 
 See docs/DELIVERY_STATUS.md for current software, tests and limits. Actual app/controller/presenter, DirectShow source, WIC and D3D12 NVENC export now exist; earlier “no UI/export” entries are historical. Fixed NV12/uint shader inputs, real guidance-before-NR, scene resets, audio format/paused seek, GPU timestamp semantics. CMake x64-release exit0; consolidated gate run d28879b01b5c44dd86cad33d6f386d90 exit0 in31.59s. No 30-minute retests. User accepted realtime internal-resolution option after GPU measurement. Independent review next; do not claim phase checkpoint yet.

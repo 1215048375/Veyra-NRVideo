@@ -34,6 +34,8 @@ public:
     int videoStreamIndex() const { return videoStreamIndex_; }
     int64_t durationUs() const;
     double averageFps() const; // informational only; the pipeline is PTS-driven
+    int nominalRateNum() const;
+    int nominalRateDen() const;
     const AVCodecParameters* videoCodecParameters() const;
     int videoTimeBaseNum() const; // stream time_base for frame PTS conversion
     int videoTimeBaseDen() const;

@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <mutex>
 #include <string>
+#include "veyra/diagnostics/DiagnosticEvent.h"
 
 namespace veyra {
 
@@ -38,11 +39,15 @@ public:
     // Flush the file sink immediately (staged-teardown markers must survive
     // a crash on the very next call).
     void flush();
+    std::string diagnosticReport();
+    std::string latestProblem();
+    static void diagnosticContext(diagnostics::DiagnosticEvent);
 
 private:
     std::mutex mutex_;
     std::FILE* file_ = nullptr;
     bool consoleEnabled_ = true;
+    diagnostics::DiagnosticHistory diagnostics_;std::string latestProblem_;
 };
 
 namespace log {

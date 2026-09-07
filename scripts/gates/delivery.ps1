@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$Root)
+param([Parameter(Mandatory=$true)][string]$Root,[switch]$VisiblePlayer)
 # User-authorized local software acceptance, <=300s for this entire suite.
 # Native-4K realtime60 is NOT asserted: user selected an explicit 1080 working realtime profile.
 # Real capture acceptance and proprietary distribution are separate, never synthetic PASS.
@@ -17,7 +17,9 @@ function Run([string]$Name,[string]$Exe,[string[]]$Argv,[int]$Limit=30,[int]$Exp
     $remaining=290-[int]$timer.Elapsed.TotalSeconds
     if($remaining -lt 1){throw 'Combined suite budget exhausted'}
     $timeout=[Math]::Min($Limit,$remaining)
-    $p=Start-Process -FilePath $Exe -ArgumentList @($Argv|ForEach-Object{'"'+$_.Replace('"','\"')+'"'}) -PassThru -WindowStyle Hidden -RedirectStandardOutput "$dir/$Name.stdout.log" -RedirectStandardError "$dir/$Name.stderr.log"
+    $windowStyle='Hidden'
+    if($VisiblePlayer -and $Argv -contains '--smoke-seconds'){$windowStyle='Normal'}
+    $p=Start-Process -FilePath $Exe -ArgumentList @($Argv|ForEach-Object{'"'+$_.Replace('"','\"')+'"'}) -PassThru -WindowStyle $windowStyle -RedirectStandardOutput "$dir/$Name.stdout.log" -RedirectStandardError "$dir/$Name.stderr.log"
     $processHandle=$p.Handle
     if(-not $p.WaitForExit($timeout*1000)){Stop-Process -Id $p.Id -Force;throw "$Name timeout"}
     $exitCode=$p.ExitCode;Check "$Name-exit" ($null -ne $exitCode -and $exitCode -eq $ExpectedExit) "exit=$exitCode expected=$ExpectedExit"

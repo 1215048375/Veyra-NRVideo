@@ -36,10 +36,12 @@ public:
         ID3D12Fence* inFence = nullptr;   // signaled when inputs are GPU-ready
         ID3D12Fence* outFence = nullptr;  // signaled when flow is GPU-ready
         // P0.4: raw output lives at hardware-grid extent in SHORT2 (S10.5).
+        uint32_t quality=1; // 0 performance / 1 balanced / 2 quality; mapped to SDK symbols
         uint32_t gridSize = 4;            // requested grid (validated vs caps)
     };
 
     struct Caps {
+        uint32_t requestedQuality=1,appliedQuality=1,actualPerfLevel=0;
         bool queried = false;
         std::vector<uint32_t> supportedGrids;  // raw capability list (two-call protocol)
         uint32_t minWidth = 0, maxWidth = 0, minHeight = 0, maxHeight = 0;

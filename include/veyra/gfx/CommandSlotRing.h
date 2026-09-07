@@ -46,9 +46,16 @@ public:
     // Waits for this slot's outstanding fence value (if any), then resets the
     // allocator and command list. Returns the recycled list ready for record.
     ID3D12GraphicsCommandList* acquire(uint32_t slot, Status& status);
+    // Shared cursor for graph and presenter: independent cursors can select
+    // the allocator just submitted by the other consumer and serialize frames.
+    ID3D12GraphicsCommandList* acquireNext(uint32_t& slot,Status& status) {
+        if(!slotCount_){status=Status::InvalidArgument;return nullptr;}
+        slot=nextSlot_++%slotCount_;return acquire(slot,status);
+    }
 
     // Closes, submits and signals the slot; advances the fence timeline.
     bool submitAndSignal(uint32_t slot);
+    bool discardRecording(); // Error rollback: never execute a partially recorded list.
     void tag(uint32_t slot,const char* label){slots_.at(slot).label=label;}
 
     // The fence value most recently signaled by this ring. Callers that need
@@ -82,12 +89,13 @@ private:
         ComPtr<ID3D12CommandAllocator> allocator;
         ComPtr<ID3D12GraphicsCommandList> list;
         uint64_t fenceValue = 0; // 0 means "never submitted"
-        bool timed = false;
+        bool timed = false,recording=false;
         std::string label;
     };
 
     bool initialized_ = false;
     uint32_t slotCount_ = 0;
+    uint32_t nextSlot_ = 0;
     ID3D12Device* device_ = nullptr;
     ID3D12CommandQueue* queue_ = nullptr;
     ID3D12Fence* fence_ = nullptr;

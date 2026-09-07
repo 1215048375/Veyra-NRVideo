@@ -79,6 +79,7 @@ bool DlssFgBackend::queryCapability(NgxCoreHost& coreHost, Capability& caps, Sta
     log::info("ngx", std::format("fg-backend: capability query result={} params={}",
         ngxResultString(static_cast<uint64_t>(capResult)), capParams != nullptr ? "non-null" : "null"));
     if (capParams == nullptr || capResult != NVSDK_NGX_Result_Success) {
+        log::error("ngx",std::format("fg-backend capability failed result=0x{:X} nullParams={}",unsigned(capResult),capParams==nullptr));
         status = Status::DeviceFailure;
         return false;
     }
@@ -193,6 +194,7 @@ bool DlssFgBackend::create(NgxCoreHost& coreHost,
         ngxResultString(createResult_), handle_ != nullptr ? "non-null" : "null", sehCode));
 
     if (result != NVSDK_NGX_Result_Success) {
+        log::error("ngx", std::format("fg-backend failed result=0x{:X} seh=0x{:X}", static_cast<unsigned>(result), sehCode));
         // Query FeatureInitResult for diagnostic detail (user directive).
         unsigned long long initResult = 0;
         const NVSDK_NGX_Result gir = params->Get(NVSDK_NGX_Parameter_FrameGeneration_FeatureInitResult, &initResult);
@@ -211,7 +213,7 @@ void DlssFgBackend::release()
 {
     if (handle_ != nullptr) {
         const NVSDK_NGX_Result result = NVSDK_NGX_D3D12_ReleaseFeature(handle_);
-        log::info("ngx", std::format("fg-backend: ReleaseFeature result={} evaluates={} resets={}",
+        (result == NVSDK_NGX_Result_Success ? log::info : log::error)("ngx", std::format("fg-backend: ReleaseFeature result={} evaluates={} resets={}",
             ngxResultString(static_cast<uint64_t>(result)), evaluateCount_, resetCount_));
         handle_ = nullptr;
     }
@@ -222,7 +224,7 @@ bool DlssFgBackend::evaluate(ID3D12GraphicsCommandList* cmdList,
                              const EvalDesc& desc,
                              Status& status)
 {
-    if (handle_ == nullptr) {
+    if (handle_ == nullptr || desc.multiFrameCount<1 || desc.multiFrameCount>3 || desc.multiFrameIndex<1 || desc.multiFrameIndex>desc.multiFrameCount) {
         status = Status::InvalidArgument;
         return false;
     }
@@ -237,8 +239,8 @@ bool DlssFgBackend::evaluate(ID3D12GraphicsCommandList* cmdList,
 
     NVSDK_NGX_DLSSG_Opt_Eval_Params optParams{};
     // 2X fixed: one generated frame per real pair.
-    optParams.multiFrameCount = 1;
-    optParams.multiFrameIndex = 1;
+    optParams.multiFrameCount = desc.multiFrameCount;
+    optParams.multiFrameIndex = desc.multiFrameIndex;
     // Static synthetic camera: identity matrices, all motion carried by the
     // mvec buffer (cameraMotionIncluded = 1).
     for (int r = 0; r < 4; ++r) {
@@ -268,6 +270,10 @@ bool DlssFgBackend::evaluate(ID3D12GraphicsCommandList* cmdList,
     optParams.orthoProjection = 0;
     optParams.motionVectorsDilated = 0;
     optParams.menuDetectionEnabled = 0;
+    optParams.backbufferSubrectSize={width_,height_};
+    optParams.outputInterpSubrectSize={width_,height_};
+    optParams.mvecsSubrectSize={width_,height_};
+    optParams.depthSubrectSize={width_,height_};
 
     if (desc.reset) {
         ++resetCount_;
@@ -279,11 +285,12 @@ bool DlssFgBackend::evaluate(ID3D12GraphicsCommandList* cmdList,
     uint32_t sehCode = 0;
     const NVSDK_NGX_Result result = CallEvaluateDlssg(cmdList, handle_, params,
         &evalParams, &optParams, sehCode);
-    log::info("ngx", std::format("fg-backend: Evaluate #{} frameId={} reset={} result={} seh={}",
-        evaluateCount_ + 1, desc.frameId, desc.reset ? 1 : 0,
+    log::info("ngx", std::format("fg-backend: Evaluate #{} frameId={} reset={} generatedCount={} subframe={} result={} seh={}",
+        evaluateCount_ + 1, desc.frameId, desc.reset ? 1 : 0,desc.multiFrameCount,desc.multiFrameIndex,
         ngxResultString(static_cast<uint64_t>(result)), sehCode));
 
     if (result != NVSDK_NGX_Result_Success) {
+        log::error("ngx", std::format("fg-backend failed result=0x{:X} seh=0x{:X}", static_cast<unsigned>(result), sehCode));
         status = Status::DeviceFailure;
         return false;
     }
