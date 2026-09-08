@@ -45,11 +45,13 @@ bool NvOfSession::initialize(ID3D12Device* device,
     // WITHOUT destroying or altering that session.
     if (device == nullptr || inputA == nullptr || inputB == nullptr ||
         flowOut == nullptr || costOut == nullptr ||
-        desc.inFence == nullptr || desc.outFence == nullptr) {
+        desc.inFence == nullptr || desc.outFence == nullptr ||
+        ((desc.reverseFlow == nullptr) != (desc.reverseCost == nullptr))) {
         log::error("nvof-session", std::format(
-            "initialize rejected: device={} inputA={} inputB={} flowOut={} costOut={} inFence={} outFence={}",
+            "initialize rejected: device={} inputA={} inputB={} flowOut={} costOut={} inFence={} outFence={} reversePairValid={}",
             device ? 1 : 0, inputA ? 1 : 0, inputB ? 1 : 0, flowOut ? 1 : 0,
-            costOut ? 1 : 0, desc.inFence ? 1 : 0, desc.outFence ? 1 : 0));
+            costOut ? 1 : 0, desc.inFence ? 1 : 0, desc.outFence ? 1 : 0,
+            (desc.reverseFlow == nullptr) == (desc.reverseCost == nullptr)));
         status = Status::InvalidArgument;
         return false;
     }
@@ -224,6 +226,17 @@ bool NvOfSession::initialize(ID3D12Device* device,
             status = Status::InvalidArgument;
             return false;
         }
+        if(desc.reverseFlow){
+            const auto rf=desc.reverseFlow->GetDesc(),rc=desc.reverseCost->GetDesc();
+            const bool valid=rf.Dimension==D3D12_RESOURCE_DIMENSION_TEXTURE2D&&rc.Dimension==D3D12_RESOURCE_DIMENSION_TEXTURE2D&&
+                rf.Format==DXGI_FORMAT_R16G16_SINT&&rc.Format==DXGI_FORMAT_R8_UINT&&
+                rf.Width==gridW_&&rf.Height==gridH_&&rc.Width==gridW_&&rc.Height==gridH_&&
+                rf.DepthOrArraySize==1&&rc.DepthOrArraySize==1&&rf.MipLevels==1&&rc.MipLevels==1&&
+                rf.SampleDesc.Count==1&&rc.SampleDesc.Count==1&&
+                desc.reverseFlow!=flowOut&&desc.reverseCost!=costOut;
+            log::info("nvof-session",std::format("reverse contract valid={} flowFormat={} costFormat={} extent={}x{} costExtent={}x{}",valid,int(rf.Format),int(rc.Format),rf.Width,rf.Height,rc.Width,rc.Height));
+            if(!valid){status=Status::InvalidArgument;return false;}
+        }
     }
 
     NV_OF_INIT_PARAMS init{};
@@ -240,14 +253,15 @@ bool NvOfSession::initialize(ID3D12Device* device,
     init.enableExternalHints = NV_OF_FALSE;
     init.enableOutputCost = NV_OF_TRUE;  // cost is mandatory (explicit costOut param)
     init.hPrivData = nullptr;
-    init.predDirection = NV_OF_PRED_DIRECTION_FORWARD;
+    init.predDirection = desc.reverseFlow ? NV_OF_PRED_DIRECTION_BOTH : NV_OF_PRED_DIRECTION_FORWARD;
+    log::info("nvof-session",std::format("prediction direction={} (1=forward,2=both)",int(init.predDirection)));
     init.enableGlobalFlow = NV_OF_FALSE;
     init.inputBufferFormat = NV_OF_BUFFER_FORMAT_ABGR8;
     // Output contract: SHORT2 (S10.5) at grid extent; the caller registers
     // an R16G16_SINT grid-extent resource as flowOut (never half-float).
     const NV_OF_STATUS initSt = fn_->list.nvOFInit(ofHandle, &init);
-    log::info("nvof-session", std::format("nvOFInit status={} ({}x{} grid{} fwd ABGR8 flowExtent={}x{})",
-        static_cast<int>(initSt), desc.width, desc.height, grid, gridW_, gridH_));
+    log::info("nvof-session", std::format("nvOFInit status={} ({}x{} grid{} direction={} ABGR8 flowExtent={}x{})",
+        static_cast<int>(initSt), desc.width, desc.height, grid, int(init.predDirection), gridW_, gridH_));
     if (initSt != NV_OF_SUCCESS) {
         log::error("nvof-session", std::format("nvOFInit failed status={}", int(initSt)));
         status = Status::DeviceFailure;
@@ -267,6 +281,8 @@ bool NvOfSession::initialize(ID3D12Device* device,
         if (us == NV_OF_SUCCESS) h = nullptr;
     };
     auto rollbackAll = [&]() {
+        unregisterOne(hReverseCost_, "reverseCost");
+        unregisterOne(hReverseFlow_, "reverseFlow");
         unregisterOne(hCost_, "costOut");
         unregisterOne(hFlow_, "flowOut");
         unregisterOne(hInputB_, "inputB");
@@ -291,7 +307,9 @@ bool NvOfSession::initialize(ID3D12Device* device,
     if (!registerResource(inputA, hInputA_, "inputA") ||
         !registerResource(inputB, hInputB_, "inputB") ||
         !registerResource(flowOut, hFlow_, "flowOut") ||
-        !registerResource(costOut, hCost_, "costOut")) {
+        !registerResource(costOut, hCost_, "costOut") ||
+        (desc.reverseFlow && (!registerResource(desc.reverseFlow,hReverseFlow_,"reverseFlow") ||
+                              !registerResource(desc.reverseCost,hReverseCost_,"reverseCost")))) {
         status = Status::DeviceFailure;
         return false;
     }
@@ -328,6 +346,8 @@ bool NvOfSession::execute(uint64_t inValue, Status& status)
 
     out.outputBuffer = reinterpret_cast<NvOfBufferT>(hFlow_);
     out.outputCostBuffer = reinterpret_cast<NvOfBufferT>(hCost_);
+    out.bwdOutputBuffer = reinterpret_cast<NvOfBufferT>(hReverseFlow_);
+    out.bwdOutputCostBuffer = reinterpret_cast<NvOfBufferT>(hReverseCost_);
     outFencePoint.fence = outFence_;
     outFencePoint.value = nextOutValue_;
     out.fencePoint = &outFencePoint;
@@ -369,6 +389,8 @@ bool NvOfSession::unregisterAll(Status& status)
         if (st == NV_OF_SUCCESS) h = nullptr;
         else allOk = false;
     };
+    unregisterOne(hReverseCost_, "reverseCost");
+    unregisterOne(hReverseFlow_, "reverseFlow");
     unregisterOne(hCost_, "costOut");
     unregisterOne(hFlow_, "flowOut");
     unregisterOne(hInputB_, "inputB");
@@ -391,6 +413,8 @@ void NvOfSession::shutdown()
         (st == NV_OF_SUCCESS ? log::info : log::error)("nvof-session", std::format("unregister {} status={}", name, static_cast<int>(st)));
         if (st == NV_OF_SUCCESS) h = nullptr;
     };
+    unregister(hReverseCost_, "reverseCost");
+    unregister(hReverseFlow_, "reverseFlow");
     unregister(hCost_, "costOut");
     unregister(hFlow_, "flowOut");
     unregister(hInputB_, "inputB");
@@ -403,6 +427,7 @@ void NvOfSession::shutdown()
     }
     hInputA_ = hInputB_ = hFlow_ = nullptr;
     hCost_ = nullptr;
+    hReverseFlow_ = hReverseCost_ = nullptr;
     delete fn_;
     fn_ = nullptr;
     if (dll_ != nullptr) {

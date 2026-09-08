@@ -76,19 +76,19 @@
     }
   ],
   "cycle": {
-    "completed": 73,
+    "completed": 74,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "Cycles71-73 moderate-luma scene reset and motion boundaries independently reviewed PASS; remaining Q6/Q7 optimization ongoing",
+  "currentTask": "Cycle74 optional bidirectional NVOF candidate and cost/occlusion evidence independently reviewed PASS; not default-integrated",
   "lastGate": {
     "name": "phase7",
     "status": "passed",
     "exitCode": 0,
-    "evidence": "logs/delivery/55725c1cd58846c59342d5e624562773/result.json 41.568s;75checks"
+    "evidence": "logs/delivery/aea3d88148bf4e6b9c793cd99f95f7fb/result.json;75checks"
   },
   "lastFailureFingerprint": "",
   "failureLedger": [
@@ -107,8 +107,8 @@
     "Current USB2 1080p50 physical throughput passed; user perceived latency/audio/actual FG display cadence still need confirmation.",
     "Public proprietary runtime distribution rights unresolved; local delivery only."
   ],
-  "nextAction": "Q6 A/B bidirectional flow cost/benefit and FG occlusion quality; Q7 controlled depth response before model investment, RTX Video SR SDK dependency and natural SR reconstruction",
-  "updatedAt": "2026-09-08T11:32:50.944787+00:00",
+  "nextAction": "Controlled depth input-response experiment before investing in model; remaining changing-frame/natural NR/FG and SR reconstruction evidence, RTXVideo SDK dependency",
+  "updatedAt": "2026-09-08T11:49:11.544171+00:00",
   "deliveryPlan": "docs/ACTIVE_DELIVERY_PLAN.md",
   "captureAcceptance": "throughput_short_test_passed_user_latency_audio_pending",
   "testInvocationLimitSeconds": 300,
@@ -130,7 +130,8 @@
     "Cycle66 independent scoped PASS: image-e8c7b9377cd94f68bd50fb189bd8b49c 21.916s; feather2/32, disjoint, central tile seams. No product changes.",
     "Cycles67-68 independent scoped PASS: temporal image6508c7cc PASS; optional R8d5f8d738/RGBAd9974360 reproduce expected-contract FAIL, no product integration.",
     "Cycles69-70 independentPASS: motionshader/debug0; repairedresidual24constants; image29e690f3 andSR60A/B GBV0. Natural/FGquality still open.",
-    "Cycles71-73 independent scopedPASS: scene14/motionverticalcostboundary; NR600NVOF594; actualFG600source594generated6hold1200output independentlydecoded, docs/REVIEW_SCENE_BOUNDARIES_2026-09-08.md"
+    "Cycles71-73 independent scopedPASS: scene14/motionverticalcostboundary; NR600NVOF594; actualFG600source594generated6hold1200output independentlydecoded, docs/REVIEW_SCENE_BOUNDARIES_2026-09-08.md",
+    "Cycle74 independent scopedPASS, docs/REVIEW_BIDIRECTIONAL_FLOW_2026-09-08.md:360/1080/4K controlledbidirectional plus640x129alignmentfix; no defaultintegration"
   ],
   "reviewBaseCommit": "6f0ebaa687e3966d989bf138c86b6882380f20fb",
   "localDelivery": "capture_fix_candidate_needs_review",
@@ -268,8 +269,8 @@
     "testInvocationLimitSeconds": 300,
     "productModified": true,
     "consecutiveBlockedGoalTurns": 0,
-    "previousGoalTurnClassification": "progress: fixed residual harness P2; fused motion bounds/photometric validation implemented and independently tested",
-    "currentGoalTurnClassification": "progress: motion corpus found all3authoredcuts missed; repaired moderate-luma scene reset and independently verified actual2Xboundaryholds",
+    "previousGoalTurnClassification": "progress: motion corpus found all3authoredcuts missed; repaired moderate-luma scene reset and independently verified actual2Xboundaryholds",
+    "currentGoalTurnClassification": "progress: actual sharedNVOFBOTH validated, constructedocclusion benefitandcost measured, diagnosticoddheightP2fixed andindependentlyreviewed",
     "controlSynchronizationAuthorization": "2026-09-08 user: 确认，给你全部权限; applies to previously proposed exact two-hash synchronization",
     "diagnosticFindings": [
       "Q7 read-only dependency check: RTXVideoSDK not present in third_party_local; official1.1download redirects NVIDIA login. Localdepthfile vitl is Large, not permitted Small; no verified Small ONNX/provider. No dependency integrated or performance claimed."

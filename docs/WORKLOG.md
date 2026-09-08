@@ -1219,3 +1219,9 @@ See docs/SCENE_MOTION_CORPUS_2026-09-08.md. Motion vertical/cost GPU checks and 
 
 ## Cycles71-73 independent scoped PASS
 review_scene_boundaries no introducedP0/P1/P2; docs/REVIEW_SCENE_BOUNDARIES_2026-09-08.md. Independentpreflight71/phase7delivery55725c1cd58846c59342d5e62456277341.568s75PASS. Freshreview-scene-fc558d881d0b404fbe51e5f6f2ebd6e0:scene14/motionbothaxesdebug0;RTXNR600NVOF594/Create0x1SEH0;actualFG600source594generated6holds1200output andindependentfull1200decode. BoundarypreviousYerror<=.048694/255. Trackedfingerprint4343fa50af201ad1393b6bec4228e3c18fb4447dunchanged. Q6/Q7/natural/physical/long-term/distribution not passed.
+
+## Cycle74 bidirectional candidate evidence
+Shared optional BOTH session and realGPU diagnostic; defaults unchanged. docs/BIDIRECTIONAL_FLOW_EXPERIMENT_2026-09-08.md. Finalbidir-matrix-e47ef77e21b44baaa4eace596d6080cd360p/1080p/4Kall exit0/debug0, known+8/-8EPE.0442px.1080pnovelwrongaccept6330->12, correctbackground101392unchanged;4K25992->44/correct432992unchanged. Fixed-pair warmedthroughput1080p.836->1.510ms,4K2.974->5.571ms; notlatency/P95/naturalquality. Default remainsforward; no graph/exportintegrity/newmodel changes. Frozen gate/review pending.
+
+## Cycle74 independent final scopedPASS
+review_bidirectional_candidate: initialP2diagnosticfootprintalignmentFAIL repaired; independent640x129all4casesPASS/debug0 (novel191->73,good1411unchanged). Initial1080/4KindependentmatrixPASS remainsvalid. Finalphase7aea3d88148bf4e6b9c793cd99f95f7fb75PASSexit0; docs/REVIEW_BIDIRECTIONAL_FLOW_2026-09-08.md. Reviewerfinalfingerprint2d3745d722cd9931e12d9ec6200d14d4d66f9924unchanged. Optionalsharedcapabilityonly; defaultforward, no graph/shader/exportintegrity/model changes. Retaincandidatependingnatural/changingframeNR/FGROI; fullGoalopen.

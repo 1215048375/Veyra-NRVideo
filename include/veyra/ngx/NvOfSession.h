@@ -1,9 +1,11 @@
 #pragma once
 
 // Reusable NVOF D3D12 session (extracted from the Phase 5 probe).
-// Produces forward optical flow as raw SHORT2 (S10.5) at the hardware-grid
-// extent, plus the SDK cost buffer; a densify pass converts to workingExtent
-// pixels for DLSSG (see shaders/NvofDensify.hlsl). Synchronization is fence-based:
+// Produces current->previous optical flow as raw SHORT2 (S10.5) at the
+// hardware-grid extent, plus SDK cost. Vectors use source-input pixels; densify
+// expands the grid, and any working-extent scaling happens downstream.
+// Optional paired reverse outputs also produce previous->current from the
+// same A/B frames. Synchronization is fence-based:
 // the caller signals `inFence`/`inValue` when both input textures are ready;
 // NVOF signals `outFence`/nextOutValue when the flow texture is complete.
 // The caller must make its D3D12 queue wait on outFence before consuming the
@@ -38,6 +40,11 @@ public:
         // P0.4: raw output lives at hardware-grid extent in SHORT2 (S10.5).
         uint32_t quality=1; // 0 performance / 1 balanced / 2 quality; mapped to SDK symbols
         uint32_t gridSize = 4;            // requested grid (validated vs caps)
+        // Optional diagnostic/candidate path: BOTH produces previous->current
+        // as well, using the same A/B pair. Caller owns both grid textures and
+        // follows the same fence and unregister-before-release contract.
+        ID3D12Resource* reverseFlow = nullptr; // R16G16_SINT, paired with reverseCost
+        ID3D12Resource* reverseCost = nullptr; // R8_UINT
     };
 
     struct Caps {
@@ -115,6 +122,7 @@ private:
     Caps caps_;
     uint32_t gridW_ = 0, gridH_ = 0;
     NvOfOpaqueHandle hCost_ = nullptr;
+    NvOfOpaqueHandle hReverseFlow_ = nullptr, hReverseCost_ = nullptr;
 };
 
 } // namespace veyra::ngx
