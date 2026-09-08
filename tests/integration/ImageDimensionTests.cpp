@@ -43,7 +43,7 @@ bool run(unsigned width,unsigned height,bool nr,const std::filesystem::path& dir
     std::cout<<"IMAGE_DIMENSION "<<width<<'x'<<height<<" nr="<<nr<<" maxError8="<<maxError<<" nrEvaluations="<<graph.metrics().nrEvaluateCount<<" pass="<<ok<<std::endl;
     out={};ring.drainQueue();graph.shutdown();av_frame_free(&f);ring.shutdown();ctx.shutdown();return ok;
 }
-bool tiled(unsigned width,unsigned height,bool nr,const std::filesystem::path& directory){
+bool tiled(unsigned width,unsigned height,bool nr,const std::filesystem::path& directory,bool protect=false){
     gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;Status st;gfx::DeviceContextDesc device;
     if(!ctx.initialize(device,st)||!ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),4,st))return false;
     sink::RgbaImage source;source.width=width;source.height=height;source.pixels.resize(size_t(width)*height*4);
@@ -52,16 +52,17 @@ bool tiled(unsigned width,unsigned height,bool nr,const std::filesystem::path& d
     // sRGB 188 over black; fully transparent color contributes nothing.
     if(!nr){source.pixels[0]=source.pixels[1]=source.pixels[2]=255;source.pixels[3]=128;source.pixels[7]=0;}
     pipeline::EnhanceGraphDesc gd;gd.enableNr=nr;gd.noFeatures=!nr;gd.runtimeAbsPath=(std::filesystem::path(VEYRA_PROJECT_ROOT)/"runtime_local/nvidia").wstring();
+    if(protect){gd.protection.enabled=true;gd.protection.featherPixels=0;gd.protection.regions[0]={0,0,1,1};}
     std::atomic<bool> cancel=false;engine::TiledImageProcessor::Stats stats;sink::RgbaImage result;
     bool ok=engine::TiledImageProcessor::process(ctx,ring,source,result,gd,cancel,stats);
     int maxError=0;uint64_t brightness=0;
     if(ok){ok=result.width==width&&result.height==height&&result.pixels.size()==source.pixels.size();
         for(size_t i=0;i<result.pixels.size();++i){int expected=source.pixels[i];if(!nr&&i<8)expected=i%4==3?255:(i<4?188:0);maxError=std::max(maxError,std::abs(int(result.pixels[i])-expected));if(i%4!=3)brightness+=result.pixels[i];}
-        ok=ok&&brightness>0&&(nr?stats.nrEvaluations==stats.tiles:maxError<=1);
-        sink::RgbaImage decoded;auto path=directory/(std::to_string(width)+"x"+std::to_string(height)+(nr?"-tiled-nr.png":"-tiled-off.png"));
+        ok=ok&&brightness>0&&(nr?stats.nrEvaluations==stats.tiles&&(!protect||maxError<=1):maxError<=1);
+        sink::RgbaImage decoded;auto path=directory/(std::to_string(width)+"x"+std::to_string(height)+(protect?"-tiled-protected.png":nr?"-tiled-nr.png":"-tiled-off.png"));
         ok=ok&&sink::saveImage(path.wstring(),result)&&sink::loadImage(path.wstring(),decoded)&&decoded.pixels==result.pixels&&decoded.width==width&&decoded.height==height;
     }
-    std::cout<<"IMAGE_TILED "<<width<<'x'<<height<<" nr="<<nr<<" tiles="<<stats.tiles<<" evaluations="<<stats.nrEvaluations<<" maxError8="<<maxError<<" pass="<<ok<<std::endl;
+    std::cout<<"IMAGE_TILED "<<width<<'x'<<height<<" nr="<<nr<<" protect="<<protect<<" tiles="<<stats.tiles<<" evaluations="<<stats.nrEvaluations<<" maxError8="<<maxError<<" pass="<<ok<<std::endl;
     if(ok&&!nr){cancel=false;sink::RgbaImage abandoned;engine::TiledImageProcessor::Stats partial;
         const bool accepted=engine::TiledImageProcessor::process(ctx,ring,source,abandoned,gd,cancel,partial,[&](uint32_t,uint32_t){cancel=true;});
         ok=!accepted&&abandoned.pixels.empty()&&partial.tiles==1;
@@ -151,6 +152,36 @@ bool srPixels(unsigned iw,unsigned ih,unsigned ow,unsigned oh,const std::filesys
     std::cout<<"SR_PIXELS "<<iw<<'x'<<ih<<" -> "<<ow<<'x'<<oh<<" interiorMaxError8="<<error<<" evaluates="<<evals<<" pass="<<ok<<std::endl;
     ring.drainQueue();graph.shutdown();av_frame_free(&f);ring.shutdown();ctx.shutdown();return ok;
 }
+bool protectionPixels(){
+    gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;Status st;gfx::DeviceContextDesc device;
+    if(!ctx.initialize(device,st)||!ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),4,st))return false;
+    pipeline::EnhanceGraph graph(ctx,ring);pipeline::EnhanceGraphDesc gd;
+    gd.sourceWidth=gd.sourceHeight=gd.workWidth=gd.workHeight=256;gd.rgbInput=gd.stillImage=true;gd.enableNr=true;gd.enableFg=false;
+    gd.runtimeAbsPath=(std::filesystem::path(VEYRA_PROJECT_ROOT)/"runtime_local/nvidia").wstring();
+    if(!graph.initialize(gd)||!graph.createViews())return false;
+    AVFrame* f=av_frame_alloc();f->format=AV_PIX_FMT_RGBA;f->width=f->height=256;
+    if(av_frame_get_buffer(f,32)<0){av_frame_free(&f);return false;}
+    for(unsigned y=0;y<256;++y)for(unsigned x=0;x<256;++x){auto* p=f->data[0]+size_t(y)*f->linesize[0]+x*4;p[0]=(x*7+y*3)%256;p[1]=(x*3+y*11)%256;p[2]=(x*5+y*17)%256;p[3]=255;}
+    sink::RgbaImage baseline;bool ok=true;int protectedError=0,outsideError=0;uint64_t changed=0;
+    for(unsigned mode=0;mode<4&&ok;++mode){
+        engine::EnhancementSettings settings;settings.protection.enabled=mode>0;settings.protection.featherPixels=0;
+        if(mode==2)settings.protection.regions[0]={0,0,1,1};
+        if(mode==3)settings.protection.regions[0]={.25f,.25f,.75f,.75f};
+        pipeline::EnhanceGraph::FrameOutputs out;sink::RgbaImage result;
+        ok=graph.applySettings(settings)&&graph.process(f,0,true,out,mode+1)&&sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),result);
+        if(ok){if(!mode)baseline=result;
+            for(unsigned y=0;y<256;++y)for(unsigned x=0;x<256;++x)for(unsigned c=0;c<3;++c){auto i=(size_t(y)*256+x)*4+c;auto original=f->data[0][size_t(y)*f->linesize[0]+x*4+c];
+                if(!mode){changed+=result.pixels[i]!=original;continue;}
+                bool protectedPixel=mode==2||(mode==3&&x>=64&&x<192&&y>=64&&y<192);
+                if(protectedPixel)protectedError=std::max(protectedError,std::abs(int(result.pixels[i])-int(original)));
+                else outsideError=std::max(outsideError,std::abs(int(result.pixels[i])-int(baseline.pixels[i])));
+            }
+        }out={};
+    }
+    ok=ok&&changed>100&&protectedError<=1&&outsideError==0&&graph.metrics().nrEvaluateCount==4;
+    std::cout<<"PROTECTION_PIXELS empty/full/rectangle changed="<<changed<<" protectedError8="<<protectedError<<" outsideError8="<<outsideError<<" nr="<<graph.metrics().nrEvaluateCount<<" pass="<<ok<<std::endl;
+    ring.drainQueue();graph.shutdown();av_frame_free(&f);ring.shutdown();ctx.shutdown();return ok;
+}
 int wmain(int argc,wchar_t** argv){
     if(argc!=2)return 2;CoInitializeEx(nullptr,COINIT_MULTITHREADED);std::filesystem::path directory(argv[1]);std::filesystem::create_directories(directory);
     bool ok=true;for(auto e:{pipeline::Extent{1,1},{257,513},{97,9001},{4097,257},{257,4097}}){if(!run(e.width,e.height,false,directory)){ok=false;break;}}
@@ -167,5 +198,7 @@ int wmain(int argc,wchar_t** argv){
     if(ok)ok=srPixels(256,128,256,256,directory);
     if(ok)ok=srPixels(256,256,256,256,directory);
     if(ok)ok=captureRgb(false)&&captureRgb(true);
+    if(ok)ok=protectionPixels();
+    if(ok)ok=tiled(2561,2561,true,directory,true);
     CoUninitialize();return ok?0:1;
 }

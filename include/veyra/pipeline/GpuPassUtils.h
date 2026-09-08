@@ -106,7 +106,7 @@ struct ComputePass {
     ComPtr<ID3D12RootSignature> rootSig;
     ComPtr<ID3D12PipelineState> pso;
     ComPtr<ID3D12DescriptorHeap> heap;
-    UINT increment = 0;
+    UINT increment = 0, constantCount = 8;
 
     bool loadShader(const char* name, std::vector<uint8_t>& bytes) const
     {
@@ -127,8 +127,10 @@ struct ComputePass {
     }
 
     bool create(ID3D12Device* device, const std::vector<uint8_t>& cs, UINT heapSlots,
-                UINT srvCount = 3, UINT uavCount = 1)
+                UINT srvCount = 3, UINT uavCount = 1, UINT constants = 8)
     {
+        if(constants==0||constants>60)return false;
+        constantCount=constants;
         D3D12_DESCRIPTOR_RANGE1 srvRange{};
         srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
         srvRange.NumDescriptors = srvCount;
@@ -141,7 +143,7 @@ struct ComputePass {
         rp[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
         rp[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
         rp[0].Constants.ShaderRegister = 0;
-        rp[0].Constants.Num32BitValues = 8;
+        rp[0].Constants.Num32BitValues = constantCount;
         rp[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         rp[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
         rp[1].DescriptorTable.NumDescriptorRanges = 1;
@@ -172,14 +174,14 @@ struct ComputePass {
         return true;
     }
 
-    void bind(ID3D12GraphicsCommandList* list, const float constants[8],
+    void bind(ID3D12GraphicsCommandList* list, const float* constants,
               uint64_t srvGpu, uint64_t uavGpu) const
     {
         ID3D12DescriptorHeap* heaps[] = { heap.Get() };
         list->SetDescriptorHeaps(1, heaps);
         list->SetComputeRootSignature(rootSig.Get());
         list->SetPipelineState(pso.Get());
-        list->SetComputeRoot32BitConstants(0, 8, constants, 0);
+        list->SetComputeRoot32BitConstants(0, constantCount, constants, 0);
         const D3D12_GPU_DESCRIPTOR_HANDLE srv{ srvGpu };
         const D3D12_GPU_DESCRIPTOR_HANDLE uav{ uavGpu };
         list->SetComputeRootDescriptorTable(1, srv);

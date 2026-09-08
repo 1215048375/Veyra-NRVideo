@@ -1448,3 +1448,15 @@ Cycle63 evidence: SR60 diagnostic failed76 D3D errors, CopyTextureRegion used4K 
 Cycle63 final60frame diagnostic PASS after actual resource extent fix. Freeze project writes/GPU for independent scoped reviewer.
 
 Cycle63 review complete: scopedPASS, tracked fingerprint unchanged. Local checkpoint; prepare Q5 protection GPU contract and UI/preset closure.
+
+Cycle64 before edit: GPU manual NR protection, maximum4 normalized rectangles with inward pixel feather, defaultdisabled. Thread settings/preset/export/tiled paths, real protected/unprotected GPU pixel checks. Keep private UICorrection experimental, SR/FG protection not claimed; UI closure next cycle. Prior turn progress eba2ec8.
+
+Cycle64 GPU tests PASS: imagea812c02d19.450s protected/outsideerrors0; full2561-square tiledNR9 evaluations maxError0; preset legacy/v2 migration PASS; phase7 0815b4cb PASS. Cycle65 before edit: professional rectangle selection UI, normalized zoom/pan mapping, explicit NR-only labels, clear/toggle and schema-backed presets. No SR/FG automatic-protection claim.
+
+Cycle65 after edit: finalactualSettingsWindow buttons smoke PASS, source-change options hardened, mainEsc cancel wired; independent review pending. Freeze tracked writes/GPU.
+
+Cycles64-65 reviewer FAILP2 protection indicators stale under dirty drafts / unchanged revision master-off. GPU/phase7/preset/UI normal path independentlyPASS; tracked fingerprintunchanged. Fix dedicated sync without numeric repopulation, extend realUI smoke dirty/master-off before recheck.
+
+P2 dedicated indicator synchronization and regression passed locally. Freeze again for reviewerrecheck; no further GPU/codechanges.
+
+Cycles64-65 finalreviewPASS fingerprintunchanged; localcheckpoint before next protection/quality evidence. No push/release/physicalcaptureclaim.

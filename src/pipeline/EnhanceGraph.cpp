@@ -59,6 +59,7 @@ EnhanceGraph::~EnhanceGraph()
 // ---------------------------------------------------------------------------
 bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
 {
+    if(!desc.protection.validate().empty())return false;
     desc_ = desc;tracker_={};prevValid_=false;cadence_.reset();scene_.reset();previousLuma_.clear();
     diagnostics::DiagnosticEvent initDiagnostic;initDiagnostic.stage="initialize";initDiagnostic.identity={epoch_+1,desc.settingsRevision,0};initDiagnostic.resolution.source={desc.sourceWidth,desc.sourceHeight};initDiagnostic.resolution.base=initDiagnostic.resolution.fg=initDiagnostic.resolution.output={desc.workWidth,desc.workHeight};initDiagnostic.resolution.nr={desc.nrWidth?desc.nrWidth:desc.workWidth,desc.nrHeight?desc.nrHeight:desc.workHeight};initDiagnostic.resolution.flow=initDiagnostic.resolution.source;initDiagnostic.flowApplied=std::to_string(unsigned(desc.flowQuality));initDiagnostic.runtimeHash="E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E";Logger::diagnosticContext(initDiagnostic);
     srcW_ = desc.sourceWidth;
@@ -470,7 +471,7 @@ bool EnhanceGraph::createComputePasses()
 {
     std::vector<uint8_t> cs;
     if(!downsamplePass_.loadShader("NrDownsample.dxil",cs)||!downsamplePass_.create(context_.device(),cs,2,1,1))return false;
-    if(!residualPass_.loadShader("NrResidualComposite.dxil",cs)||!residualPass_.create(context_.device(),cs,4,3,1))return false;
+    if(!residualPass_.loadShader("NrResidualComposite.dxil",cs)||!residualPass_.create(context_.device(),cs,4,3,1,24))return false;
     if(!flowAdaptPass_.loadShader("FlowAdapt.dxil",cs)||!flowAdaptPass_.create(context_.device(),cs,3,1,1))return false;
     if (!yuvPass_.loadShader("YuvToLinearRgb.dxil", cs) || !yuvPass_.create(context_.device(), cs, 8, 2, 1)) return false;
     if(desc_.rgbInput&&(!rgbPass_.loadShader("RgbToLinear.dxil",cs)||!rgbPass_.create(context_.device(),cs,4,1,1)))return false;
@@ -997,7 +998,8 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     if(nrEnabled_&&nrHandle_){
         gpuTimer_.mark(list,GpuStage::Residual);
         tracker_.transition(list,residualRgba_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        const auto& r=desc_.residual;const float c[8]={r.total,r.darken,r.brighten,r.color,r.luminance,0,0,0};
+        const auto& r=desc_.residual;float c[24]={r.total,r.darken,r.brighten,r.color,r.luminance,desc_.protection.enabled?1.0f:0.0f,desc_.protection.featherPixels,0};
+        for(size_t i=0;i<4;++i){const auto q=desc_.protection.regions[i];c[8+i*4]=q.left;c[9+i*4]=q.top;c[10+i*4]=q.right;c[11+i*4]=q.bottom;}
         residualPass_.bind(list,c,gpuHandleOf(residualPass_,0).ptr,gpuHandleOf(residualPass_,3).ptr);
         list->Dispatch((workW_+15)/16,(workH_+15)/16,1);tracker_.uavBarrier(list,residualRgba_.Get());tracker_.transition(list,residualRgba_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);gpuTimer_.mark(list,GpuStage::Residual,true);
     }
@@ -1109,7 +1111,7 @@ bool EnhanceGraph::resolveGeneration(FrameOutputs& out)
 
 bool EnhanceGraph::applySettings(const engine::EnhancementSettings& s){
     if(!s.validate().empty()||(s.multiplier>1&&(!fgCapsAvailable_||s.multiplier-1>uint32_t(fgMultiFrameMax_))))return false;
-    desc_.contentRate=s.content;desc_.model=s.model;desc_.residual=s.residual;desc_.settingsRevision=s.revision;
+    desc_.contentRate=s.content;desc_.model=s.model;desc_.residual=s.residual;desc_.protection=s.protection;desc_.settingsRevision=s.revision;
     desc_.fgMultiplier=std::max(2u,s.multiplier);desc_.enableNvofStandalone=s.nr&&!desc_.stillImage;nvofStandalone_=desc_.enableNvofStandalone;
     setNrEnabled(s.nr);setFgEnabled(s.multiplier>1);
     veyra::log::info("settings",std::format("requested revision={} intensity={} tone={} structure={} skin={} style={} autoMask={} UI={} residual={}/{}/{}/{}/{} multiplier={}",s.revision,s.model.intensity,s.model.tone,s.model.structure,s.model.skin,s.model.style,s.model.autoMask,s.model.uiCorrection,s.residual.total,s.residual.darken,s.residual.brighten,s.residual.color,s.residual.luminance,s.multiplier));

@@ -468,3 +468,9 @@ Cycle62 independent scoped PASS: docs/REVIEW_CAPTURE_RGB_2026-09-08.md; full Goa
 Cycle63 SR fixed image87b550aa16.462s and motion60c12206415.8s PASS; diagnostic failurebd4905c3 root-caused/repaired actual texture sizes. Official linear flags0x41; same-size/height-only validated. WORKLOG details; review pending.
 
 Cycle63 reviewer scoped PASS: docs/REVIEW_SR_CONTRACT_2026-09-08.md. FullQ4 visual reconstruction and Q5-Q7 remain.
+
+Cycles64-65 protection GPU imagea812c02d19.450s PASS, presets migration PASS, phase7b9de57f741.751s PASS, finalactualbuttons329fc51e UI9s PASS. App098F6950... NR-only, feather quality/SR/FG/natural andQ6Q7 open. WORKLOG details.
+
+Protection P2 fixed; actualUIcd4088559s PASS dirty draft+master-off same revision indicators. App0654C61F... independent recheckpending.
+
+Protection final independent scopedPASS: docs/REVIEW_NR_PROTECTION_2026-09-08.md; app0654C61F... phase7a178db7f41.477s. P2closed withdirty/master-off regressions; Q5b/Q6/Q7 stillopen.

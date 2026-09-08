@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include <array>
 #include <cstdint>
 #include <string>
 #include "veyra/pipeline/ResolutionPlan.h"
@@ -15,10 +16,28 @@ struct ResidualSettings {
     float total=1,darken=1,brighten=1,color=1,luminance=1;
     bool operator==(const ResidualSettings&) const = default;
 };
+struct ProtectionRect {
+    float left=0,top=0,right=0,bottom=0;
+    bool empty()const{return left==right||top==bottom;}
+    bool operator==(const ProtectionRect&)const=default;
+};
+struct ProtectionSettings {
+    bool enabled=false;
+    float featherPixels=2;
+    std::array<ProtectionRect,4> regions{};
+    bool operator==(const ProtectionSettings&)const=default;
+    std::string validate()const{
+        if(!std::isfinite(featherPixels)||featherPixels<0||featherPixels>32)return "invalid protection feather";
+        for(auto r:regions){for(float v:{r.left,r.top,r.right,r.bottom})if(!std::isfinite(v)||v<0||v>1)return "invalid protection rectangle";
+            if(r.left>r.right||r.top>r.bottom)return "inverted protection rectangle";}
+        return {};
+    }
+};
 struct EnhancementSettings {
     uint64_t revision=1;
     NrSettings model;
     ResidualSettings residual;
+    ProtectionSettings protection;
     bool nr=true,sr=false;
     uint32_t multiplier=1;
     pipeline::NrSizePolicy nrPolicy=pipeline::NrSizePolicy::Realtime;
@@ -27,6 +46,7 @@ struct EnhancementSettings {
     bool operator==(const EnhancementSettings&) const = default;
     std::string validate() const {
         auto range=[](float v,float hi){return std::isfinite(v)&&v>=0&&v<=hi;};
+        if(auto error=protection.validate();!error.empty())return error;
         if(!revision)return "settingsRevision must be nonzero";
         if(!range(model.intensity,1)||!range(model.tone,1)||!range(model.structure,1))return "model parameter out of range";
         if(model.skin!=-1&&!range(model.skin,2))return "skin parameter out of range";

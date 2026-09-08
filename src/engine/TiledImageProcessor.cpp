@@ -50,6 +50,16 @@ bool TiledImageProcessor::process(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotR
                 memcpy(dst+size_t(x)*4,input.pixels.data()+(size_t(sy)*input.width+sx)*4,4);
             }
         }
+        // Source-normalized regions are mapped to this padded tile. Halo exceeds
+        // the maximum feather, so clipping at tile edges cannot alter core pixels.
+        engine::EnhancementSettings tileSettings;tileSettings.nr=desc.enableNr;tileSettings.model=desc.model;tileSettings.residual=desc.residual;tileSettings.protection=desc.protection;
+        for(auto& q:tileSettings.protection.regions){
+            q.left=std::clamp(float(q.left*input.width-originX+halo)/tileW,0.0f,1.0f);
+            q.right=std::clamp(float(q.right*input.width-originX+halo)/tileW,0.0f,1.0f);
+            q.top=std::clamp(float(q.top*input.height-originY+halo)/tileH,0.0f,1.0f);
+            q.bottom=std::clamp(float(q.bottom*input.height-originY+halo)/tileH,0.0f,1.0f);
+        }
+        tileSettings.revision=desc.settingsRevision;if(!graph.applySettings(tileSettings))return false;
         pipeline::EnhanceGraph::FrameOutputs out;sink::RgbaImage tile;
         // Every tile is a new spatial image, never a temporal neighbour.
         if(!graph.process(frame.get(),0,true,out,uint64_t(stats.tiles)+1)||
