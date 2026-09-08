@@ -1,3 +1,15 @@
+# 2026-09-08 GitHub 源码存档准备与 README
+
+用户明确要求建立 Git 存档并上传到 `Likely7/Veyra-DLSS-Video-Player`。本次只修改 README、保留远端既有 LICENSE，并补充存档记录；应用源码与最终 UI v4 EXE 未改，不重新运行构建、GPU 或实卡测试，也不改变 Phase 7 / needs_review。
+
+初始本地 `c557d5f`，94 次提交、661 个历史 blob、248 个当前文件。只读检查发现历史包含已移除的测试 MP4 和 `third_party_local/depth/manifest.json`，当前树没有这些文件。全历史常见密钥模式扫描未发现匹配，不把模式扫描当作绝对安全证明。指定 NR / add-on 身份匹配，Lucide 素材与许可保留。
+
+远端 `main` 初始为 `8556fc7`，只有 README 和 GPL v3 LICENSE。沿用用户仓库已有许可证；保留本地完整历史，在远端初始提交之后追加当前源码快照，不合并或推送本地旧历史。详细范围与后续同步注意事项见 [源码存档记录](SOURCE_ARCHIVE_2026-09-08.md)。上传后的提交身份以 GitHub 远端及本机 `logs/github-archive/` 核对记录为准。
+
+本轮执行 Git 状态 / 历史对象检查、`gh auth status`、`gh repo view`、`git ls-remote` / `fetch`、README 本地链接与格式检查、源码树 / 许可证 / 图标身份检查；结果记录在 `logs/github-archive/`。原始日志、SDK、runtime、用户配置和媒体不随源码上传。原有统一 delivery 门禁差异、实卡体验与长稳仍未解决；本轮不新增产品通过结论。
+
+---
+
 # 2026-09-08 UI v4：常用操作直出与统一玻璃选择器
 
 日常底栏直接提供打开、采集、最近、总增强、SR、播放、音量、字幕、全屏及窗口控制；720px保留全部入口。采用固定来源的Lucide免费图标（完整ISC/Feather MIT通知），字幕和所有应用内下拉框使用同一Desktop Acrylic弹层。保留真实桌面透明与纯黑视频区域。
