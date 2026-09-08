@@ -1,5 +1,13 @@
 # Veyra Loop Journal
 
+## Cycle 49 — 2026-09-08 optimization Goal startup / control drift diagnosis
+
+User started Goal for arbitrary media dimensions, professional preview wheel zoom, and the quality optimization plan; retain export integrity checks and 300-second per-test limit. Unique task: preflight / reconcile before product edits. Hypothesis: prior user-requested archive README no longer matches old control ledger. Expected edits: runtime state only until preflight passes. Actual command: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate preflight`; exit 1 in 2.604 seconds, sole failed check control:README.md. Other control files and both binary identities passed.
+
+Git confirms README exactly matches user-authorized f79ef95, but manifest retains old README hash. Unapplied proposal: logs/optimization-goal-20260908/control-rebaseline-proposal.json and CONTROL_HASHES.proposed.json. Only README entry plus gate's pinned manifest hash would change, no thresholds or logic. Explicit control-stop rule requires authorization; no self-rebaseline or product edit. Local status paused, first occurrence only; Goal is not complete or marked blocked.
+
+Read-only source evidence: EngineController.cpp:89 rejects width>3840, height>2160 or odd dimensions, including images. Presenter currently fits the viewport; no professional preview wheel zoom handler found. Future work must adapt actual GPU/model extents, not merely delete the guard. No build/GPU/media test this cycle. Proposal and diagnosis are new evidence; queue and historical phase evidence preserved.
+
 ## Cycle 48 — independent review and local handoff
 
 Reviewer initial FAIL found3 P1: realtime affected still-image size; NVENC cancel callback outlived block-local captures; second audio source read failure silently dropped audio. Fixed !isImage, scoped EncoderCloser before callback captures die, fail-closed audio inspection. Added real4K image and cancel regression to short gate. Also Play after Stop/EOF now reopens source. Build exit0. Reviewer rerun preflight/phase5=0/0, PASS, logs/delivery/9be0614da5d642e394a35c71d80f6207/result.json,40.31s; cancel43 submitted NVENC pictures/exit3/partial only. Code frozen after PASS. See docs/REVIEW_F6.md. Preserve user-deleted test clip; stage only implementation/document files, local checkpoint only, no package/push.
@@ -1322,3 +1330,71 @@ Protected delivery04388 FAIL legacy23 assertion; protected7 unchanged and fixed 
 User requested direct bottom controls, a free consistent icon set, and glass app selectors. Baseline97ccd19; single writer retained. Native toolbar + Lucide ISC/MIT subset + accessible list/combo popup implemented. Fixed DeferWindowPos hide/show merge, SR effective-state sync, popup synchronous cancel and focus/notification lifetimes. True desktop acrylic and opaque video retained.
 
 Final executable7EEA31511FFA649F3E6B0829F5D1D3A5D454010167A70137786D4430F71E9514: controls/14popup cases PASS1.312s, switch40 PASS15.008s, nativeNR/SR/NaN/bottom controls PASS25.858s. Previous build differs by12DIP compactSR width: fullUI PASS141.503s; image/video/SR/export PASS80.914s. Evidence is version-qualified in docs/UI_CONTROLS_V4_DELIVERY_2026-09-08.md, not combined into a fake Phase7 pass. Actual1280/720 and popup keyboard screenshots retained locally. Independent readonly review scope recorded in docs/REVIEW_UI_CONTROLS_V4_2026-09-08.md. Protected hashes unchanged. No capture stream, runtime change, upload, packaging or shutdown. Global needs_review unchanged. Next: user UI and original capture acceptance.
+
+## 2026-09-08 optimization blocked audit 2
+
+Previous Goal turn classified progress (identified preflight failure and exact authorized-README origin). This automatic continuation is no progress, not a verified process wait: README still F226D0A7 versus expected 781FAFD8; manifest still 26559334; no STOP and no explicit authorization received. Proposal unchanged, no product or control edits. Same blocker for second consecutive Goal turn; goal remains active under the three-turn blocked threshold. No build/GPU/gate rerun performed.
+
+## 2026-09-08 optimization blocked audit 3 — Goal blocked
+
+Previous and current continuation classified no progress, not verified process waits. Read-only revalidation confirms unchanged README F226D0A7 / manifest expectation 781FAFD8, manifest hash 26559334; no explicit authorization for the exact two-hash synchronization. Same blocker for three consecutive Goal turns including startup. Under the explicit control-plane stop rule there is no permitted independent implementation remaining. Mark Goal blocked, retain full Q0–Q8 scope and unapplied proposal; no product/control edits, build or GPU test. Resume requires explicit authorization recorded in INBOX, then exact synchronization and fresh preflight. Not complete.
+
+## Cycle 50 — explicit authorization and resume
+User confirmed exact prior two-hash synchronization (确认，给你全部权限). Applied only README hash in manifest and pinned manifest hash in gate; no validation logic/threshold changes. Revalidate before Q1. Full objective unchanged.
+
+## Cycle 51 — Q1a RGB/odd-size ingestion foundation
+Hypothesis: direct RGBA ingestion avoids 4:2:0 damage and odd-size truncation. Implement bounded GPU RGBA upload and shader, generalized valid texture extents/ceil chroma sizes, WIC allocation bounds and PNG negotiated packing. Test independent shader pixel roundtrip + portrait/odd native NR; full large-image tiling remains Q1b, not claimed done. Product export integrity procedure unchanged.
+
+## Cycle 52 — static image temporal isolation
+Independent Q1a review passed with P2: still images create/warm FG. Skip capability/create/warmup for still images; reject direct FG settings and normalize controller image settings to multiplier 1. Extend real NR test to long portrait before claiming support. Prior phase7 passed: logs/delivery/4c37adc29e6e406c9f7e398fd2a286cd; independent logs/delivery/3af42697442443a6b79e3aab2e78c04b (41.461s). Goal remains incomplete.
+
+## 2026-09-08 Q1a RGB / odd dimensions and static NR isolation
+
+Phase 7 optimization remains in progress. Q1b large-image tiling, Q2 zoom and Q3-Q7 quality work are not passed. Real capture remains unexecuted.
+
+Changes: ResolutionPlan/EnhanceGraph accept odd extents up to actual single-texture 16384; WIC arbitrary 8192 guard removed with checked UINT byte bounds; RGB upload and RgbToLinear avoid 4:2:0 conversion; PNG negotiated BGRA packing fixed; ScaleBlit exact 1:1 load avoids long-image floating-point interpolation error. Static images skip NVOF and FG capability/Create/warmup, reject FG enable, normalize image settings to 1X. Product per-export integrity checks unchanged.
+
+Build command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Root . -Preset x64-release (exit0; logs/optimization-goal-20260908/build-static-final.log).
+Image command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File logs/optimization-goal-20260908/run-image-tests.ps1 (latest image-c17dd1e5813b494e9d25344ebd0c93e1, exit0,4.4185s; EXE 60EEF44E1E36B97182D0EE53A09A782444D7AA01864CD1B617D5677703CF9008).
+Five NR-off cases 1x1,257x513,97x9001,4097x257,257x4097 have max RGB error0 and exact PNG readback. 257x513 and97x9001 real NR: Feature18 Create0x1 Success,handle non-null,SEH0,Evaluate1,nonblack output. FG capability/Create absent; direct enable and 2X apply rejected. This proves execution/dimensions, not NR quality equivalence.
+
+Historical failures retained: image-ece8... missing shader dependency (fixed CMake); image-fe18... long1:1 error6 (fixed ScaleBlit). phase7-rgb failed old 23-frame assertion: actual 12source+11generated+1hold=24,120Hz,0.2sec,audio preserved. Developer delivery gate now checks all those identities/duration/rate for H264/HEVC; it does not change export behavior or add product scans.
+
+Gate command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/loop-gate.ps1 -Gate phase7. Q1a run4c37adc29e6e406c9f7e398fd2a286cd passed; independent reviewer run3af42697442443a6b79e3aab2e78c04b passed41.461s. Static-FG fix runb3c3df19f8b94d3eae6bcfde6aa68679 exit0 preceded final controller normalization/test assertions, so do not claim identical final executable coverage. Independent review_rgb_foundation scoped PASS with P2 static-FG finding subsequently fixed; this subsequent fix awaits review.
+
+Next: Q1b bounded tiles using the same EnhanceGraph, full-size image export and viewport rendering. Inputs beyond single-texture limit still fail explicitly; memory/model/codec limits are real and arbitrary input support is not complete. No runtime replacement, push, artifact upload, packaging or shutdown.
+
+## Cycle 53 — Q1b bounded static-image tiles
+Previous goal turn classified progress: static-image FG isolation and 97x9001 real NR evidence. Fresh preflight exit0; no STOP. Implement reusable image processor on shared EnhanceGraph with bounded overlapping GPU tiles, explicit per-tile reset, full-resolution CPU output and cancellation. Image-only readback; no video pipeline readback. Verify >16384 long inputs, transparent/boundary pixels and actual NR before UI integration. Q1 remains incomplete until integrated and reviewed.
+
+## Cycle 54 — viewport transform required by large-image presentation / Q2
+Q1b tiled service and app save smoke pass (>16384 edge, original full resolution retained). Current bounded preview loses zoom detail; add coherent presentation-only view transform and regenerate large-image viewport from full CPU result. Normal video uses pixel shader UV transform. Wheel only professional hover, middle drag pan and reset, no NGX/source or output-size changes. This is a Q1/Q2 dependency, not an arbitrary queue bypass.
+
+## 2026-09-08 Q1b tiles and Q2 preview candidate (cycles 53–54)
+
+Previous turn classified progress, not wait/no-progress. Fresh preflight passed; STOP absent. Q1a static FG isolation integrated into Q1b. Added TiledImageProcessor using shared EnhanceGraph (1280 core,128 context halo,64 overlap feather; spatial tiles reset independently). Real full-sized CPU result retained for image save. EngineControllerImage presents bounded viewport sampled from full result, reprocesses on settings only, supports original comparison, cancel and rollback. Normal presentation uses PreviewView UVs; professional wheel anchors cursor, middle pan/right reset; new media/daily reset fit. Product video export integrity unchanged.
+
+Release build: scripts/build.ps1 -Root . -Preset x64-release, exit0; logs/optimization-goal-20260908/build-q1b-final.log. Current app SHA256 0409DACD716950F3B674D0B105AAC9972B1B85A8AAC8362EECAA27314166F0E6. Shader identities recorded separately; EXE hash alone does not prove shader identity.
+
+Tests: image-55da6ef7d941450cbbb8d934852191a0, exit0,6.400s (run-image-tests.ps1,275s watchdog). NR-off single texture five sizes exact; 17001x17 and17x17001 tiled14 each, maxError0 including independent half-transparent white->188/transparent->black fixtures; cancellation after first tile returns no output. Real NR97x17001:14 tiles,14 Evaluates, full dimensions,PNG exact readback (pixel quality/equivalence not asserted). Earlier single257x513 and97x9001 real NR remain covered. UiContractTests pass includes pointer anchoring/inverse wheel/pan math.
+
+Application --smoke-zoom --smoke-seconds 9/10 tests: zoom-large-5ae8f78c7c5442ca982871c5638d7c82 (17x17001 NRoff) saved same PNG SHA3E3331C3FF73E636F4F37467F8F0175EE2F1158772E24A5EB0AC1F1A69F525C1 despite zoom; zoom-nr-7918200c1f554761b4af22d7ffd68db4 normal257x513 NR1 unchanged; final app zoom-large-nr-0b7a2fdd8cef4cc1855094d3d3cedbe8 NR14 unchanged,97x17001 full save. Session/revision/output extent preserved; zoom/pan/reset/daily flags pass. App processes bounded25s. Runtime output/dimensions covered; screenshot pixel comparison and real pointer hover routing still need stronger evidence.
+
+Final phase7: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/loop-gate.ps1 -Gate phase7 exit0; logs/delivery/bb35fca4c4e64b269caa7a5eb4243a2d/result.json 41.140s, same app0409..., all software checks pass. Prior run0ff376...41.203s is older app1B943... . Software gate is not full Goal approval. Q1 video model/codec edge limits and tiled visual seams/quality still need review; Q3–Q7 remain. No capture hardware claim, publishing or shutdown.
+
+## Cycle 55 — reviewer P2 save exception / cleanup
+Independent review_tiles_zoom FAIL: unhandled large-image save allocation exception loses result and can destroy presenter before queue drain. Gates pass but do not dismiss finding. Add all-exit drain cleanup and local save/settings exception handling, bounded row packing in PNG/JPEG with same existing decode-back integrity check and owned partial cleanup. Inject one save allocation failure, verify session/NR preserved and retry same path succeeds. No actual memory exhaustion.
+
+### Cycle55 reviewer P2 recovery fix — 2026-09-08
+
+review_tiles_zoom independently passed software gates (3637158bbc434cb3aa6af32f9d62935c40.906s; image-bb9100790cf54d5c85237c8afc1da9d0 6.465s) but scoped verdict FAIL for unhandled save allocation exception and presenter-before-drain unwind. Finding accepted and repaired, not dismissed by green gates.
+
+All-exit cleanup guard now drains shared queue before presenter/graph destruction. Large-image save and settings exceptions retain last successful result; ordinary image saves also preserve playback. WIC channel packing is bounded to row bands instead of another full-size image; existing decode-back extent verification remains unchanged. Partial file is CREATE_NEW-owned and removed after WIC closes on failure, or disarmed after successful rename. No new integrity scans or video-export changes.
+
+Fault injection is opt-in VEYRA_TEST_LARGE_IMAGE_SAVE_THROW=1, once after actual WIC WritePixels (partial exists), not actual system memory exhaustion. App save-recovery-15610c7429934b15803b3e0a5cbc6751 9s smoke/25s watchdog: exception caught; session/output retained; same-path retry success; no partial remains; saved SHA equals source3E3331...525C1. Zoom session/revision/output assertions still pass.
+
+Build scripts/build.ps1 -Root . -Preset x64-release exit0 (build-save-recovery-final.log/build-save-tests.log). Final app SHA5E7BC723B647903851C4DD0265F6CDC1A16BBDCE9AEEF07D6E213808F49BE95E. Image integration image-98845305ab6045a79311ef503ecfee9d exit0,6.515s: prior cases, cancellation, new PNG/JPEG multiple-band1024x3073 solid RGB fixtures pass. Final phase7 via scripts/loop-gate.ps1 exit0; logs/delivery/04815e94852a435a83840eaa45ba0ac1/result.json41.246s matches final app. Reviewer recheck pending.
+
+Read-only Q3 diagnosis: CaptureCardSource packet duration is still default known0; downstream clamp selects83333 ticks incorrectly. Source colorInfo defaults BT709/SD601 but graph reads unresolved AVFrame fields and uses different transfer/matrix defaults. Capture RGB32 also leaves transfer/matrix unspecified and alpha is not guaranteed meaningful. Next Q3 must resolve once, carry actual sample/nominal duration, and retain explicit fallback logging; no Q3 code changes yet.
+
+Independent recheck PASS for implemented Q1a/Q1b/Q2 and cycle55 save recovery; see docs/REVIEW_IMAGES_PREVIEW_2026-09-08.md. Current Phase7/Goal remains in_progress. Prepare local checkpoint only; next close remaining input/preview evidence, then Q3–Q7.

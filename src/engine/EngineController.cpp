@@ -42,7 +42,7 @@ void EngineController::dispatch(){
 void EngineController::post(std::function<void()> task){ {std::lock_guard lock(mutex_);stop_=true;pending_=std::move(task);}wake_.notify_one(); }
 bool EngineController::idle()const{std::lock_guard lock(mutex_);return !busy_&&!pending_;}
 void EngineController::open(HWND video,const std::wstring& path,PlayerOptions opts){
-    {std::lock_guard lock(mutex_);snapshot_={};snapshot_.sessionId=++sessionId_;snapshot_.transport=TransportState::Opening;savePath_.clear();desired_=opts.snapshot();desired_.revision=++nextRevision_;snapshot_.desired=desired_;opts=PlayerOptions::from(desired_);}
+    {std::lock_guard lock(mutex_);snapshot_={};previewView_={};snapshot_.sessionId=++sessionId_;snapshot_.transport=TransportState::Opening;savePath_.clear();desired_=opts.snapshot();desired_.revision=++nextRevision_;snapshot_.desired=desired_;opts=PlayerOptions::from(desired_);}
     post([this,video,path,opts]{paused_=false;seekSeconds_=-1;run(video,path,opts);});
 }
 void EngineController::stop(){std::lock_guard lock(mutex_);stop_=true;pending_={};snapshot_.transport=busy_?TransportState::Stopping:TransportState::Empty;}
@@ -50,7 +50,7 @@ void EngineController::pause(bool p){paused_=p;std::lock_guard lock(mutex_);if(s
 void EngineController::setVolume(float gain,bool mute){if(!std::isfinite(gain))return;volume_=std::clamp(gain,0.0f,1.0f);muted_=mute;}
 bool EngineController::requestSettings(EnhancementSettings s){
     if(!s.validate().empty()){veyra::log::warn("settings","invalid whole settings transaction rejected");status(L"整套设置无效，未应用任何字段",false);return false;}
-    std::lock_guard lock(mutex_);s.revision=++nextRevision_;desired_=s;snapshot_.desired=s;snapshot_.applying=true;return true;
+    std::lock_guard lock(mutex_);if(snapshot_.image)s.multiplier=1;s.revision=++nextRevision_;desired_=s;snapshot_.desired=s;snapshot_.applying=true;return true;
 }
 void EngineController::saveFrame(const std::wstring& path){std::lock_guard lock(mutex_);savePath_=path;}
 void EngineController::startExport(const std::wstring& input,const std::wstring& output,PlayerOptions opts,bool hevc){
@@ -77,17 +77,21 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             uint32_t width=0,height=0;double duration=0;
             if(isImage){
                 if(!sink::loadImage(path,image)){status(L"无法解码PNG/JPEG",true);break;}
-                imageFrame=av_frame_alloc();imageFrame->format=AV_PIX_FMT_RGBA;imageFrame->width=image.width;imageFrame->height=image.height;imageFrame->pts=0;imageFrame->color_range=AVCOL_RANGE_JPEG;
+                if(!pipeline::Extent{image.width,image.height}.valid()||uint64_t(image.width)*image.height>16777216){
+                    runLargeImage(window,image,options,ctx,ring);break;
+                }
+                imageFrame=av_frame_alloc();imageFrame->format=AV_PIX_FMT_RGBA;imageFrame->width=image.width;imageFrame->height=image.height;imageFrame->pts=0;imageFrame->color_range=AVCOL_RANGE_JPEG;imageFrame->colorspace=AVCOL_SPC_RGB;imageFrame->color_trc=AVCOL_TRC_IEC61966_2_1;
                 if(av_frame_get_buffer(imageFrame,32)<0){status(L"图片资源分配失败",true);break;}
                 for(unsigned y=0;y<image.height;++y)memcpy(imageFrame->data[0]+size_t(y)*imageFrame->linesize[0],image.pixels.data()+size_t(y)*image.width*4,size_t(image.width)*4);
                 width=image.width;height=image.height;options.fg=false;
+                {std::lock_guard lock(mutex_);desired_.multiplier=1;snapshot_.image=true;snapshot_.desired=desired_;}
             }else{
                 source::SourceOpenDesc od;od.path=path;od.preferHardwareDecode=false;
                 if(!(isCapture?captureSource.configure(od):activeSource->open(od))){status(L"无法打开视频，请查看诊断",true);break;}
                 width=activeSource->info().width;height=activeSource->info().height;duration=activeSource->info().duration.toDouble();
             }
-            if(width>3840||height>2160||width%2||height%2){status(L"仅支持偶数尺寸SDR输入，最大3840×2160",true);break;}
-            pipeline::EnhanceGraphDesc gd;gd.sourceWidth=width;gd.sourceHeight=height;
+            if(!pipeline::Extent{width,height}.valid()){status(L"图像尺寸超出单张GPU纹理能力，需要分块处理",true);break;}
+            pipeline::EnhanceGraphDesc gd;gd.sourceWidth=width;gd.sourceHeight=height;gd.rgbInput=isImage;gd.stillImage=isImage;
             const auto resolution=pipeline::ResolutionPlan::make({width,height},options.sr,options.realtime?pipeline::NrSizePolicy::Realtime:pipeline::NrSizePolicy::Native,isImage,1);
             gd.workWidth=resolution.base.width;gd.workHeight=resolution.base.height;gd.nrWidth=resolution.nr.width;gd.nrHeight=resolution.nr.height;
             gd.enableSr=resolution.srApplied;gd.enableNr=options.nr;gd.enableFg=options.fg;gd.fgMultiplier=options.fgMultiplier;gd.enableNvofStandalone=options.nr;
@@ -109,8 +113,10 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 // Save the currently displayed result before a settings transaction
                 // invalidates it. Keep a request queued until a frame exists.
                 std::wstring save;EnhancementSettings requested;{std::lock_guard lock(mutex_);requested=desired_;if(hasOutput)save.swap(savePath_);}
-                if(!save.empty()){sink::RgbaImage result;const auto e=std::filesystem::path(save).extension().wstring();
-                    if(!sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),result)||!sink::saveImage(save,result,e==L".jpg"||e==L".jpeg"))status(L"保存失败（目标文件可能已存在）",true);else{status(L"图片已保存："+save);veyra::log::info("image-save",std::format("saved extent={}x{} revision={}",gd.workWidth,gd.workHeight,options.settings.revision));}}
+                if(!save.empty()){try{sink::RgbaImage result;const auto e=std::filesystem::path(save).extension().wstring();
+                    if(!sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),result)||!sink::saveImage(save,result,e==L".jpg"||e==L".jpeg"))status(L"保存失败（目标文件可能已存在），播放已保留",false);else{status(L"图片已保存："+save);veyra::log::info("image-save",std::format("saved extent={}x{} revision={}",gd.workWidth,gd.workHeight,options.settings.revision));}}
+                    catch(const std::exception& e){veyra::log::warn("image-save",std::format("save exception; retaining session: {}",e.what()));status(L"保存异常，播放已保留；可再次保存",false);}}
+                if(isImage)requested.multiplier=1;
                 const auto previous=options.snapshot();const auto previousDesc=gd;bool transaction=false;
                 if(requested.revision!=previous.revision){
                     auto next=PlayerOptions::from(requested);auto nextDesc=gd;
@@ -133,7 +139,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 }
                 if(!transaction&&((paused_&&seek<0)||(isImage&&hasOutput))){
                     if(audioStarted)audioPipe.setPaused(true);wasPaused=true;
-                    if(hasOutput&&!presenter.present(ctx,ring,graph,out.videoSlot,false,comparisonMode_,comparisonBase_,comparisonSplit_,out.batch.identity)){status(L"画面呈现失败",true);break;}
+                    if(hasOutput&&!presenter.present(ctx,ring,graph,out.videoSlot,false,comparisonMode_,comparisonBase_,comparisonSplit_,out.batch.identity,previewView())){status(L"画面呈现失败",true);break;}
                     std::this_thread::sleep_for(std::chrono::milliseconds(16));continue;
                 }
                 if(wasPaused&&!paused_){if(audioStarted)audioPipe.setPaused(false);anchor=Clock::now();anchorMs=out.ptsMs;reset=true;wasPaused=false;}
@@ -190,7 +196,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     frameWaitMs+=elapsedMs(waitStart);
                     if(stop_||paused_||seekSeconds_>=0){interrupted=true;break;}
                     const auto begin=Clock::now();const auto before=presenter.submittedCount();
-                    if(!presenter.present(ctx,ring,graph,item.lease->slot,generated,comparisonMode_,comparisonBase_,comparisonSplit_,item.identity)){presentFailed=true;break;}
+                    if(!presenter.present(ctx,ring,graph,item.lease->slot,generated,comparisonMode_,comparisonBase_,comparisonSplit_,item.identity,previewView())){presentFailed=true;break;}
                     framePresentMs+=elapsedMs(begin);
                     item.lease->consumerFence=ring.lastSignaledValue();
                     if(presenter.submittedCount()>before){++submitted;const auto time=host100ns();submissionTimes.push_back(time);while(submissionTimes.size()>1&&time-submissionTimes.front()>10000000)submissionTimes.pop_front();veyra::log::info("submit",std::format("batch={} epoch={} revision={} subframe={} pts100ns={} host100ns={} fence={} (submission, display unmeasured)",out.batch.batchId,item.identity.epoch,item.identity.settingsRevision,item.subframe,item.pts100ns,host100ns(),item.lease->consumerFence));}

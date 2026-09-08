@@ -30,9 +30,14 @@ VSOut vsMain(uint vertexId : SV_VertexID)
 
 float4 psMain(VSOut input) : SV_Target
 {
-    (void)srcDims;
-    (void)dstDims;
-    float4 color=sourceTex.SampleLevel(linearClamp,input.uv,0);
+    // zoom==0 retains the original contract for diagnostic harness callers.
+    float2 uv=input.uv;
+    if(srcDims.w>0){
+        float fit=min(dstDims.x/srcDims.x,dstDims.y/srcDims.y)*srcDims.w;
+        uv=(input.uv-.5)*dstDims.xy/(srcDims.xy*fit)+dstDims.zw;
+        if(any(uv<0)||any(uv>1))return float4(0,0,0,1);
+    }
+    float4 color=sourceTex.SampleLevel(linearClamp,uv,0);
     if(srcDims.z>0.5){float3 c=max(color.rgb,0);color.rgb=lerp(1.055*pow(c,1.0/2.4)-0.055,c*12.92,step(c,0.0031308));}
     return color;
 }

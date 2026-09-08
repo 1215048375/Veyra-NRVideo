@@ -25,6 +25,11 @@ void main(uint3 groupId : SV_GroupID, uint3 localId : SV_GroupThreadID, uint3 gl
     if (globalId.x >= outputWidth || globalId.y >= outputHeight) {
         return;
     }
+    float4 value;
+    if(sourceWidth==outputWidth&&sourceHeight==outputHeight){
+        // Avoid reciprocal/interpolation rounding on tall 1:1 images.
+        value=sourceTex[globalId.xy];
+    }else{
     // Map output pixel center back into source coordinates.
     const float scaleX = float(sourceWidth) / float(outputWidth);
     const float scaleY = float(sourceHeight) / float(outputHeight);
@@ -44,7 +49,8 @@ void main(uint3 groupId : SV_GroupID, uint3 localId : SV_GroupThreadID, uint3 gl
     const float4 s11 = sourceTex[uint2(x1, y1)];
     const float4 top = lerp(s00, s10, fx);
     const float4 bottom = lerp(s01, s11, fx);
-    float4 value = lerp(top, bottom, fy);
+    value = lerp(top, bottom, fy);
+    }
     if (encodeSrgb > 0.5) {
         const float3 c = max(value.rgb, 0.0);
         value.rgb = select(c <= 0.0031308, c * 12.92, 1.055 * pow(c, 1.0/2.4) - 0.055);

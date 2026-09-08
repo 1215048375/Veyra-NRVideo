@@ -6,6 +6,7 @@
 #include <wrl/client.h>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 namespace veyra::sink {
 using Microsoft::WRL::ComPtr;
 bool readRgba8(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotRing& ring,ID3D12Resource* tex,RgbaImage& img) {
@@ -40,7 +41,12 @@ bool loadImage(const std::wstring& path,RgbaImage& img) {
        FAILED(fac->CreateDecoderFromFilename(path.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&dec))||
        FAILED(dec->GetFrame(0,&frame))||FAILED(fac->CreateFormatConverter(&conv))||
        FAILED(conv->Initialize(frame.Get(),GUID_WICPixelFormat32bppRGBA,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom))||
-       FAILED(conv->GetSize(&img.width,&img.height))||img.width==0||img.height==0||img.width>8192||img.height>8192) return false;
+       FAILED(conv->GetSize(&img.width,&img.height))||img.width==0||img.height==0) return false;
+    // WIC CopyPixels has a UINT byte-count contract. Do not substitute an
+    // arbitrary 4K/8K edge limit for checked byte arithmetic.
+    if(uint64_t(img.width)*img.height>std::numeric_limits<UINT>::max()/4){
+        log::error("image","decoded RGBA exceeds WIC CopyPixels buffer capacity");return false;
+    }
     ComPtr<IWICMetadataQueryReader> metadata;
     UINT orientation=1;
     if(SUCCEEDED(frame->GetMetadataQueryReader(&metadata))){PROPVARIANT value{};
@@ -56,23 +62,45 @@ bool loadImage(const std::wstring& path,RgbaImage& img) {
     return SUCCEEDED(oriented->CopyPixels(nullptr,img.width*4,static_cast<UINT>(img.pixels.size()),img.pixels.data()));
 }
 bool saveImage(const std::wstring& path,const RgbaImage& img,bool jpeg) {
-    if(img.pixels.size()!=size_t(img.width)*img.height*4||std::filesystem::exists(path))return false;
+    const uint64_t pixelCount=uint64_t(img.width)*img.height;
+    if(!img.width||!img.height||pixelCount>SIZE_MAX/4||img.pixels.size()!=pixelCount*4||std::filesystem::exists(path))return false;
     const auto temp=path+L".partial";
-    if(std::filesystem::exists(temp))return false;
+    // Own the partial file exclusively; clean it on failure/exception after
+    // WIC releases its handles. Never remove an existing caller's partial.
+    HANDLE file=CreateFileW(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(file==INVALID_HANDLE_VALUE)return false;
+    CloseHandle(file);
+    struct Partial {const std::wstring& path;bool active=true;~Partial(){if(active)DeleteFileW(path.c_str());}} partial{temp};
     ComPtr<IWICImagingFactory> fac;ComPtr<IWICStream> stream;ComPtr<IWICBitmapEncoder> enc;ComPtr<IWICBitmapFrameEncode> frame;ComPtr<IPropertyBag2> opts;
     if(FAILED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&fac)))||
        FAILED(fac->CreateStream(&stream))||FAILED(stream->InitializeFromFilename(temp.c_str(),GENERIC_WRITE))||
        FAILED(fac->CreateEncoder(jpeg?GUID_ContainerFormatJpeg:GUID_ContainerFormatPng,nullptr,&enc))||
        FAILED(enc->Initialize(stream.Get(),WICBitmapEncoderNoCache))||FAILED(enc->CreateNewFrame(&frame,&opts))||
        FAILED(frame->Initialize(opts.Get()))||FAILED(frame->SetSize(img.width,img.height)))return false;
-    auto format=jpeg?GUID_WICPixelFormat24bppBGR:GUID_WICPixelFormat32bppRGBA;
+    auto format=jpeg?GUID_WICPixelFormat24bppBGR:GUID_WICPixelFormat32bppBGRA;
     if(FAILED(frame->SetPixelFormat(&format)))return false;
-    std::vector<uint8_t> bgr;
-    const uint8_t* pixels=img.pixels.data();UINT stride=img.width*4;
-    if(jpeg){bgr.resize(size_t(img.width)*img.height*3);for(size_t i=0;i<img.pixels.size()/4;++i){bgr[i*3]=pixels[i*4+2];bgr[i*3+1]=pixels[i*4+1];bgr[i*3+2]=pixels[i*4];}pixels=bgr.data();stride=img.width*3;}
-    if(FAILED(frame->WritePixels(img.height,stride,stride*img.height,const_cast<BYTE*>(pixels)))||FAILED(frame->Commit())||FAILED(enc->Commit()))return false;
+    if(format!=(jpeg?GUID_WICPixelFormat24bppBGR:GUID_WICPixelFormat32bppBGRA)){
+        log::error("image","encoder negotiated an unsupported pixel format");return false;
+    }
+    const UINT channels=jpeg?3:4;
+    if(!img.width||!img.height||img.width>UINT_MAX/channels)return false;
+    const UINT stride=img.width*channels;
+    const UINT bandHeight=std::min(img.height,std::max(1u,(8u*1024*1024)/stride));
+    std::vector<uint8_t> bgr(size_t(stride)*bandHeight);
+    for(UINT row=0;row<img.height;){
+        const UINT rows=std::min(bandHeight,img.height-row);
+        const auto* pixels=img.pixels.data()+size_t(row)*img.width*4;
+        for(size_t i=0;i<size_t(rows)*img.width;++i){bgr[i*channels]=pixels[i*4+2];bgr[i*channels+1]=pixels[i*4+1];bgr[i*channels+2]=pixels[i*4];if(!jpeg)bgr[i*4+3]=pixels[i*4+3];}
+        if(FAILED(frame->WritePixels(rows,stride,stride*rows,bgr.data())))return false;
+        static LONG saveFaultInjected=0;
+        if(GetEnvironmentVariableW(L"VEYRA_TEST_LARGE_IMAGE_SAVE_THROW",nullptr,0)&&InterlockedCompareExchange(&saveFaultInjected,1,0)==0)throw std::bad_alloc();
+        row+=rows;
+    }
+    if(FAILED(frame->Commit())||FAILED(enc->Commit()))return false;
     frame.Reset();enc.Reset();stream.Reset();RgbaImage check;
     if(!loadImage(temp,check)||check.width!=img.width||check.height!=img.height)return false;
-    return MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_WRITE_THROUGH)!=FALSE;
+    const bool moved=MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_WRITE_THROUGH)!=FALSE;
+    if(moved)partial.active=false;
+    return moved;
 }
 }

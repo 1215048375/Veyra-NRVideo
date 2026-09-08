@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "engineVersion": "veyra-loop-v1",
-  "objective": "Ship Launch V1, not an MVP: one shared engine, native 4K SDR capture/player/export, Feature 18, DLSSG 2X, bounded live lookahead, D3D12 NVENC H.264/HEVC, and product recovery/diagnostics.",
-  "status": "needs_review",
+  "objective": "User-started optimization Goal: remove arbitrary input dimension limits, professional preview wheel zoom, implement current verified quality repairs; retain export integrity checks; each test <=300 seconds.",
+  "status": "running",
   "phase": {
     "id": 7,
-    "name": "Capture latency repair; physical throughput retested, review/user experience pending",
-    "state": "gate_passed",
+    "name": "2026-09-08 dimensions, professional zoom and quality optimization",
+    "state": "in_progress",
     "gate": "phase7"
   },
   "phases": [
@@ -68,40 +68,47 @@
     },
     {
       "id": 7,
-      "name": "Capture latency repair; physical throughput retested, review/user experience pending",
-      "status": "gate_passed",
-      "gateEvidence": "logs/delivery/01b72df768524af9ab0aa8d2e3dbb59e/result.json plus logs/capture-fix-20260907/final-nr-fg.log; capture latency repair candidate",
-      "reviewEvidence": "Current repair attempt ended without a final reviewer verdict. docs/REVIEW_F6.md applies only to the historical checkpoint below.",
-      "commit": "d681541a8fca77e3bfd5f496c8ee2dfe2d6a9031"
+      "name": "2026-09-08 dimensions, professional zoom and quality optimization",
+      "status": "in_progress",
+      "gateEvidence": null,
+      "reviewEvidence": null,
+      "commit": null
     }
   ],
   "cycle": {
-    "completed": 48,
+    "completed": 55,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "Repair v2 known defects fixed and read-only reviewed; broader physical/performance acceptance remains.",
+  "currentTask": "Q1a/Q1b/Q2 implemented scope independently reviewed PASS; remaining visual/video-boundary evidence open",
   "lastGate": {
-    "name": "visible consolidated delivery regression",
+    "name": "phase7",
     "status": "passed",
     "exitCode": 0,
-    "evidence": "logs/delivery/01b72df768524af9ab0aa8d2e3dbb59e/result.json"
+    "evidence": "logs/delivery/04815e94852a435a83840eaa45ba0ac1/result.json41.246s final app5E7BC723..."
   },
-  "lastFailureFingerprint": null,
-  "failureLedger": [],
+  "lastFailureFingerprint": "",
+  "failureLedger": [
+    {
+      "fingerprint": "preflight|control:README.md|expected781FAFD8_actualF226D0A7",
+      "attempts": 1,
+      "hypothesis": "Prior user-authorized README update not synchronized into control manifest",
+      "result": "Confirmed README matches f79ef95; no control mutation",
+      "proposal": "logs/optimization-goal-20260908/control-rebaseline-proposal.json"
+    }
+  ],
   "baselineCommit": "2086282478ae5d1e07e8162d47148633b59882fe",
   "lastGoodCommit": "d681541a8fca77e3bfd5f496c8ee2dfe2d6a9031",
   "openP0P1Findings": [],
   "blockers": [
-    "Read-only reviewer attempt failed without final verdict; needs_review, no new checkpoint.",
     "Current USB2 1080p50 physical throughput passed; user perceived latency/audio/actual FG display cadence still need confirmation.",
     "Public proprietary runtime distribution rights unresolved; local delivery only."
   ],
-  "nextAction": "User accepts current UI and capture experience; see docs/UI_REPAIR_V3_DELIVERY_2026-09-08.md. Old Phase records are not new gate proof.",
-  "updatedAt": "2026-09-07T13:20:00Z",
+  "nextAction": "Close Q1/Q2 remaining 2D tile/visual-hover/video capability evidence, then Q3 duration/color and Q4-Q7 quality work.",
+  "updatedAt": "2026-09-08T09:04:53.6024326Z",
   "deliveryPlan": "docs/ACTIVE_DELIVERY_PLAN.md",
   "captureAcceptance": "throughput_short_test_passed_user_latency_audio_pending",
   "testInvocationLimitSeconds": 300,
@@ -109,7 +116,12 @@
     "logs/f6-diag.json: diagnostic native1080 12frames exit0 (prior to statistics stride correction rebuild)",
     "logs/f4-encode-1080.mp4: actual D3D12 NVENC H264+audio",
     "logs/f4-encode-4k-hevc-fg.mp4: actual D3D12 NVENC HEVC 4K120+audio 39frames",
-    "preflight 71 checks exit0"
+    "preflight 71 checks exit0",
+    "Q1a independent review_rgb_foundation scoped PASS; logs/delivery/3af42697442443a6b79e3aab2e78c04b/result.json 41.461s",
+    "Static NR test image-c17dd1e5813b494e9d25344ebd0c93e1 4.4185s exit0; 97x9001 and 257x513 actual NR Create/Evaluate; FG capability/create absent and enable rejected",
+    "Q1b/Q2 candidate app0409DACD...; final image-55da6...6.400s, zoom-large-nr-0b7a...10s, phase7 bb35fca...41.140s; review pending",
+    "Cycle55 saved failure/retry recovered: save-recovery-15610...; image988453...6.515s includes multi-band PNG/JPEG; phase7 04815...41.246s",
+    "docs/REVIEW_IMAGES_PREVIEW_2026-09-08.md: independent scoped PASS; final phase7 3e2dd555...41.144s; save retry and image matrix independently verified"
   ],
   "reviewBaseCommit": "6f0ebaa687e3966d989bf138c86b6882380f20fb",
   "localDelivery": "capture_fix_candidate_needs_review",
@@ -157,7 +169,7 @@
     "report": "docs/UI_DUAL_MODE_DELIVERY_2026-09-08.md",
     "baselineCommit": "ddc515d",
     "exeSha256": "2DE33230CD3A6556BC8E1399DD93BB8959B8EF37B2BACEF23D1486590AA4D3C6",
-    "updatedAt": "2026-09-07T19:38:07.275382+00:00",
+    "updatedAt": "2026-09-08T03:38:07.275382+08:00",
     "softwareEvidence": [
       "logs/ui-dual-mode/de337338b71e43618c4beaa488d54afb/result.json",
       "logs/repair-v2/joint-91436d0b0f4145c2b6fe6794ff146c68/result.json",
@@ -193,7 +205,7 @@
       "logs/repair-v2/joint-f3c40457ea02481c87dfce0739f51c74/result.json",
       "logs/ui-dual-mode/4k-719b7f3002fa42b88abbad8ba0262137/result.json"
     ],
-    "updatedAt": "2026-09-08T03:16:19.278371+00:00",
+    "updatedAt": "2026-09-08T11:16:19.278371+08:00",
     "testLimitScope": "per_invocation",
     "testLimitSeconds": 300,
     "desktopMaterial": "Windows Desktop Acrylic; actual independent red/blue behind-window proof; empty video opaque black",
@@ -230,5 +242,25 @@
     "phaseApprovalUnchanged": true,
     "captureHardwareTested": false,
     "nextAction": "User validates direct toolbar and themed selectors; existing capture acceptance remains with user."
+  },
+  "historicalPhase7AtOptimizationStart": {
+    "id": 7,
+    "name": "Capture latency repair; physical throughput retested, review/user experience pending",
+    "status": "gate_passed",
+    "gateEvidence": "logs/delivery/01b72df768524af9ab0aa8d2e3dbb59e/result.json plus logs/capture-fix-20260907/final-nr-fg.log; capture latency repair candidate",
+    "reviewEvidence": "Current repair attempt ended without a final reviewer verdict. docs/REVIEW_F6.md applies only to the historical checkpoint below.",
+    "commit": "d681541a8fca77e3bfd5f496c8ee2dfe2d6a9031"
+  },
+  "optimizationGoal": {
+    "status": "running",
+    "baselineCommit": "f79ef95deb2dc0375e7a2adb936e7d4d4298f93a",
+    "plan": "docs/QUALITY_OPTIMIZATION_PLAN_2026-09-08.md",
+    "exportIntegrityChecks": "unchanged",
+    "testInvocationLimitSeconds": 300,
+    "productModified": true,
+    "consecutiveBlockedGoalTurns": 0,
+    "previousGoalTurnClassification": "progress: static FG isolation, long native NR evidence",
+    "currentGoalTurnClassification": "progress: >16384 tiled images in app with full-size save, professional viewport zoom, current gates passed",
+    "controlSynchronizationAuthorization": "2026-09-08 user: 确认，给你全部权限; applies to previously proposed exact two-hash synchronization"
   }
 }

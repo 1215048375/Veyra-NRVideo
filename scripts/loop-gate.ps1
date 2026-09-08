@@ -157,7 +157,7 @@ foreach ($requiredFile in $requiredFiles) {
 }
 
 $controlManifestPath = Join-Path $root "loop\CONTROL_HASHES.json"
-$expectedControlManifestHash = "26559334D3A520682A42B20FD8127F3F297E70686CF139DC9325087047FDC8FC"
+$expectedControlManifestHash = "4D5A30F73E06B59B3D6AD5D4A0AE106A0C3AD808D758418B21CC339D2E28779B"
 if (Test-Path -LiteralPath $controlManifestPath -PathType Leaf) {
     $actualControlManifestHash = (Get-FileHash -LiteralPath $controlManifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
     $manifestHashValid = $actualControlManifestHash -eq $expectedControlManifestHash

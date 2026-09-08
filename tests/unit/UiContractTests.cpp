@@ -4,12 +4,17 @@
 #include "../../apps/veyra/ui/TransportLayout.h"
 #include "../../apps/veyra/ui/UiPreferenceStore.h"
 #include "veyra/sink/AudioGain.h"
+#include "veyra/engine/PreviewView.h"
 #include <iostream>
 #include <vector>
 #include <stdexcept>
 void require(bool value,const char* why){if(!value)throw std::runtime_error(why);}
 int wmain(int argc,wchar_t** argv){try{
     using namespace veyra;
+    {engine::PreviewView v;v.wheel(3,800,300,1000,600,1920,1080);require(std::abs(v.zoom-1.728f)<.0001f,"wheel scale");
+    const float anchored=(800-500)/(1920.0f*(1000.0f/1920)*v.zoom)+v.centerX;require(std::abs(anchored-.8f)<.0001f,"pointer anchor fixed");
+    v.wheel(-3,800,300,1000,600,1920,1080);require(std::abs(v.zoom-1)<.0001f&&std::abs(v.centerX-.5f)<.0001f,"inverse wheel returns same view");
+    v.pan(100,0,1000,600,1920,1080);require(std::abs(v.centerX-.4f)<.0001f,"pan measured in displayed pixels");}
     ui::UiSessionState state;state.configured.multiplier=4;state.configured.sr=true;state.configured.model.intensity=.37f;state.configured.residual.color=1.4f;
     auto before=state.effective();require(state.mode==ui::Mode::Daily,"startup Daily");state.mode=ui::Mode::Professional;require(state.effective()==before,"mode cannot alter settings");state.enhanced=false;auto bypass=state.effective();require(!bypass.nr&&!bypass.sr&&bypass.multiplier==1,"true full bypass");state.enhanced=true;require(state.effective()==before,"restore all settings");
     ui::ChromeLayout daily(1440,900,false,false);require(daily.left==0&&daily.top==0&&daily.viewWidth==1440&&daily.viewHeight==812&&daily.bottom==812,"daily video owns all space above transport");

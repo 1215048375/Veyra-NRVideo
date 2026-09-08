@@ -1,5 +1,11 @@
 # Veyra Human Inbox
 
+## RESOLVED · 2026-09-08 用户明确确认两处 hash 同步
+
+preflight exit1，唯一失败 README hash。当前 README 匹配用户授权的存档提交 f79ef95；其他控制与二进制身份通过。拟仅将 CONTROL_HASHES.json 的 README 项由 781FAFD857A82A19FCC09FDEDB2E00EE2465099E32B5A0857127D648316336E0 同步到 F226D0A74E56E79D16F4FBE34130B0B27DAFACE0631388D0BE09C8ED46753A33，并将 scripts/loop-gate.ps1 固定 manifest hash 由 26559334D3A520682A42B20FD8127F3F297E70686CF139DC9325087047FDC8FC 同步到 4D5A30F73E06B59B3D6AD5D4A0AE106A0C3AD808D758418B21CC339D2E28779B。
+
+不改 README 内容、其他控制 hash、逻辑、阈值或 runtime。用户回复“确认，给你全部权限”后，上述两处同步已执行；preflight 71/71 通过。此前 proposal 与失败日志保留在 logs/optimization-goal-20260908/，当前无需再次授权。
+
 ## 当前交付后唯一用户验收项（2026-09-07）
 
 本机软件已交付，独立复核PASS见docs/REVIEW_F6.md。请接入采集卡，按docs/USER_GUIDE.md测试视频设备/格式/HDMI音频、NR/FG、停止重开、断连和体感延迟。未做实卡测试，不声明硬件通过。NVOF/NVENC本机依赖已能构建运行，不再因为历史SDK阻塞停工。公开分发依然未授权，不能上传/打包运行时。以下旧阻塞为历史，不应自动重启长测或改驱动。

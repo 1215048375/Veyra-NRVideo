@@ -60,6 +60,8 @@ struct EnhanceGraphDesc {
     bool enableNvofStandalone = false; // run NVOF+densify per frame without FG (quality core)
     bool noFeatures = false;     // VEYRA_NO_FEATURES: NVOF/NGX objects skipped
     bool noNgx = false;          // VEYRA_NO_NGX: core/features skipped, NVOF only
+    bool rgbInput = false;       // allocate direct RGBA ingestion before NGX creation
+    bool stillImage = false;     // no temporal motion/FG history for a single image
     uint32_t nrWidth=0,nrHeight=0; // zero preserves legacy native working extent
     uint32_t fgMultiplier=2;
     uint64_t settingsRevision=1;
@@ -168,7 +170,7 @@ public:
     // setNrEnabled also refreshes the section-5 blit SRV (slot 2) so the
     // videoFrame source follows workRgba (NR off) or finalRgba (NR on).
     void setNrEnabled(bool on);
-    void setFgEnabled(bool on) { fgEnabled_ = on; }
+    void setFgEnabled(bool on) { fgEnabled_ = on && !desc_.stillImage; }
     bool fgCreated() const;
 
 private:
@@ -198,6 +200,9 @@ private:
     ComPtr<ID3D12Resource> lumaTex_;
     ComPtr<ID3D12Resource> chromaTex_;
     ComPtr<ID3D12Resource> srcRgba_;
+    ComPtr<ID3D12Resource> rgbTex_,upRgb_[2];
+    uint8_t* mappedRgb_[2]={};
+    size_t rgbPitch_=0;
     ComPtr<ID3D12Resource> workRgba_;
     ComPtr<ID3D12Resource> nrInput_,residualRgba_,nrFlow_,baseFlow_;
     ComPtr<ID3D12Resource> proxyTex_;
@@ -220,6 +225,7 @@ private:
     std::vector<uint8_t> nv12Buf_;
 
     ComputePass yuvPass_, encPass_, decPass_, blitPass_, uploadPass_, densifyPass_;
+    ComputePass rgbPass_;
     ComputePass downsamplePass_,residualPass_,flowAdaptPass_;
     DescriptorStager stager_;
     Microsoft::WRL::ComPtr<ID3D12Resource> sourceReferences_[2],baseReferences_[2];

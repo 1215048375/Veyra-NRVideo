@@ -53,7 +53,12 @@ try{
         Run "inspect-$codec" $ffprobe @('-v','error','-count_frames','-show_streams','-of','json',$file) 10
         $streams=(Get-Content "$dir/inspect-$codec.stdout.log" -Raw|ConvertFrom-Json).streams
         $v=@($streams|Where-Object codec_type -eq 'video')[0];$a=@($streams|Where-Object codec_type -eq 'audio')
-        Check "decode-$codec" ($v.width -eq 3840 -and $v.height -eq 2160 -and $v.codec_name -eq $codec -and [int]$v.nb_read_frames -eq 23 -and $a.Count -ge 1) 'all short exported frames decoded; native4K 2X CFR timeline + audio'
+        # The approved CFR tail policy preserves all 12/60 seconds: 12 source
+        # pictures + 11 actual interpolations + 1 explicit tail hold = 24/120.
+        # This is a developer gate only; the per-export integrity path is unchanged.
+        $exportLog=Get-Content "$dir/export-$codec.stdout.log" -Raw
+        Check "frame-kinds-$codec" ($exportLog -match 'export-counts\] source=12 generated=11 hold=1 output=24 multiplier=2') '12 real + 11 generated + 1 declared CFR tail hold; never count hold as DLSSG'
+        Check "decode-$codec" ($v.width -eq 3840 -and $v.height -eq 2160 -and $v.codec_name -eq $codec -and [int]$v.nb_read_frames -eq 24 -and $v.avg_frame_rate -eq '120/1' -and [math]::Abs([double]$v.duration-0.2) -lt 0.00001 -and $a.Count -ge 1) 'all short frames decoded; native4K 2X CFR frame count, duration, rate and audio'
     }
     Run cancel "$bin/veyra.exe" @($clip4k,'--export-out',"$dir/cancel.mp4",'--cancel-after-ms','3000') 15 3
     Check cancel-not-success ((-not (Test-Path "$dir/cancel.mp4")) -and (Test-Path "$dir/cancel.mp4.partial")) 'cancel drains with live callback; never promotes incomplete output'

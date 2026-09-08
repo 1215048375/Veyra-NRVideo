@@ -8,6 +8,9 @@
 #include <functional>
 #include "veyra/engine/EnhancementSettings.h"
 #include "veyra/diagnostics/FrameMetrics.h"
+#include "veyra/engine/PreviewView.h"
+namespace veyra::sink { struct RgbaImage; }
+namespace veyra::gfx { class D3D12DeviceContext; class CommandSlotRing; }
 namespace veyra::engine {
 struct PlayerOptions { bool nr=true,sr=false,fg=false,realtime=true; uint32_t fgMultiplier=2; EnhancementSettings settings;
     EnhancementSettings snapshot()const{auto s=settings;s.nr=nr;s.sr=sr;s.multiplier=fg?fgMultiplier:1;s.nrPolicy=realtime?pipeline::NrSizePolicy::Realtime:pipeline::NrSizePolicy::Native;return s;}
@@ -39,6 +42,8 @@ public:
     void stop();
     void comparison(int mode,bool base,float split=.5f){comparisonMode_=mode;comparisonBase_=base;comparisonSplit_=std::clamp(split,0.0f,1.0f);}
     void pause(bool p);
+    void previewView(PreviewView view){if(!std::isfinite(view.zoom)||!std::isfinite(view.centerX)||!std::isfinite(view.centerY))return;std::lock_guard lock(mutex_);view.zoom=std::clamp(view.zoom,.05f,64.0f);previewView_=view;}
+    PreviewView previewView()const{std::lock_guard lock(mutex_);return previewView_;}
     void setVolume(float gain,bool mute);
     void seek(double seconds){seekSeconds_.store(seconds);}
     void saveFrame(const std::wstring& path);
@@ -46,11 +51,13 @@ public:
     PlayerSnapshot snapshot()const;
 private:
     void run(HWND,std::wstring,PlayerOptions);
+    void runLargeImage(HWND,const sink::RgbaImage&,PlayerOptions,gfx::D3D12DeviceContext&,gfx::CommandSlotRing&);
     void post(std::function<void()>);
     void dispatch();
     void status(const std::wstring&,bool failed=false);
     mutable std::mutex mutex_;
     PlayerSnapshot snapshot_;
+    PreviewView previewView_;
     std::wstring savePath_;
     std::thread worker_;
     std::condition_variable wake_;std::function<void()> pending_;bool shutdown_=false,busy_=false;

@@ -67,18 +67,21 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
     nrW_=desc.nrWidth?desc.nrWidth:workW_; nrH_=desc.nrHeight?desc.nrHeight:workH_;
     nvofW_ = srcW_;
     nvofH_ = srcH_;
+    if(!Extent{srcW_,srcH_}.valid()||!Extent{workW_,workH_}.valid()){
+        veyra::log::error("resolution","source/output exceeds D3D12 texture dimensions or is empty");return false;
+    }
     if(!Extent{nrW_,nrH_}.valid()||nrW_>workW_||nrH_>workH_){veyra::log::error("resolution","invalid NR extent");return false;}
     veyra::log::info("resolution",std::format("source={}x{} base={}x{} nr={}x{} flow={}x{} fg={}x{} output={}x{}",srcW_,srcH_,workW_,workH_,nrW_,nrH_,nvofW_,nvofH_,workW_,workH_,workW_,workH_));
     srEnabled_ = desc.enableSr;
     nrEnabled_ = desc.enableNr && !desc.noFeatures && !desc.noNgx;
-    fgEnabled_ = desc.enableFg && !desc.noNgx;
+    fgEnabled_ = desc.enableFg && !desc.noNgx && !desc.stillImage;
     nvofStandalone_ = desc.enableNvofStandalone && !desc.noFeatures;
     Status st = Status::Ok;
 
     lumaPitch_ = (static_cast<size_t>(srcW_) + 255) & ~size_t(255);
     chromaPitch_ = lumaPitch_;
     lumaSize_ = lumaPitch_ * srcH_;
-    chromaSize_ = chromaPitch_ * (srcH_ / 2);
+    chromaSize_ = chromaPitch_ * ((srcH_ + 1) / 2);
     dPitch_ = (static_cast<size_t>(workW_) * 4 + 255) & ~size_t(255);
     const size_t dSize = dPitch_ * workH_;
     nv12Buf_.resize(lumaSize_ + chromaSize_);
@@ -125,7 +128,15 @@ bool EnhanceGraph::createResources()
     upZeroDepth_ = makeUploadBuffer(context_.device(), dPitch_ * workH_);
     upZeroMotion_ = makeUploadBuffer(context_.device(), dPitch_ * workH_);
     lumaTex_ = makeTexture(context_.device(), srcW_, srcH_, DXGI_FORMAT_R8_UNORM, true);
-    chromaTex_ = makeTexture(context_.device(), srcW_ / 2, srcH_ / 2, DXGI_FORMAT_R8G8_UNORM, true);
+    chromaTex_ = makeTexture(context_.device(), (srcW_+1) / 2, (srcH_+1) / 2, DXGI_FORMAT_R8G8_UNORM, true);
+    if(desc_.rgbInput){
+        rgbPitch_=(size_t(srcW_)*4+255)&~size_t(255);
+        rgbTex_=makeTexture(context_.device(),srcW_,srcH_,DXGI_FORMAT_R8G8B8A8_UNORM,false);
+        if(!rgbTex_)return false;
+        for(unsigned i=0;i<2;++i){upRgb_[i]=makeUploadBuffer(context_.device(),rgbPitch_*srcH_);
+            if(!upRgb_[i]||FAILED(upRgb_[i]->Map(0,nullptr,reinterpret_cast<void**>(&mappedRgb_[i]))))return false;
+        }
+    }
     srcRgba_ = makeTexture(context_.device(), srcW_, srcH_, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
     workRgba_ = makeTexture(context_.device(), workW_, workH_, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
     for(unsigned i=0;i<2;++i){sourceReferences_[i]=makeTexture(context_.device(),srcW_,srcH_,DXGI_FORMAT_R16G16B16A16_FLOAT,false);baseReferences_[i]=makeTexture(context_.device(),workW_,workH_,DXGI_FORMAT_R16G16B16A16_FLOAT,false);if(!sourceReferences_[i]||!baseReferences_[i])return false;}
@@ -250,6 +261,7 @@ bool EnhanceGraph::initZeroAndDepthTextures()
 
 bool EnhanceGraph::initNvof()
 {
+    if(desc_.stillImage){mvecSource_="single-image (no temporal motion)";return true;}
     if (desc_.noFeatures) {
         veyra::log::info("graph", "VEYRA_NO_FEATURES: NVOF session skipped");
         return true;
@@ -317,6 +329,9 @@ bool EnhanceGraph::initNgxFeatures()
         return false;
     }
 
+    fgCapsAvailable_ = false;
+    fgMultiFrameMax_ = 0;
+    if (!desc_.stillImage) {
     fgBackend_ = std::make_unique<ngx::DlssFgBackend>();
     ngx::DlssFgBackend::Capability fgCaps{};
     const bool fgAvailable = fgBackend_->queryCapability(*coreHost_, fgCaps, st);
@@ -329,6 +344,7 @@ bool EnhanceGraph::initNgxFeatures()
     fgMultiFrameMax_ = fgCaps.multiFrameCountMax;
     veyra::log::info("graph", std::format("FG capability available={} multiFrameMax={}",
         fgCaps.available, fgCaps.multiFrameCountMax));
+    }
 
     nrAdapter_ = std::make_unique<ngx::DlssNrRuntimeAdapter>();
     if (!nrAdapter_->load(desc_.runtimeAbsPath.c_str(), st) ||
@@ -385,10 +401,11 @@ bool EnhanceGraph::initNgxFeatures()
         (void)ring_.waitIdle();
     }
 
+    // Still images have no temporal pair and must not depend on FG support.
     // FG create + warm-up evaluate BEFORE descriptor views (the runtime
     // allocates internals at the first evaluate and would fail after views
     // exist on this system).
-    {
+    if (!desc_.stillImage) {
         ngx::DlssFgBackend::CreateDesc fd{};
         fd.width = workW_; fd.height = workH_;
         fd.renderWidth = workW_; fd.renderHeight = workH_;
@@ -455,6 +472,7 @@ bool EnhanceGraph::createComputePasses()
     if(!residualPass_.loadShader("NrResidualComposite.dxil",cs)||!residualPass_.create(context_.device(),cs,4,3,1))return false;
     if(!flowAdaptPass_.loadShader("FlowAdapt.dxil",cs)||!flowAdaptPass_.create(context_.device(),cs,3,1,1))return false;
     if (!yuvPass_.loadShader("YuvToLinearRgb.dxil", cs) || !yuvPass_.create(context_.device(), cs, 8, 2, 1)) return false;
+    if(desc_.rgbInput&&(!rgbPass_.loadShader("RgbToLinear.dxil",cs)||!rgbPass_.create(context_.device(),cs,4,1,1)))return false;
     if (!encPass_.loadShader("ParityEncode.dxil", cs) || !encPass_.create(context_.device(), cs, 8, 1, 1)) return false;
     if (!decPass_.loadShader("ParityDecode.dxil", cs) || !decPass_.create(context_.device(), cs, 8)) return false;
     if (!blitPass_.loadShader("ScaleBlit.dxil", cs) || !blitPass_.create(context_.device(), cs, 16, 1, 1)) return false;
@@ -516,6 +534,10 @@ bool EnhanceGraph::createViews()
     makeUav(context_.device(),nrFlow_.Get(),DXGI_FORMAT_R16G16_FLOAT,cpu(flowAdaptPass_,1));
     makeUav(context_.device(),baseFlow_.Get(),DXGI_FORMAT_R16G16_FLOAT,cpu(flowAdaptPass_,2));
     // Immutable per-resource views.
+    if(desc_.rgbInput){
+        stagedSrv(rgbTex_.Get(),DXGI_FORMAT_R8G8B8A8_UNORM,rgbPass_,0);
+        makeUav(context_.device(),srcRgba_.Get(),DXGI_FORMAT_R16G16B16A16_FLOAT,cpu(rgbPass_,1));
+    }
     if (viewsTex) stagedSrv(lumaTex_.Get(), DXGI_FORMAT_R8_UNORM, yuvPass_, 0);
     if (viewsTex) stagedSrv(chromaTex_.Get(), DXGI_FORMAT_R8G8_UNORM, yuvPass_, 1);
     if (viewsUav) makeUav(context_.device(), srcRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, cpu(yuvPass_, 2));
@@ -628,7 +650,23 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     if (list == nullptr) { veyra::log::error("graph", "ring acquire"); return false; }
     gpuTimer_.frame({epoch_,desc_.settingsRevision,realFrameIndex_+1},context_.fence());gpuTimer_.mark(list,GpuStage::Color);
 
-    if (frame->format == AV_PIX_FMT_D3D12) {
+    if(desc_.rgbInput){
+        if(frame->format!=AV_PIX_FMT_RGBA&&frame->format!=AV_PIX_FMT_BGRA){
+            veyra::log::error("graph","direct RGB input contract requires RGBA/BGRA frame");return false;
+        }
+        if(frame->width!=int(srcW_)||frame->height!=int(srcH_))return false;
+        for(uint32_t y=0;y<srcH_;++y){
+            auto* dst=mappedRgb_[parity]+y*rgbPitch_;const auto* src=frame->data[0]+ptrdiff_t(y)*frame->linesize[0];
+            if(frame->format==AV_PIX_FMT_RGBA)std::memcpy(dst,src,size_t(srcW_)*4);
+            else for(uint32_t x=0;x<srcW_;++x){dst[x*4]=src[x*4+2];dst[x*4+1]=src[x*4+1];dst[x*4+2]=src[x*4];dst[x*4+3]=src[x*4+3];}
+        }
+        tracker_.transition(list,rgbTex_.Get(),D3D12_RESOURCE_STATE_COPY_DEST);
+        D3D12_TEXTURE_COPY_LOCATION dst{},src{};dst.pResource=rgbTex_.Get();dst.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        src.pResource=upRgb_[parity].Get();src.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        src.PlacedFootprint.Footprint={DXGI_FORMAT_R8G8B8A8_UNORM,srcW_,srcH_,1,UINT(rgbPitch_)};
+        list->CopyTextureRegion(&dst,0,0,0,&src,nullptr);
+        tracker_.transition(list,rgbTex_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    } else if (frame->format == AV_PIX_FMT_D3D12) {
         auto* d3dFrame = reinterpret_cast<AVD3D12VAFrame*>(frame->data[0]);
         if (d3dFrame == nullptr || d3dFrame->texture == nullptr) {
             veyra::log::error("graph", "null d3d12va frame");
@@ -714,8 +752,8 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         previousLuma_=std::move(sample);
         if(!directUpload){for (uint32_t y = 0; y < srcH_; ++y)
             std::memcpy(mappedLuma_[parity] + y * lumaPitch_, planes[0] + y * lumaPitch_, srcW_);
-        for (uint32_t y = 0; y < srcH_ / 2; ++y)
-            std::memcpy(mappedChroma_[parity] + y * chromaPitch_, planes[1] + y * chromaPitch_, srcW_);}
+        for (uint32_t y = 0; y < (srcH_+1) / 2; ++y)
+            std::memcpy(mappedChroma_[parity] + y * chromaPitch_, planes[1] + y * chromaPitch_, ((srcW_+1)/2)*2);}
         auto copyPlane = [&](ID3D12Resource* texture, ID3D12Resource* upload,
                              DXGI_FORMAT format, UINT width, UINT height, UINT pitch) {
             tracker_.transition(list, texture, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -730,7 +768,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         copyPlane(lumaTex_.Get(), upLuma_[parity].Get(), DXGI_FORMAT_R8_UNORM,
                   srcW_, srcH_, static_cast<UINT>(lumaPitch_));
         copyPlane(chromaTex_.Get(), upChroma_[parity].Get(), DXGI_FORMAT_R8G8_UNORM,
-                  srcW_/2, srcH_/2, static_cast<UINT>(chromaPitch_));
+                  (srcW_+1)/2, (srcH_+1)/2, static_cast<UINT>(chromaPitch_));
         tracker_.transition(list, lumaTex_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         tracker_.transition(list, chromaTex_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     }
@@ -738,7 +776,11 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
 
     // 2. YUV -> RGBA16F.
     tracker_.transition(list, srcRgba_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    {
+    if(desc_.rgbInput){
+        const float c[8]={uintBits(srcW_),uintBits(srcH_),uintBits(frame->color_trc==AVCOL_TRC_LINEAR?0u:(frame->color_trc==AVCOL_TRC_BT709?2u:1u)),0,0,0,0,0};
+        rgbPass_.bind(list,c,gpuHandleOf(rgbPass_,0).ptr,gpuHandleOf(rgbPass_,1).ptr);
+        list->Dispatch((srcW_+15)/16,(srcH_+15)/16,1);
+    }else{
         const float constants[8] = { frame->color_range == AVCOL_RANGE_JPEG ? 0.0f : 1.0f,
             (frame->colorspace == AVCOL_SPC_BT470BG || frame->colorspace == AVCOL_SPC_SMPTE170M) ? 0.0f : 1.0f,
             (frame->color_trc == AVCOL_TRC_BT709 || frame->color_trc == AVCOL_TRC_SMPTE170M) ? 2.0f : 1.0f, 0.0f,
@@ -1044,7 +1086,7 @@ bool EnhanceGraph::resolveGeneration(FrameOutputs& out)
 bool EnhanceGraph::applySettings(const engine::EnhancementSettings& s){
     if(!s.validate().empty()||(s.multiplier>1&&(!fgCapsAvailable_||s.multiplier-1>uint32_t(fgMultiFrameMax_))))return false;
     desc_.contentRate=s.content;desc_.model=s.model;desc_.residual=s.residual;desc_.settingsRevision=s.revision;
-    desc_.fgMultiplier=std::max(2u,s.multiplier);desc_.enableNvofStandalone=s.nr;nvofStandalone_=s.nr;
+    desc_.fgMultiplier=std::max(2u,s.multiplier);desc_.enableNvofStandalone=s.nr&&!desc_.stillImage;nvofStandalone_=desc_.enableNvofStandalone;
     setNrEnabled(s.nr);setFgEnabled(s.multiplier>1);
     veyra::log::info("settings",std::format("requested revision={} intensity={} tone={} structure={} skin={} style={} autoMask={} UI={} residual={}/{}/{}/{}/{} multiplier={}",s.revision,s.model.intensity,s.model.tone,s.model.structure,s.model.skin,s.model.style,s.model.autoMask,s.model.uiCorrection,s.residual.total,s.residual.darken,s.residual.brighten,s.residual.color,s.residual.luminance,s.multiplier));
     return true;
@@ -1140,6 +1182,8 @@ void EnhanceGraph::shutdown()
 
     // Staged explicit release (scope-end destructors then have nothing left).
     decPass_ = ComputePass{};
+    rgbPass_={};rgbTex_.Reset();
+    for(unsigned i=0;i<2;++i){if(upRgb_[i]&&mappedRgb_[i])upRgb_[i]->Unmap(0,nullptr);mappedRgb_[i]=nullptr;upRgb_[i].Reset();}
     downsamplePass_={};residualPass_={};flowAdaptPass_={};
     nrInput_.Reset();residualRgba_.Reset();nrFlow_.Reset();baseFlow_.Reset();
     for(unsigned i=0;i<6;++i){fgDisable_[i].Reset();fgDisableReadback_[i].Reset();generatedLeases_[i].reset();genFrame_[i].Reset();}for(auto& lease:realLeases_)lease.reset();fgDisableInit_.Reset();

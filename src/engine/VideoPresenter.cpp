@@ -17,7 +17,7 @@ bool VideoPresenter::open(gfx::D3D12DeviceContext& ctx,HWND window,pipeline::Enh
     return true;
 }
 void VideoPresenter::refresh(ID3D12Device* device){for(unsigned i=0;i<3;++i){Microsoft::WRL::ComPtr<ID3D12Resource> bb;if(SUCCEEDED(sink_.swapChain()->GetBuffer(i,IID_PPV_ARGS(&bb))))device->CreateRenderTargetView(bb.Get(),nullptr,{rtvs_->GetCPUDescriptorHandleForHeapStart().ptr+size_t(i)*inc_});}}
-bool VideoPresenter::present(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotRing& ring,pipeline::EnhanceGraph& graph,unsigned slot,bool generated,int comparison,bool baseReference,float split,pipeline::FrameIdentity identity) {
+bool VideoPresenter::present(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotRing& ring,pipeline::EnhanceGraph& graph,unsigned slot,bool generated,int comparison,bool baseReference,float split,pipeline::FrameIdentity identity,PreviewView view) {
     RECT rc{};GetClientRect(window_,&rc);if(rc.right<1||rc.bottom<1)return true;
     const auto now=std::chrono::steady_clock::now();
     const auto deferUntil=uint64_t(uintptr_t(GetPropW(window_,L"Veyra.ResizeDeferUntil")));
@@ -39,18 +39,17 @@ bool VideoPresenter::present(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotRing& 
     // Compute contain in CURRENT client coordinates, then map back to buffer
     // coordinates so that the onscreen image keeps its aspect throughout.
     const float scale=std::min(float(rc.right)/graph.workWidth(),float(rc.bottom)/graph.workHeight());
-    const float w=graph.workWidth()*scale*sink_.bufferWidth()/rc.right,h=graph.workHeight()*scale*sink_.bufferHeight()/rc.bottom;
-    D3D12_VIEWPORT viewport{(sink_.bufferWidth()-w)*0.5f,(sink_.bufferHeight()-h)*0.5f,w,h,0,1};
+    D3D12_VIEWPORT viewport{0,0,float(sink_.bufferWidth()),float(sink_.bufferHeight()),0,1};
     D3D12_RECT rect{0,0,LONG(sink_.bufferWidth()),LONG(sink_.bufferHeight())};list->RSSetViewports(1,&viewport);list->RSSetScissorRects(1,&rect);
     ID3D12DescriptorHeap* heaps[]={pass_.heap.Get()};list->SetDescriptorHeaps(1,heaps);list->SetGraphicsRootSignature(pass_.rootSig.Get());list->SetPipelineState(pass_.pso.Get());
-    float dims[8]={float(graph.workWidth()),float(graph.workHeight()),0,0,float(sink_.bufferWidth()),float(sink_.bufferHeight()),0,0};list->SetGraphicsRoot32BitConstants(0,8,dims,0);
+    float dims[8]={float(graph.workWidth()),float(graph.workHeight()),0,view.zoom,float(rc.right),float(rc.bottom),view.centerX,view.centerY};list->SetGraphicsRoot32BitConstants(0,8,dims,0);
     list->SetGraphicsRootDescriptorTable(1,{pass_.heap->GetGPUDescriptorHandleForHeapStart().ptr+size_t(slot+(generated?2:0))*pass_.increment});
     list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);list->DrawInstanced(3,1,0,0);
     if(comparison&&!generated){
         auto* reference=baseReference?graph.baseReference(slot):graph.sourceReference(slot);
         D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=reference;b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;b.Transition.StateBefore=D3D12_RESOURCE_STATE_COMMON;b.Transition.StateAfter=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;list->ResourceBarrier(1,&b);
         dims[2]=1;list->SetGraphicsRoot32BitConstants(0,8,dims,0);list->SetGraphicsRootDescriptorTable(1,{pass_.heap->GetGPUDescriptorHandleForHeapStart().ptr+size_t(8+slot+(baseReference?2:0))*pass_.increment});
-        if(comparison==2)rect.right=LONG(viewport.TopLeftX+viewport.Width*std::clamp(split,0.0f,1.0f));list->RSSetScissorRects(1,&rect);list->DrawInstanced(3,1,0,0);
+        if(comparison==2)rect.right=LONG(std::clamp((rc.right*.5f+(std::clamp(split,0.0f,1.0f)-view.centerX)*graph.workWidth()*scale*view.zoom)*sink_.bufferWidth()/rc.right,0.0f,float(sink_.bufferWidth())));list->RSSetScissorRects(1,&rect);list->DrawInstanced(3,1,0,0);
         std::swap(b.Transition.StateBefore,b.Transition.StateAfter);list->ResourceBarrier(1,&b);
         veyra::log::info("comparison",std::format("real-frame source={} epoch={} revision={} reference={} mode={} split={} (same leased frame)",identity.sourceFrameId,identity.epoch,identity.settingsRevision,baseReference?"base":"input",comparison,split));
     }

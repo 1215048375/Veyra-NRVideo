@@ -142,6 +142,7 @@ endif()
 
 # YUV→RGB shader is shared between the media pipeline and the harness.
 veyra_add_compute_shader(veyra_shader_yuv_to_rgb YuvToLinearRgb)
+veyra_add_compute_shader(veyra_shader_rgb_to_linear RgbToLinear)
 # ScaleBlit: working frame -> swapchain backbuffer (Phase 6 present path).
 veyra_add_compute_shader(veyra_shader_scale_blit ScaleBlit)
 # Nv12Upload: byte buffer -> luma/chroma planes (copy-free upload path).
@@ -311,7 +312,7 @@ if(TARGET veyra_ngx AND TARGET veyra_nvof AND VEYRA_FFMPEG_ROOT)
   target_include_directories(veyra_pipeline PRIVATE ${FFMPEG_INCLUDE_DIRS})
   target_link_libraries(veyra_pipeline PRIVATE veyra_ngx veyra_nvof ${FFMPEG_LIBRARIES})
   add_dependencies(veyra_pipeline
-    veyra_shader_yuv_to_rgb veyra_shader_parity_encode
+    veyra_shader_yuv_to_rgb veyra_shader_rgb_to_linear veyra_shader_parity_encode
     veyra_shader_parity_decode veyra_shader_scale_blit
     veyra_shader_nv12_upload veyra_shader_nvof_densify)
 endif()
@@ -416,6 +417,11 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_include_directories(veyra_repair_contract_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
   add_executable(veyra_repair_parameter_tests tests/integration/RepairParameterTests.cpp)
+  add_executable(veyra_image_dimension_tests tests/integration/ImageDimensionTests.cpp)
+  target_compile_features(veyra_image_dimension_tests PRIVATE cxx_std_20)
+  target_include_directories(veyra_image_dimension_tests PRIVATE ${FFMPEG_INCLUDE_DIRS})
+  target_compile_definitions(veyra_image_dimension_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN VEYRA_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(veyra_image_dimension_tests PRIVATE veyra_engine)
   target_compile_features(veyra_repair_parameter_tests PRIVATE cxx_std_20)
   target_include_directories(veyra_repair_parameter_tests PRIVATE ${FFMPEG_INCLUDE_DIRS})
   target_compile_definitions(veyra_repair_parameter_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN VEYRA_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
@@ -430,7 +436,7 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_link_libraries(veyra_repair_fg_tests PRIVATE veyra_pipeline veyra_sinks veyra_nvof)
 
   # Headless quality-core runner (Playbook R3.3): the phase5 gate's quality
-  add_library(veyra_engine STATIC src/engine/EngineController.cpp src/engine/PresetStore.cpp src/engine/VideoPresenter.cpp src/engine/VideoExportJob.cpp src/engine/ExportJobManager.cpp src/engine/Subtitles.cpp)
+  add_library(veyra_engine STATIC src/engine/EngineController.cpp src/engine/EngineControllerImage.cpp src/engine/TiledImageProcessor.cpp src/engine/PresetStore.cpp src/engine/VideoPresenter.cpp src/engine/VideoExportJob.cpp src/engine/ExportJobManager.cpp src/engine/Subtitles.cpp)
   target_compile_features(veyra_engine PUBLIC cxx_std_20)
   target_compile_options(veyra_engine PRIVATE /utf-8)
   target_compile_definitions(veyra_engine PUBLIC VEYRA_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}" VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
