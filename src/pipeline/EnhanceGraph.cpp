@@ -958,6 +958,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             pb.setF32(p::kSkinStructureStrength, desc_.model.skin);
             pb.setI32(p::kUseAutoMask, desc_.model.autoMask);
             pb.setI32(p::kUICorrection, desc_.model.uiCorrection);
+            if(desc_.nrParameterProbe)desc_.nrParameterProbe(ngxParams_,proxyTex_.Get(),neuralTex_.Get(),nrW_,nrH_);
             static bool injectedFailureConsumed=false;
             if(!injectedFailureConsumed&&desc_.model.style==2&&GetEnvironmentVariableW(L"VEYRA_TEST_REJECT_NR_STYLE2",nullptr,0)){
                 injectedFailureConsumed=true;veyra::log::error("settings-test","injected NR execution rejection before NGX; rollback exercise, not a hardware failure");return false;

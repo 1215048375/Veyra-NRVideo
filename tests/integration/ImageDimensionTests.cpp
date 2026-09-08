@@ -5,9 +5,12 @@
 #include "veyra/engine/EnhancementSettings.h"
 #include "veyra/engine/TiledImageProcessor.h"
 #include "veyra/pipeline/ColorMetadata.h"
+#include "veyra/ngx/NgxParameters.h"
 #include <filesystem>
 #include <iostream>
 #include <cmath>
+#include <vector>
+#include <d3d12sdklayers.h>
 extern "C" {
 #include <libavutil/frame.h>
 #include <libavutil/pixfmt.h>
@@ -210,8 +213,162 @@ bool protectionPixels(){
     std::cout<<"PROTECTION_PIXELS empty/full/rectangle/feather/disjoint changed="<<changed<<" protectedError8="<<protectedError<<" outsideError8="<<outsideError<<" nr="<<graph.metrics().nrEvaluateCount<<" pass="<<ok<<std::endl;
     ring.drainQueue();graph.shutdown();av_frame_free(&f);ring.shutdown();ctx.shutdown();return ok;
 }
+// Two independent temporal sequences share identical input, PTS and history.
+// Readback is diagnostic only; normal playback never calls this test.
+bool protectionMoving(const std::filesystem::path& directory){
+    constexpr unsigned width=256,height=256,frames=12;
+    std::vector<sink::RgbaImage> baseline(frames);
+    auto protectedPixel=[](unsigned x,unsigned y){return (x>=16&&x<112&&y>=16&&y<64)||(x>=32&&x<224&&y>=192&&y<240);};
+    bool ok=true;uint64_t changedOutside=0,changedHud=0,replacedCaption=0;
+    int protectedError=0,outsideError=0;
+    for(unsigned mode=0;mode<2&&ok;++mode){
+        gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;Status st;gfx::DeviceContextDesc device;
+        if(!ctx.initialize(device,st)||!ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),4,st))return false;
+        pipeline::EnhanceGraph graph(ctx,ring);pipeline::EnhanceGraphDesc gd;
+        gd.sourceWidth=gd.workWidth=width;gd.sourceHeight=gd.workHeight=height;
+        gd.rgbInput=gd.enableNr=gd.enableNvofStandalone=true;gd.enableFg=false;
+        gd.runtimeAbsPath=(std::filesystem::path(VEYRA_PROJECT_ROOT)/"runtime_local/nvidia").wstring();
+        gd.protection.enabled=mode==1;gd.protection.featherPixels=0;
+        gd.protection.regions[0]={16.f/width,16.f/height,112.f/width,64.f/height};
+        gd.protection.regions[1]={32.f/width,192.f/height,224.f/width,240.f/height};
+        if(!graph.initialize(gd)||!graph.createViews())return false;
+        AVFrame* f=av_frame_alloc();f->format=AV_PIX_FMT_RGBA;f->width=width;f->height=height;
+        if(av_frame_get_buffer(f,32)<0){av_frame_free(&f);return false;}
+        sink::RgbaImage previousInput;
+        for(unsigned frame=0;frame<frames&&ok;++frame){
+            sink::RgbaImage input;input.width=width;input.height=height;input.pixels.resize(size_t(width)*height*4);
+            for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){
+                auto* p=input.pixels.data()+(size_t(y)*width+x)*4;
+                unsigned sx=(x+frame*3)%width,sy=(y+frame)%height;
+                p[0]=uint8_t(40+(sx*7+sy*3)%160);p[1]=uint8_t(32+(sx*3+sy*11)%176);p[2]=uint8_t(24+(sx*5+sy*17)%192);p[3]=255;
+                if(protectedPixel(x,y)){
+                    // Fixed top HUD; bottom synthetic glyphs change at frames 4/8.
+                    unsigned textPhase=y>=192?frame/4:0;
+                    unsigned gx=(x/3+textPhase*2)%7,gy=(y/3)%9;
+                    bool ink=(gx==1||gx==5||gy==2||gy==6)&&((x/21+textPhase)%3!=1||gy!=2);
+                    p[0]=ink?235:24;p[1]=ink?224:30;p[2]=ink?180:40;
+                }
+                memcpy(f->data[0]+size_t(y)*f->linesize[0]+x*4,p,4);
+            }
+            pipeline::EnhanceGraph::FrameOutputs out;sink::RgbaImage result;
+            ok=graph.process(f,frame*(1000.0/30),frame==0,out,frame+1)&&sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),result);
+            if(ok){ok=result.width==width&&result.height==height&&result.pixels.size()==input.pixels.size();
+                if(!mode)baseline[frame]=result;
+                for(unsigned y=0;y<height&&ok;++y)for(unsigned x=0;x<width;++x)for(unsigned c=0;c<3;++c){
+                    size_t i=(size_t(y)*width+x)*4+c;bool region=protectedPixel(x,y);
+                    if(!mode){if(region)changedHud+=result.pixels[i]!=input.pixels[i];else changedOutside+=result.pixels[i]!=input.pixels[i];}
+                    else if(region){protectedError=std::max(protectedError,std::abs(int(result.pixels[i])-int(input.pixels[i])));
+                        if((frame==4||frame==8)&&y>=192)replacedCaption+=input.pixels[i]!=previousInput.pixels[i]&&result.pixels[i]!=previousInput.pixels[i];
+                    }else outsideError=std::max(outsideError,std::abs(int(result.pixels[i])-int(baseline[frame].pixels[i])));
+                }
+                if(frame==0||frame==4||frame==8||frame==11){
+                    auto prefix="moving-"+std::to_string(frame);
+                    ok=ok&&sink::saveImage((directory/(prefix+(mode?"-protected.png":"-nr.png"))).wstring(),result);
+                    if(!mode)ok=ok&&sink::saveImage((directory/(prefix+"-input.png")).wstring(),input);
+                }
+            }
+            std::cout<<"PROTECTION_MOVING_FRAME mode="<<mode<<" frame="<<frame<<" protectedError8="<<protectedError<<" outsideError8="<<outsideError<<" pass="<<ok<<std::endl;
+            previousInput=std::move(input);out={};
+        }
+        const auto m=graph.metrics();ok=ok&&m.nrEvaluateCount==frames&&m.nvofExecuteCount>=9&&m.nrMotionFrames>=9;
+        std::cout<<"PROTECTION_MOVING_SEQUENCE mode="<<mode<<" nr="<<m.nrEvaluateCount<<" nvof="<<m.nvofExecuteCount<<" motionFrames="<<m.nrMotionFrames<<" resets="<<m.resetCount<<" cuts="<<m.sceneCutCount<<" pass="<<ok<<std::endl;
+        ring.drainQueue();graph.shutdown();av_frame_free(&f);ring.shutdown();ctx.shutdown();
+    }
+    ok=ok&&protectedError<=1&&outsideError==0&&changedOutside>1000&&changedHud>100&&replacedCaption>100;
+    std::cout<<"PROTECTION_MOVING_RESULT protectedError8="<<protectedError<<" outsideError8="<<outsideError<<" changedBackground="<<changedOutside<<" changedHud="<<changedHud<<" freshCaptionChannels="<<replacedCaption<<" pass="<<ok<<std::endl;
+    return ok;
+}
+bool nrOptionalResourcePixels(const std::filesystem::path& directory,bool rgba=false){
+    constexpr unsigned width=256,height=256;const unsigned bytesPerPixel=rgba?4:1;const auto format=rgba?DXGI_FORMAT_R8G8B8A8_UNORM:DXGI_FORMAT_R8_UNORM;
+    sink::RgbaImage baseline,rawBaseline;bool ok=true,matrixMatch=true;uint64_t changed=0;
+    for(unsigned mode=0;mode<8&&ok;++mode){
+        gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;Status st;gfx::DeviceContextDesc device;device.enableDebugLayer=true;
+        if(!ctx.initialize(device,st)||!ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),4,st))return false;
+        // Allocate/upload before graph descriptor creation. No per-frame upload.
+        auto mask=pipeline::makeTexture(ctx.device(),width,height,format,false);
+        auto upload=pipeline::makeUploadBuffer(ctx.device(),width*height*bytesPerPixel);
+        if(!mask||!upload)return false;
+        void* mapped=nullptr;if(FAILED(upload->Map(0,nullptr,&mapped)))return false;
+        for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){
+            bool rect=x>=64&&x<192&&y>=64&&y<192;
+            for(unsigned c=0;c<bytesPerPixel;++c)static_cast<uint8_t*>(mapped)[(y*width+x)*bytesPerPixel+c]=(mode==2||mode==4||mode==6||((mode==3||mode==7)&&rect))?255:0;
+        }upload->Unmap(0,nullptr);
+        uint32_t slot=0;auto* list=ring.acquireNext(slot,st);if(!list)return false;
+        pipeline::StateTracker states;states.transition(list,mask.Get(),D3D12_RESOURCE_STATE_COPY_DEST);
+        D3D12_TEXTURE_COPY_LOCATION dst{},src{};dst.pResource=mask.Get();dst.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        src.pResource=upload.Get();src.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;src.PlacedFootprint.Footprint={format,width,height,1,width*bytesPerPixel};
+        list->CopyTextureRegion(&dst,0,0,0,&src,nullptr);states.transition(list,mask.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        if(!ring.submitAndSignal(slot))return false;ring.drainQueue();
+        pipeline::EnhanceGraph graph(ctx,ring);pipeline::EnhanceGraphDesc gd;
+        gd.sourceWidth=gd.workWidth=width;gd.sourceHeight=gd.workHeight=height;
+        gd.rgbInput=gd.stillImage=gd.enableNr=true;gd.enableFg=false;
+        gd.runtimeAbsPath=(std::filesystem::path(VEYRA_PROJECT_ROOT)/"runtime_local/nvidia").wstring();
+        ID3D12Resource* rawProxy=nullptr;ID3D12Resource* rawNeural=nullptr;
+        gd.nrParameterProbe=[&](NVSDK_NGX_Parameter* parameters,ID3D12Resource* proxy,ID3D12Resource* neural,uint32_t w,uint32_t h){
+            rawProxy=proxy;rawNeural=neural;if(!mode)return;
+            ngx::ParameterBlock pb(parameters);const char* name=mode<=3?"DLSSNR.ControlMask":"DLSSNR.UIAlpha";
+            pb.setD3D12Resource(name,mask.Get());
+            // Pinned author probe uses signed I32 optional subrects; test exact types.
+            for(auto suffix:{"SubrectBaseX","SubrectBaseY","SubrectWidth","SubrectHeight"}){
+                std::string key=std::string(name)+suffix;pb.setI32(key.c_str(),std::string(suffix)=="SubrectWidth"?w:std::string(suffix)=="SubrectHeight"?h:0);
+            }
+            if(mode>=4){
+                pb.setI32("DLSSNR.UICorrection",mode==4?0:1);pb.setD3D12Resource("DLSSNR.Backbuffer",proxy);
+                pb.setI32("DLSSNR.BackbufferSubrectBaseX",0);pb.setI32("DLSSNR.BackbufferSubrectBaseY",0);
+                pb.setI32("DLSSNR.BackbufferSubrectWidth",w);pb.setI32("DLSSNR.BackbufferSubrectHeight",h);
+            }
+        };
+        if(!graph.initialize(gd)||!graph.createViews())return false;
+        AVFrame* f=av_frame_alloc();f->format=AV_PIX_FMT_RGBA;f->width=width;f->height=height;
+        if(av_frame_get_buffer(f,32)<0){av_frame_free(&f);return false;}
+        for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){auto* p=f->data[0]+size_t(y)*f->linesize[0]+x*4;p[0]=(x*7+y*3)%256;p[1]=(x*3+y*11)%256;p[2]=(x*5+y*17)%256;p[3]=255;}
+        pipeline::EnhanceGraph::FrameOutputs out;sink::RgbaImage result;
+        ok=graph.process(f,0,true,out,1)&&sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),result);
+        // Image readback helper requires COMMON; graph internals are SRVs.
+        auto rawStates=[&](bool restore){
+            uint32_t readSlot=0;auto* readList=ring.acquireNext(readSlot,st);if(!readList)return false;
+            for(auto* resource:{rawProxy,rawNeural}){D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                b.Transition={resource,D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,restore?D3D12_RESOURCE_STATE_COMMON:D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,restore?D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE:D3D12_RESOURCE_STATE_COMMON};readList->ResourceBarrier(1,&b);}
+            return ring.submitAndSignal(readSlot);
+        };
+        sink::RgbaImage proxyPixels,neuralPixels;
+        ok=ok&&rawProxy&&rawNeural&&rawStates(false);
+        bool rawPrepared=ok;
+        ok=ok&&rawProxy&&rawNeural&&sink::readRgba8(ctx,ring,rawProxy,proxyPixels)&&sink::readRgba8(ctx,ring,rawNeural,neuralPixels);
+        if(rawPrepared)ok=rawStates(true)&&ok;
+        ok=ok&&proxyPixels.width==width&&proxyPixels.height==height&&neuralPixels.width==width&&neuralPixels.height==height;
+        int rawSourceError=0,rawBaselineError=0,rawAllProxyError=0;bool contractMatch=false;
+        int sourceError=0,baselineError=0;uint64_t sourcePixels=0,baselinePixels=0;
+        if(ok){ok=result.width==width&&result.height==height;if(!mode){baseline=result;rawBaseline=neuralPixels;}
+            for(unsigned y=0;y<height&&ok;++y)for(unsigned x=0;x<width;++x){
+                bool rect=x>=64&&x<192&&y>=64&&y<192;
+                bool sourceExpected=mode==1||mode==6||(mode==3&&!rect)||(mode==7&&rect);
+                sourcePixels+=sourceExpected;baselinePixels+=!sourceExpected;
+                for(unsigned c=0;c<3;++c){auto i=(size_t(y)*width+x)*4+c;auto original=f->data[0][size_t(y)*f->linesize[0]+x*4+c];
+                    rawAllProxyError=std::max(rawAllProxyError,std::abs(int(neuralPixels.pixels[i])-int(proxyPixels.pixels[i])));
+                    if(!mode)changed+=result.pixels[i]!=original;
+                    else if(sourceExpected){sourceError=std::max(sourceError,std::abs(int(result.pixels[i])-int(original)));rawSourceError=std::max(rawSourceError,std::abs(int(neuralPixels.pixels[i])-int(proxyPixels.pixels[i])));}
+                    else {baselineError=std::max(baselineError,std::abs(int(result.pixels[i])-int(baseline.pixels[i])));rawBaselineError=std::max(rawBaselineError,std::abs(int(neuralPixels.pixels[i])-int(rawBaseline.pixels[i])));}
+                }
+            }
+            contractMatch=rawSourceError==0&&rawBaselineError==0&&baselineError==0;matrixMatch=matrixMatch&&contractMatch;
+            ok=ok&&graph.metrics().nrEvaluateCount==1;
+            ok=sink::saveImage((directory/("optional-nr-"+std::to_string(mode)+".png")).wstring(),result)&&ok;
+        }
+        std::cout<<"NR_OPTIONAL format="<<(rgba?"RGBA8":"R8")<<" mode="<<mode<<" finalSourceError8="<<sourceError<<" allRawProxyError8="<<rawAllProxyError<<" contractMatch="<<contractMatch<<" rawProxyError8="<<rawSourceError<<" rawBaselineError8="<<rawBaselineError<<" baselineError8="<<baselineError<<" sourcePixels="<<sourcePixels<<" baselinePixels="<<baselinePixels<<" positiveControl="<<changed<<" nr="<<graph.metrics().nrEvaluateCount<<" pass="<<ok<<std::endl;
+        out={};ring.drainQueue();graph.shutdown();
+        pipeline::ComPtr<ID3D12InfoQueue> iq;uint64_t debugErrors=0;
+        if(FAILED(ctx.device()->QueryInterface(IID_PPV_ARGS(&iq))))ok=false;
+        else for(UINT64 i=0;i<iq->GetNumStoredMessages();++i){SIZE_T size=0;iq->GetMessage(i,nullptr,&size);std::vector<uint8_t> bytes(size);auto* message=reinterpret_cast<D3D12_MESSAGE*>(bytes.data());if(FAILED(iq->GetMessage(i,message,&size))){ok=false;break;}if(message->Severity<=D3D12_MESSAGE_SEVERITY_ERROR){++debugErrors;std::cerr<<message->pDescription<<std::endl;}}
+        ok=ok&&!debugErrors;std::cout<<"NR_OPTIONAL_DEBUG mode="<<mode<<" errors="<<debugErrors<<" pass="<<ok<<std::endl;iq.Reset();
+        av_frame_free(&f);mask.Reset();upload.Reset();ring.shutdown();ctx.shutdown();
+    }
+    std::cout<<"NR_OPTIONAL_MATRIX executionPass="<<ok<<" expectedContractMatch="<<matrixMatch<<std::endl;
+    return ok&&changed>100&&matrixMatch;
+}
 int wmain(int argc,wchar_t** argv){
-    if(argc!=2)return 2;CoInitializeEx(nullptr,COINIT_MULTITHREADED);std::filesystem::path directory(argv[1]);std::filesystem::create_directories(directory);
+    if(argc!=2&&!(argc==3&&(std::wstring(argv[1])==L"--nr-optional"||std::wstring(argv[1])==L"--nr-optional-rgba")))return 2;CoInitializeEx(nullptr,COINIT_MULTITHREADED);std::filesystem::path directory(argv[argc-1]);std::filesystem::create_directories(directory);
+    if(argc==3){bool result=nrOptionalResourcePixels(directory,std::wstring(argv[1])==L"--nr-optional-rgba");CoUninitialize();return result?0:1;}
     bool ok=true;for(auto e:{pipeline::Extent{1,1},{257,513},{97,9001},{4097,257},{257,4097}}){if(!run(e.width,e.height,false,directory)){ok=false;break;}}
     if(ok)ok=run(257,513,true,directory);
     if(ok)ok=run(97,9001,true,directory);
@@ -229,5 +386,6 @@ int wmain(int argc,wchar_t** argv){
     if(ok)ok=protectionPixels();
     if(ok)ok=tiled(2561,2561,true,directory,1);
     if(ok)ok=tiled(2561,2561,true,directory,2);
+    if(ok)ok=protectionMoving(directory);
     CoUninitialize();return ok?0:1;
 }

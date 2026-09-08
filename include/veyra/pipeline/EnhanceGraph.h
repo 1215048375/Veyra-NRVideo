@@ -74,6 +74,9 @@ struct EnhanceGraphDesc {
     std::wstring runtimeAbsPath; // absolute runtime_local/nvidia path
     // Optional stage instrumentation hook (GPU timing experiments).
     std::function<void(const char*)> stageMark;
+    // Isolated contract probes only. Unset by every product entry point.
+    // Caller retains any supplied resources until graph drain/shutdown.
+    std::function<void(NVSDK_NGX_Parameter*,ID3D12Resource*,ID3D12Resource*,uint32_t,uint32_t)> nrParameterProbe;
 };
 
 class EnhanceGraph {
