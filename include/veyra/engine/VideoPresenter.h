@@ -6,12 +6,15 @@
 #include <chrono>
 namespace veyra::gfx { class D3D12DeviceContext; class CommandSlotRing; }
 namespace veyra::pipeline { class EnhanceGraph; }
+namespace veyra::sink { struct RgbaImage; }
 namespace veyra::engine {
 class VideoPresenter {
 public:
     bool open(gfx::D3D12DeviceContext&, HWND, pipeline::EnhanceGraph&);
     bool present(gfx::D3D12DeviceContext&,gfx::CommandSlotRing&,pipeline::EnhanceGraph&,unsigned slot,bool generated,int comparison=0,bool baseReference=false,float split=.5f,pipeline::FrameIdentity identity={},PreviewView view={});
     void close();
+    // Explicit integration-test capture only; never called by playback/export.
+    bool readPresentedFrameForTest(gfx::D3D12DeviceContext&,gfx::CommandSlotRing&,sink::RgbaImage&);
     uint64_t submittedCount() const {return sink_.presentCount();}
 diagnostics::GpuSample blitTiming(ID3D12Fence* f){gpuTimer_.collect(f);return gpuTimer_.last().gpu[size_t(diagnostics::GpuStage::Blit)];}
 private:
@@ -20,6 +23,7 @@ private:
     pipeline::GraphicsPass pass_;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtvs_;
     unsigned inc_=0;
+    unsigned lastBuffer_=0;bool hasPresented_=false;
     HWND window_=nullptr;
     std::chrono::steady_clock::time_point lastResize_{};
     void refresh(ID3D12Device*);

@@ -1,3 +1,4 @@
+#include "veyra/pipeline/ColorMetadata.h"
 // EnhanceGraph implementation - the real GPU chain migrated from
 // tools/player_probe main.cpp (R3.2). Ordering constraints preserved from the
 // injected-layer era evidence: committed resources and NGX/NVOF objects are
@@ -608,7 +609,7 @@ bool EnhanceGraph::createViews()
 // ---------------------------------------------------------------------------
 // process: the per-frame chain (verbatim from the probe lambda).
 // ---------------------------------------------------------------------------
-bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, FrameOutputs& out, uint64_t sourceFrameId)
+bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, FrameOutputs& out, uint64_t sourceFrameId, const ColorDescription* color)
 {
     out = FrameOutputs{};
     out.ptsMs = ptsMs;
@@ -617,6 +618,9 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     diagnostic.resolution.source={srcW_,srcH_};diagnostic.resolution.base={workW_,workH_};diagnostic.resolution.nr={nrW_,nrH_};diagnostic.resolution.flow={nvofW_,nvofH_};diagnostic.resolution.fg=diagnostic.resolution.output={workW_,workH_};diagnostic.runtimeHash="E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E";diagnostic.flowApplied=std::to_string(actualFlowPerf());diagnostic.fallbackReason=mvecSource_;Logger::diagnosticContext(diagnostic);
     static const bool graphOff = GetEnvironmentVariableW(L"VEYRA_GRAPH_OFF", nullptr, 0) != 0;
     if (!frame || !initialized_ || !std::isfinite(ptsMs)) return false;
+    const auto resolved=resolveFrameColor(*frame,color?*color:ColorDescription{});
+    if(resolved.matrix==YuvMatrix::BT2020NCL||resolved.matrix==YuvMatrix::BT2020CL||resolved.transfer==TransferFunction::BT2020_10){veyra::log::error("graph","BT.2020 input is not supported by the BT.601/709 SDR conversion");return false;}
+    if(reset||!realFrameIndex_)veyra::log::info("color",std::format("range={} assumed={} matrix={} assumed={} transfer={} assumed={}",int(resolved.range),resolved.rangeAssumed,int(resolved.matrix),resolved.matrixAssumed,int(resolved.transfer),resolved.transferAssumed));
     if (frame->color_trc == AVCOL_TRC_SMPTE2084 || frame->color_trc == AVCOL_TRC_ARIB_STD_B67) {
         veyra::log::error("graph", "HDR input is unsupported by the V1 SDR pipeline"); return false;
     }
@@ -729,9 +733,9 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             frame->width, frame->height, AV_PIX_FMT_NV12, SWS_POINT,
             nullptr, nullptr, nullptr);
         if (nv12Ctx_ == nullptr) { veyra::log::error("graph", "sws"); return false; }
-        const int colorSpace=(frame->colorspace==AVCOL_SPC_BT470BG||frame->colorspace==AVCOL_SPC_SMPTE170M)?SWS_CS_ITU601:SWS_CS_ITU709;
+        const int colorSpace=resolved.matrix==YuvMatrix::BT601?SWS_CS_ITU601:SWS_CS_ITU709;
         const int* coefficients=sws_getCoefficients(colorSpace);
-        const int full=frame->color_range==AVCOL_RANGE_JPEG?1:0;
+        const int full=resolved.range==ColorRange::Full?1:0;
         if(sws_setColorspaceDetails(nv12Ctx_,coefficients,full,coefficients,full,0,1<<16,1<<16)<0)return false;
         // Planar 8-bit YUV already exposes CPU luma for cadence analysis.
         // Convert directly into the fenced upload slot instead of writing and
@@ -777,13 +781,13 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     // 2. YUV -> RGBA16F.
     tracker_.transition(list, srcRgba_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     if(desc_.rgbInput){
-        const float c[8]={uintBits(srcW_),uintBits(srcH_),uintBits(frame->color_trc==AVCOL_TRC_LINEAR?0u:(frame->color_trc==AVCOL_TRC_BT709?2u:1u)),0,0,0,0,0};
+        const float c[8]={uintBits(srcW_),uintBits(srcH_),uintBits(transferCode(resolved.transfer)),0,0,0,0,0};
         rgbPass_.bind(list,c,gpuHandleOf(rgbPass_,0).ptr,gpuHandleOf(rgbPass_,1).ptr);
         list->Dispatch((srcW_+15)/16,(srcH_+15)/16,1);
     }else{
-        const float constants[8] = { frame->color_range == AVCOL_RANGE_JPEG ? 0.0f : 1.0f,
-            (frame->colorspace == AVCOL_SPC_BT470BG || frame->colorspace == AVCOL_SPC_SMPTE170M) ? 0.0f : 1.0f,
-            (frame->color_trc == AVCOL_TRC_BT709 || frame->color_trc == AVCOL_TRC_SMPTE170M) ? 2.0f : 1.0f, 0.0f,
+        const float constants[8] = { resolved.range==ColorRange::Full?0.0f:1.0f,
+            resolved.matrix==YuvMatrix::BT601?0.0f:1.0f,
+            float(transferCode(resolved.transfer)), 0.0f,
             uintBits(srcW_), uintBits(srcH_), 0.0f, 0.0f };
         yuvPass_.bind(list, constants, gpuHandleOf(yuvPass_, 0).ptr, gpuHandleOf(yuvPass_, 2).ptr);
         list->Dispatch((srcW_ + 15) / 16, (srcH_ + 15) / 16, 1);

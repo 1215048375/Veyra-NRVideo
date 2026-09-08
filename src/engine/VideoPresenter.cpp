@@ -2,6 +2,7 @@
 #include "veyra/pipeline/EnhanceGraph.h"
 #include "veyra/gfx/D3D12DeviceContext.h"
 #include "veyra/gfx/CommandSlotRing.h"
+#include "veyra/sink/ImageExportSink.h"
 namespace veyra::engine {
 bool VideoPresenter::open(gfx::D3D12DeviceContext& ctx,HWND window,pipeline::EnhanceGraph& graph) {
     gpuTimer_.initialize(ctx.device(),ctx.directQueue());window_=window;RECT rc{};GetClientRect(window,&rc);
@@ -55,7 +56,12 @@ bool VideoPresenter::present(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotRing& 
     }
     for(auto& b:barriers)std::swap(b.Transition.StateBefore,b.Transition.StateAfter);list->ResourceBarrier(2,barriers);
     gpuTimer_.mark(list,diagnostics::GpuStage::Blit,true);gpuTimer_.resolve(list);
-    if(!ring.submitAndSignal(commandSlot))return false;gpuTimer_.submitted(ring.lastSignaledValue());return sink_.present(st);
+    if(!ring.submitAndSignal(commandSlot))return false;gpuTimer_.submitted(ring.lastSignaledValue());lastBuffer_=sink_.swapChain()->GetCurrentBackBufferIndex();hasPresented_=true;return sink_.present(st);
 }
-void VideoPresenter::close(){gpuTimer_.close();rtvs_.Reset();pass_={};sink_.shutdown();}
+bool VideoPresenter::readPresentedFrameForTest(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotRing& ring,sink::RgbaImage& image){
+    if(!hasPresented_||!sink_.swapChain()||!ring.drainQueue())return false;
+    Microsoft::WRL::ComPtr<ID3D12Resource> buffer;
+    return SUCCEEDED(sink_.swapChain()->GetBuffer(lastBuffer_,IID_PPV_ARGS(&buffer)))&&sink::readRgba8(ctx,ring,buffer.Get(),image);
+}
+void VideoPresenter::close(){hasPresented_=false;gpuTimer_.close();rtvs_.Reset();pass_={};sink_.shutdown();}
 }

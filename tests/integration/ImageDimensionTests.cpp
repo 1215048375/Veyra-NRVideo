@@ -4,6 +4,7 @@
 #include "veyra/sink/ImageExportSink.h"
 #include "veyra/engine/EnhancementSettings.h"
 #include "veyra/engine/TiledImageProcessor.h"
+#include "veyra/pipeline/ColorMetadata.h"
 #include <filesystem>
 #include <iostream>
 #include <cmath>
@@ -80,6 +81,26 @@ bool codecBands(const std::filesystem::path& directory){
     }
     std::cout<<"IMAGE_CODEC_BANDS pass="<<ok<<std::endl;return ok;
 }
+bool colorFallback(){
+    gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;Status st;gfx::DeviceContextDesc device;
+    if(!ctx.initialize(device,st)||!ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),4,st))return false;
+    pipeline::EnhanceGraph graph(ctx,ring);pipeline::EnhanceGraphDesc gd;gd.sourceWidth=gd.sourceHeight=gd.workWidth=gd.workHeight=64;gd.stillImage=gd.noFeatures=true;gd.enableNr=gd.enableFg=false;
+    if(!graph.initialize(gd)||!graph.createViews())return false;
+    AVFrame* f=av_frame_alloc();f->format=AV_PIX_FMT_YUV420P;f->width=f->height=64;
+    if(av_frame_get_buffer(f,32)<0){av_frame_free(&f);return false;}
+    bool ok=true;uint64_t sequence=0;
+    auto test=[&](int y,int u,int v,AVColorTransferCharacteristic trc,int expectedR,int expectedG,int expectedB){
+        f->color_trc=trc;f->color_range=AVCOL_RANGE_UNSPECIFIED;f->colorspace=AVCOL_SPC_UNSPECIFIED;
+        for(int row=0;row<64;++row)memset(f->data[0]+row*f->linesize[0],y,64);
+        for(int row=0;row<32;++row){memset(f->data[1]+row*f->linesize[1],u,32);memset(f->data[2]+row*f->linesize[2],v,32);}
+        auto metadata=pipeline::resolveFrameColor(*f);pipeline::EnhanceGraph::FrameOutputs out;sink::RgbaImage result;
+        bool pass=graph.process(f,0,true,out,++sequence,&metadata)&&sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),result);
+        if(pass){auto* p=result.pixels.data()+(32*64+32)*4;pass=std::abs(int(p[0])-expectedR)<=2&&std::abs(int(p[1])-expectedG)<=2&&std::abs(int(p[2])-expectedB)<=2;std::cout<<"COLOR_PIXEL transfer="<<trc<<" rgb="<<int(p[0])<<','<<int(p[1])<<','<<int(p[2])<<" pass="<<pass<<std::endl;}
+        out={};return pass;
+    };
+    ok=test(128,128,128,AVCOL_TRC_UNSPECIFIED,142,142,142)&&test(128,128,128,AVCOL_TRC_IEC61966_2_1,130,130,130)&&test(128,128,128,AVCOL_TRC_LINEAR,189,189,189)&&test(81,90,240,AVCOL_TRC_UNSPECIFIED,255,0,0);
+    ring.drainQueue();graph.shutdown();av_frame_free(&f);ring.shutdown();ctx.shutdown();return ok;
+}
 int wmain(int argc,wchar_t** argv){
     if(argc!=2)return 2;CoInitializeEx(nullptr,COINIT_MULTITHREADED);std::filesystem::path directory(argv[1]);std::filesystem::create_directories(directory);
     bool ok=true;for(auto e:{pipeline::Extent{1,1},{257,513},{97,9001},{4097,257},{257,4097}}){if(!run(e.width,e.height,false,directory)){ok=false;break;}}
@@ -88,6 +109,9 @@ int wmain(int argc,wchar_t** argv){
     if(ok)ok=tiled(17001,17,false,directory);
     if(ok)ok=tiled(17,17001,false,directory);
     if(ok)ok=tiled(97,17001,true,directory);
+    if(ok)ok=tiled(2561,2561,false,directory);
+    if(ok)ok=tiled(2561,2561,true,directory);
     if(ok)ok=codecBands(directory);
+    if(ok)ok=colorFallback();
     CoUninitialize();return ok?0:1;
 }

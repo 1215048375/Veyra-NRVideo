@@ -1,4 +1,6 @@
 #include "veyra/source/CaptureCardSource.h"
+#include "veyra/source/CaptureTiming.h"
+#include "veyra/pipeline/ColorMetadata.h"
 #include "veyra/Log.h"
 #include <windows.h>
 #include <dshow.h>
@@ -35,6 +37,7 @@ struct CaptureCardSource::Impl:ISampleGrabberCB {
     // reference. Holding the producer's sole RGB32 sample starves its allocator.
     AVFrame* frame=nullptr;AVFrame* pendingFrame=nullptr;bool pending=false,callbackError=false,configured=false;
     double pendingTime=0,lastPts=0,readAgeMs=0;bool pendingDiscontinuity=false;
+    int64_t nominalDuration100ns=0;pipeline::Rational pendingDuration=pipeline::Rational::unknown();
     uint64_t received=0,dropped=0,lastDrop=0,sequence=0;
     Clock::time_point pendingArrival{},readArrival{},firstArrival{},latestArrival{};
     ComPtr<IGraphBuilder> graph;ComPtr<ICaptureGraphBuilder2> builder;ComPtr<IBaseFilter> device,grabFilter,nullFilter,audioFilter;ComPtr<IAMStreamConfig> config;ComPtr<ISampleGrabber> grab;ComPtr<IMediaControl> control;ComPtr<IMediaEvent> events;
@@ -44,6 +47,8 @@ struct CaptureCardSource::Impl:ISampleGrabberCB {
     ULONG STDMETHODCALLTYPE AddRef()override{return ++refs;}ULONG STDMETHODCALLTYPE Release()override{return --refs;}
     HRESULT STDMETHODCALLTYPE SampleCB(double time,IMediaSample* sample)override{
         const auto arrival=Clock::now();BYTE* data=nullptr;
+        REFERENCE_TIME sampleStart=0,sampleEnd=0;
+        const bool sampleTime=sample&&sample->GetTime(&sampleStart,&sampleEnd)==S_OK;
         const bool valid=sample&&std::isfinite(time)&&SUCCEEDED(sample->GetPointer(&data))&&data&&
             sample->GetActualDataLength()>=LONG(size_t(stride)*info.height);
         {
@@ -57,6 +62,7 @@ struct CaptureCardSource::Impl:ISampleGrabberCB {
                         data+size_t(bottomUp?info.height-1-y:y)*stride,stride);
                 if(pending)++dropped;
                 pending=true;pendingTime=time;pendingArrival=arrival;
+                pendingDuration=captureDuration(sampleStart,sampleEnd,sampleTime,nominalDuration100ns);
                 pendingDiscontinuity=sample->IsDiscontinuity()==S_OK;
                 if(!received)firstArrival=arrival;
                 ++received;latestArrival=arrival;
@@ -90,6 +96,7 @@ bool CaptureCardSource::configure(const SourceOpenDesc& desc){close();p_->lastAu
     if(connected.formattype!=FORMAT_VideoInfo||connected.cbFormat<sizeof(VIDEOINFOHEADER)){freeType(&connected,false);return false;}auto vi=*reinterpret_cast<VIDEOINFOHEADER*>(connected.pbFormat);freeType(&connected,false);
     if(vi.bmiHeader.biWidth<=0||vi.bmiHeader.biWidth>3840||abs(vi.bmiHeader.biHeight)>2160||vi.bmiHeader.biBitCount!=32)return false;
     p.info={};p.info.kind=pipeline::SourceKind::CaptureCard;p.info.width=vi.bmiHeader.biWidth;p.info.height=abs(vi.bmiHeader.biHeight);p.info.averageFps=vi.AvgTimePerFrame>0?1e7/vi.AvgTimePerFrame:0;p.info.duration=pipeline::Rational::unknown();p.bottomUp=vi.bmiHeader.biHeight>0;p.stride=p.info.width*4;
+    p.nominalDuration100ns=vi.AvgTimePerFrame;
     if(audio>=0){if(!bind(unsigned(audio),true,p.audioFilter)||FAILED(p.graph->AddFilter(p.audioFilter.Get(),L"Capture audio"))||FAILED(p.builder->RenderStream(&PIN_CATEGORY_CAPTURE,&MEDIATYPE_Audio,p.audioFilter.Get(),nullptr,nullptr)))return false;}
     if(FAILED(p.graph.As(&p.control))||FAILED(p.graph.As(&p.events))||FAILED(p.grab->SetBufferSamples(FALSE))||FAILED(p.grab->SetCallback(&p,0)))return false;
     for(auto** f:{&p.frame,&p.pendingFrame}){
@@ -97,7 +104,7 @@ bool CaptureCardSource::configure(const SourceOpenDesc& desc){close();p_->lastAu
         (*f)->format=AV_PIX_FMT_BGRA;(*f)->width=p.info.width;(*f)->height=p.info.height;(*f)->color_range=AVCOL_RANGE_JPEG;
         if(av_frame_get_buffer(*f,32)<0)return false;
     }
-    p.configured=true;
+    p.info.color=pipeline::resolveFrameColor(*p.frame);p.configured=true;
     // Log the upstream type after DirectShow has finished negotiation. The
     // RGB32 output's nominal FPS alone is not proof of actual callback cadence.
     AM_MEDIA_TYPE* actual=nullptr;const auto formatHr=p.config->GetFormat(&actual);
@@ -118,12 +125,13 @@ CaptureMetrics CaptureCardSource::metrics()const{
 }
 SourceReadStatus CaptureCardSource::read(pipeline::FramePacket& packet,const AVFrame** frame){auto& p=*p_;*frame=nullptr;if(!p.info.opened)return SourceReadStatus::Error;
     long code=0;LONG_PTR a=0,b=0;while(p.events&&p.events->GetEvent(&code,&a,&b,0)==S_OK){p.events->FreeEventParams(code,a,b);if(code==EC_DEVICE_LOST||code==EC_ERRORABORT)return SourceReadStatus::Error;}
-    double time=0;uint32_t flags=0;uint64_t sequence=0;
+    double time=0;uint32_t flags=0;uint64_t sequence=0;pipeline::Rational duration;
     {
         std::unique_lock lock(p.mutex);p.wake.wait_for(lock,std::chrono::milliseconds(30),[&]{return p.pending||p.callbackError;});
         if(p.callbackError)return SourceReadStatus::Error;
         if(!p.pending)return Impl::Clock::now()-p.lastFrame>std::chrono::seconds(3)?SourceReadStatus::Error:SourceReadStatus::Waiting;
         std::swap(p.frame,p.pendingFrame);p.pending=false;time=p.pendingTime;p.readArrival=p.pendingArrival;
+        duration=p.pendingDuration;
         p.readAgeMs=std::chrono::duration<double,std::milli>(Impl::Clock::now()-p.readArrival).count();
         if(!p.sequence)flags|=static_cast<uint32_t>(pipeline::FrameFlagBits::Open);
         if(p.dropped!=p.lastDrop)flags|=static_cast<uint32_t>(pipeline::FrameFlagBits::Drop);
@@ -131,7 +139,7 @@ SourceReadStatus CaptureCardSource::read(pipeline::FramePacket& packet,const AVF
         if(p.pendingDiscontinuity||(p.sequence&&(time<=p.lastPts||time-p.lastPts>maxGap)))flags|=static_cast<uint32_t>(pipeline::FrameFlagBits::Discontinuity);
         p.lastDrop=p.dropped;p.lastPts=time;sequence=++p.sequence;
     }
-    p.frame->pts=static_cast<int64_t>(time*10000000);packet={};packet.pts={p.frame->pts,10000000};packet.sourceKind=pipeline::SourceKind::CaptureCard;packet.sequence=sequence;packet.flags=flags;packet.sourceEpoch=1;*frame=p.frame;p.lastFrame=Impl::Clock::now();return SourceReadStatus::Frame;
+    p.frame->pts=static_cast<int64_t>(time*10000000);p.frame->duration=duration.isUnknown()?0:duration.to100ns();p.frame->time_base={1,10000000};packet={};packet.pts={p.frame->pts,10000000};packet.duration=duration;packet.colorInfo=p.info.color;packet.sourceKind=pipeline::SourceKind::CaptureCard;packet.sequence=sequence;packet.flags=flags;packet.sourceEpoch=1;*frame=p.frame;p.lastFrame=Impl::Clock::now();return SourceReadStatus::Frame;
 }
 void CaptureCardSource::close()noexcept{
     auto& p=*p_;if(p.control)p.control->Stop();if(p.grab)p.grab->SetCallback(nullptr,0);

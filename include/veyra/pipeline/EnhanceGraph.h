@@ -48,6 +48,7 @@ class NvOfSession;
 }
 
 namespace veyra::pipeline {
+struct ColorDescription;
 
 struct EnhanceGraphDesc {
     uint32_t sourceWidth = 0;
@@ -107,7 +108,7 @@ public:
     // does not own the demuxer). `reset` marks the first frame of a new
     // temporal epoch (open/seek/...): NVOF/FG history is not consumed.
     // Returns false on hard failure (run verdict must FAIL).
-    bool process(const AVFrame* frame, double ptsMs, bool reset, FrameOutputs& out, uint64_t sourceFrameId = 0);
+    bool process(const AVFrame* frame, double ptsMs, bool reset, FrameOutputs& out, uint64_t sourceFrameId = 0, const ColorDescription* color = nullptr);
     // Nonblocking. The scheduler polls at a GPU-ready/deadline boundary; no
     // full image readback and no waits inside the graph's individual passes.
     bool resolveGeneration(FrameOutputs& out);

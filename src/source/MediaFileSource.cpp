@@ -1,4 +1,5 @@
 #include "veyra/source/MediaFileSource.h"
+#include "veyra/pipeline/ColorMetadata.h"
 
 #include <climits>
 #include <cmath>
@@ -68,26 +69,12 @@ pipeline::ColorDescription MediaFileSource::parseColor(const AVCodecParameters* 
     default: cd.primaries = pipeline::ColorPrimaries::Unknown; break;
     }
 
-    // Documented, logged defaults when the container is silent (Playbook 9):
-    // SD -> BT.601, HD SDR -> BT.709; flagged assumed so the UI can show it.
-    if (cd.matrix == pipeline::YuvMatrix::Unknown) {
-        const bool hd = info_.height >= 700;
-        cd.matrix = hd ? pipeline::YuvMatrix::BT709 : pipeline::YuvMatrix::BT601;
-        cd.matrixAssumed = true;
-    }
-    if (cd.range == pipeline::ColorRange::Unknown) {
-        cd.range = pipeline::ColorRange::Limited;
-        cd.rangeAssumed = true;
-    }
-    if (cd.transfer == pipeline::TransferFunction::Unknown) {
-        cd.transfer = pipeline::TransferFunction::BT709;
-        cd.transferAssumed = true;
-    }
     if (cd.primaries == pipeline::ColorPrimaries::Unknown) {
         cd.primaries = pipeline::ColorPrimaries::BT709;
         cd.primariesAssumed = true;
     }
-    return cd;
+    AVFrame metadata{};metadata.format=params->format;metadata.height=info_.height;metadata.color_range=params->color_range;metadata.colorspace=params->color_space;metadata.color_trc=params->color_trc;
+    return pipeline::resolveFrameColor(metadata,cd);
 }
 
 bool MediaFileSource::open(const SourceOpenDesc& desc)
@@ -207,7 +194,7 @@ SourceReadStatus MediaFileSource::read(pipeline::FramePacket& out, const AVFrame
         out.duration = pipeline::Rational::unknown();
     }
     out.sourceKind = pipeline::SourceKind::File;
-    out.colorInfo = info_.color;
+    out.colorInfo = pipeline::resolveFrameColor(*frame,info_.color);
     out.sourceEpoch = epoch_;
 
     uint32_t flags = 0;

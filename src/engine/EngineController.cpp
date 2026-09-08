@@ -158,11 +158,11 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 const auto processStart=Clock::now();
                 const bool injectedReject=transaction&&!options.nr&&GetEnvironmentVariableW(L"VEYRA_TEST_REJECT_NR_DISABLE",nullptr,0)>0;
                 if(injectedReject)veyra::log::error("settings-test","test-only reject NR-disable transaction before graph process; no driver failure");
-                if(injectedReject||!graph.process(frame,pts,reset||pipeline::breaksHistory(pkt.flags),out,pkt.sequence)){
+                if(injectedReject||!graph.process(frame,pts,reset||pipeline::breaksHistory(pkt.flags),out,pkt.sequence,&pkt.colorInfo)){
                     if(transaction){
                         ring.drainQueue();out={};presenter.close();graph.shutdown();options=PlayerOptions::from(previous);
                         gd=previousDesc;
-                        if(graph.initialize(gd)&&presenter.open(ctx,window,graph)&&graph.createViews()&&graph.process(frame,pts,true,out,pkt.sequence)){
+                        if(graph.initialize(gd)&&presenter.open(ctx,window,graph)&&graph.createViews()&&graph.process(frame,pts,true,out,pkt.sequence,&pkt.colorInfo)){
                             std::lock_guard lock(mutex_);if(desired_.revision==requested.revision)desired_=previous;snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.applying=desired_.revision!=previous.revision;snapshot_.status=L"参数执行失败，已整套回滚";transaction=false;
                         }else{status(L"参数回滚失败，已停止",true);break;}
                     }else{status(L"增强执行失败；请查看日志",true);break;}
@@ -172,7 +172,8 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 reset=false;hasOutput=true;
                 const auto processDone=Clock::now();processTimes.add(elapsedMs(processStart));
                 if(isCapture&&!liveTimeline.anchored(out.batch.identity.epoch)){
-                    const auto duration100ns=pkt.duration.isUnknown()?200000:std::clamp<int64_t>(pkt.duration.to100ns(),83333,1000000);
+                    const auto duration100ns=liveSourceInterval100ns(pkt.duration,activeSource->info().averageFps);
+                    veyra::log::info("capture-timeline",std::format("interval100ns={} packetDurationKnown={} packetDurationPositive={} nominalFps={} FG={}",duration100ns,!pkt.duration.isUnknown(),pkt.duration.num>0,activeSource->info().averageFps,options.fg));
                     liveTimeline.reset(out.batch.identity.epoch,out.batch.b100ns,std::chrono::duration_cast<std::chrono::nanoseconds>(processStart.time_since_epoch()).count()/100,options.fg?duration100ns:0);
                 }
                 if(!audioStarted&&!isImage&&!isCapture&&frames==0){if(audioPipe.open(path)&&audio.start()){audioPipe.startThread(&audio);audioStarted=true;{std::lock_guard lock(mutex_);snapshot_.audioAvailable=true;}}anchor=Clock::now();anchorMs=pts;}

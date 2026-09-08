@@ -76,19 +76,19 @@
     }
   ],
   "cycle": {
-    "completed": 55,
+    "completed": 61,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "Q1a/Q1b/Q2 implemented scope independently reviewed PASS; remaining visual/video-boundary evidence open",
+  "currentTask": "Cycles56-61 independently reviewed PASS; proceed to direct RGB capture",
   "lastGate": {
     "name": "phase7",
     "status": "passed",
     "exitCode": 0,
-    "evidence": "logs/delivery/04815e94852a435a83840eaa45ba0ac1/result.json41.246s final app5E7BC723..."
+    "evidence": "logs/delivery/f3fbdc84e9c54e718e03a94066df28bc/result.json41.453s appCDD4A16..."
   },
   "lastFailureFingerprint": "",
   "failureLedger": [
@@ -107,8 +107,8 @@
     "Current USB2 1080p50 physical throughput passed; user perceived latency/audio/actual FG display cadence still need confirmation.",
     "Public proprietary runtime distribution rights unresolved; local delivery only."
   ],
-  "nextAction": "Close Q1/Q2 remaining 2D tile/visual-hover/video capability evidence, then Q3 duration/color and Q4-Q7 quality work.",
-  "updatedAt": "2026-09-08T09:04:53.6024326Z",
+  "nextAction": "Implement and verify direct RGB capture with opaque BGR0 and shared scene/cadence analysis; then Q4-Q7.",
+  "updatedAt": "2026-09-08T09:32:12.0342288Z",
   "deliveryPlan": "docs/ACTIVE_DELIVERY_PLAN.md",
   "captureAcceptance": "throughput_short_test_passed_user_latency_audio_pending",
   "testInvocationLimitSeconds": 300,
@@ -121,7 +121,9 @@
     "Static NR test image-c17dd1e5813b494e9d25344ebd0c93e1 4.4185s exit0; 97x9001 and 257x513 actual NR Create/Evaluate; FG capability/create absent and enable rejected",
     "Q1b/Q2 candidate app0409DACD...; final image-55da6...6.400s, zoom-large-nr-0b7a...10s, phase7 bb35fca...41.140s; review pending",
     "Cycle55 saved failure/retry recovered: save-recovery-15610...; image988453...6.515s includes multi-band PNG/JPEG; phase7 04815...41.246s",
-    "docs/REVIEW_IMAGES_PREVIEW_2026-09-08.md: independent scoped PASS; final phase7 3e2dd555...41.144s; save retry and image matrix independently verified"
+    "docs/REVIEW_IMAGES_PREVIEW_2026-09-08.md: independent scoped PASS; final phase7 3e2dd555...41.144s; save retry and image matrix independently verified",
+    "Cycles56-61:2Dtile,actualGPUpreview,rootqueuehover,odd/tallH264,14 timing checks,4 GPU color goldens; review pending",
+    "docs/REVIEW_COLOR_TIMING_2026-09-08.md: scoped independent PASS; phase7 31051b6d 41.143s, image GPU matrix and timing14 passed"
   ],
   "reviewBaseCommit": "6f0ebaa687e3966d989bf138c86b6882380f20fb",
   "localDelivery": "capture_fix_candidate_needs_review",
@@ -259,8 +261,8 @@
     "testInvocationLimitSeconds": 300,
     "productModified": true,
     "consecutiveBlockedGoalTurns": 0,
-    "previousGoalTurnClassification": "progress: static FG isolation, long native NR evidence",
-    "currentGoalTurnClassification": "progress: >16384 tiled images in app with full-size save, professional viewport zoom, current gates passed",
+    "previousGoalTurnClassification": "progress: checkpoint3b2806b reviewed image/preview and save recovery",
+    "currentGoalTurnClassification": "progress: input/preview evidence, actual odd/tall video, capture duration and shared color correction",
     "controlSynchronizationAuthorization": "2026-09-08 user: 确认，给你全部权限; applies to previously proposed exact two-hash synchronization"
   }
 }

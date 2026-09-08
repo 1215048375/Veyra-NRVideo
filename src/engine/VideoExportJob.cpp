@@ -79,7 +79,7 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
                 progress(0,L"此文件时间戳不均匀，当前CFR导出不支持；已保留partial，未改写音画时间轴");
                 veyra::log::error("export-timeline",std::format("CFR rejected source={} pts={} expected={}",sourceCount,packet.pts.toDouble(),expectedPts));error=true;break;
             }
-            pipeline::EnhanceGraph::FrameOutputs out;if(!graph.process(frame,packet.pts.toDouble()*1000,sourceCount==0||pipeline::breaksHistory(packet.flags),out,packet.sequence)){error=true;break;}
+            pipeline::EnhanceGraph::FrameOutputs out;if(!graph.process(frame,packet.pts.toDouble()*1000,sourceCount==0||pipeline::breaksHistory(packet.flags),out,packet.sequence,&packet.colorInfo)){error=true;break;}
             const auto readyStart=std::chrono::steady_clock::now();
             while(!cancel&&!graph.resolveGeneration(out)){
                 if(std::chrono::steady_clock::now()-readyStart>std::chrono::seconds(2)){error=true;break;}

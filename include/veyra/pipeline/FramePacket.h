@@ -150,7 +150,7 @@ struct GpuTextureHandle {
 struct FramePacket {
     uint64_t sequence = 0;        // monotonic per source (0 reserved as invalid)
     Rational pts;
-    Rational duration;
+    Rational duration=Rational::unknown();
     SourceKind sourceKind = SourceKind::Unknown;
     FrameFlags flags = 0;
     ColorDescription colorInfo;
