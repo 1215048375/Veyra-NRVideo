@@ -1231,3 +1231,9 @@ Newdiagnostictarget only. docs/NR_DEPTH_RESPONSE_2026-09-08.md; finaldepth-respo
 
 ## Cycle75 independent scopedPASS
 review_nr_depth_response nointroducedP0/P1/P2. Independentpreflight71/phase7e67dc13783b24976a68fd1118c43a18841.694s75PASS. Actualreview-depth-9678e01163c949b999231759f1fe6fc6exit0/40.440s:all24casesreproduce,depthzerochange/intensityandMVpositive,NR12NVOF11motion11reset1/debug0. Raw/residentcopy/pointer/per-frame comparisonreviewed; no universaldepthignoredclaim. docs/REVIEW_NR_DEPTH_RESPONSE_2026-09-08.md. Trackedfingerprintca90e967b7f2c588749b2eaf8dc516fed4b7eaadunchanged; exe0A0CA21053F6CDE55CB023A6AD3D71A24EEEE1C91BA6B91E2E57B894A4D8859A. Do notadddefaultNRdepthmodelwithoutnewbenefitevidence. SR/FGdepth/naturalreconstructionremainopen.
+
+## Cycle76 candidate final matrix
+18 cases actual RTX PASS, srfg-final-b3590fc9f2b1478ab4e205897cb2ef2f exit0 31.988s/debug0; SR12 or FG11/NVOF11/reset1; all generated PTS checked. SR depth RGB unchanged, FG ordinal near-depth MAE .237438->.237343, insufficient default model justification. docs/SR_FG_DEPTH_RESPONSE_2026-09-08.md. Build final exit0; frozen gate/review pending. Export integrity unchanged.
+
+## Cycle76 independent final PASS
+Initial P2 incomplete-FG-sample assertion repaired; independent18cases review-srfg-final-e1efc4f1b8124f8f9bea0aa7423b8345 exit0/32.210s, actual Create/Evaluate0x1 SEH0/debug0. Finalpreflight71 and phase7 bf527e55e4914c8aa93451ec78121f18 41.408s/75PASS. docs/REVIEW_SR_FG_DEPTH_RESPONSE_2026-09-08.md. Defaultdepthmodel remains absent; no verified cost/quality case for adding it. Next: known4K reconstruction against spatial baseline, then natural/changing-frame quality. RTX Video SDK absent from project and filename-targeted Downloads search. Export integrity unchanged; fullGoal open.
