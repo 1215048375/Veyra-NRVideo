@@ -94,8 +94,13 @@ bool DlssSrBackend::create(NgxCoreHost& coreHost,
     createParams.Feature.InTargetWidth = desc.outputWidth;
     createParams.Feature.InTargetHeight = desc.outputHeight;
     createParams.Feature.InPerfQualityValue = static_cast<NVSDK_NGX_PerfQuality_Value>(desc.perfQuality);
+    // Linear RGBA16F requires IsHDR even for SDR media (NGX guide 3.1).
+    // Video has no renderer exposure texture; use the documented GPU estimator.
+    createParams.InFeatureCreateFlags = NVSDK_NGX_DLSS_Feature_Flags_IsHDR |
+        NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
     createParams.InEnableOutputSubrects = desc.enableOutputSubrects ? 1 : 0;
 
+    log::info("ngx",std::format("sr-backend: linearInput=true flags=0x{:X} exposure=auto mvUnits=output-pixels jitter=source-sampling",createParams.InFeatureCreateFlags));
     uint32_t sehCode = 0;
     const NVSDK_NGX_Result result = CallCreateDlss(cmdList, 1, 1, &handle_,
         params, &createParams, sehCode);
@@ -134,7 +139,7 @@ bool DlssSrBackend::evaluate(ID3D12GraphicsCommandList* cmdList,
                              Status& status)
 {
     // 1:1 bypass: skip Evaluate entirely (Playbook section 11).
-    if (shouldBypass(inputWidth_, outputWidth_)) {
+    if (shouldBypass(inputWidth_, inputHeight_, outputWidth_, outputHeight_)) {
         ++bypassCount_;
         return true;
     }
@@ -156,6 +161,7 @@ bool DlssSrBackend::evaluate(ID3D12GraphicsCommandList* cmdList,
     evalParams.InMVScaleX = 1.0f;
     evalParams.InMVScaleY = 1.0f;
     evalParams.InPreExposure = 1.0f;
+    evalParams.InExposureScale = 1.0f;
     evalParams.InRenderSubrectDimensions.Width = inputWidth_;
     evalParams.InRenderSubrectDimensions.Height = inputHeight_;
 
@@ -175,7 +181,7 @@ bool DlssSrBackend::evaluate(ID3D12GraphicsCommandList* cmdList,
 
 bool DlssSrBackend::isBypass() const
 {
-    return shouldBypass(inputWidth_, outputWidth_);
+    return shouldBypass(inputWidth_, inputHeight_, outputWidth_, outputHeight_);
 }
 
 } // namespace veyra::ngx

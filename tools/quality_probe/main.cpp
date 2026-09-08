@@ -56,16 +56,22 @@ struct GuidanceStats {
 bool sampleGuidanceStats(veyra::gfx::D3D12DeviceContext& ctx,
                          veyra::gfx::CommandSlotRing& ring,
                          veyra::pipeline::EnhanceGraph& graph,
-                         uint32_t width, uint32_t height,
                          GuidanceStats& stats)
 {
     Status st = Status::Ok;
+    if(!graph.flowResource()||!graph.confidenceResource())return false;
+    const auto flow=graph.flowResource()->GetDesc(),confidence=graph.confidenceResource()->GetDesc();
+    if(flow.Dimension!=D3D12_RESOURCE_DIMENSION_TEXTURE2D||confidence.Dimension!=D3D12_RESOURCE_DIMENSION_TEXTURE2D||
+       flow.Width!=confidence.Width||flow.Height!=confidence.Height||flow.Width>16384||
+       flow.Format!=DXGI_FORMAT_R16G16_FLOAT||confidence.Format!=DXGI_FORMAT_R8_UNORM)return false;
+    const auto width=uint32_t(flow.Width),height=flow.Height;
+    veyra::log::info("quality",std::format("guidance sample source-space={}x{} (actual resources)",width,height));
     // Sample a strided 64x36 window to keep the staging copy small.
     constexpr uint32_t kCols = 64, kRows = 36;
     if (width < kCols || height < kRows) return false;
     const uint32_t stepX = width / kCols, stepY = height / kRows;
 
-    // Full-width row copies: flow needs width*8 bytes, confidence width*1.
+    // Full-width row copies: flow needs width*4 bytes, confidence width*1.
     const uint64_t flowPitch = (static_cast<uint64_t>(width) * 4 + 511) & ~511ull;
     const uint64_t confPitch = (static_cast<uint64_t>(width) + 511) & ~511ull;
     const uint64_t size = (flowPitch + confPitch) * kRows;
@@ -388,7 +394,7 @@ int main(int argc, char** argv)
 
             // Sample guidance statistics every 60th frame.
             if (nvofOn && framesThisClip % 60 == 0) {
-                if (!sampleGuidanceStats(ctx, ring, graph, gd.workWidth, gd.workHeight, stats)) {
+                if (!sampleGuidanceStats(ctx, ring, graph, stats)) {
                     veyra::log::warn("quality", "guidance stats sample failed");
                 }
             }

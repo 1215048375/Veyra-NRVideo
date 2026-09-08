@@ -1440,3 +1440,11 @@ Cycle62 before edit: bypass capture RGB32 -> NV12 conversion; use BGR0 opaque pi
 Cycle62 after edit: build/GPU image/phase7 passed. First fixture failure was missing standalone motion flag; production already set it. Freeze checkout for independent readonly reviewer.
 
 Cycle62 reviewer PASS, freeze lifted. Checkpoint; next atomic Q4 SR linear-input flags/exposure and extent bypass with actual GPU outputs.
+
+Cycle63 before edit: Q4 SR contract. Add actual GPU source/output/color diagnostics for 2D and height-only upscale, compare current unflagged baseline with official linear IsHDR+AutoExposure contract. Fix identical extent bypass consistently; no synthetic jitter or runtime replacement. Preflight71/71; prior turn progress checkpointd731ccf.
+
+Cycle63 evidence: SR60 diagnostic failed76 D3D errors, CopyTextureRegion used4K working extent on1920x1080 source-space flow/conf. Fix diagnostic sampler to derive/validate actual resource extent/format before recording commands; preserve checks. 24frame run had not reached60frame sampling.
+
+Cycle63 final60frame diagnostic PASS after actual resource extent fix. Freeze project writes/GPU for independent scoped reviewer.
+
+Cycle63 review complete: scopedPASS, tracked fingerprint unchanged. Local checkpoint; prepare Q5 protection GPU contract and UI/preset closure.

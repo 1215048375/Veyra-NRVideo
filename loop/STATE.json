@@ -76,19 +76,19 @@
     }
   ],
   "cycle": {
-    "completed": 62,
+    "completed": 63,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "Cycle62 direct RGB capture independently reviewed PASS",
+  "currentTask": "Cycle63 SR color/extent contract independently reviewed PASS; quality scope still open",
   "lastGate": {
     "name": "phase7",
     "status": "passed",
     "exitCode": 0,
-    "evidence": "logs/delivery/8211c4bf969647d099f62cd3cd11d96a/result.json app410EE473..."
+    "evidence": "logs/delivery/1168a76f88224761a80b1cdfe975f3f7/result.json41.678s app37361B9C..."
   },
   "lastFailureFingerprint": "",
   "failureLedger": [
@@ -107,8 +107,8 @@
     "Current USB2 1080p50 physical throughput passed; user perceived latency/audio/actual FG display cadence still need confirmation.",
     "Public proprietary runtime distribution rights unresolved; local delivery only."
   ],
-  "nextAction": "Q4: set official linear SR input flags/exposure, fix width-only evaluate/isBypass, verify actual GPU color and extent outputs; then Q5-Q7",
-  "updatedAt": "2026-09-08T09:45:28.2172149Z",
+  "nextAction": "Q5 protected regions: GPU residual composition and source-normalized coordinates, professional rectangle UI plus preset persistence; then SR/FG protection and remaining natural quality/Q6/Q7 comparisons",
+  "updatedAt": "2026-09-08T09:56:33.5048414Z",
   "deliveryPlan": "docs/ACTIVE_DELIVERY_PLAN.md",
   "captureAcceptance": "throughput_short_test_passed_user_latency_audio_pending",
   "testInvocationLimitSeconds": 300,
@@ -124,7 +124,8 @@
     "docs/REVIEW_IMAGES_PREVIEW_2026-09-08.md: independent scoped PASS; final phase7 3e2dd555...41.144s; save retry and image matrix independently verified",
     "Cycles56-61:2Dtile,actualGPUpreview,rootqueuehover,odd/tallH264,14 timing checks,4 GPU color goldens; review pending",
     "docs/REVIEW_COLOR_TIMING_2026-09-08.md: scoped independent PASS; phase7 31051b6d 41.143s, image GPU matrix and timing14 passed",
-    "docs/REVIEW_CAPTURE_RGB_2026-09-08.md: independent phase7afe022a9 41.407s and image9ac2822f11.487s PASS; synthetic RGB only"
+    "docs/REVIEW_CAPTURE_RGB_2026-09-08.md: independent phase7afe022a9 41.407s and image9ac2822f11.487s PASS; synthetic RGB only",
+    "docs/REVIEW_SR_CONTRACT_2026-09-08.md: independent scopedPASS; SR60a70819e6 actual motion andGBV0, image route/color golden passed"
   ],
   "reviewBaseCommit": "6f0ebaa687e3966d989bf138c86b6882380f20fb",
   "localDelivery": "capture_fix_candidate_needs_review",
@@ -262,8 +263,8 @@
     "testInvocationLimitSeconds": 300,
     "productModified": true,
     "consecutiveBlockedGoalTurns": 0,
-    "previousGoalTurnClassification": "progress: checkpoint3b2806b reviewed image/preview and save recovery",
-    "currentGoalTurnClassification": "progress: color/timing checkpoint0dee6c1 and reviewed direct RGB capture",
+    "previousGoalTurnClassification": "progress: reviewed direct RGB capture checkpointd731ccf",
+    "currentGoalTurnClassification": "progress: SR flags/extent GPU tests and diagnostic source-space repair",
     "controlSynchronizationAuthorization": "2026-09-08 user: 确认，给你全部权限; applies to previously proposed exact two-hash synchronization"
   }
 }

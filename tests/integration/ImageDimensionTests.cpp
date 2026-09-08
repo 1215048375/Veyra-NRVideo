@@ -125,6 +125,32 @@ bool captureRgb(bool nr){
     std::cout<<"CAPTURE_RGB nr="<<nr<<" maxError8="<<maxError<<" cuts="<<m.sceneCutCount<<" nrEvaluations="<<m.nrEvaluateCount<<" nvof="<<m.nvofExecuteCount<<" pass="<<ok<<std::endl;
     ring.drainQueue();graph.shutdown();av_frame_free(&f);ring.shutdown();ctx.shutdown();return ok;
 }
+bool srPixels(unsigned iw,unsigned ih,unsigned ow,unsigned oh,const std::filesystem::path& directory){
+    gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;Status st;gfx::DeviceContextDesc device;
+    if(!ctx.initialize(device,st)||!ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),4,st))return false;
+    pipeline::EnhanceGraph graph(ctx,ring);pipeline::EnhanceGraphDesc gd;
+    gd.sourceWidth=iw;gd.sourceHeight=ih;gd.workWidth=ow;gd.workHeight=oh;
+    gd.rgbInput=gd.stillImage=gd.enableSr=true;gd.enableNr=gd.enableFg=false;
+    gd.runtimeAbsPath=(std::filesystem::path(VEYRA_PROJECT_ROOT)/"runtime_local/nvidia").wstring();
+    if(!graph.initialize(gd)||!graph.createViews())return false;
+    AVFrame* f=av_frame_alloc();f->format=AV_PIX_FMT_RGBA;f->width=iw;f->height=ih;
+    if(av_frame_get_buffer(f,32)<0){av_frame_free(&f);return false;}
+    for(unsigned y=0;y<ih;++y)for(unsigned x=0;x<iw;++x){auto* p=f->data[0]+size_t(y)*f->linesize[0]+x*4;
+        unsigned quadrant=(x>=iw/2)+2*(y>=ih/2);p[0]=p[1]=p[2]=uint8_t(32+quadrant*64);p[3]=255;}
+    bool ok=true;int error=0;
+    for(unsigned frame=0;frame<3&&ok;++frame){
+        pipeline::EnhanceGraph::FrameOutputs out;sink::RgbaImage result;
+        ok=graph.process(f,frame*33.333333,frame==0,out,frame+1)&&sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),result);
+        if(ok){ok=result.width==ow&&result.height==oh;
+            for(unsigned q=0;q<4;++q){auto x=ow*(q%2?3:1)/4,y=oh*(q/2?3:1)/4;const auto* p=result.pixels.data()+(size_t(y)*ow+x)*4;
+                for(unsigned c=0;c<3;++c)error=std::max(error,std::abs(int(p[c])-int(32+q*64)));}
+            ok=ok&&sink::saveImage((directory/("sr-"+std::to_string(iw)+"x"+std::to_string(ih)+"-to-"+std::to_string(ow)+"x"+std::to_string(oh)+"-"+std::to_string(frame)+".png")).wstring(),result);
+        }out={};
+    }
+    auto evals=graph.metrics().srEvaluateCount;ok=ok&&error<=8&&evals==((iw==ow&&ih==oh)?0:3);
+    std::cout<<"SR_PIXELS "<<iw<<'x'<<ih<<" -> "<<ow<<'x'<<oh<<" interiorMaxError8="<<error<<" evaluates="<<evals<<" pass="<<ok<<std::endl;
+    ring.drainQueue();graph.shutdown();av_frame_free(&f);ring.shutdown();ctx.shutdown();return ok;
+}
 int wmain(int argc,wchar_t** argv){
     if(argc!=2)return 2;CoInitializeEx(nullptr,COINIT_MULTITHREADED);std::filesystem::path directory(argv[1]);std::filesystem::create_directories(directory);
     bool ok=true;for(auto e:{pipeline::Extent{1,1},{257,513},{97,9001},{4097,257},{257,4097}}){if(!run(e.width,e.height,false,directory)){ok=false;break;}}
@@ -137,6 +163,9 @@ int wmain(int argc,wchar_t** argv){
     if(ok)ok=tiled(2561,2561,true,directory);
     if(ok)ok=codecBands(directory);
     if(ok)ok=colorFallback();
+    if(ok)ok=srPixels(256,256,512,512,directory);
+    if(ok)ok=srPixels(256,128,256,256,directory);
+    if(ok)ok=srPixels(256,256,256,256,directory);
     if(ok)ok=captureRgb(false)&&captureRgb(true);
     CoUninitialize();return ok?0:1;
 }

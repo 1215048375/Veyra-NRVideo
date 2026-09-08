@@ -34,10 +34,10 @@ public:
     };
 
     struct EvalDesc {
-        ID3D12Resource* color;       // input (render resolution)
+        ID3D12Resource* color;       // linear input (render resolution)
         ID3D12Resource* output;      // output (target resolution)
-        ID3D12Resource* depth;       // optional (zero depth for V1)
-        ID3D12Resource* motionVectors; // optional (zero motion for V1)
+        ID3D12Resource* depth;       // estimated depth or explicitly zero fallback
+        ID3D12Resource* motionVectors; // current-to-previous, output pixels; zero on reset
         bool reset;
         float jitterOffsetX;
         float jitterOffsetY;

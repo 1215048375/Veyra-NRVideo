@@ -73,7 +73,7 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
     }
     if(!Extent{nrW_,nrH_}.valid()||nrW_>workW_||nrH_>workH_){veyra::log::error("resolution","invalid NR extent");return false;}
     veyra::log::info("resolution",std::format("source={}x{} base={}x{} nr={}x{} flow={}x{} fg={}x{} output={}x{}",srcW_,srcH_,workW_,workH_,nrW_,nrH_,nvofW_,nvofH_,workW_,workH_,workW_,workH_));
-    srEnabled_ = desc.enableSr;
+    srEnabled_ = desc.enableSr && (srcW_ != workW_ || srcH_ != workH_);
     nrEnabled_ = desc.enableNr && !desc.noFeatures && !desc.noNgx;
     fgEnabled_ = desc.enableFg && !desc.noNgx && !desc.stillImage;
     nvofStandalone_ = desc.enableNvofStandalone && !desc.noFeatures;
