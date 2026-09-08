@@ -76,19 +76,19 @@
     }
   ],
   "cycle": {
-    "completed": 74,
+    "completed": 75,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "Cycle74 optional bidirectional NVOF candidate and cost/occlusion evidence independently reviewed PASS; not default-integrated",
+  "currentTask": "Cycle75 NR depth response independently verified; no default NR depth-model investment justified by current evidence",
   "lastGate": {
     "name": "phase7",
     "status": "passed",
     "exitCode": 0,
-    "evidence": "logs/delivery/aea3d88148bf4e6b9c793cd99f95f7fb/result.json;75checks"
+    "evidence": "logs/delivery/e67dc13783b24976a68fd1118c43a188/result.json;41.694s;75checks"
   },
   "lastFailureFingerprint": "",
   "failureLedger": [
@@ -107,8 +107,8 @@
     "Current USB2 1080p50 physical throughput passed; user perceived latency/audio/actual FG display cadence still need confirmation.",
     "Public proprietary runtime distribution rights unresolved; local delivery only."
   ],
-  "nextAction": "Controlled depth input-response experiment before investing in model; remaining changing-frame/natural NR/FG and SR reconstruction evidence, RTXVideo SDK dependency",
-  "updatedAt": "2026-09-08T11:49:11.544171+00:00",
+  "nextAction": "SR/FG controlled depth response separately, then natural/known4K reconstruction and changing-frame motion quality; RTXVideo SDK dependency remains",
+  "updatedAt": "2026-09-08T12:04:59.733444+00:00",
   "deliveryPlan": "docs/ACTIVE_DELIVERY_PLAN.md",
   "captureAcceptance": "throughput_short_test_passed_user_latency_audio_pending",
   "testInvocationLimitSeconds": 300,
@@ -131,7 +131,8 @@
     "Cycles67-68 independent scoped PASS: temporal image6508c7cc PASS; optional R8d5f8d738/RGBAd9974360 reproduce expected-contract FAIL, no product integration.",
     "Cycles69-70 independentPASS: motionshader/debug0; repairedresidual24constants; image29e690f3 andSR60A/B GBV0. Natural/FGquality still open.",
     "Cycles71-73 independent scopedPASS: scene14/motionverticalcostboundary; NR600NVOF594; actualFG600source594generated6hold1200output independentlydecoded, docs/REVIEW_SCENE_BOUNDARIES_2026-09-08.md",
-    "Cycle74 independent scopedPASS, docs/REVIEW_BIDIRECTIONAL_FLOW_2026-09-08.md:360/1080/4K controlledbidirectional plus640x129alignmentfix; no defaultintegration"
+    "Cycle74 independent scopedPASS, docs/REVIEW_BIDIRECTIONAL_FLOW_2026-09-08.md:360/1080/4K controlledbidirectional plus640x129alignmentfix; no defaultintegration",
+    "Cycle75 independent NRdepth24casesPASS:docs/REVIEW_NR_DEPTH_RESPONSE_2026-09-08.md; no depthresponse, strongMV/intensityresponse; no newmodels/defaults"
   ],
   "reviewBaseCommit": "6f0ebaa687e3966d989bf138c86b6882380f20fb",
   "localDelivery": "capture_fix_candidate_needs_review",
@@ -269,8 +270,8 @@
     "testInvocationLimitSeconds": 300,
     "productModified": true,
     "consecutiveBlockedGoalTurns": 0,
-    "previousGoalTurnClassification": "progress: motion corpus found all3authoredcuts missed; repaired moderate-luma scene reset and independently verified actual2Xboundaryholds",
-    "currentGoalTurnClassification": "progress: actual sharedNVOFBOTH validated, constructedocclusion benefitandcost measured, diagnosticoddheightP2fixed andindependentlyreviewed",
+    "previousGoalTurnClassification": "progress: actual sharedNVOFBOTH validated, constructedocclusion benefitandcost measured, diagnosticoddheightP2fixed andindependentlyreviewed",
+    "currentGoalTurnClassification": "progress: controlledNRdepthnegative withresidenttextureupdate, MV/intensitypositive, actualRTXandindependentreview; avoidedunsupporteddefaultmodelcost",
     "controlSynchronizationAuthorization": "2026-09-08 user: 确认，给你全部权限; applies to previously proposed exact two-hash synchronization",
     "diagnosticFindings": [
       "Q7 read-only dependency check: RTXVideoSDK not present in third_party_local; official1.1download redirects NVIDIA login. Localdepthfile vitl is Large, not permitted Small; no verified Small ONNX/provider. No dependency integrated or performance claimed."

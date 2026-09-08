@@ -528,3 +528,9 @@ Shared optional BOTH session and realGPU diagnostic; defaults unchanged. docs/BI
 
 ## Cycle74 independent final scopedPASS
 review_bidirectional_candidate: initialP2diagnosticfootprintalignmentFAIL repaired; independent640x129all4casesPASS/debug0 (novel191->73,good1411unchanged). Initial1080/4KindependentmatrixPASS remainsvalid. Finalphase7aea3d88148bf4e6b9c793cd99f95f7fb75PASSexit0; docs/REVIEW_BIDIRECTIONAL_FLOW_2026-09-08.md. Reviewerfinalfingerprint2d3745d722cd9931e12d9ec6200d14d4d66f9924unchanged. Optionalsharedcapabilityonly; defaultforward, no graph/shader/exportintegrity/model changes. Retaincandidatependingnatural/changingframeNR/FGROI; fullGoalopen.
+
+## Cycle75 NR depth controlled response candidate
+Newdiagnostictarget only. docs/NR_DEPTH_RESPONSE_2026-09-08.md; finaldepth-response-b8490565d1374d1c9a28a93ecc12b54dexit0/39.416s/debug0. Default/replacement/residentdepth0,1,gradient,checker:rawNRandfinalRGBchanged0;singleframe andall12temporalframes. Intensity0positiveandMVscale0/-1changemillionsofRGBchannels; explicit.5/repeatbaselineexact;NR12/NVOF11/motion11/reset1. Resident originaltexturecontentsmutated afterframe0 toexclude simplepointercacheexplanation. No basisfordefaultNRdepthmodel; SR/FGdepth nottested. Frozen gate/review pending.
+
+## Cycle75 independent scopedPASS
+review_nr_depth_response nointroducedP0/P1/P2. Independentpreflight71/phase7e67dc13783b24976a68fd1118c43a18841.694s75PASS. Actualreview-depth-9678e01163c949b999231759f1fe6fc6exit0/40.440s:all24casesreproduce,depthzerochange/intensityandMVpositive,NR12NVOF11motion11reset1/debug0. Raw/residentcopy/pointer/per-frame comparisonreviewed; no universaldepthignoredclaim. docs/REVIEW_NR_DEPTH_RESPONSE_2026-09-08.md. Trackedfingerprintca90e967b7f2c588749b2eaf8dc516fed4b7eaadunchanged; exe0A0CA21053F6CDE55CB023A6AD3D71A24EEEE1C91BA6B91E2E57B894A4D8859A. Do notadddefaultNRdepthmodelwithoutnewbenefitevidence. SR/FGdepth/naturalreconstructionremainopen.
