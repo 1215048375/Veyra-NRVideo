@@ -540,3 +540,9 @@ review_nr_depth_response nointroducedP0/P1/P2. Independentpreflight71/phase7e67d
 
 ## Cycle76 independent final PASS
 Initial P2 incomplete-FG-sample assertion repaired; independent18cases review-srfg-final-e1efc4f1b8124f8f9bea0aa7423b8345 exit0/32.210s, actual Create/Evaluate0x1 SEH0/debug0. Finalpreflight71 and phase7 bf527e55e4914c8aa93451ec78121f18 41.408s/75PASS. docs/REVIEW_SR_FG_DEPTH_RESPONSE_2026-09-08.md. Defaultdepthmodel remains absent; no verified cost/quality case for adding it. Next: known4K reconstruction against spatial baseline, then natural/changing-frame quality. RTX Video SDK absent from project and filename-targeted Downloads search. Export integrity unchanged; fullGoal open.
+
+## Cycle77 reconstruction candidate
+Actual1080->4K sharedgraph two24frame scenes: final0-b240e19c658c43d2bc06b06c4f4442ea17.030s andfinal1-42eb27fb292f4be0814b1e6d2c42de0819.956s exit0, NR/FGoff SR24/NVOF23/reset1/debug0, SRrepeat exact. SR lowers spatialMAE but increases temporalerrorandmaxerror; docs/SR_RECONSTRUCTION_2026-09-08.md. No naturalquality or defaultreplacement claim. Buildcycle77finalexit0; frozen gate/reviewpending.
+
+## Cycle77 independent final PASS
+review_sr_reconstruction: full24frameSR/spatial metrics reproduced, SRrepeat exact; twoactualRTXinvocations17.861/22.122s, debug0; docs/REVIEW_SR_RECONSTRUCTION_2026-09-08.md. Independentpreflight71/phase7 268ee4b316bf4604bedafcd9b747b09c41.718s75PASS. DocumentationP2 initializationFGwarmup distinction fixedandreadonlyrereadclosed. No default/product/export change. Next isolate exactmotion vsestimated SR guidance, and natural material; recent-app source exists (ffprobe H2641920x1080,30000/1001,limitedBT709,56.689s), not native4K reference. FullGoalopen.

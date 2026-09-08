@@ -76,19 +76,19 @@
     }
   ],
   "cycle": {
-    "completed": 76,
+    "completed": 77,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "Cycle76 SR/FG depth response independently passed after FG sample-completeness assertion repair",
+  "currentTask": "Cycle77 known4K reconstruction independently passed; spatial/temporal tradeoff measured",
   "lastGate": {
     "name": "phase7",
     "status": "passed",
     "exitCode": 0,
-    "evidence": "logs/delivery/bf527e55e4914c8aa93451ec78121f18/result.json;41.408s;75checks"
+    "evidence": "logs/delivery/268ee4b316bf4604bedafcd9b747b09c/result.json;41.718s;75checks"
   },
   "lastFailureFingerprint": "",
   "failureLedger": [
@@ -107,8 +107,8 @@
     "Current USB2 1080p50 physical throughput passed; user perceived latency/audio/actual FG display cadence still need confirmation.",
     "Public proprietary runtime distribution rights unresolved; local delivery only."
   ],
-  "nextAction": "Known4K downsample/reconstruction comparison against spatial baseline, then natural/changing-frame quality; RTX Video SDK unavailable",
-  "updatedAt": "2026-09-08T12:28:19.1665042Z",
+  "nextAction": "Isolate accurate motion versus estimated SR guidance and supplement natural material; no default SR/depth replacement without benefit",
+  "updatedAt": "2026-09-08T12:41:17.8709040Z",
   "deliveryPlan": "docs/ACTIVE_DELIVERY_PLAN.md",
   "captureAcceptance": "throughput_short_test_passed_user_latency_audio_pending",
   "testInvocationLimitSeconds": 300,
@@ -133,7 +133,8 @@
     "Cycles71-73 independent scopedPASS: scene14/motionverticalcostboundary; NR600NVOF594; actualFG600source594generated6hold1200output independentlydecoded, docs/REVIEW_SCENE_BOUNDARIES_2026-09-08.md",
     "Cycle74 independent scopedPASS, docs/REVIEW_BIDIRECTIONAL_FLOW_2026-09-08.md:360/1080/4K controlledbidirectional plus640x129alignmentfix; no defaultintegration",
     "Cycle75 independent NRdepth24casesPASS:docs/REVIEW_NR_DEPTH_RESPONSE_2026-09-08.md; no depthresponse, strongMV/intensityresponse; no newmodels/defaults",
-    "Cycle76 independent scopedPASS: docs/REVIEW_SR_FG_DEPTH_RESPONSE_2026-09-08.md; SR8bit negative depth response, FG tiny constructed benefit, no defaultmodel"
+    "Cycle76 independent scopedPASS: docs/REVIEW_SR_FG_DEPTH_RESPONSE_2026-09-08.md; SR8bit negative depth response, FG tiny constructed benefit, no defaultmodel",
+    "Cycle77 independent scopedPASS: docs/REVIEW_SR_RECONSTRUCTION_2026-09-08.md; real4K SR spatialMAE lower, temporalerror/max higher; no natural/steady-state claim"
   ],
   "reviewBaseCommit": "6f0ebaa687e3966d989bf138c86b6882380f20fb",
   "localDelivery": "capture_fix_candidate_needs_review",
@@ -271,8 +272,8 @@
     "testInvocationLimitSeconds": 300,
     "productModified": true,
     "consecutiveBlockedGoalTurns": 0,
-    "previousGoalTurnClassification": "progress: controlledNRdepthnegative withresidenttextureupdate, MV/intensitypositive, actualRTXandindependentreview; avoidedunsupporteddefaultmodelcost",
-    "currentGoalTurnClassification": "progress: SR/FG depth response and exact half-frame GT measured; incomplete-sample P2 fixed, independent18cases andgate PASS; default model not justified",
+    "previousGoalTurnClassification": "progress: SR/FG depth response and exact half-frame GT measured; incomplete-sample P2 fixed, independent18cases andgate PASS; default model not justified",
+    "currentGoalTurnClassification": "progress: known4K downsample reconstruction and temporal errors measured, independentRTXreproduction andgatePASS; next isolate motion cause",
     "controlSynchronizationAuthorization": "2026-09-08 user: 确认，给你全部权限; applies to previously proposed exact two-hash synchronization",
     "diagnosticFindings": [
       "Q7 read-only dependency check: RTXVideoSDK not present in third_party_local; official1.1download redirects NVIDIA login. Localdepthfile vitl is Large, not permitted Small; no verified Small ONNX/provider. No dependency integrated or performance claimed."
