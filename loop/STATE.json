@@ -76,19 +76,19 @@
     }
   ],
   "cycle": {
-    "completed": 65,
+    "completed": 66,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "Manual NR protection GPU/UI/preset path independently reviewed PASS; full quality goal ongoing",
+  "currentTask": "Manual NR protection boundary diagnostics independently reviewed PASS; full quality goal ongoing",
   "lastGate": {
     "name": "phase7",
     "status": "passed",
     "exitCode": 0,
-    "evidence": "logs/delivery/a178db7f0e0e4a4a8555d0b66e764f0a/result.json41.477s app0654C61F..."
+    "evidence": "logs/delivery/d8846bbfe5d54b41b7b14327e8897975/result.json 41.695s;75checks"
   },
   "lastFailureFingerprint": "",
   "failureLedger": [
@@ -107,8 +107,8 @@
     "Current USB2 1080p50 physical throughput passed; user perceived latency/audio/actual FG display cadence still need confirmation.",
     "Public proprietary runtime distribution rights unresolved; local delivery only."
   ],
-  "nextAction": "Validate feathered/partial-tile/moving protection; isolated private NR resources and SR/FG reference policy; then Q6 motion confidence/FG and Q7 candidate ROI/natural reconstruction comparisons",
-  "updatedAt": "2026-09-08T10:20:30.0786887Z",
+  "nextAction": "Moving-background/static-HUD protection matrix, then isolated optional NR resources; Q6 motion confidence/FG and Q7 candidate ROI/natural reconstruction comparisons",
+  "updatedAt": "2026-09-08T10:31:00.662715+00:00",
   "deliveryPlan": "docs/ACTIVE_DELIVERY_PLAN.md",
   "captureAcceptance": "throughput_short_test_passed_user_latency_audio_pending",
   "testInvocationLimitSeconds": 300,
@@ -126,7 +126,8 @@
     "docs/REVIEW_COLOR_TIMING_2026-09-08.md: scoped independent PASS; phase7 31051b6d 41.143s, image GPU matrix and timing14 passed",
     "docs/REVIEW_CAPTURE_RGB_2026-09-08.md: independent phase7afe022a9 41.407s and image9ac2822f11.487s PASS; synthetic RGB only",
     "docs/REVIEW_SR_CONTRACT_2026-09-08.md: independent scopedPASS; SR60a70819e6 actual motion andGBV0, image route/color golden passed",
-    "docs/REVIEW_NR_PROTECTION_2026-09-08.md: scopedPASS afterP2syncfix; GPU/presets andactualUI dirty/master-off independently verified"
+    "docs/REVIEW_NR_PROTECTION_2026-09-08.md: scopedPASS afterP2syncfix; GPU/presets andactualUI dirty/master-off independently verified",
+    "Cycle66 independent scoped PASS: image-e8c7b9377cd94f68bd50fb189bd8b49c 21.916s; feather2/32, disjoint, central tile seams. No product changes."
   ],
   "reviewBaseCommit": "6f0ebaa687e3966d989bf138c86b6882380f20fb",
   "localDelivery": "capture_fix_candidate_needs_review",

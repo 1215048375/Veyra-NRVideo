@@ -1460,3 +1460,18 @@ Cycles64-65 reviewer FAILP2 protection indicators stale under dirty drafts / unc
 P2 dedicated indicator synchronization and regression passed locally. Freeze again for reviewerrecheck; no further GPU/codechanges.
 
 Cycles64-65 finalreviewPASS fingerprintunchanged; localcheckpoint before next protection/quality evidence. No push/release/physicalcaptureclaim.
+
+## Cycle 66 - protection boundary evidence
+Before change: HEAD 674c726 clean; preflight 71/71. Extend GPU diagnostics for feather 2/32 px, disjoint rectangles and partial mask crossing 3x3 tile seams. Product path and export integrity unchanged. Each invocation bounded <=300 seconds. Natural motion quality remains separate.
+
+## Cycle 66 - protection boundary diagnostics (2026-09-08)
+
+Scoped test-only change in tests/integration/ImageDimensionTests.cpp: feather 2/32 pixels, disjoint regions, and partial 2561x2561 mask spanning central horizontal/vertical tile seams. No product code, export integrity or runtime changed.
+
+Commands: scripts/build.ps1 -Root "$PWD" -Preset x64-release; scripts/loop-gate.ps1 -Gate preflight; logs/optimization-goal-20260908/run-image-tests.ps1 (275s watchdog); scripts/loop-gate.ps1 -Gate phase7. Build log build-protection-boundaries-final.log. Initial runs image-eeba5f9f5a934480ab91d3307fbdc74a (17.620s) and image-97deff3da67c4a3e94c731e561377964 (17.654s) failed a new test assertion: unsigned 192-x subtraction misclassified exterior pixels. Diagnostic per-mode evidence isolated the assertion; changed to 192.f-x, no product adjustment.
+
+Maker image-262e170a7cef4014b6287f6c4c022f22 passed 21.828s. Independent review_protection_boundaries PASS with no introduced P0/P1/P2: preflight71; phase7 logs/delivery/d8846bbfe5d54b41b7b14327e8897975/result.json 41.695s/75checks; image-e8c7b9377cd94f68bd50fb189bd8b49c 21.916s. Actual Feature18 Create0x1 non-null SEH0; seven protection evaluations with original/baseline error0. Feather2/32 has 1581/15725 mixed channels, envelope error0. Partial nine-tile/nine-NR interior/exterior error0, envelope error1. Baseline comes from same run, dimensions verified.
+
+Image-test SHA256 052F7DE99BB622DDF05F977D5431C8257F26330119CF7760072126C3DC655481. App remains 0654C61F11D9FC50436B964F385E4028E6458C4B9D186B6DCD5B0796C383B4F5. Reviewer tracked fingerprint f80219622037f7671d65046e14313267f9bb85ce unchanged.
+
+Limits: these assertions prove endpoints and bounded nontrivial blending, not exact smoothstep or perceptual smoothness. Central seams covered, not every seam with a protected region. Moving HUD/temporal behavior, natural quality, SR/FG protection and private resource effectiveness remain unverified. Phase7 and full Goal remain in_progress. Next atomic task: moving-background/static-HUD protection matrix, then isolated optional NR resource contract; Q6 motion confidence/FG and Q7 candidate ROI remain pending.

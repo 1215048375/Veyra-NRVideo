@@ -43,7 +43,7 @@ bool run(unsigned width,unsigned height,bool nr,const std::filesystem::path& dir
     std::cout<<"IMAGE_DIMENSION "<<width<<'x'<<height<<" nr="<<nr<<" maxError8="<<maxError<<" nrEvaluations="<<graph.metrics().nrEvaluateCount<<" pass="<<ok<<std::endl;
     out={};ring.drainQueue();graph.shutdown();av_frame_free(&f);ring.shutdown();ctx.shutdown();return ok;
 }
-bool tiled(unsigned width,unsigned height,bool nr,const std::filesystem::path& directory,bool protect=false){
+bool tiled(unsigned width,unsigned height,bool nr,const std::filesystem::path& directory,int protect=0){
     gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;Status st;gfx::DeviceContextDesc device;
     if(!ctx.initialize(device,st)||!ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),4,st))return false;
     sink::RgbaImage source;source.width=width;source.height=height;source.pixels.resize(size_t(width)*height*4);
@@ -52,14 +52,30 @@ bool tiled(unsigned width,unsigned height,bool nr,const std::filesystem::path& d
     // sRGB 188 over black; fully transparent color contributes nothing.
     if(!nr){source.pixels[0]=source.pixels[1]=source.pixels[2]=255;source.pixels[3]=128;source.pixels[7]=0;}
     pipeline::EnhanceGraphDesc gd;gd.enableNr=nr;gd.noFeatures=!nr;gd.runtimeAbsPath=(std::filesystem::path(VEYRA_PROJECT_ROOT)/"runtime_local/nvidia").wstring();
-    if(protect){gd.protection.enabled=true;gd.protection.featherPixels=0;gd.protection.regions[0]={0,0,1,1};}
+    if(protect){gd.protection.enabled=true;gd.protection.featherPixels=0;gd.protection.regions[0]={0,0,1,1};if(protect==2){gd.protection.featherPixels=32;gd.protection.regions[0]={.25f,.25f,.75f,.75f};}}
     std::atomic<bool> cancel=false;engine::TiledImageProcessor::Stats stats;sink::RgbaImage result;
     bool ok=engine::TiledImageProcessor::process(ctx,ring,source,result,gd,cancel,stats);
     int maxError=0;uint64_t brightness=0;
     if(ok){ok=result.width==width&&result.height==height&&result.pixels.size()==source.pixels.size();
         for(size_t i=0;i<result.pixels.size();++i){int expected=source.pixels[i];if(!nr&&i<8)expected=i%4==3?255:(i<4?188:0);maxError=std::max(maxError,std::abs(int(result.pixels[i])-expected));if(i%4!=3)brightness+=result.pixels[i];}
-        ok=ok&&brightness>0&&(nr?stats.nrEvaluations==stats.tiles&&(!protect||maxError<=1):maxError<=1);
-        sink::RgbaImage decoded;auto path=directory/(std::to_string(width)+"x"+std::to_string(height)+(protect?"-tiled-protected.png":nr?"-tiled-nr.png":"-tiled-off.png"));
+        ok=ok&&brightness>0&&(nr?stats.nrEvaluations==stats.tiles&&(protect!=1||maxError<=1):maxError<=1);
+        if(protect==2){
+            sink::RgbaImage baseline;ok=ok&&sink::loadImage((directory/(std::to_string(width)+"x"+std::to_string(height)+"-tiled-nr.png")).wstring(),baseline);
+            ok=ok&&baseline.width==width&&baseline.height==height&&baseline.pixels.size()==result.pixels.size();
+            int inside=0,outside=0,envelope=0;uint64_t interiorCount=0,exteriorCount=0;
+            if(ok)for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){
+                float edge=std::min(std::min(x+.5f-width*.25f,width*.75f-x-.5f),std::min(y+.5f-height*.25f,height*.75f-y-.5f));
+                interiorCount+=edge>=32;exteriorCount+=edge<=0;
+                for(unsigned c=0;c<3;++c){size_t i=(size_t(y)*width+x)*4+c;int v=result.pixels[i],a=source.pixels[i],b=baseline.pixels[i];
+                    if(edge>=32)inside=std::max(inside,std::abs(v-a));
+                    if(edge<=0)outside=std::max(outside,std::abs(v-b));
+                    envelope=std::max(envelope,std::max(std::min(a,b)-v,v-std::max(a,b)));
+                }
+            }
+            ok=ok&&inside<=1&&outside<=1&&envelope<=2&&interiorCount>100000&&exteriorCount>100000;
+            std::cout<<"PROTECTION_PARTIAL_TILE feather=32 insideError8="<<inside<<" outsideError8="<<outside<<" envelopeError8="<<envelope<<" pass="<<ok<<std::endl;
+        }
+        sink::RgbaImage decoded;auto path=directory/(std::to_string(width)+"x"+std::to_string(height)+(protect==2?"-tiled-partial.png":protect?"-tiled-protected.png":nr?"-tiled-nr.png":"-tiled-off.png"));
         ok=ok&&sink::saveImage(path.wstring(),result)&&sink::loadImage(path.wstring(),decoded)&&decoded.pixels==result.pixels&&decoded.width==width&&decoded.height==height;
     }
     std::cout<<"IMAGE_TILED "<<width<<'x'<<height<<" nr="<<nr<<" protect="<<protect<<" tiles="<<stats.tiles<<" evaluations="<<stats.nrEvaluations<<" maxError8="<<maxError<<" pass="<<ok<<std::endl;
@@ -163,23 +179,35 @@ bool protectionPixels(){
     if(av_frame_get_buffer(f,32)<0){av_frame_free(&f);return false;}
     for(unsigned y=0;y<256;++y)for(unsigned x=0;x<256;++x){auto* p=f->data[0]+size_t(y)*f->linesize[0]+x*4;p[0]=(x*7+y*3)%256;p[1]=(x*3+y*11)%256;p[2]=(x*5+y*17)%256;p[3]=255;}
     sink::RgbaImage baseline;bool ok=true;int protectedError=0,outsideError=0;uint64_t changed=0;
-    for(unsigned mode=0;mode<4&&ok;++mode){
+    for(unsigned mode=0;mode<7&&ok;++mode){
         engine::EnhancementSettings settings;settings.protection.enabled=mode>0;settings.protection.featherPixels=0;
         if(mode==2)settings.protection.regions[0]={0,0,1,1};
-        if(mode==3)settings.protection.regions[0]={.25f,.25f,.75f,.75f};
+        if(mode>=3)settings.protection.regions[0]={.25f,.25f,.75f,.75f};
+        if(mode==4||mode==5)settings.protection.featherPixels=mode==4?2.f:32.f;
+        if(mode==6){settings.protection.regions[0]={.125f,.125f,.375f,.375f};settings.protection.regions[1]={.625f,.625f,.875f,.875f};}
         pipeline::EnhanceGraph::FrameOutputs out;sink::RgbaImage result;
         ok=graph.applySettings(settings)&&graph.process(f,0,true,out,mode+1)&&sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),result);
+        int envelope=0;uint64_t mixed=0;
         if(ok){if(!mode)baseline=result;
             for(unsigned y=0;y<256;++y)for(unsigned x=0;x<256;++x)for(unsigned c=0;c<3;++c){auto i=(size_t(y)*256+x)*4+c;auto original=f->data[0][size_t(y)*f->linesize[0]+x*4+c];
                 if(!mode){changed+=result.pixels[i]!=original;continue;}
-                bool protectedPixel=mode==2||(mode==3&&x>=64&&x<192&&y>=64&&y<192);
+                float edge=std::min(std::min(x+.5f-64,192.f-x-.5f),std::min(y+.5f-64,192.f-y-.5f));
+                if(mode==4||mode==5){
+                    int v=result.pixels[i],a=original,b=baseline.pixels[i];
+                    envelope=std::max(envelope,std::max(std::min(a,b)-v,v-std::max(a,b)));
+                    if(edge>0&&edge<settings.protection.featherPixels){mixed+=std::abs(v-a)>1&&std::abs(v-b)>1;continue;}
+                }
+                bool protectedPixel=mode==2||(mode>=3&&mode<=5&&edge>=settings.protection.featherPixels)||(mode==6&&((x>=32&&x<96&&y>=32&&y<96)||(x>=160&&x<224&&y>=160&&y<224)));
                 if(protectedPixel)protectedError=std::max(protectedError,std::abs(int(result.pixels[i])-int(original)));
                 else outsideError=std::max(outsideError,std::abs(int(result.pixels[i])-int(baseline.pixels[i])));
             }
-        }out={};
+        }
+        if(mode==4||mode==5){ok=ok&&envelope<=1&&mixed>100;std::cout<<"PROTECTION_FEATHER pixels="<<settings.protection.featherPixels<<" mixedChannels="<<mixed<<" envelopeError8="<<envelope<<" pass="<<ok<<std::endl;}
+        std::cout<<"PROTECTION_MODE mode="<<mode<<" protectedError8="<<protectedError<<" outsideError8="<<outsideError<<std::endl;
+        out={};
     }
-    ok=ok&&changed>100&&protectedError<=1&&outsideError==0&&graph.metrics().nrEvaluateCount==4;
-    std::cout<<"PROTECTION_PIXELS empty/full/rectangle changed="<<changed<<" protectedError8="<<protectedError<<" outsideError8="<<outsideError<<" nr="<<graph.metrics().nrEvaluateCount<<" pass="<<ok<<std::endl;
+    ok=ok&&changed>100&&protectedError<=1&&outsideError==0&&graph.metrics().nrEvaluateCount==7;
+    std::cout<<"PROTECTION_PIXELS empty/full/rectangle/feather/disjoint changed="<<changed<<" protectedError8="<<protectedError<<" outsideError8="<<outsideError<<" nr="<<graph.metrics().nrEvaluateCount<<" pass="<<ok<<std::endl;
     ring.drainQueue();graph.shutdown();av_frame_free(&f);ring.shutdown();ctx.shutdown();return ok;
 }
 int wmain(int argc,wchar_t** argv){
@@ -199,6 +227,7 @@ int wmain(int argc,wchar_t** argv){
     if(ok)ok=srPixels(256,256,256,256,directory);
     if(ok)ok=captureRgb(false)&&captureRgb(true);
     if(ok)ok=protectionPixels();
-    if(ok)ok=tiled(2561,2561,true,directory,true);
+    if(ok)ok=tiled(2561,2561,true,directory,1);
+    if(ok)ok=tiled(2561,2561,true,directory,2);
     CoUninitialize();return ok?0:1;
 }
