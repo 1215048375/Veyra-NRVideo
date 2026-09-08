@@ -76,19 +76,19 @@
     }
   ],
   "cycle": {
-    "completed": 61,
+    "completed": 62,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "Cycles56-61 independently reviewed PASS; proceed to direct RGB capture",
+  "currentTask": "Cycle62 direct RGB capture independently reviewed PASS",
   "lastGate": {
     "name": "phase7",
     "status": "passed",
     "exitCode": 0,
-    "evidence": "logs/delivery/f3fbdc84e9c54e718e03a94066df28bc/result.json41.453s appCDD4A16..."
+    "evidence": "logs/delivery/8211c4bf969647d099f62cd3cd11d96a/result.json app410EE473..."
   },
   "lastFailureFingerprint": "",
   "failureLedger": [
@@ -107,8 +107,8 @@
     "Current USB2 1080p50 physical throughput passed; user perceived latency/audio/actual FG display cadence still need confirmation.",
     "Public proprietary runtime distribution rights unresolved; local delivery only."
   ],
-  "nextAction": "Implement and verify direct RGB capture with opaque BGR0 and shared scene/cadence analysis; then Q4-Q7.",
-  "updatedAt": "2026-09-08T09:32:12.0342288Z",
+  "nextAction": "Q4: set official linear SR input flags/exposure, fix width-only evaluate/isBypass, verify actual GPU color and extent outputs; then Q5-Q7",
+  "updatedAt": "2026-09-08T09:45:28.2172149Z",
   "deliveryPlan": "docs/ACTIVE_DELIVERY_PLAN.md",
   "captureAcceptance": "throughput_short_test_passed_user_latency_audio_pending",
   "testInvocationLimitSeconds": 300,
@@ -123,7 +123,8 @@
     "Cycle55 saved failure/retry recovered: save-recovery-15610...; image988453...6.515s includes multi-band PNG/JPEG; phase7 04815...41.246s",
     "docs/REVIEW_IMAGES_PREVIEW_2026-09-08.md: independent scoped PASS; final phase7 3e2dd555...41.144s; save retry and image matrix independently verified",
     "Cycles56-61:2Dtile,actualGPUpreview,rootqueuehover,odd/tallH264,14 timing checks,4 GPU color goldens; review pending",
-    "docs/REVIEW_COLOR_TIMING_2026-09-08.md: scoped independent PASS; phase7 31051b6d 41.143s, image GPU matrix and timing14 passed"
+    "docs/REVIEW_COLOR_TIMING_2026-09-08.md: scoped independent PASS; phase7 31051b6d 41.143s, image GPU matrix and timing14 passed",
+    "docs/REVIEW_CAPTURE_RGB_2026-09-08.md: independent phase7afe022a9 41.407s and image9ac2822f11.487s PASS; synthetic RGB only"
   ],
   "reviewBaseCommit": "6f0ebaa687e3966d989bf138c86b6882380f20fb",
   "localDelivery": "capture_fix_candidate_needs_review",
@@ -262,7 +263,7 @@
     "productModified": true,
     "consecutiveBlockedGoalTurns": 0,
     "previousGoalTurnClassification": "progress: checkpoint3b2806b reviewed image/preview and save recovery",
-    "currentGoalTurnClassification": "progress: input/preview evidence, actual odd/tall video, capture duration and shared color correction",
+    "currentGoalTurnClassification": "progress: color/timing checkpoint0dee6c1 and reviewed direct RGB capture",
     "controlSynchronizationAuthorization": "2026-09-08 user: 确认，给你全部权限; applies to previously proposed exact two-hash synchronization"
   }
 }

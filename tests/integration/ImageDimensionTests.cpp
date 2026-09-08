@@ -101,6 +101,30 @@ bool colorFallback(){
     ok=test(128,128,128,AVCOL_TRC_UNSPECIFIED,142,142,142)&&test(128,128,128,AVCOL_TRC_IEC61966_2_1,130,130,130)&&test(128,128,128,AVCOL_TRC_LINEAR,189,189,189)&&test(81,90,240,AVCOL_TRC_UNSPECIFIED,255,0,0);
     ring.drainQueue();graph.shutdown();av_frame_free(&f);ring.shutdown();ctx.shutdown();return ok;
 }
+bool captureRgb(bool nr){
+    gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;Status st;gfx::DeviceContextDesc device;
+    if(!ctx.initialize(device,st)||!ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),4,st))return false;
+    pipeline::EnhanceGraph graph(ctx,ring);pipeline::EnhanceGraphDesc gd;
+    gd.sourceWidth=gd.sourceHeight=gd.workWidth=gd.workHeight=256;gd.rgbInput=true;gd.enableNr=nr;gd.enableNvofStandalone=nr;gd.enableFg=false;gd.noFeatures=!nr;
+    gd.runtimeAbsPath=(std::filesystem::path(VEYRA_PROJECT_ROOT)/"runtime_local/nvidia").wstring();
+    if(!graph.initialize(gd)||!graph.createViews())return false;
+    AVFrame* f=av_frame_alloc();f->format=AV_PIX_FMT_BGR0;f->width=f->height=256;
+    if(av_frame_get_buffer(f,32)<0){av_frame_free(&f);return false;}
+    bool ok=true;int maxError=0;
+    for(unsigned frame=0;frame<4&&ok;++frame){
+        for(unsigned y=0;y<256;++y)for(unsigned x=0;x<256;++x){auto* p=f->data[0]+size_t(y)*f->linesize[0]+x*4;
+            // Adjacent saturated red/blue proves that no 4:2:0 averaging occurs.
+            p[0]=frame<2?(x%2?255:0):255;p[1]=frame<2?0:255;p[2]=frame<2?(x%2?0:255):255;p[3]=0;}
+        pipeline::EnhanceGraph::FrameOutputs out;sink::RgbaImage result;
+        ok=graph.process(f,frame*33.333333,frame==0,out,frame+1)&&sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),result);
+        if(ok&&!nr)for(unsigned y=0;y<256;++y)for(unsigned x=0;x<256;++x){auto* expected=f->data[0]+size_t(y)*f->linesize[0]+x*4;auto* actual=result.pixels.data()+(size_t(y)*256+x)*4;
+            for(unsigned c=0;c<3;++c)maxError=std::max(maxError,std::abs(int(actual[c])-int(expected[2-c])));ok=ok&&actual[3]==255;}
+        out={};
+    }
+    const auto m=graph.metrics();ok=ok&&maxError<=1&&m.sceneCutCount==1&&(!nr||(m.nrEvaluateCount==4&&m.nvofExecuteCount>=2));
+    std::cout<<"CAPTURE_RGB nr="<<nr<<" maxError8="<<maxError<<" cuts="<<m.sceneCutCount<<" nrEvaluations="<<m.nrEvaluateCount<<" nvof="<<m.nvofExecuteCount<<" pass="<<ok<<std::endl;
+    ring.drainQueue();graph.shutdown();av_frame_free(&f);ring.shutdown();ctx.shutdown();return ok;
+}
 int wmain(int argc,wchar_t** argv){
     if(argc!=2)return 2;CoInitializeEx(nullptr,COINIT_MULTITHREADED);std::filesystem::path directory(argv[1]);std::filesystem::create_directories(directory);
     bool ok=true;for(auto e:{pipeline::Extent{1,1},{257,513},{97,9001},{4097,257},{257,4097}}){if(!run(e.width,e.height,false,directory)){ok=false;break;}}
@@ -113,5 +137,6 @@ int wmain(int argc,wchar_t** argv){
     if(ok)ok=tiled(2561,2561,true,directory);
     if(ok)ok=codecBands(directory);
     if(ok)ok=colorFallback();
+    if(ok)ok=captureRgb(false)&&captureRgb(true);
     CoUninitialize();return ok?0:1;
 }

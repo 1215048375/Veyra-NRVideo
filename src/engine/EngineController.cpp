@@ -91,7 +91,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 width=activeSource->info().width;height=activeSource->info().height;duration=activeSource->info().duration.toDouble();
             }
             if(!pipeline::Extent{width,height}.valid()){status(L"图像尺寸超出单张GPU纹理能力，需要分块处理",true);break;}
-            pipeline::EnhanceGraphDesc gd;gd.sourceWidth=width;gd.sourceHeight=height;gd.rgbInput=isImage;gd.stillImage=isImage;
+            pipeline::EnhanceGraphDesc gd;gd.sourceWidth=width;gd.sourceHeight=height;gd.rgbInput=isImage||isCapture;gd.stillImage=isImage;
             const auto resolution=pipeline::ResolutionPlan::make({width,height},options.sr,options.realtime?pipeline::NrSizePolicy::Realtime:pipeline::NrSizePolicy::Native,isImage,1);
             gd.workWidth=resolution.base.width;gd.workHeight=resolution.base.height;gd.nrWidth=resolution.nr.width;gd.nrHeight=resolution.nr.height;
             gd.enableSr=resolution.srApplied;gd.enableNr=options.nr;gd.enableFg=options.fg;gd.fgMultiplier=options.fgMultiplier;gd.enableNvofStandalone=options.nr;

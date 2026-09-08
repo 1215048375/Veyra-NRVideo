@@ -101,7 +101,7 @@ bool CaptureCardSource::configure(const SourceOpenDesc& desc){close();p_->lastAu
     if(FAILED(p.graph.As(&p.control))||FAILED(p.graph.As(&p.events))||FAILED(p.grab->SetBufferSamples(FALSE))||FAILED(p.grab->SetCallback(&p,0)))return false;
     for(auto** f:{&p.frame,&p.pendingFrame}){
         *f=av_frame_alloc();if(!*f)return false;
-        (*f)->format=AV_PIX_FMT_BGRA;(*f)->width=p.info.width;(*f)->height=p.info.height;(*f)->color_range=AVCOL_RANGE_JPEG;
+        (*f)->format=AV_PIX_FMT_BGR0;(*f)->width=p.info.width;(*f)->height=p.info.height;(*f)->color_range=AVCOL_RANGE_JPEG;
         if(av_frame_get_buffer(*f,32)<0)return false;
     }
     p.info.color=pipeline::resolveFrameColor(*p.frame);p.configured=true;

@@ -1434,3 +1434,9 @@ Q3 color: shared ColorMetadata resolver combines declared AVFrame fields with so
 Commands: scripts/build.ps1 -Root . -Preset x64-release exit0 (build-color-capture.log); veyra_live_timing_tests.exe14 PASS (duration-unit.log); run-image-tests.ps1 (275s bound) and explicit25s-bounded PreviewGeometry/app tests. Latest phase7 via scripts/loop-gate.ps1 -Gate phase7 exit0; logs/delivery/f3fbdc84e9c54e718e03a94066df28bc/result.json41.453s appCDD4A16CC66A462A907EFA9EB82C10D22AA58A7B057BAEFDFAF4FB0EC055DC4F. Earlier duration gate e2fee...41.489s was previous app9A5C... . Latest small metadata-format changes covered by gate; GPU color goldens precede those small changes and await independent rerun. No new export integrity checks, publish, runtime change or shutdown. Independent review pending; Q4–Q7 open.
 
 Cycles56-61 review finished: scoped PASS, no project writes by reviewer; checkpoint before next atomic RGB capture change.
+
+Cycle62 before edit: bypass capture RGB32 -> NV12 conversion; use BGR0 opaque pixels, share CPU luma scene/cadence analysis with YUV path, verify GPU RGB goldens. Keep real capture acceptance pending.
+
+Cycle62 after edit: build/GPU image/phase7 passed. First fixture failure was missing standalone motion flag; production already set it. Freeze checkout for independent readonly reviewer.
+
+Cycle62 reviewer PASS, freeze lifted. Checkpoint; next atomic Q4 SR linear-input flags/exposure and extent bypass with actual GPU outputs.

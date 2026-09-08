@@ -1134,3 +1134,13 @@ Q3 color: shared ColorMetadata resolver combines declared AVFrame fields with so
 Commands: scripts/build.ps1 -Root . -Preset x64-release exit0 (build-color-capture.log); veyra_live_timing_tests.exe14 PASS (duration-unit.log); run-image-tests.ps1 (275s bound) and explicit25s-bounded PreviewGeometry/app tests. Latest phase7 via scripts/loop-gate.ps1 -Gate phase7 exit0; logs/delivery/f3fbdc84e9c54e718e03a94066df28bc/result.json41.453s appCDD4A16CC66A462A907EFA9EB82C10D22AA58A7B057BAEFDFAF4FB0EC055DC4F. Earlier duration gate e2fee...41.489s was previous app9A5C... . Latest small metadata-format changes covered by gate; GPU color goldens precede those small changes and await independent rerun. No new export integrity checks, publish, runtime change or shutdown. Independent review pending; Q4–Q7 open.
 
 Independent scoped review PASS: docs/REVIEW_COLOR_TIMING_2026-09-08.md; actual GPU tests and phase7 rerun. Q3 direct RGB capture and Q4-Q7 remain.
+
+## Cycle62 — direct RGB capture (review pending)
+- CaptureCardSource now labels DirectShow RGB32 as BGR0 (unused alpha); EngineController selects direct RGB for capture. EnhanceGraph accepts BGR0/RGB0 with opaque alpha and preserves alpha only for RGBA/BGRA. Removes an application RGB→NV12 conversion, not upstream device compression.
+- Shared 64×36 scene/cadence analysis serves CPU YUV and live RGB. Static images remain single frame. No normal pixel readback added.
+- Build: scripts/build.ps1 -Root project -Preset x64-release, build-capture-rgb2.log exit0. Initial image test 1df8045c failed because fixture omitted enableNvofStandalone; production sets it. Fixed fixture to match product, no production bypass.
+- GPU image test image-1660346e66504f8bac949030915d7398 exit0, 11.706s (275s watchdog): alternating red/blue BGR0 alpha0 exact maxError8=0, opaque output, one detected cut; NR-on4 actual Evaluates and2 NVOF executes. Prior images/colors/tiles remain passed. This is synthetic source, not physical capture validation.
+- powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/loop-gate.ps1 -Gate phase7: 75 checks PASS, logs/delivery/8211c4bf969647d099f62cd3cd11d96a/result.json. App SHA256 410EE473BDBCD8948D24589D8047F4A54FA6C30BA4E243F2B946D44EAF03B06A.
+- Q4–Q7 and natural image tile quality remain; full Phase7/Goal stays in_progress. Existing export integrity unchanged.
+
+Cycle62 independent PASS: docs/REVIEW_CAPTURE_RGB_2026-09-08.md. phase7 afe022a9 41.407s, image9ac2822f11.487s. NR-on fixture error0 is unmeasured, not a pixel quality assertion. Next Q4: official DLSS guide31March2026 PDF pages20/35/37 verifies linear input IsHDR and exposure contract; local SR evaluate/isBypass still width-only (Create checks both), fix and GPU-test next.

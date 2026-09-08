@@ -460,3 +460,7 @@ Q3 color: shared ColorMetadata resolver combines declared AVFrame fields with so
 Commands: scripts/build.ps1 -Root . -Preset x64-release exit0 (build-color-capture.log); veyra_live_timing_tests.exe14 PASS (duration-unit.log); run-image-tests.ps1 (275s bound) and explicit25s-bounded PreviewGeometry/app tests. Latest phase7 via scripts/loop-gate.ps1 -Gate phase7 exit0; logs/delivery/f3fbdc84e9c54e718e03a94066df28bc/result.json41.453s appCDD4A16CC66A462A907EFA9EB82C10D22AA58A7B057BAEFDFAF4FB0EC055DC4F. Earlier duration gate e2fee...41.489s was previous app9A5C... . Latest small metadata-format changes covered by gate; GPU color goldens precede those small changes and await independent rerun. No new export integrity checks, publish, runtime change or shutdown. Independent review pending; Q4–Q7 open.
 
 Cycles56-61 independent review_color_timing PASS: docs/REVIEW_COLOR_TIMING_2026-09-08.md. Full Goal still open.
+
+Cycle62 RGB capture: image-1660346e66504f8bac949030915d7398 11.706s PASS, exact saturated color / opaque BGR0, cut1 NR4 NVOF2. phase7 8211c4bf969647d099f62cd3cd11d96a PASS; app410EE473... Review pending; real capture unexecuted.
+
+Cycle62 independent scoped PASS: docs/REVIEW_CAPTURE_RGB_2026-09-08.md; full Goal not approved.

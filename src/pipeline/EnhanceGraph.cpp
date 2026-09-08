@@ -654,15 +654,42 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     if (list == nullptr) { veyra::log::error("graph", "ring acquire"); return false; }
     gpuTimer_.frame({epoch_,desc_.settingsRevision,realFrameIndex_+1},context_.fence());gpuTimer_.mark(list,GpuStage::Color);
 
+    // Both CPU source layouts feed the same bounded scene/cadence history.
+    auto analyzeLuma = [&](std::vector<uint8_t> sample) {
+        std::vector<double> hist(256,0);double sad=0;
+        for(auto v:sample)hist[v]+=1.0/sample.size();
+        if(previousLuma_.size()==sample.size())for(size_t i=0;i<sample.size();++i)sad+=std::abs(int(sample[i])-int(previousLuma_[i]))/(255.0*sample.size());
+        cadence_.observe(ptsMs,sad,previousLuma_.size()==sample.size());
+        out.measuredContentRate=cadence_.confirmedRate(desc_.contentRate);
+        if(cadence_.conflicts(desc_.contentRate)&&realFrameIndex_%60==0)veyra::log::warn("cadence","requested content-rate identification conflicts with observed motion; preserving source timestamps");
+        out.contentDuplicate=desc_.contentRate!=engine::ContentRate::Transport&&previousLuma_.size()==sample.size()&&sad<0.0001;
+        const auto analysis=scene_.analyze(realFrameIndex_,hist,sad,static_cast<uint64_t>(std::max(0.0,ptsMs)*1000));
+        if(analysis.isSceneCut||analysis.isCadenceBreak){reset=true;prevValid_=false;if(analysis.isSceneCut)++metrics_.sceneCutCount;}
+        previousLuma_=std::move(sample);
+    };
+
     if(desc_.rgbInput){
-        if(frame->format!=AV_PIX_FMT_RGBA&&frame->format!=AV_PIX_FMT_BGRA){
-            veyra::log::error("graph","direct RGB input contract requires RGBA/BGRA frame");return false;
+        if(frame->format!=AV_PIX_FMT_RGBA&&frame->format!=AV_PIX_FMT_BGRA&&frame->format!=AV_PIX_FMT_RGB0&&frame->format!=AV_PIX_FMT_BGR0){
+            veyra::log::error("graph","direct RGB input contract requires packed RGBA/BGRA/RGB0/BGR0 frame");return false;
         }
         if(frame->width!=int(srcW_)||frame->height!=int(srcH_))return false;
         for(uint32_t y=0;y<srcH_;++y){
             auto* dst=mappedRgb_[parity]+y*rgbPitch_;const auto* src=frame->data[0]+ptrdiff_t(y)*frame->linesize[0];
             if(frame->format==AV_PIX_FMT_RGBA)std::memcpy(dst,src,size_t(srcW_)*4);
-            else for(uint32_t x=0;x<srcW_;++x){dst[x*4]=src[x*4+2];dst[x*4+1]=src[x*4+1];dst[x*4+2]=src[x*4];dst[x*4+3]=src[x*4+3];}
+            else for(uint32_t x=0;x<srcW_;++x){
+                const bool bgr=frame->format==AV_PIX_FMT_BGRA||frame->format==AV_PIX_FMT_BGR0;
+                dst[x*4]=src[x*4+(bgr?2:0)];dst[x*4+1]=src[x*4+1];dst[x*4+2]=src[x*4+(bgr?0:2)];
+                dst[x*4+3]=(frame->format==AV_PIX_FMT_BGRA)?src[x*4+3]:255;
+            }
+        }
+        if(!desc_.stillImage){
+            std::vector<uint8_t> sample;sample.reserve(64*36);
+            const bool bgr=frame->format==AV_PIX_FMT_BGRA||frame->format==AV_PIX_FMT_BGR0;
+            for(unsigned y=0;y<36;++y)for(unsigned x=0;x<64;++x){
+                const auto* p=frame->data[0]+ptrdiff_t(y*srcH_/36)*frame->linesize[0]+(x*srcW_/64)*4;
+                sample.push_back(uint8_t((54*unsigned(p[bgr?2:0])+183*unsigned(p[1])+19*unsigned(p[bgr?0:2])+128)>>8));
+            }
+            analyzeLuma(std::move(sample));
         }
         tracker_.transition(list,rgbTex_.Get(),D3D12_RESOURCE_STATE_COPY_DEST);
         D3D12_TEXTURE_COPY_LOCATION dst{},src{};dst.pResource=rgbTex_.Get();dst.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
@@ -744,16 +771,9 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         uint8_t* planes[2] = { directUpload?mappedLuma_[parity]:nv12Buf_.data(), directUpload?mappedChroma_[parity]:nv12Buf_.data() + lumaSize_ };
         const int strides[2] = { static_cast<int>(lumaPitch_), static_cast<int>(chromaPitch_) };
         sws_scale(nv12Ctx_, frame->data, frame->linesize, 0, frame->height, planes, strides);
-        std::vector<uint8_t> sample;sample.reserve(64*36);std::vector<double> hist(256,0);double sad=0;
-        for(unsigned y=0;y<36;++y)for(unsigned x=0;x<64;++x){const uint8_t v=directUpload?frame->data[0][ptrdiff_t(y*srcH_/36)*frame->linesize[0]+x*srcW_/64]:planes[0][size_t(y*srcH_/36)*lumaPitch_+x*srcW_/64];hist[v]+=1.0/(64*36);sample.push_back(v);}
-        if(previousLuma_.size()==sample.size())for(size_t i=0;i<sample.size();++i)sad+=std::abs(int(sample[i])-int(previousLuma_[i]))/(255.0*sample.size());
-        cadence_.observe(ptsMs,sad,previousLuma_.size()==sample.size());
-        out.measuredContentRate=cadence_.confirmedRate(desc_.contentRate);
-        if(cadence_.conflicts(desc_.contentRate)&&realFrameIndex_%60==0)veyra::log::warn("cadence","requested content-rate identification conflicts with observed motion; preserving source timestamps");
-        out.contentDuplicate=desc_.contentRate!=engine::ContentRate::Transport&&previousLuma_.size()==sample.size()&&sad<0.0001;
-        const auto analysis=scene_.analyze(realFrameIndex_,hist,sad,static_cast<uint64_t>(std::max(0.0,ptsMs)*1000));
-        if(analysis.isSceneCut||analysis.isCadenceBreak){reset=true;prevValid_=false;if(analysis.isSceneCut)++metrics_.sceneCutCount;}
-        previousLuma_=std::move(sample);
+        std::vector<uint8_t> sample;sample.reserve(64*36);
+        for(unsigned y=0;y<36;++y)for(unsigned x=0;x<64;++x){const uint8_t v=directUpload?frame->data[0][ptrdiff_t(y*srcH_/36)*frame->linesize[0]+x*srcW_/64]:planes[0][size_t(y*srcH_/36)*lumaPitch_+x*srcW_/64];sample.push_back(v);}
+        analyzeLuma(std::move(sample));
         if(!directUpload){for (uint32_t y = 0; y < srcH_; ++y)
             std::memcpy(mappedLuma_[parity] + y * lumaPitch_, planes[0] + y * lumaPitch_, srcW_);
         for (uint32_t y = 0; y < (srcH_+1) / 2; ++y)
