@@ -483,7 +483,7 @@ bool EnhanceGraph::createComputePasses()
     // upload is the proven frame-path ingestion on this system.
     if (!uploadPass_.loadShader("Nv12Upload.dxil", cs) || !uploadPass_.create(context_.device(), cs, 4, 1, 2)) return false;
     if (!densifyPass_.loadShader("NvofDensify.dxil", cs) ||
-        !densifyPass_.create(context_.device(), cs, 6, 2, 2)) return false;
+        !densifyPass_.create(context_.device(), cs, 6, 4, 2)) return false;
     if (!stager_.initialize(context_.device(), 64)) {
         veyra::log::error("graph", "descriptor stager init failed");
         return false;
@@ -575,7 +575,7 @@ bool EnhanceGraph::createViews()
     if (viewsTex) stagedSrv(videoFrame_[1].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 12);
 
     // Densify pass views: 0=rawFlow SRV(int2) 1=cost SRV(uint)
-    // 2=flowOut UAV(float2) 3=confOut UAV(float).
+    // 2=previous RGB SRV,3=current RGB SRV;4=flow UAV,5=confidence UAV.
     {
         D3D12_SHADER_RESOURCE_VIEW_DESC rf{};
         rf.Format = DXGI_FORMAT_R16G16_SINT;
@@ -595,14 +595,15 @@ bool EnhanceGraph::createViews()
         rc.Texture2D.PlaneSlice = 0;
         rc.Texture2D.ResourceMinLODClamp = 0.0f;
         if (viewsTex) stager_.stageSrv(nvofCostTex_.Get(), &rc, densifyPass_.heap.Get(), 1);
+        if(viewsTex){stagedSrv(nvofInA_.Get(),DXGI_FORMAT_B8G8R8A8_UNORM,densifyPass_,2);stagedSrv(nvofInB_.Get(),DXGI_FORMAT_B8G8R8A8_UNORM,densifyPass_,3);}
         D3D12_UNORDERED_ACCESS_VIEW_DESC uf{};
         uf.Format = DXGI_FORMAT_R16G16_FLOAT;
         uf.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-        context_.device()->CreateUnorderedAccessView(flowTex_.Get(), nullptr, &uf, cpu(densifyPass_, 2));
+        context_.device()->CreateUnorderedAccessView(flowTex_.Get(), nullptr, &uf, cpu(densifyPass_, 4));
         D3D12_UNORDERED_ACCESS_VIEW_DESC uc{};
         uc.Format = DXGI_FORMAT_R8_UNORM;
         uc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-        context_.device()->CreateUnorderedAccessView(confTex_.Get(), nullptr, &uc, cpu(densifyPass_, 3));
+        context_.device()->CreateUnorderedAccessView(confTex_.Get(), nullptr, &uc, cpu(densifyPass_, 5));
     }
     return true;
 }
@@ -821,7 +822,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     gpuTimer_.mark(list,GpuStage::Color,true);
     if (desc_.stageMark) desc_.stageMark("yuv");
 
-    // Guidance from original post-SR color BEFORE NR. Queue waits are GPU-side.
+    // Guidance from original source-space color before SR/NR. Queue waits are GPU-side.
     bool haveFlow = false;
     const bool runMotion = nvofStandalone_ || fgEnabled_ || srEnabled_;
     if (runMotion && nvof_ && nvof_->initialized()) {
@@ -856,11 +857,15 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
                 tracker_.transition(list,nvofCostTex_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 tracker_.transition(list,flowTex_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                 tracker_.transition(list,confTex_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                tracker_.transition(list,nvofInA_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                tracker_.transition(list,nvofInB_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 const float dc[8]={uintBits(rawW_),uintBits(rawH_),uintBits(nvofW_),uintBits(nvofH_),
-                    uintBits(selectedGrid_),uintBits(0),uintBits(32),0};
-                densifyPass_.bind(list,dc,gpuHandleOf(densifyPass_,0).ptr,gpuHandleOf(densifyPass_,2).ptr);
+                    uintBits(selectedGrid_),uintBits(0),uintBits(32),uintBits(desc_.validateMotion?3u:0u)};
+                densifyPass_.bind(list,dc,gpuHandleOf(densifyPass_,0).ptr,gpuHandleOf(densifyPass_,4).ptr);
                 list->Dispatch((nvofW_+15)/16,(nvofH_+15)/16,1);
                 tracker_.uavBarrier(list,flowTex_.Get());tracker_.uavBarrier(list,confTex_.Get());
+                tracker_.transition(list,nvofInA_.Get(),D3D12_RESOURCE_STATE_COMMON);
+                tracker_.transition(list,nvofInB_.Get(),D3D12_RESOURCE_STATE_COMMON);
                 tracker_.transition(list,nvofRawTex_.Get(),D3D12_RESOURCE_STATE_COMMON);
                 tracker_.transition(list,nvofCostTex_.Get(),D3D12_RESOURCE_STATE_COMMON);
                 tracker_.transition(list,flowTex_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);

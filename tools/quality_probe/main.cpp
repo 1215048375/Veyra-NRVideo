@@ -213,13 +213,14 @@ int main(int argc, char** argv)
     std::string corpusManifest, guidanceMode = "motion", runId = "quality-probe", jsonPath, logPath, inputPath;
     int durationSeconds = 0;
     int maxFrames = 60;
-    bool native = false, diag = false;
+    bool native = false, diag = false, legacyMotion = false;
     std::string dumpPath;
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         auto value = [&]() -> std::string { return (i + 1 < argc) ? std::string(argv[++i]) : std::string(); };
         if (arg == "--diag") diag = true;
+        else if(arg=="--legacy-motion")legacyMotion=true;
         else if (arg == "--native") native = true;
         else if (arg == "--frames") maxFrames = std::atoi(value().c_str());
         else if (arg == "--dump") dumpPath = value();
@@ -292,7 +293,7 @@ int main(int argc, char** argv)
     const std::string configText = "guidance=" + guidanceMode
         + (native ? ";workExtent=native;nrPerFrame=1;fg=0;nvofStandalone=" : ";workExtent=3840x2160;nrPerFrame=1;fg=0;nvofStandalone=")
         + (guidanceMode == "motion" || guidanceMode == "motion-depth" || guidanceMode == "auto" ? "1" : "0")
-        + ";";
+        + (legacyMotion?";motionValidation=0;":";motionValidation=3;");
     const std::string configHash = veyra::sha256Hex(
         reinterpret_cast<const uint8_t*>(configText.data()), configText.size());
 
@@ -332,7 +333,7 @@ int main(int argc, char** argv)
         const uint32_t srcW = source.info().width, srcH = source.info().height;
         if (firstSourceW == 0) { firstSourceW = srcW; firstSourceH = srcH; }
 
-        veyra::pipeline::EnhanceGraphDesc gd{};
+        veyra::pipeline::EnhanceGraphDesc gd{};gd.validateMotion=!legacyMotion;
         gd.sourceWidth = srcW;
         gd.sourceHeight = srcH;
         gd.workWidth = native ? srcW : 3840; gd.workHeight = native ? srcH : 2160;
@@ -440,6 +441,7 @@ int main(int argc, char** argv)
     j += "  \"probe\": \"veyra_quality_probe\",\n";
     j += std::format("  \"runId\": \"{}\",\n", veyra::harness::util::jsonEscape(runId));
     j += std::format("  \"guidanceMode\": \"{}\",\n", guidanceMode);
+    j += std::format("  \"motionValidation\": {},\n", legacyMotion ? 0 : 3);
     j += std::format("  \"exeHash\": \"{}\",\n", exeHash.empty() ? "unavailable" : exeHash);
     j += std::format("  \"inputHash\": \"{}\",\n", inputHash.empty() ? "unavailable" : inputHash);
     j += std::format("  \"configHash\": \"{}\",\n", configHash);

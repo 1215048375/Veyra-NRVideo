@@ -76,19 +76,19 @@
     }
   ],
   "cycle": {
-    "completed": 68,
+    "completed": 70,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "Temporal manual NR protection reviewed PASS; optional resource contract mismatch independently confirmed, not integrated",
+  "currentTask": "Fused motion bounds/photometric checks and residual harness repair independently reviewed PASS; Q6 quality evaluation ongoing",
   "lastGate": {
     "name": "phase7",
     "status": "passed",
     "exitCode": 0,
-    "evidence": "logs/delivery/2b2498a58135471e981779c989390d31/result.json 41.739s;75checks"
+    "evidence": "logs/delivery/240031138e804d7f84a42a57a2069759/result.json 41.996s;75checks"
   },
   "lastFailureFingerprint": "",
   "failureLedger": [
@@ -107,8 +107,8 @@
     "Current USB2 1080p50 physical throughput passed; user perceived latency/audio/actual FG display cadence still need confirmation.",
     "Public proprietary runtime distribution rights unresolved; local delivery only."
   ],
-  "nextAction": "Correct existing RepairShaderTests residual constants8->24 and validate; then Q6 out-of-frame/photometric motion confidence and FG policy, Q7 candidate ROI/natural reconstruction",
-  "updatedAt": "2026-09-08T10:52:23.421388+00:00",
+  "nextAction": "Extend motion GPU matrix to vertical/top-bottom/cost31-32/intermediate confidence; then occlusion/cut/FG corpus and bidirectional A/B ROI, followed by Q7 candidates/natural reconstruction",
+  "updatedAt": "2026-09-08T11:08:10.377584+00:00",
   "deliveryPlan": "docs/ACTIVE_DELIVERY_PLAN.md",
   "captureAcceptance": "throughput_short_test_passed_user_latency_audio_pending",
   "testInvocationLimitSeconds": 300,
@@ -128,7 +128,8 @@
     "docs/REVIEW_SR_CONTRACT_2026-09-08.md: independent scopedPASS; SR60a70819e6 actual motion andGBV0, image route/color golden passed",
     "docs/REVIEW_NR_PROTECTION_2026-09-08.md: scopedPASS afterP2syncfix; GPU/presets andactualUI dirty/master-off independently verified",
     "Cycle66 independent scoped PASS: image-e8c7b9377cd94f68bd50fb189bd8b49c 21.916s; feather2/32, disjoint, central tile seams. No product changes.",
-    "Cycles67-68 independent scoped PASS: temporal image6508c7cc PASS; optional R8d5f8d738/RGBAd9974360 reproduce expected-contract FAIL, no product integration."
+    "Cycles67-68 independent scoped PASS: temporal image6508c7cc PASS; optional R8d5f8d738/RGBAd9974360 reproduce expected-contract FAIL, no product integration.",
+    "Cycles69-70 independentPASS: motionshader/debug0; repairedresidual24constants; image29e690f3 andSR60A/B GBV0. Natural/FGquality still open."
   ],
   "reviewBaseCommit": "6f0ebaa687e3966d989bf138c86b6882380f20fb",
   "localDelivery": "capture_fix_candidate_needs_review",
@@ -266,11 +267,9 @@
     "testInvocationLimitSeconds": 300,
     "productModified": true,
     "consecutiveBlockedGoalTurns": 0,
-    "previousGoalTurnClassification": "progress: cycle66 boundary evidence committed3d73860",
-    "currentGoalTurnClassification": "progress: temporal protection verified; optional resources independently measured and rejected for integration; existing shader harness P2 identified",
+    "previousGoalTurnClassification": "progress: d2921d2 temporal protection/private resource decision",
+    "currentGoalTurnClassification": "progress: fixed residual harness P2; fused motion bounds/photometric validation implemented and independently tested",
     "controlSynchronizationAuthorization": "2026-09-08 user: 确认，给你全部权限; applies to previously proposed exact two-hash synchronization",
-    "diagnosticFindings": [
-      "P2 pre-existing RepairShaderTests.cpp residual constants8 vs24; next atomic repair"
-    ]
+    "diagnosticFindings": []
   }
 }
