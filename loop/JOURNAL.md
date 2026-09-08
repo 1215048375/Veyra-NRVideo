@@ -1524,3 +1524,21 @@ review_motion_validation scopedPASS, no introducedP0/P1/P2. Independent prefligh
 AppD14DFB94A933E1BE85B9972CADB628BC58E320C26D53B4887F2102BFA2E48D46; quality21A265B0645BD8FA5556E527776155FD26AB7F65DF2EBAC9E523CF653D0988F1; motiontestC5F3AE03B74EB56B106C070FD275095811DE0CE18599411B564C1F2B85C25428. Reviewer trackedfingerprinte3db68bd6d230d63b0752d9f5d6fa84be6837252 unchanged. Product export integrity remains unchanged.
 
 Limits: encoded-luma.03/.15 heuristic cannot detect isoluminant mismatch or repetitive wrong matches; shortened/zero motion does not prove safe model history exclusion. Unit matrix currently horizontalpositive/negative/fractional only; next atomic task extends nonzerovertical/top-bottom/cost31-32/intermediateconfidence, then actual occlusion/cut/FG comparisons and A/B bidirectional cost/benefit. Natural footage/Q7/physical acceptance remain pending. Phase7/Goalin_progress; scopedpass only.
+
+## Cycle71 - motion validation boundary completion
+Previous turn progress fb11585 fused motion validation, independently reviewed. Clean HEAD/noSTOP. Extend shader fixture to transposed vertical motion/top-bottom bounds and cost16/31/32/255; unchanged product logic. Run real GPU test then frozen gate, retain per-test <=300s.
+
+Cycle71 GPU horizontal/vertical costboundary tests PASS debug0; gate75PASS.
+## Cycle72 - actual motion corpus A/B evidence
+Run existing pinned1080p corpus through current shared NR/NVOF,600framesperclip toinclude allcuts/flash/duplicate. SameEXE legacyflag0 vsvalidation3, report periodic samples; no invented fulltrajectory metric. Eachchild275secondwatchdog. No product edits during experiment.
+Cycle72 correction: quality motion/confidence statistics aggregate 64x36 samples every60frames (23040 samples), not final-frame-only. Ten600frame NR/NVOF runs exit0/debug0; source diagnostic shows ALL THREE actual cuts150/300/450 missed; prior count2 corresponds to flash301/302. No scene-quality PASS. Initial runner nullExitCode retained; cached process Handle and fresh complete matrix exit0.
+## Cycle73 - moderate-luma hard discontinuity repair
+Before edits: source-exact64x36 Y-plane diagnostics for all five600frame corpus clips find strong histogram replacement with SAD.104/.212/.214 at actual cuts. Add conservative alternate threshold SAD>.08 AND histogram L1/2>.9, retaining old high-SAD branch. Five affected boundaries include flash appearance/return; without future-frame classification these are reset candidates, not five semantic cuts. Four other synthetic clips produce no candidate resets. Add regression tests and actual boundary logs, then NR/FG corpus, gate and independent review. This heuristic cannot guarantee detection of equal-histogram cuts or eliminate exposure false positives; no new model/readback/lookahead.
+
+## Cycles71-73 scoped scene repair candidate
+See docs/SCENE_MOTION_CORPUS_2026-09-08.md. Motion vertical/cost GPU checks and scene14 checks PASS. Fixed all3 authored cuts missed by old .3 SAD threshold; actual shared graph logs150/300/301/302/450,600NR/594NVOF/debug0. Four other600frameclips zero new boundaries. Actual1080p2X export fg-scene-b1e15c6c88b64b00aee2b6af5f8c4990 exit0:600source/594generated/6hold/1200output; full diagnosticdecode1200,5boundaryholds matchpreviousYmean<=.049/255. Buildcycle73exit0. No exportintegrity change, no naturalquality conclusion. Frozen gate/review pending.
+
+Cycle73 gate initial wrapper FAIL: phase.state needs_review is not accepted by the protected state schema; delivery body exit0 and no project mutation. Restored phase.state=in_progress; currentTask explicitly remains needs independent review. No gate/control change. Retain gate-cycle73.log and rerun frozen wrapper.
+
+## Cycles71-73 independent scoped PASS
+review_scene_boundaries no introducedP0/P1/P2; docs/REVIEW_SCENE_BOUNDARIES_2026-09-08.md. Independentpreflight71/phase7delivery55725c1cd58846c59342d5e62456277341.568s75PASS. Freshreview-scene-fc558d881d0b404fbe51e5f6f2ebd6e0:scene14/motionbothaxesdebug0;RTXNR600NVOF594/Create0x1SEH0;actualFG600source594generated6holds1200output andindependentfull1200decode. BoundarypreviousYerror<=.048694/255. Trackedfingerprint4343fa50af201ad1393b6bec4228e3c18fb4447dunchanged. Q6/Q7/natural/physical/long-term/distribution not passed.

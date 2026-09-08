@@ -48,6 +48,26 @@ int main() {
         check("scene:cut-counted", a.sceneCutCount() == 1, "count=1");
     }
 
+    // Moderate-luma cuts were previously missed by the mandatory SAD > .3.
+    // Disjoint point histograms are deliberately independent of the generator.
+    {
+        std::vector<double> dark(256,0), nearby(256,0), partial(256,0);
+        dark[100]=1; nearby[130]=1; partial[100]=.2;partial[130]=.8;
+        SceneCadenceAnalyzer a;
+        (void)a.analyze(0,dark,0,0);
+        auto r=a.analyze(1,nearby,30.0/255,16667);
+        check("scene:moderate-luma-cut",r.isSceneCut,"histogram replacement and SAD below old .3 threshold");
+        a.reset();(void)a.analyze(0,dark,0,0);
+        r=a.analyze(1,nearby,.079,16667);
+        check("scene:small-change-not-cut",!r.isSceneCut,"disjoint histogram alone is insufficient");
+        a.reset();(void)a.analyze(0,dark,0,0);
+        r=a.analyze(1,partial,.15,16667);
+        check("scene:partial-replacement-not-cut",!r.isSceneCut,"moderate SAD needs near-total replacement");
+        a.reset();(void)a.analyze(0,dark,0,0);
+        r=a.analyze(1,dark,.25,16667);
+        check("scene:moving-texture-not-cut",!r.isSceneCut,"high motion with stable distribution is not a cut");
+    }
+
     // Same scene: similar histogram + low SAD.
     {
         SceneCadenceAnalyzer a;

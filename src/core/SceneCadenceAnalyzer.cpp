@@ -51,9 +51,14 @@ SceneAnalysisResult SceneCadenceAnalyzer::analyze(uint64_t frameId,
         ++flashCount_;
         // Flash is NOT a cut  don't reset.
     }
-    // Hard cut: high SAD AND high histogram distance.
-    else if (sad > config_.sceneCutSadThreshold &&
-             result.histogramDistance > config_.sceneCutHistogramThreshold) {
+    // Hard discontinuity: either large per-pixel change, or almost complete
+    // histogram replacement with moderate change. The latter catches cuts with
+    // similar brightness. A flash can also trigger this conservative reset;
+    // without future frames this is not a semantic scene classification.
+    else if ((sad > config_.sceneCutSadThreshold &&
+              result.histogramDistance > config_.sceneCutHistogramThreshold) ||
+             (sad > config_.replacementSadThreshold &&
+              result.histogramDistance > config_.replacementHistogramThreshold)) {
         result.isSceneCut = true;
         ++sceneCutCount_;
     }

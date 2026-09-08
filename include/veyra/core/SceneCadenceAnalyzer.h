@@ -11,7 +11,7 @@
 namespace veyra::core {
 
 struct SceneAnalysisResult {
-    bool isSceneCut = false;       // hard cut detected
+    bool isSceneCut = false;       // reset candidate; also includes abrupt exposure transitions
     bool isFlash = false;          // bright flash (not a cut)
     bool isDuplicate = false;      // duplicate of previous frame
     bool isCadenceBreak = false;   // PTS irregularity
@@ -27,6 +27,10 @@ public:
     struct Config {
         double sceneCutHistogramThreshold = 0.5;  // L1 distance for hard cut
         double sceneCutSadThreshold = 0.3;        // normalized SAD for hard cut
+        // Similar average brightness does not imply temporal continuity. Require
+        // nearly disjoint histograms before accepting the lower SAD threshold.
+        double replacementHistogramThreshold = 0.9;
+        double replacementSadThreshold = 0.08;
         double flashHistogramThreshold = 0.1;     // flash: high SAD, low hist distance
         double flashSadThreshold = 0.5;           // flash: SAD above this
         double duplicateSadThreshold = 0.001;     // near-zero SAD = duplicate
