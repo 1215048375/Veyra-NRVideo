@@ -8,28 +8,17 @@ struct ChromeLayout {
     bool pro,drawer;
     ChromeLayout(int width,int height,bool professional,bool showDrawer,int inspectorWidth=320):w(width),h(height),pro(professional),drawer(showDrawer){
         panelWidth=pro?(w>=1180?std::clamp(inspectorWidth,296,420):w>=960?296:showDrawer?296:0):0;
-        left=pro?(w>=960?84:68):(w>=1000?64:24);top=pro?68:(h>=720?104:76);
+        left=pro?(w>=960?84:68):0;top=pro?68:0;
         right=w-panelWidth-20;viewWidth=pro?((w>=960||showDrawer)?right-left-14:w-left-20):w-left*2;
-        viewHeight=pro?std::max(160,h-306):std::max(180,std::min(int(viewWidth*9.0/16),h-top-138));
-        bottom=top+viewHeight+14;
+        viewHeight=pro?std::max(160,h-306):h-88;
+        bottom=top+viewHeight+(pro?14:0);
     }
 };
-inline void chromeText(HDC dc,HWND window,std::wstring value,int x,int y,int w,int h,int size,COLORREF c,int weight=FW_NORMAL,UINT flags=DT_LEFT|DT_SINGLELINE|DT_VCENTER){auto font=makeFont(window,size,weight);auto old=SelectObject(dc,font);SetTextColor(dc,c);SetBkMode(dc,TRANSPARENT);RECT r{dip(window,x),dip(window,y),dip(window,x+w),dip(window,y+h)};DrawTextW(dc,value.c_str(),-1,&r,flags|DT_END_ELLIPSIS);SelectObject(dc,old);DeleteObject(font);}
+inline void chromeText(HDC dc,HWND window,std::wstring value,int x,int y,int w,int h,int size,COLORREF c,int weight=FW_NORMAL,UINT flags=DT_LEFT|DT_SINGLELINE|DT_VCENTER){auto font=makeFont(window,size,weight);auto old=SelectObject(dc,font);SetTextColor(dc,c);SetBkMode(dc,TRANSPARENT);RECT r{dip(window,x),dip(window,y),dip(window,x+w),dip(window,y+h)};glassText(dc,value.c_str(),-1,&r,flags|DT_END_ELLIPSIS);SelectObject(dc,old);DeleteObject(font);}
 inline void paintChrome(HWND window,HDC dc,const ChromeLayout& l,const engine::PlayerSnapshot& s,bool full){
-    RECT client{};GetClientRect(window,&client);if(full){FillRect(dc,&client,bgBrush());return;}
-    auto rect=[&](int x,int y,int w,int h){return RECT{dip(window,x),dip(window,y),dip(window,x+w),dip(window,y+h)};};
-    using namespace Gdiplus;Graphics g(dc);g.SetSmoothingMode(SmoothingModeAntiAlias);
-    if(!l.pro){LinearGradientBrush bg(Point(0,0),Point(0,client.bottom),color(cinema),color(RGB(20,31,41)));g.FillRectangle(&bg,0,0,client.right,client.bottom);
-        // Restrained ambient shadow below the single cinema surface.
-        for(int i=18;i>0;--i){auto r=rect(l.left-i/2,l.top+i/2,l.viewWidth+i,l.viewHeight+88+i/2);GraphicsPath p;rounded(p,{float(r.left),float(r.top),float(r.right-r.left),float(r.bottom-r.top)},float(dip(window,5)));SolidBrush shadow(Color(BYTE(3),0,0,0));g.FillPath(&shadow,&p);}
-        roundRect(dc,rect(l.left,l.top,l.viewWidth,l.viewHeight+88),cinemaPanel,dip(window,5));
-        chromeText(dc,window,L"V E Y R A",l.left,l.h-46,160,24,12,RGB(118,133,144),FW_MEDIUM);
-        chromeText(dc,window,L"本地增强播放器",l.w-238,l.h-46,174,24,12,RGB(118,133,144));
-    }else{
-        FillRect(dc,&client,bgBrush());roundRect(dc,rect(4,4,64,l.h-8),RGB(16,17,18),dip(window,22));
-        roundRect(dc,rect(l.left,l.top,l.viewWidth,l.viewHeight),panel,dip(window,20));
-        roundRect(dc,rect(l.left,l.bottom,l.viewWidth,l.h-l.bottom-20),panel,dip(window,20));
-        if(l.panelWidth){roundRect(dc,rect(l.right,l.top,l.panelWidth,l.viewHeight),panel,dip(window,20));roundRect(dc,rect(l.right,l.bottom,l.panelWidth,l.h-l.bottom-20),panel,dip(window,20));}
+    RECT client{};GetClientRect(window,&client);if(!copyGlass(dc,client,window))FillRect(dc,&client,bgBrush());if(full)return;
+    using namespace Gdiplus;AlphaGraphics drawing(dc);auto& g=drawing.get();g.SetSmoothingMode(SmoothingModeAntiAlias);
+    if(l.pro){
         chromeText(dc,window,L"专业工作台",l.left,18,180,24,13,secondary);
         const auto& resolution=s.metrics.resolution;
         auto extent=[](uint32_t w,uint32_t h){return w&&h?std::format(L"{} × {}",w,h):std::wstring(L"—");};

@@ -15,7 +15,8 @@ struct ResolutionPlan {
     uint64_t settingsRevision=0;
     static ResolutionPlan make(Extent source,bool sr,NrSizePolicy policy,bool exporting,uint64_t revision=0) {
         if(!source.valid())throw std::invalid_argument("invalid SDR source extent");
-        ResolutionPlan p; p.source=source;p.base=sr?Extent{3840,2160}:source;
+        ResolutionPlan p; p.source=source;p.base=source;
+        if(sr){const double scale=std::min(3840.0/source.width,2160.0/source.height);p.base={std::max(2u,uint32_t(source.width*scale+1e-6)&~1u),std::max(2u,uint32_t(source.height*scale+1e-6)&~1u)};}
         p.srApplied=sr&&p.base!=source;p.nr=p.base;
         if(!exporting&&policy==NrSizePolicy::Realtime) {
             const double scale=std::min({1.0,1920.0/p.base.width,1080.0/p.base.height});

@@ -38,10 +38,15 @@ try {
   $input=$clip
   if($name -in @('audio','export','canceljob','exitjob')){
    $input=Join-Path $runDir ($name+'-audio.mp4')
-   Run-Check ($name+'-fixture') (Get-Command ffmpeg).Source ('-nostdin -v error -i "'+$clip+'" -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=9" -t 9 -c:v copy -c:a aac "'+$input+'"')
+   $fixtureSeconds=if($name -eq 'audio'){9}else{30}
+   Run-Check ($name+'-fixture') (Get-Command ffmpeg).Source ('-nostdin -v error -stream_loop 3 -i "'+$clip+'" -f lavfi -i "sine=frequency=440:sample_rate=48000:duration='+$fixtureSeconds+'" -t '+$fixtureSeconds+' -c:v copy -c:a aac "'+$input+'"')
   }
   if($name -eq 'masterreject'){$env:VEYRA_TEST_REJECT_NR_DISABLE='1'}else{$env:VEYRA_TEST_REJECT_NR_DISABLE=$oldReject}
-  Run-Check $name $exe ('--smoke-seconds 14 --nr --no-sr --no-fg '+$flags+' "'+$input+'"')
+  # Two independent GPU contexts can take several seconds to initialize cold.
+  # Keep foreground media playing through worker pause/resume; assertions and
+  # the entire invocation's 300-second ceiling remain unchanged.
+  $smokeSeconds=if($name -in @('export','canceljob','exitjob')){30}else{14}
+  Run-Check $name $exe ('--smoke-seconds '+$smokeSeconds+' --nr --no-sr --no-fg '+$flags+' "'+$input+'"')
   $log=Get-Content -LiteralPath $env:VEYRA_LOG_FILE -Raw
   if($name -eq 'switch'){
    $lines=@($log -split '\r?\n');$first=[Array]::FindIndex($lines,[Predicate[string]]{param($line) $line.Contains('[ui-mode]')});$last=[Array]::FindLastIndex($lines,[Predicate[string]]{param($line) $line.Contains('[ui-mode]')});$interval=($lines[$first..$last] -join "`n")

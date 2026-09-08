@@ -2,6 +2,7 @@
 #include "veyra/engine/CfrTimeline.h"
 #include "veyra/source/MediaFileSource.h"
 #include "veyra/pipeline/EnhanceGraph.h"
+#include "veyra/pipeline/ResolutionPlan.h"
 #include "veyra/sink/NvencD3D12Encoder.h"
 #include "veyra/gfx/D3D12DeviceContext.h"
 #include "veyra/gfx/CommandSlotRing.h"
@@ -39,7 +40,8 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
         source.close();if(!source.open(od))break; // reopen from the true beginning, including negative PTS
         const AVRational rate=av_mul_q({rateNum,rateDen},{int(options.fg?options.fgMultiplier:1),1});
         veyra::log::info("export-timeline",std::format("CFR declared={}/{} candidate={}/{} timestampQuantum={} sampled={} output={}/{} (timestamp-consistent candidate, quantized short clips may be ambiguous; every PTS validated)",info.nominalRateNum,info.nominalRateDen,rateNum,rateDen,info.timestampQuantum,samples.size(),rate.num,rate.den));
-        pipeline::EnhanceGraphDesc gd;gd.sourceWidth=info.width;gd.sourceHeight=info.height;gd.workWidth=options.sr?3840:info.width;gd.workHeight=options.sr?2160:info.height;gd.enableSr=options.sr&&(info.width!=3840||info.height!=2160);gd.enableNr=options.nr;gd.enableFg=options.fg;gd.fgMultiplier=options.fgMultiplier;gd.enableNvofStandalone=options.nr;gd.model=options.settings.model;gd.residual=options.settings.residual;gd.settingsRevision=options.settings.revision;gd.flowQuality=options.settings.flow;gd.contentRate=options.settings.content;gd.runtimeAbsPath=(std::filesystem::path(VEYRA_PROJECT_ROOT)/"runtime_local/nvidia").wstring();
+        const auto resolution=pipeline::ResolutionPlan::make({info.width,info.height},options.sr,pipeline::NrSizePolicy::Native,true,options.settings.revision);
+        pipeline::EnhanceGraphDesc gd;gd.sourceWidth=info.width;gd.sourceHeight=info.height;gd.workWidth=resolution.base.width;gd.workHeight=resolution.base.height;gd.enableSr=resolution.srApplied;gd.enableNr=options.nr;gd.enableFg=options.fg;gd.fgMultiplier=options.fgMultiplier;gd.enableNvofStandalone=options.nr;gd.model=options.settings.model;gd.residual=options.settings.residual;gd.settingsRevision=options.settings.revision;gd.flowQuality=options.settings.flow;gd.contentRate=options.settings.content;gd.runtimeAbsPath=(std::filesystem::path(VEYRA_PROJECT_ROOT)/"runtime_local/nvidia").wstring();
         if(!graph.initialize(gd)||!graph.createViews())break;
         if(avformat_alloc_output_context2(&mux,nullptr,"mp4",utf8(partial).c_str())<0||!mux)break;
         videoStream=avformat_new_stream(mux,nullptr);if(!videoStream)break;videoStream->time_base={rate.den,rate.num};videoStream->avg_frame_rate=rate;

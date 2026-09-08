@@ -20,7 +20,8 @@ void VideoPresenter::refresh(ID3D12Device* device){for(unsigned i=0;i<3;++i){Mic
 bool VideoPresenter::present(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotRing& ring,pipeline::EnhanceGraph& graph,unsigned slot,bool generated,int comparison,bool baseReference,float split,pipeline::FrameIdentity identity) {
     RECT rc{};GetClientRect(window_,&rc);if(rc.right<1||rc.bottom<1)return true;
     const auto now=std::chrono::steady_clock::now();
-    if((unsigned(rc.right)!=sink_.width()||unsigned(rc.bottom)!=sink_.height())&&now-lastResize_>=std::chrono::milliseconds(100)) {
+    const auto deferUntil=uint64_t(uintptr_t(GetPropW(window_,L"Veyra.ResizeDeferUntil")));
+    if((unsigned(rc.right)!=sink_.width()||unsigned(rc.bottom)!=sink_.height())&&GetTickCount64()>=deferUntil&&now-lastResize_>=std::chrono::milliseconds(100)) {
         if(!ring.drainQueue())return false;sink_.resize(rc.right,rc.bottom);
         if(sink_.bufferWidth()!=unsigned(rc.right)||sink_.bufferHeight()!=unsigned(rc.bottom))return false;
         refresh(ctx.device());lastResize_=now;
@@ -34,8 +35,11 @@ bool VideoPresenter::present(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotRing& 
     barriers[1].Transition.pResource=bb;barriers[1].Transition.StateAfter=D3D12_RESOURCE_STATE_RENDER_TARGET;list->ResourceBarrier(2,barriers);
     D3D12_CPU_DESCRIPTOR_HANDLE rtv{rtvs_->GetCPUDescriptorHandleForHeapStart().ptr+size_t(sink_.swapChain()->GetCurrentBackBufferIndex())*inc_};
     const float black[4]={0,0,0,1};list->ClearRenderTargetView(rtv,black,0,nullptr);list->OMSetRenderTargets(1,&rtv,FALSE,nullptr);
-    const float scale=std::min(float(sink_.bufferWidth())/graph.workWidth(),float(sink_.bufferHeight())/graph.workHeight());
-    const float w=graph.workWidth()*scale,h=graph.workHeight()*scale;
+    // DXGI stretches the retained buffer while the native workspace unfolds.
+    // Compute contain in CURRENT client coordinates, then map back to buffer
+    // coordinates so that the onscreen image keeps its aspect throughout.
+    const float scale=std::min(float(rc.right)/graph.workWidth(),float(rc.bottom)/graph.workHeight());
+    const float w=graph.workWidth()*scale*sink_.bufferWidth()/rc.right,h=graph.workHeight()*scale*sink_.bufferHeight()/rc.bottom;
     D3D12_VIEWPORT viewport{(sink_.bufferWidth()-w)*0.5f,(sink_.bufferHeight()-h)*0.5f,w,h,0,1};
     D3D12_RECT rect{0,0,LONG(sink_.bufferWidth()),LONG(sink_.bufferHeight())};list->RSSetViewports(1,&viewport);list->RSSetScissorRects(1,&rect);
     ID3D12DescriptorHeap* heaps[]={pass_.heap.Get()};list->SetDescriptorHeaps(1,heaps);list->SetGraphicsRootSignature(pass_.rootSig.Get());list->SetPipelineState(pass_.pso.Get());

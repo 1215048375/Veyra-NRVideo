@@ -90,7 +90,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             pipeline::EnhanceGraphDesc gd;gd.sourceWidth=width;gd.sourceHeight=height;
             const auto resolution=pipeline::ResolutionPlan::make({width,height},options.sr,options.realtime?pipeline::NrSizePolicy::Realtime:pipeline::NrSizePolicy::Native,isImage,1);
             gd.workWidth=resolution.base.width;gd.workHeight=resolution.base.height;gd.nrWidth=resolution.nr.width;gd.nrHeight=resolution.nr.height;
-            gd.enableSr=options.sr&&(width!=3840||height!=2160);gd.enableNr=options.nr;gd.enableFg=options.fg;gd.fgMultiplier=options.fgMultiplier;gd.enableNvofStandalone=options.nr;
+            gd.enableSr=resolution.srApplied;gd.enableNr=options.nr;gd.enableFg=options.fg;gd.fgMultiplier=options.fgMultiplier;gd.enableNvofStandalone=options.nr;
             gd.noFeatures=false;gd.model=options.settings.model;gd.residual=options.settings.residual;gd.settingsRevision=options.settings.revision;gd.flowQuality=options.settings.flow;gd.contentRate=options.settings.content;
             gd.runtimeAbsPath=std::filesystem::path(VEYRA_PROJECT_ROOT).wstring()+L"\\runtime_local\\nvidia";
             if(!graph.initialize(gd)||!presenter.open(ctx,window,graph)||!graph.createViews()){status(L"增强初始化失败，请核对本地运行时",true);break;}
@@ -106,13 +106,17 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             while(!stop_){
                 const float gain=muted_?0.0f:volume_.load();audio.setGain(gain);
                 if(isCapture){const bool available=captureSource.setAudioGain(gain);std::lock_guard lock(mutex_);snapshot_.audioAvailable=available;}
-                EnhancementSettings requested;{std::lock_guard lock(mutex_);requested=desired_;}
+                // Save the currently displayed result before a settings transaction
+                // invalidates it. Keep a request queued until a frame exists.
+                std::wstring save;EnhancementSettings requested;{std::lock_guard lock(mutex_);requested=desired_;if(hasOutput)save.swap(savePath_);}
+                if(!save.empty()){sink::RgbaImage result;const auto e=std::filesystem::path(save).extension().wstring();
+                    if(!sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),result)||!sink::saveImage(save,result,e==L".jpg"||e==L".jpeg"))status(L"保存失败（目标文件可能已存在）",true);else{status(L"图片已保存："+save);veyra::log::info("image-save",std::format("saved extent={}x{} revision={}",gd.workWidth,gd.workHeight,options.settings.revision));}}
                 const auto previous=options.snapshot();const auto previousDesc=gd;bool transaction=false;
                 if(requested.revision!=previous.revision){
                     auto next=PlayerOptions::from(requested);auto nextDesc=gd;
                     const auto plan=pipeline::ResolutionPlan::make({width,height},next.sr,requested.nrPolicy,isImage,requested.revision);
                     nextDesc.workWidth=plan.base.width;nextDesc.workHeight=plan.base.height;nextDesc.nrWidth=plan.nr.width;nextDesc.nrHeight=plan.nr.height;
-                    nextDesc.enableSr=next.sr&&(width!=3840||height!=2160);nextDesc.enableNr=next.nr;nextDesc.enableFg=next.fg;nextDesc.fgMultiplier=next.fgMultiplier;nextDesc.enableNvofStandalone=next.nr;
+                    nextDesc.enableSr=plan.srApplied;nextDesc.enableNr=next.nr;nextDesc.enableFg=next.fg;nextDesc.fgMultiplier=next.fgMultiplier;nextDesc.enableNvofStandalone=next.nr;
                     nextDesc.model=requested.model;nextDesc.residual=requested.residual;nextDesc.settingsRevision=requested.revision;nextDesc.flowQuality=requested.flow;nextDesc.contentRate=requested.content;
                     const bool rebuild=gd.flowQuality!=nextDesc.flowQuality||gd.workWidth!=nextDesc.workWidth||gd.workHeight!=nextDesc.workHeight||gd.nrWidth!=nextDesc.nrWidth||gd.nrHeight!=nextDesc.nrHeight;
                     bool accepted=ring.drainQueue();out={};hasOutput=false;
@@ -122,9 +126,6 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     if(accepted){options=next;gd=nextDesc;transaction=true;reset=true;}
                     else {std::lock_guard lock(mutex_);if(desired_.revision==requested.revision)desired_=previous;snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.applying=desired_.revision!=previous.revision;snapshot_.status=L"设置应用失败，已恢复上一套参数";}
                 }
-                std::wstring save;{std::lock_guard lock(mutex_);save.swap(savePath_);}
-                if(!save.empty()&&hasOutput){sink::RgbaImage result;const auto e=std::filesystem::path(save).extension().wstring();
-                    if(!sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),result)||!sink::saveImage(save,result,e==L".jpg"||e==L".jpeg"))status(L"保存失败（目标文件可能已存在）",true);else status(L"图片已保存："+save);}
                 const double seek=seekSeconds_.exchange(-1);
                 if(seek>=0&&!isImage&&!isCapture){
                     if(!ring.drainQueue()||!activeSource->seek({static_cast<int64_t>(seek*1000000),1000000})){status(L"跳转失败",true);break;}

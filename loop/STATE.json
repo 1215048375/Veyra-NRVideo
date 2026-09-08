@@ -100,7 +100,7 @@
     "Current USB2 1080p50 physical throughput passed; user perceived latency/audio/actual FG display cadence still need confirmation.",
     "Public proprietary runtime distribution rights unresolved; local delivery only."
   ],
-  "nextAction": "User accepts current EXE on capture hardware; see docs/REPAIR_V2_DELIVERY_2026-09-08.md for measured performance limits.",
+  "nextAction": "User accepts current UI and capture experience; see docs/UI_REPAIR_V3_DELIVERY_2026-09-08.md. Old Phase records are not new gate proof.",
   "updatedAt": "2026-09-07T13:20:00Z",
   "deliveryPlan": "docs/ACTIVE_DELIVERY_PLAN.md",
   "captureAcceptance": "throughput_short_test_passed_user_latency_audio_pending",
@@ -177,6 +177,41 @@
       "physical multi-monitor DPI",
       "long stability",
       "all SR4K+4X realtime combinations",
+      "proprietary distribution blocked"
+    ],
+    "currentRepairReport": "docs/UI_REPAIR_V3_DELIVERY_2026-09-08.md"
+  },
+  "uiRepairV3": {
+    "status": "local_software_checks_passed_user_acceptance_pending",
+    "baselineCommit": "b6b251d",
+    "exeSha256": "B1892C51E8AFC27D7223E271D48D93107C34CAA96BC4014DFF6F45FDE0D7BF74",
+    "report": "docs/UI_REPAIR_V3_DELIVERY_2026-09-08.md",
+    "review": "docs/REVIEW_UI_REPAIR_V3_2026-09-08.md",
+    "softwareEvidence": [
+      "logs/ui-repair-v3/3fb66a3472264eb4abc1fc61917839a8/result.json",
+      "logs/ui-dual-mode/13e2d933fe66477797a71b32612af303/result.json",
+      "logs/repair-v2/joint-f3c40457ea02481c87dfce0739f51c74/result.json",
+      "logs/ui-dual-mode/4k-719b7f3002fa42b88abbad8ba0262137/result.json"
+    ],
+    "updatedAt": "2026-09-08T03:16:19.278371+00:00",
+    "testLimitScope": "per_invocation",
+    "testLimitSeconds": 300,
+    "desktopMaterial": "Windows Desktop Acrylic; actual independent red/blue behind-window proof; empty video opaque black",
+    "protectedDeliveryGate": {
+      "status": "failed_obsolete_23_frame_assertion",
+      "evidence": "logs/delivery/04388a82e2424d4a8f8832daa4db83db/result.json",
+      "modified": false,
+      "doesNotAdvanceOldPhase": true
+    },
+    "nextAction": "User accepts true desktop glass and player interactions via Veyra.cmd, then physical capture video/audio/latency under existing contract",
+    "remainingLimits": [
+      "user visual acceptance",
+      "physical capture video/audio/disconnect",
+      "physical scanout/photon latency",
+      "physical multi-monitor DPI",
+      "long stability",
+      "actual IME candidate composition",
+      "system transparency/high-contrast policy fallback",
       "proprietary distribution blocked"
     ]
   }
