@@ -214,5 +214,21 @@
       "system transparency/high-contrast policy fallback",
       "proprietary distribution blocked"
     ]
+  },
+  "uiControlsV4": {
+    "date": "2026-09-08",
+    "status": "scoped_ui_verified",
+    "baselineCommit": "97ccd19",
+    "exeSha256": "7EEA31511FFA649F3E6B0829F5D1D3A5D454010167A70137786D4430F71E9514",
+    "report": "docs/UI_CONTROLS_V4_DELIVERY_2026-09-08.md",
+    "review": "docs/REVIEW_UI_CONTROLS_V4_2026-09-08.md",
+    "finalControls": "logs/ui-controls-v4/b03d18f21e404b7a9106c133ea05395f/result.json",
+    "finalSwitch": "logs/ui-dual-mode/e0a09d4eef9541edb9607853133bae26/result.json",
+    "finalNativeSr": "logs/ui-controls-v4/native-sr-final.json",
+    "priorWidthTweakAllUi": "logs/ui-dual-mode/abe2b4a697e344a3aa6a8825081a196c/result.json",
+    "priorWidthTweakRepair": "logs/ui-repair-v3/cabd46022aa244d2a521bea6807773fd/result.json",
+    "phaseApprovalUnchanged": true,
+    "captureHardwareTested": false,
+    "nextAction": "User validates direct toolbar and themed selectors; existing capture acceptance remains with user."
   }
 }

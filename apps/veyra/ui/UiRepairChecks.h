@@ -27,6 +27,14 @@ void tickRepairChecks(HWND hwnd,const veyra::engine::PlayerSnapshot& s){
         showDiagnostics=true;layout();toggleFullscreen();repairTick=GetTickCount64();repairStep=6;break;}
     case 6:{RECT vr{},wr{};GetWindowRect(video,&vr);GetWindowRect(hwnd,&wr);MONITORINFO mi{sizeof(mi)};GetMonitorInfoW(MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST),&mi);
         if(!require(full&&EqualRect(&vr,&mi.rcMonitor)&&EqualRect(&wr,&mi.rcMonitor)&&!IsWindowVisible(inspector)&&(s.image||IsWindowVisible(seekBar)),"fullscreen_covers_monitor_and_diagnostics_keeps_seek"))break;
-        toggleFullscreen();showDiagnostics=false;layout();repairStep=10;log::info("ui-repair-test","PASS native controls, drafts, master sync, SR extent, scroll viewport, fullscreen");break;}
+        toggleFullscreen();showDiagnostics=false;layout();repairStep=7;repairTick=GetTickCount64();break;}
+    case 7:if(uiState.mode!=Mode::Daily){switchMode();return;}{
+        RECT client{};GetClientRect(hwnd,&client);std::vector<RECT> controls;
+        for(int id:{Open,Capture,Recent,Master,Sr,Play,Stop,Mute,Volume,Subtitle,Fullscreen,ModeSwitch,WindowMin,WindowClose}){auto child=GetDlgItem(hwnd,id);RECT r{};GetWindowRect(child,&r);MapWindowPoints(nullptr,hwnd,reinterpret_cast<POINT*>(&r),2);if(!require((GetWindowLongPtrW(child,GWL_STYLE)&WS_VISIBLE)&&r.left>=0&&r.right<=client.right&&r.top>=0&&r.bottom<=client.bottom,"daily_action_has_visible_contained_slot"))return;for(const auto& prior:controls){RECT overlap{};if(!require(!IntersectRect(&overlap,&prior,&r),"daily_action_hitboxes_do_not_overlap"))return;}controls.push_back(r);}
+        SendMessageW(GetDlgItem(hwnd,Master),BM_CLICK,0,0);repairTick=GetTickCount64();repairStep=8;break;}
+    case 8:if(!require(!uiState.enhanced&&!s.applied.sr&&IsDlgButtonChecked(hwnd,Sr)==BST_UNCHECKED,"daily_SR_shows_effective_off_after_master_bypass"))break;
+        SendMessageW(GetDlgItem(hwnd,Sr),BM_CLICK,0,0);repairRevision=engine.snapshot().desired.revision;repairTick=GetTickCount64();repairStep=9;break;
+    case 9:if(s.applied.revision!=repairRevision)return;if(!require(uiState.enhanced&&s.applied.sr&&IsDlgButtonChecked(hwnd,Sr)==BST_CHECKED&&checkControl(201)&&std::wstring(draft)==L"NaN","daily_SR_click_restores_master_and_syncs_professional_without_submitting_draft"))break;
+        repairStep=10;log::info("ui-repair-test","PASS native controls, drafts, master sync, SR extent, scroll viewport, fullscreen, direct daily controls");break;
     }
 }

@@ -1,0 +1,4 @@
+# Preserve the pinned upstream bytes for manifest SHA256 checks on Windows.
+*.svg -text
+LICENSE -text
+manifest.json text eol=lf

@@ -10,6 +10,7 @@
 #include <cmath>
 #include <string>
 #include "GlassMaterial.h"
+#include "LucideIcons.h"
 #pragma comment(lib,"uxtheme.lib")
 #pragma comment(lib,"dwmapi.lib")
 #pragma comment(lib,"gdiplus.lib")
@@ -60,20 +61,7 @@ inline LRESULT CALLBACK labelPaint(HWND h,UINT m,WPARAM w,LPARAM l,UINT_PTR,DWOR
     if(m==WM_PAINT){PaintBuffer paint(h);fillSurface(paint.dc,paint.rect,h);wchar_t text[4096]{};GetWindowTextW(h,text,4096);auto old=SelectObject(paint.dc,HFONT(SendMessageW(h,WM_GETFONT,0,0)));SetBkMode(paint.dc,TRANSPARENT);SetTextColor(paint.dc,IsWindowEnabled(h)?secondary:RGB(120,125,132));auto style=GetWindowLongPtrW(h,GWL_STYLE);auto type=style&SS_TYPEMASK;UINT flags=(style&SS_NOPREFIX)?DT_NOPREFIX:0;flags|=type==SS_CENTER?DT_CENTER:type==SS_RIGHT?DT_RIGHT:DT_LEFT;if(style&SS_CENTERIMAGE)flags|=DT_SINGLELINE|DT_VCENTER;else if(type==SS_SIMPLE||type==SS_LEFTNOWORDWRAP)flags|=DT_SINGLELINE;else flags|=DT_WORDBREAK;if(style&SS_ENDELLIPSIS)flags|=DT_END_ELLIPSIS;glassText(paint.dc,text,-1,&paint.rect,flags);SelectObject(paint.dc,old);return 0;}
     auto result=DefSubclassProc(h,m,w,l);if(m==WM_SETTEXT||m==WM_ENABLE||m==WM_SETFONT)InvalidateRect(h,nullptr,FALSE);return result;
 }
-enum class Icon { None,Play,Pause,Stop,Volume,Muted,Fullscreen,Video,Capture,Image,Subtitle,Minimize,Maximize,Close,Back,Settings };
 inline void icon(HWND h,Icon icon,bool caption=false){if(INT_PTR(GetPropW(h,L"veyra.icon"))==INT_PTR(icon)&&(GetPropW(h,L"veyra.caption")!=nullptr)==caption)return;SetPropW(h,L"veyra.icon",HANDLE(INT_PTR(icon)));if(caption)SetPropW(h,L"veyra.caption",HANDLE(1));else RemovePropW(h,L"veyra.caption");InvalidateRect(h,nullptr,FALSE);}
-inline void drawIcon(HDC dc,Icon icon,float x,float y,float size,COLORREF c){using namespace Gdiplus;AlphaGraphics drawing(dc);auto& g=drawing.get();g.SetSmoothingMode(SmoothingModeAntiAlias);Pen pen(color(c),std::max(1.4f,size/13));pen.SetStartCap(LineCapRound);pen.SetEndCap(LineCapRound);SolidBrush brush(color(c));const float a=size/2;auto line=[&](float x1,float y1,float x2,float y2){g.DrawLine(&pen,x+x1*a,y+y1*a,x+x2*a,y+y2*a);};
-    switch(icon){case Icon::Play:{PointF p[]={{x-a*.45f,y-a*.8f},{x+a*.85f,y},{x-a*.45f,y+a*.8f}};g.FillPolygon(&brush,p,3);break;}case Icon::Pause:g.FillRectangle(&brush,x-a*.55f,y-a*.7f,a*.35f,a*1.4f);g.FillRectangle(&brush,x+a*.2f,y-a*.7f,a*.35f,a*1.4f);break;
-    case Icon::Stop:g.FillRectangle(&brush,x-a*.55f,y-a*.55f,a*1.1f,a*1.1f);break;
-    case Icon::Volume:case Icon::Muted:{PointF p[]={{x-a*.9f,y-a*.28f},{x-a*.5f,y-a*.28f},{x,y-a*.7f},{x,y+a*.7f},{x-a*.5f,y+a*.28f},{x-a*.9f,y+a*.28f}};g.DrawPolygon(&pen,p,6);if(icon==Icon::Muted){line(.35f,-.4f,.85f,.4f);line(.35f,.4f,.85f,-.4f);}else{g.DrawArc(&pen,x-a*.4f,y-a*.6f,a*1.2f,a*1.2f,-60,120);g.DrawArc(&pen,x-a*.7f,y-a*.95f,a*1.9f,a*1.9f,-60,120);}break;}
-    case Icon::Fullscreen:for(int sx:{-1,1})for(int sy:{-1,1}){line(sx*.85f,sy*.35f,sx*.85f,sy*.85f);line(sx*.35f,sy*.85f,sx*.85f,sy*.85f);}break;
-    case Icon::Video:g.DrawRectangle(&pen,x-a*.85f,y-a*.65f,a*1.7f,a*1.3f);{PointF p[]={{x-a*.2f,y-a*.35f},{x+a*.4f,y},{x-a*.2f,y+a*.35f}};g.FillPolygon(&brush,p,3);}break;
-    case Icon::Capture:g.DrawRectangle(&pen,x-a*.85f,y-a*.6f,a*1.7f,a*1.2f);line(-.4f,1,.4f,1);line(0,.6f,0,1);g.FillEllipse(&brush,x-a*.16f,y-a*.16f,a*.32f,a*.32f);break;
-    case Icon::Image:g.DrawRectangle(&pen,x-a*.85f,y-a*.7f,a*1.7f,a*1.4f);line(-.6f,.4f,-.1f,-.2f);line(-.1f,-.2f,.3f,.2f);line(.3f,.2f,.65f,-.1f);g.FillEllipse(&brush,x+a*.25f,y-a*.5f,a*.24f,a*.24f);break;
-    case Icon::Subtitle:g.DrawRectangle(&pen,x-a*.9f,y-a*.6f,a*1.8f,a*1.2f);line(-.6f,.2f,-.1f,.2f);line(.15f,.2f,.6f,.2f);break;
-    case Icon::Minimize:line(-.6f,0,.6f,0);break;case Icon::Maximize:g.DrawRectangle(&pen,x-a*.55f,y-a*.55f,a*1.1f,a*1.1f);break;
-    case Icon::Close:line(-.5f,-.5f,.5f,.5f);line(-.5f,.5f,.5f,-.5f);break;case Icon::Back:line(.2f,-.6f,-.5f,0);line(-.5f,0,.2f,.6f);break;case Icon::Settings:g.DrawEllipse(&pen,x-a*.55f,y-a*.55f,a*1.1f,a*1.1f);for(int i=0;i<8;++i){float angle=float(i)*3.14159265f/4;line(cosf(angle)*.6f,sinf(angle)*.6f,cosf(angle)*.9f,sinf(angle)*.9f);}break;default:break;}
-}
 inline LRESULT CALLBACK buttonPaint(HWND h,UINT m,WPARAM w,LPARAM l,UINT_PTR,DWORD_PTR){
     if(m==WM_ERASEBKGND)return 1;
     if(m==WM_MOUSEMOVE){if(!GetPropW(h,L"veyra.hover")){SetPropW(h,L"veyra.hover",HANDLE(1));TRACKMOUSEEVENT t{sizeof(t),TME_LEAVE,h,0};TrackMouseEvent(&t);InvalidateRect(h,nullptr,FALSE);}}
@@ -82,14 +70,21 @@ inline LRESULT CALLBACK buttonPaint(HWND h,UINT m,WPARAM w,LPARAM l,UINT_PTR,DWO
         const bool marked=GetPropW(h,L"veyra.accent")!=nullptr,selected=GetPropW(h,L"veyra.selected")!=nullptr,hover=GetPropW(h,L"veyra.hover")!=nullptr,down=SendMessageW(h,BM_GETSTATE,0,0)&BST_PUSHED,check=SendMessageW(h,BM_GETCHECK,0,0)==BST_CHECKED,ghost=GetPropW(h,L"veyra.ghost")!=nullptr;
         const auto ico=static_cast<Icon>(INT_PTR(GetPropW(h,L"veyra.icon")));bool caption=GetPropW(h,L"veyra.caption")!=nullptr;
         COLORREF fill=marked?accent:(down||selected?line:hover?raised:surface(h));if(glassBackdrop(h)&&!marked){if(down||selected||hover)translucentRound(dc,r,down?42:selected?31:18,dip(h,8));}else if(!ghost||hover||selected||marked)roundRect(dc,r,fill,ico==Icon::Play||ico==Icon::Pause?std::min(r.right,r.bottom)/2:dip(h,8));
-        wchar_t value[512]{};GetWindowTextW(h,value,512);auto f=reinterpret_cast<HFONT>(SendMessageW(h,WM_GETFONT,0,0));auto old=SelectObject(dc,f);SetBkMode(dc,TRANSPARENT);COLORREF ink=!IsWindowEnabled(h)?RGB(90,96,103):marked?RGB(24,31,36):selected?textColor:hover?textColor:secondary;SetTextColor(dc,ink);
+        wchar_t value[512]{};GetWindowTextW(h,value,512);auto f=reinterpret_cast<HFONT>(SendMessageW(h,WM_GETFONT,0,0));auto old=SelectObject(dc,f);SetBkMode(dc,TRANSPARENT);COLORREF ink=!IsWindowEnabled(h)?RGB(90,96,103):marked?RGB(24,31,36):(selected||check)?accent:hover?textColor:secondary;SetTextColor(dc,ink);
         if(ico!=Icon::None){drawIcon(dc,ico,caption?float(dip(h,18)):r.right/2.f,r.bottom/2.f,float(dip(h,ico==Icon::Play||ico==Icon::Pause?22:17)),ink);if(caption){r.left=dip(h,34);glassText(dc,value,-1,&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);}}
         else if((GetWindowLongPtrW(h,GWL_STYLE)&BS_TYPEMASK)==BS_AUTOCHECKBOX){RECT toggle{r.right-dip(h,40),r.bottom/2-dip(h,8),r.right-dip(h,10),r.bottom/2+dip(h,8)};roundRect(dc,toggle,check?accent:line,dip(h,8));RECT knob{toggle.left+dip(h,check?16:3),toggle.top+dip(h,3),toggle.left+dip(h,check?26:13),toggle.top+dip(h,13)};roundRect(dc,knob,check?panel:secondary,dip(h,5));r.left=dip(h,12);r.right-=dip(h,46);glassText(dc,value,-1,&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);}else glassText(dc,value,-1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
         if(GetFocus()==h&&!(SendMessageW(h,WM_QUERYUISTATE,0,0)&UISF_HIDEFOCUS)){RECT outline{};GetClientRect(h,&outline);InflateRect(&outline,-3,-3);AlphaGraphics focusDrawing(dc);auto& focus=focusDrawing.get();focus.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);Gdiplus::GraphicsPath path;rounded(path,{float(outline.left),float(outline.top),float(outline.right-outline.left),float(outline.bottom-outline.top)},float(dip(h,6)));Gdiplus::Pen stroke(color(accent,145),1);focus.DrawPath(&stroke,&path);}SelectObject(dc,old);return 0;}
     if(m==WM_ENABLE||m==WM_SETFOCUS||m==WM_KILLFOCUS||m==BM_SETCHECK||m==WM_SETTEXT||m==BM_SETSTATE){auto result=DefSubclassProc(h,m,w,l);InvalidateRect(h,nullptr,FALSE);return result;}
     return DefSubclassProc(h,m,w,l);
 }
+}
+#include "PopupSelector.h"
+namespace veyra::ui {
 inline LRESULT CALLBACK comboPaint(HWND h,UINT m,WPARAM w,LPARAM l,UINT_PTR,DWORD_PTR){
+    if(m==CB_GETDROPPEDSTATE)return GetPropW(h,L"Veyra.ComboOpen")!=nullptr;
+    if(m==CB_SHOWDROPDOWN&&!w){if(GetPropW(h,L"Veyra.ComboOpen")){SetPropW(h,L"Veyra.ComboCancel",HANDLE(1));cancelPopupSelector();}return 0;}
+    if(m==WM_LBUTTONDOWN||m==CB_SHOWDROPDOWN&&w||m==WM_KEYDOWN&&(w==VK_F4||w==VK_SPACE||w==VK_RETURN)||m==WM_SYSKEYDOWN&&w==VK_DOWN){if(IsWindowEnabled(h))comboSelector(h);return 0;}
+    if(m==WM_LBUTTONUP||m==WM_LBUTTONDBLCLK)return 0;
     if(m==WM_ERASEBKGND)return 1;if(m==WM_PAINT){PaintBuffer paint(h);HDC dc=paint.dc;RECT r=paint.rect;fillSurface(dc,r,h);if(glassBackdrop(h))translucentRound(dc,r,16,dip(h,7));else roundRect(dc,r,raised,dip(h,7));int index=int(SendMessageW(h,CB_GETCURSEL,0,0));wchar_t value[512]{};if(index>=0&&SendMessageW(h,CB_GETLBTEXTLEN,index,0)<512)SendMessageW(h,CB_GETLBTEXT,index,LPARAM(value));auto old=SelectObject(dc,HFONT(SendMessageW(h,WM_GETFONT,0,0)));SetBkMode(dc,TRANSPARENT);SetTextColor(dc,IsWindowEnabled(h)?secondary:RGB(85,88,92));RECT label=r;label.left+=dip(h,12);label.right-=dip(h,26);glassText(dc,value,-1,&label,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS);{AlphaGraphics drawing(dc);auto& g=drawing.get();g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);Gdiplus::Pen pen(color(secondary),float(dip(h,1)));float x=float(r.right-dip(h,15)),y=r.bottom/2.f;g.DrawLine(&pen,x-dip(h,3),y-dip(h,1),x,y+dip(h,2));g.DrawLine(&pen,x,y+dip(h,2),x+dip(h,3),y-dip(h,1));}SelectObject(dc,old);return 0;}
     auto result=DefSubclassProc(h,m,w,l);if(m==CB_SETCURSEL||m==WM_SETFOCUS||m==WM_KILLFOCUS||m==WM_ENABLE)InvalidateRect(h,nullptr,FALSE);return result;
 }
