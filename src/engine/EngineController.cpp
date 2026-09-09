@@ -11,6 +11,7 @@
 #include "veyra/sink/ImageExportSink.h"
 #include "veyra/gfx/D3D12DeviceContext.h"
 #include "veyra/gfx/CommandSlotRing.h"
+#include "veyra/RuntimePaths.h"
 #include <chrono>
 #include <filesystem>
 #include <format>
@@ -94,9 +95,9 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             pipeline::EnhanceGraphDesc gd;gd.sourceWidth=width;gd.sourceHeight=height;gd.rgbInput=isImage||isCapture;gd.stillImage=isImage;
             const auto resolution=pipeline::ResolutionPlan::make({width,height},options.sr,options.realtime?pipeline::NrSizePolicy::Realtime:pipeline::NrSizePolicy::Native,isImage,1);
             gd.workWidth=resolution.base.width;gd.workHeight=resolution.base.height;gd.nrWidth=resolution.nr.width;gd.nrHeight=resolution.nr.height;
-            gd.enableSr=resolution.srApplied;gd.videoSrQuality=options.settings.videoSrQuality;gd.enableNr=options.nr;gd.enableFg=options.fg;gd.fgMultiplier=options.fgMultiplier;gd.enableNvofStandalone=options.nr;
+            gd.enableSr=resolution.srApplied;gd.videoSrQuality=options.settings.videoSrQuality;gd.enableNr=options.nr;gd.enableFg=options.fg;gd.fgMultiplier=options.fgMultiplier;gd.frameGenerationBackend=options.settings.frameGenerationBackend;gd.enableNvofStandalone=options.nr;
             gd.noFeatures=false;gd.model=options.settings.model;gd.residual=options.settings.residual;gd.protection=options.settings.protection;gd.settingsRevision=options.settings.revision;gd.flowQuality=options.settings.flow;gd.contentRate=options.settings.content;
-            gd.runtimeAbsPath=std::filesystem::path(VEYRA_PROJECT_ROOT).wstring()+L"\\runtime_local\\nvidia";
+            gd.runtimeAbsPath=runtime::localRuntimeDirectory().wstring();
             if(!graph.initialize(gd)||!presenter.open(ctx,window,graph)||!graph.createViews()){status(L"增强初始化失败，请核对本地运行时",true);break;}
             if(isCapture&&!captureSource.start()){status(L"无法启动采集，请查看诊断",true);break;}
             {std::lock_guard lock(mutex_);snapshot_.duration=duration;snapshot_.running=true;snapshot_.transport=TransportState::Playing;snapshot_.image=isImage;snapshot_.capture=isCapture;snapshot_.applied=options.snapshot();snapshot_.desired=desired_;}
@@ -122,9 +123,9 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     auto next=PlayerOptions::from(requested);auto nextDesc=gd;
                     const auto plan=pipeline::ResolutionPlan::make({width,height},next.sr,requested.nrPolicy,isImage,requested.revision);
                     nextDesc.workWidth=plan.base.width;nextDesc.workHeight=plan.base.height;nextDesc.nrWidth=plan.nr.width;nextDesc.nrHeight=plan.nr.height;
-                    nextDesc.enableSr=plan.srApplied;nextDesc.videoSrQuality=next.settings.videoSrQuality;nextDesc.enableNr=next.nr;nextDesc.enableFg=next.fg;nextDesc.fgMultiplier=next.fgMultiplier;nextDesc.enableNvofStandalone=next.nr;
+                    nextDesc.enableSr=plan.srApplied;nextDesc.videoSrQuality=next.settings.videoSrQuality;nextDesc.enableNr=next.nr;nextDesc.enableFg=next.fg;nextDesc.fgMultiplier=next.fgMultiplier;nextDesc.frameGenerationBackend=next.settings.frameGenerationBackend;nextDesc.enableNvofStandalone=next.nr;
                     nextDesc.model=requested.model;nextDesc.residual=requested.residual;nextDesc.protection=requested.protection;nextDesc.settingsRevision=requested.revision;nextDesc.flowQuality=requested.flow;nextDesc.contentRate=requested.content;
-                    const bool rebuild=gd.videoSrQuality!=nextDesc.videoSrQuality||gd.flowQuality!=nextDesc.flowQuality||gd.workWidth!=nextDesc.workWidth||gd.workHeight!=nextDesc.workHeight||gd.nrWidth!=nextDesc.nrWidth||gd.nrHeight!=nextDesc.nrHeight;
+                    const bool rebuild=gd.frameGenerationBackend!=nextDesc.frameGenerationBackend||(nextDesc.frameGenerationBackend==FrameGenerationBackend::Fruc&&(gd.fgMultiplier!=nextDesc.fgMultiplier||gd.enableFg!=nextDesc.enableFg))||gd.videoSrQuality!=nextDesc.videoSrQuality||gd.flowQuality!=nextDesc.flowQuality||gd.workWidth!=nextDesc.workWidth||gd.workHeight!=nextDesc.workHeight||gd.nrWidth!=nextDesc.nrWidth||gd.nrHeight!=nextDesc.nrHeight;
                     bool accepted=ring.drainQueue();out={};hasOutput=false;
                     if(accepted&&rebuild){presenter.close();graph.shutdown();accepted=graph.initialize(nextDesc)&&presenter.open(ctx,window,graph)&&graph.createViews();
                         if(!accepted){presenter.close();graph.shutdown();if(!graph.initialize(gd)||!presenter.open(ctx,window,graph)||!graph.createViews()){status(L"设置失败且旧资源恢复失败，已停止",true);break;}}
@@ -167,7 +168,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                         }else{status(L"参数回滚失败，已停止",true);break;}
                     }else{status(L"增强执行失败；请查看日志",true);break;}
                 }
-                if(transaction){std::lock_guard lock(mutex_);snapshot_.applied=options.snapshot();snapshot_.applying=desired_.revision!=options.settings.revision;snapshot_.status=std::format(L"输入 {}×{} / 底图 {}×{} / NR {}×{} / 光流 {}×{} / FG与输出 {}×{} | {}",width,height,gd.workWidth,gd.workHeight,gd.nrWidth,gd.nrHeight,width,height,gd.workWidth,gd.workHeight,gd.nrWidth<gd.workWidth?L"实时NR变化回填":L"原生NR（性能成本较高）");veyra::log::info("settings",std::format("Applied revision={} sourcePtsMs={} (source kept open)",options.settings.revision,pts));}
+                if(transaction){std::lock_guard lock(mutex_);snapshot_.applied=options.snapshot();snapshot_.applying=desired_.revision!=options.settings.revision;snapshot_.status=std::format(L"输入 {}×{} / 底图 {}×{} / NR {}×{} / 光流 {}×{} / FG与输出 {}×{} | {}",width,height,gd.workWidth,gd.workHeight,gd.nrWidth,gd.nrHeight,width,height,gd.workWidth,gd.workHeight,gd.nrWidth<gd.workWidth?L"实时NR变化回填":L"原生NR（性能成本较高）");veyra::log::info("settings",std::format("Applied revision={} sourcePtsMs={} backend={} multiplier={} (source kept open)",options.settings.revision,pts,options.settings.frameGenerationBackend==FrameGenerationBackend::Fruc?"FRUC":"DLSS",options.snapshot().multiplier));}
                 veyra::log::info("source-identity",std::format("source={} totalRead={} graphProcessed={} cached={} revision={} nvofStandalone={}",pkt.sequence,sourceFrames,frames+1,rereadCached,options.settings.revision,gd.enableNvofStandalone));
                 reset=false;hasOutput=true;
                 const auto processDone=Clock::now();processTimes.add(elapsedMs(processStart));

@@ -1,5 +1,6 @@
 #include "TelemetryWindow.h"
 #include "veyra/Log.h"
+#include "veyra/RuntimePaths.h"
 #include <shellapi.h>
 #include <filesystem>
 #include "ui/Theme.h"
@@ -29,7 +30,7 @@ case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:case WM_CTLC
 case WM_TIMER:refresh();return 0;
 case WM_COMMAND:if(LOWORD(w)==6){SendMessageW(GetParent(h),WM_APP+43,0,0);}else if(LOWORD(w)==3){preview=wide(Logger::instance().diagnosticReport());SetDlgItemTextW(h,2,preview.c_str());}else if(LOWORD(w)==4&&!preview.empty()){
     if(OpenClipboard(h)){HGLOBAL data=GlobalAlloc(GMEM_MOVEABLE,(preview.size()+1)*sizeof(wchar_t));if(data){if(void* p=GlobalLock(data)){memcpy(p,preview.c_str(),(preview.size()+1)*sizeof(wchar_t));GlobalUnlock(data);EmptyClipboard();if(!SetClipboardData(CF_UNICODETEXT,data))GlobalFree(data);}else GlobalFree(data);}CloseClipboard();}
-}else if(LOWORD(w)==5)ShellExecuteW(h,L"open",(std::filesystem::path(VEYRA_PROJECT_ROOT)/"logs").c_str(),nullptr,nullptr,SW_SHOW);return 0;
+}else if(LOWORD(w)==5)ShellExecuteW(h,L"open",runtime::logsDirectory().c_str(),nullptr,nullptr,SW_SHOW);return 0;
 
 case WM_CLOSE:DestroyWindow(h);return 0;case WM_DESTROY:KillTimer(h,1);DeleteObject(font);window=nullptr;return 0;}return DefWindowProcW(h,m,w,l);}
 }

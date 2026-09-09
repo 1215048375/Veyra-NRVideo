@@ -1293,3 +1293,32 @@ Cycle86 safety stop: build passed (logs/video-sdk-trial-20260909/build-cycle86.l
 EXE SHA256: `3BD470D51AD43F7C461F23AB6F9F9B7234DC6F33D84C9DDEB35A463663264E2C`。构建日志 `logs/video-sdk-trial-20260909/build-cycle86.log`；独立review前后跟踪指纹 `9d45fe7ff6b19a67b3a42db2215928b1aecf5b4f`不变，之后仅更新交接记录。单次测试均不足300秒。Cycle86修复可交本机实测；整体Phase7优化仍in_progress，既有统计窗口/间歇时序/实卡体验/长期稳定风险未宣称消失。下一任务见HANDOFF优先处理配置相关统计窗口。
 
 本地Git checkpoint包括Cycles78–86已核对源码、使用指南、交接报告与授权的GOAL_PROMPT删除；不包含runtime/SDK/个人媒体，不push。实际提交ID以本次 `git log -1` 为准，避免在commit内容中制造自指hash。
+
+
+## Cycle87–88 FRUC/high-FPS candidate
+
+User requested1000fps support andFRUC2/3/4. Source timing admission120→1000, exact timestamp validation retained. OptionalFRUC behind sharedgraph, UI/preset/export propagated, DLSS retained. Same-process multiinstance required per-instanceCUDAcontext; destroy/recreate repeatedlyRegister4/warpSEH, so stopped that approach and isolated runtime in hidden ownedworker with GPUsharedtextures/fence. No normal pixelreadback. Fullreset freshworker is correct in triple-reset tests but has startupcost/capture-drop feedbackrisk. Maker pixel/PTS2/3/4PASS; playbackknownpan有效5/10/15子帧与实际播放计数、NVENC24/36/48frame输出、1000fps2000frames/999.34processedfps及UI切换PASS. Specificcommands/logs/failures in docs/FRUC_INTEGRATION_2026-09-09.md. 最终lazy创建候选等待独立review/preflight/phase7；整体Phase7未完成，不push。
+
+
+## 独立检查与用户反馈补充
+
+独立review_fruc已报告CPU16+27项/preset、实际2/3/4pixel/PTS/连续reset、UI全后端切换和自有worker进程故障测试通过，无新增已确认P0/P1/P2消息。preflight69 PASS；其实际phase7日志 `logs/video-sdk-trial-20260909/review-fruc-gate-phase7.log` 为73 PASS，delivery `logs/delivery/1c195ef6d3684879b220fc8c13439e83/result.json`。Reviewer随后额度耗尽，未返回最终整体结论；因此记录为independent_checks_passed / final_verdict_unavailable，不伪造最终Reviewer PASS。用户随后明确“我已经测试没问题”，记录用户本次体验通过，不外推其未说明的配置与长期稳定性。程序SHA256 BD76BA1F3D66DF30286E450AD1742E773F48989B5815C175BDC0A297ABF4E94D；workerSHA256 B6F267C3B1C73DE0CB99C4BAD4B5DA9355C42DF7E7F37F21C9891B02B80412A3。
+
+
+## 用户新请求：GitHub性能归因
+
+已固定7个仓库head，只读源码/官方文档+既有GPU日志；报告docs/GITHUB_PERFORMANCE_AUDIT_2026-09-09.md。确认原生4KNR硬预算与软件同步/日志/重置/统计问题并存，不提供未测占比。未运行竞品、未改runtime/产品代码、未占实卡。下一条任务：配置revision隔离统计，再同源逐项A/B定位等待与计算；不先建议换卡。
+
+## 2026-09-09 竞品对照改进方案（仅文档）
+
+用户暂停间歇卡顿现场追查，要求先对照已有竞品写改进方案。新增 docs/COMPETITOR_IMPROVEMENT_PLAN_2026-09-09.md，按固定 GitHub 审计、当前 controller/FRUC 源码、旧质量方案及已完成专项整理。先统计/日志/有界调度与 reset，再做 CUDA FRUC、硬解和拷贝消减实验；深度/缓存不加入默认路径。明确每项证据、动作、验收与回退，保留导出完整性检查和单次 300 秒约定。最新自然日志未包含用户所述卡顿的处理证据，不给周期性卡顿下确定归因。同步 HANDOFF 索引和 STATE 文档条目，未改产品代码/依赖/默认设置或保护门禁。未运行新的构建/GPU/实卡测试，未推进 Phase 7 或补造 Reviewer 结论。
+
+## 2026-09-09 0.0.1 发布候选（尚未提交或上传）
+
+按用户请求完成 README 中英文重写、0.0.1 release notes、可复现便携包脚本，以及运行目录自定位。应用从 EXE 所在目录查找 shader、日志、设置和可选本地运行时；源码开发目录仍兼容。Release build 命令 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Root <project> -Preset x64-release` 通过。最终 ZIP `out/releases/Veyra-0.0.1-win64-portable.zip` SHA256 `906964FC80BA74F5A8407AE8E4FD9890485962539FD59FAF7764CF74799D0095`；从新解压目录以 `--smoke-empty --smoke-seconds 3 --no-nr --no-sr --no-fg` 实际启动退出码 0。包内未发现 NVIDIA、CUDA、NVENC、PDB 或 LIB；包含 Veyra EXE、自建 worker、shader、FFmpeg shared DLL、FFmpeg copyright、项目 LICENSE/notice 和空的 runtime_local/nvidia 说明。README 是控制面文件，preflight 因其固定 hash 变更而失败，未私自更新控制清单。公开上传仍等待许可证/来源确认及远端 main 分支整合；未创建 commit、tag、release 或 push。
+
+## 2026-09-09 Runtime Pack 发布策略（用户明确授权）
+
+用户选择完整开箱即用的实验 Runtime Pack，并明确接受该 Pack 可能被 GitHub 下架或被权利方要求移除的风险。`AGENTS.md` 已锁定源码/Release 物理隔离：NVIDIA 二进制、SDK、头文件、库、样例和压缩包不得进入 Git、LFS、源码或资源；仅经 manifest 白名单、固定 SHA-256、有效 NVIDIA Authenticode 签名和适用许可证检查的用户包 Release 资产可携带运行时。不得篡改/重签名/隐藏、不得从游戏或驱动缓存提取，且不得宣称 NVIDIA 官方支持。
+
+`FrucWorker` 改为从 EXE 相对的 `runtime_local/nvidia/NvOFFRUC.dll` 加载，移除开发机绝对路径。`scripts/package-portable.ps1` 以显式 allowlist 打包 `nvngx_dlss.dll`、`nvngx_dlssg.dll`、`nvngx_dlssnr.dll`、`nvngx_vsr.dll`、`NvOFFRUC.dll`，生成 `release-runtime-manifest.json`，附带 RTX / Optical Flow 许可证并排除 SDK 开发文件。Release 构建通过；最新 ZIP SHA256 `C3BA5C6E138557D3F4A208737CCC2542CE5687DA1BA7F0AD534F009DA4AE1E6F`。独立解压后五个 DLL 的 SHA-256 均匹配 manifest、Authenticode 均为 Valid，包内未发现 PDB/LIB/头文件/样例/SDK 目录；`veyra.exe --smoke-empty --smoke-seconds 3 --no-nr --no-sr --no-fg` 退出码 0。尚未 commit、push、tag 或创建 GitHub Release；README 控制面 hash 漂移仍未自行重基线。

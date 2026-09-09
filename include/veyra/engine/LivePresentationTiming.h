@@ -5,8 +5,8 @@
 
 namespace veyra::engine {
 inline int64_t liveSourceInterval100ns(pipeline::Rational duration,double nominalFps){
-    if(!duration.isUnknown()&&duration.den>0&&duration.num>0)return int64_t(std::clamp(static_cast<long double>(duration.num)*10000000.L/duration.den,83333.L,1000000.L)+.5L);
-    if(std::isfinite(nominalFps)&&nominalFps>=10&&nominalFps<=120)return int64_t(std::llround(10000000.0/nominalFps));
+    if(!duration.isUnknown()&&duration.den>0&&duration.num>0)return int64_t(std::clamp(static_cast<long double>(duration.num)*10000000.L/duration.den,10000.L,1000000.L)+.5L);
+    if(std::isfinite(nominalFps)&&nominalFps>=10&&nominalFps<=1000)return int64_t(std::llround(10000000.0/nominalFps));
     return 200000; // documented last-resort 50 Hz estimate, never a measured duration
 }
 // Live capture never waits on an absolute source PTS. Once B is available,

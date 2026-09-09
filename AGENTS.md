@@ -3,6 +3,7 @@
 > 2026-09-07 新用户决定：默认明确标注的实时档（4K输入可用1080内部处理），保留原生4K可选；视频导出仍原生4K。不得要求以本机原生4K NR达到60fps作为本次默认档门槛，也不得把实时档冒充native4K。最终统一软件短测为 `scripts/gates/delivery.ps1`（phase5–7本次合同的合并检查），实卡仍由用户验收。其他安全/许可规则不变。
 
 > 2026-09-06 用户授权接管修订：当前推进、五分钟短测与用户实卡验收以 `docs/ACTIVE_DELIVERY_PLAN.md` 为准，取代下文旧的严格串行施工/30分钟测试/未接设备阻塞全部交付规则。历史记录不是当前通过证明。
+> 2026-09-09 用户发布决策：Veyra 采用“完整开箱即用的实验 Runtime Pack”发布策略。用户明确接受该 Pack 可能被 GitHub 下架或被权利方要求移除的风险，并授权将经过身份校验的指定实验运行时作为 **GitHub Release 资产** 随 Veyra 用户包分发。该例外不允许把 NVIDIA SDK、运行时、模型、头文件、样例或压缩包提交进源码仓库、Git LFS、Git 历史或 C++ 源文件；不允许修改、重签名、伪装或从游戏/驱动缓存提取二进制。详情以“Release Runtime Pack 规则”为准。
 
 本文件对在本目录工作的所有 Agent 生效。不要只扫标题；开工前必须完整阅读：
 
@@ -59,6 +60,18 @@ renodx-dlss5-1.addon64
 ```
 
 如果 hash 不同，不要“先试试看”；记录实际值并询问用户。
+## Release Runtime Pack 规则（2026-09-09 用户授权）
+
+这是一项面向用户体验的、明确标记为实验性的发布决策，不是 NVIDIA 官方合作、官方支持或通用再分发授权。
+
+- **源码与 Release 必须物理分离。** 所有 NVIDIA SDK/runtime、模型、头文件、`.lib`、样例、SDK ZIP、驱动文件和本机抓帧必须保持在 gitignore 的本地目录；不得提交、vendoring、Git LFS、嵌入资源、编码为 base64 或以任何方式混入源码/提交历史。
+- **仅 Release 资产可带二进制。** 用户批准的完整包可从本机受控 staging 目录复制已批准运行时；每个文件必须在 `release-runtime-manifest.json` 中列明文件名、来源类别、版本、大小、SHA-256、签名状态、实验标记及是否可卸载。未列明的 NVIDIA 文件一律拒绝打包。
+- **当前 DLSSNR 许可范围。** 仅允许身份与本规则上方完全一致的 `nvngx_dlssnr.dll`（310.8.0.0、指定 SHA-256、NVIDIA 签名有效）进入 `runtime/experimental/`。哈希、版本、签名或来源不一致时停止打包并询问用户；不得联网搜寻“更新偷跑版”。
+- **不得篡改或隐藏。** 禁止 patch、重签名、修改 PE、伪装为 Veyra 文件、嵌进资源、从游戏安装目录/驱动缓存复制，或借助 RenoDX/ReShade 注入路径实现发布包。实验 Runtime Pack 必须以清晰目录、版本与哈希呈现。
+- **运行时保护。** Veyra 启动时校验 manifest、SHA-256、签名和 GPU/驱动兼容性；校验或初始化失败时只禁用对应增强功能，基础播放器、采集和导出仍可启动。不得静默下载未知二进制，也不得把失败伪装为增强已生效。
+- **发布说明。** Release Notes、README、软件内组件页必须写明“实验运行时 / community experimental”，不得宣称 NVIDIA 官方合作、认证、支持或完整官方 DLSS 5 集成；同时保留 Veyra 自身版本、runtime 版本、哈希和卸载说明。
+- **范围最小化。** 用户包只包含运行所需 DLL/模型与适用许可证、notice、manifest；绝不包含 SDK 开发文件、样例、私有测试媒体、日志、PDB、LIB 或游戏文件。官方 SDK 中明确可集成分发的组件仍须逐项保留其许可证与来源记录。
+- **人工发布。** 任何 push、GitHub Release、Runtime Pack 上传、替换或删除都必须由用户在当前对话明确授权；无人值守 Goal 仍禁止发布。若平台或权利方要求移除，先移除/下架 Runtime Pack，再保留不含该 Pack 的 Veyra 基础包。
 
 ## 阶段门禁
 
@@ -107,10 +120,10 @@ Phase 0–4 的历史 checkpoint 只能证明各基础 harness 当时通过，�
 
 - Magpie 是 GPLv3。闭源 Veyra 不得复制其源码或做机械改名；只可把其公开行为当作黑盒/接口参考后独立实现。若要直接复用，先让用户明确接受 GPLv3 以及对应源码义务。
 - `video2dlssnr` 当前仓库未提供许可证；不得复制代码。`DLSS5-Feeder`、`dlss5-infinity-studio` 和 `dlss5-visual-enhancer` 只能按各自许可证与第三方 notices 取用；默认只借鉴公开行为与架构，任何代码复用都要在 `THIRD_PARTY_NOTICES` 逐项归因。
-- NVIDIA SDK/runtime 和当前 DLSSNR 文件的分发权不能假定。默认只做本机研发，`runtime_local/`、`third_party_local/`、抓帧和 SDK 压缩包必须 gitignore。
-- NVIDIA Video Codec SDK 头文件/sample 同样需要单独接受 EULA；系统 `nvEncodeAPI64.dll` 不复制进安装包。没有完成第三方分发审计前，“首发产品完成”不等于“获准公开捆绑发布”。
-- 不得上传、发布、打包或向第三方发送项目中的两个二进制。
-- 任何准备公开发布、签名安装包或 CI 上传 artifact 的动作，都必须先停下并让用户确认许可证与分发来源。
+- NVIDIA SDK/runtime 的分发权不得想当然地扩大。除“Release Runtime Pack 规则”列出的、用户明确批准并完成身份校验的 Release 资产外，默认只做本机研发；`runtime_local/`、`third_party_local/`、抓帧和 SDK 压缩包必须 gitignore。
+- NVIDIA Video Codec SDK 头文件/sample 同样需要单独接受 EULA；系统 `nvEncodeAPI64.dll` 不复制进用户包。没有完成第三方分发审计前，不得把产品宣传为 NVIDIA 官方认证、合作或支持。
+- 已批准的 Runtime Pack 例外只适用于 GitHub Release 用户包，不适用于源码仓库、Git 历史、CI artifact、第三方镜像或私下发送未经 manifest 校验的二进制。
+- 任何 Runtime Pack 的新增文件、版本替换、push、GitHub Release、上传或删除都必须先在当前对话得到用户明确授权，并报告来源、SHA-256、签名状态、许可证文件和包内扫描结果。
 
 ## 每次交付必须报告
 

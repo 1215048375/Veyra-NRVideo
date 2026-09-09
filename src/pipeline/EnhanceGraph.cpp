@@ -20,6 +20,7 @@
 #include "veyra/gfx/CommandSlotRing.h"
 #include "veyra/gfx/D3D12DeviceContext.h"
 #include "veyra/ngx/DlssFgBackend.h"
+#include "veyra/ngx/FrucBackend.h"
 #include "veyra/ngx/DlssNrParameters.h"
 #include "veyra/ngx/DlssNrRuntimeAdapter.h"
 #include "veyra/ngx/DlssSrBackend.h"
@@ -343,7 +344,7 @@ bool EnhanceGraph::initNgxFeatures()
 
     fgCapsAvailable_ = false;
     fgMultiFrameMax_ = 0;
-    if (!desc_.stillImage) {
+    if (!desc_.stillImage && desc_.frameGenerationBackend==engine::FrameGenerationBackend::Dlss) {
     fgBackend_ = std::make_unique<ngx::DlssFgBackend>();
     ngx::DlssFgBackend::Capability fgCaps{};
     const bool fgAvailable = fgBackend_->queryCapability(*coreHost_, fgCaps, st);
@@ -358,6 +359,13 @@ bool EnhanceGraph::initNgxFeatures()
         fgCaps.available, fgCaps.multiFrameCountMax));
     }
 
+    if(!desc_.stillImage&&desc_.frameGenerationBackend==engine::FrameGenerationBackend::Fruc){
+        if(desc_.enableFg){
+            frucBackend_=std::make_unique<ngx::FrucBackend>();
+            if(!frucBackend_->initialize(context_,workW_,workH_,std::max(2u,desc_.fgMultiplier)))return false;
+        }
+        fgCapsAvailable_=true;fgMultiFrameMax_=3;
+    }
     nrAdapter_ = std::make_unique<ngx::DlssNrRuntimeAdapter>();
     if (!nrAdapter_->load(desc_.runtimeAbsPath.c_str(), st) ||
         !nrAdapter_->installCallerCompatibility(st) ||
@@ -418,7 +426,7 @@ bool EnhanceGraph::initNgxFeatures()
     // FG create + warm-up evaluate BEFORE descriptor views (the runtime
     // allocates internals at the first evaluate and would fail after views
     // exist on this system).
-    if (!desc_.stillImage) {
+    if (!desc_.stillImage && desc_.frameGenerationBackend==engine::FrameGenerationBackend::Dlss) {
         ngx::DlssFgBackend::CreateDesc fd{};
         fd.width = workW_; fd.height = workH_;
         fd.renderWidth = workW_; fd.renderHeight = workH_;
@@ -841,7 +849,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
 
     // Guidance from original source-space color before SR/NR. Queue waits are GPU-side.
     bool haveFlow = false;
-    const bool runMotion = nvofStandalone_ || fgEnabled_ || (srEnabled_ && !desc_.videoSrQuality);
+    const bool runMotion = nvofStandalone_ || (fgEnabled_&&!frucBackend_) || (srEnabled_ && !desc_.videoSrQuality);
     if (runMotion && nvof_ && nvof_->initialized()) {
         const float dims[8] = {uintBits(nvofW_),uintBits(nvofH_),uintBits(nvofW_),uintBits(nvofH_),0,0,0,0};
         if (prevValid_) {
@@ -1060,6 +1068,24 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     if(!fgEnabled_)gpuTimer_.submitted(ring_.lastSignaledValue());
     out.videoFenceValue = ring_.lastSignaledValue();
 
+    if(fgEnabled_&&frucBackend_){
+        if(reset&&realFrameIndex_>0&&(!ring_.drainQueue()||!frucBackend_->reset()))return false;
+        auto* flist=ring_.acquireNext(slot,st);if(!flist)return false;
+        gpuTimer_.mark(flist,GpuStage::FgBatch);
+        frucBackend_->recordInput(flist,videoFrame_[parity].Get(),parity);
+        if(!ring_.submitAndSignal(slot))return false;
+        std::array<bool,3> repeats{};
+        if(!frucBackend_->execute(parity,prevValid_&&!reset?prevPtsMs_:ptsMs,ptsMs,repeats))return false;
+        flist=ring_.acquireNext(slot,st);if(!flist)return false;
+        for(uint32_t sub=1;sub<desc_.fgMultiplier;++sub){const unsigned generatedSlot=parity+(sub-1)*2;frucBackend_->recordOutput(flist,genFrame_[generatedSlot].Get(),sub);frucRepeated_[generatedSlot]=repeats[sub-1];}
+        gpuTimer_.mark(flist,GpuStage::FgBatch,true);gpuTimer_.resolve(flist);
+        if(!ring_.submitAndSignal(slot))return false;gpuTimer_.submitted(ring_.lastSignaledValue());
+        out.genFenceValue=ring_.lastSignaledValue();out.genSlot=parity;out.hasGenerated=prevValid_&&!reset;
+        if(out.hasGenerated)for(uint32_t sub=1;sub<desc_.fgMultiplier;++sub){const unsigned generatedSlot=parity+(sub-1)*2;++metrics_.fgSubmittedCandidates;
+            BatchFrame f;f.identity=out.batch.identity;f.kind=FrameKind::Generated;f.validity=GenerationValidity::Pending;f.subframe=sub;f.pts100ns=FrameBatch::interpolate(out.batch.a100ns,out.batch.b100ns,sub,desc_.fgMultiplier);
+            f.lease=std::make_shared<FrameLease>();f.lease->texture=genFrame_[generatedSlot];f.lease->slot=generatedSlot;f.lease->readyFence=out.genFenceValue;generatedLeases_[generatedSlot]=f.lease;out.batch.append(std::move(f));}
+    }
+
     // FG reads enhanced SDR color, not the pre-NR guidance input.
     if (fgEnabled_ && fgBackend_ && fgBackend_->created()) {
       for(uint32_t sub=1;sub<desc_.fgMultiplier;++sub){
@@ -1131,11 +1157,14 @@ bool EnhanceGraph::resolveGeneration(FrameOutputs& out)
     for(uint32_t i=0;i<out.batch.count;++i){
     auto& frame=out.batch.frames[i];if(frame.kind!=FrameKind::Generated)continue;
     if(frame.validity!=GenerationValidity::Pending){anyValid|=frame.validity==GenerationValidity::Valid;continue;}
-    void* data=nullptr;D3D12_RANGE range{0,4};
-    HRESULT hr=fgDisableReadback_[frame.lease->slot]->Map(0,&range,&data);
-    if(FAILED(hr)){frame.validity=GenerationValidity::Failed;out.hasGenerated=false;veyra::log::error("fg-status",std::format("Map hr=0x{:X}",unsigned(hr)));return true;}
-    const uint32_t disabled=*static_cast<uint8_t*>(data); // SDK writes the first byte only
-    D3D12_RANGE written{0,0};fgDisableReadback_[frame.lease->slot]->Unmap(0,&written);
+    uint32_t disabled=frucRepeated_[frame.lease->slot];
+    if(!frucBackend_){
+        void* data=nullptr;D3D12_RANGE range{0,4};
+        HRESULT hr=fgDisableReadback_[frame.lease->slot]->Map(0,&range,&data);
+        if(FAILED(hr)){frame.validity=GenerationValidity::Failed;out.hasGenerated=false;veyra::log::error("fg-status",std::format("Map hr=0x{:X}",unsigned(hr)));return true;}
+        disabled=*static_cast<uint8_t*>(data);
+        D3D12_RANGE written{0,0};fgDisableReadback_[frame.lease->slot]->Unmap(0,&written);
+    }
     const bool rejected=disabled||out.contentDuplicate;
     frame.validity=rejected?GenerationValidity::Disabled:GenerationValidity::Valid;
     anyValid|=!rejected;if(rejected)++metrics_.fgDisabledFrames;else ++metrics_.fgGeneratedFrames;
@@ -1145,7 +1174,7 @@ bool EnhanceGraph::resolveGeneration(FrameOutputs& out)
 }
 
 bool EnhanceGraph::applySettings(const engine::EnhancementSettings& s){
-    if(s.videoSrQuality!=desc_.videoSrQuality||!s.validate().empty()||(s.multiplier>1&&(!fgCapsAvailable_||s.multiplier-1>uint32_t(fgMultiFrameMax_))))return false;
+    if((s.frameGenerationBackend==engine::FrameGenerationBackend::Fruc&&s.multiplier>1&&!frucBackend_)||s.frameGenerationBackend!=desc_.frameGenerationBackend||(frucBackend_&&s.multiplier>1&&s.multiplier!=desc_.fgMultiplier)||s.videoSrQuality!=desc_.videoSrQuality||!s.validate().empty()||(s.multiplier>1&&(!fgCapsAvailable_||s.multiplier-1>uint32_t(fgMultiFrameMax_))))return false;
     desc_.contentRate=s.content;desc_.model=s.model;desc_.residual=s.residual;desc_.protection=s.protection;desc_.settingsRevision=s.revision;
     desc_.fgMultiplier=std::max(2u,s.multiplier);desc_.enableNvofStandalone=s.nr&&!desc_.stillImage;nvofStandalone_=desc_.enableNvofStandalone;
     setNrEnabled(s.nr);setFgEnabled(s.multiplier>1);
@@ -1166,7 +1195,7 @@ ID3D12Fence* EnhanceGraph::contextFence()const{return context_.fence();}
 uint32_t EnhanceGraph::actualFlowPerf()const{return nvof_?nvof_->caps().actualPerfLevel:0;}
 bool EnhanceGraph::fgCreated() const
 {
-    return fgBackend_ && fgBackend_->created();
+    return frucBackend_ || (fgBackend_ && fgBackend_->created());
 }
 
 uint64_t EnhanceGraph::lastNvofSignal() const
@@ -1211,6 +1240,7 @@ void EnhanceGraph::shutdown()
         (void)nrAdapter_->snippetReleaseFeature(nrHandle_, rr, rs);
         nrHandle_ = nullptr;
     }
+    frucBackend_.reset();
     if (fgBackend_) fgBackend_->release();
     if(videoSrBackend_){videoSrBackend_->release();videoSrBackend_.reset();}
     if (srBackend_) srBackend_->release();

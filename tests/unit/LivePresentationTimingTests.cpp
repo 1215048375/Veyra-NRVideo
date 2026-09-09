@@ -12,6 +12,8 @@ int main(){
     check(captureDuration(100,166767,true,333333).to100ns()==166667,"sample duration wins over nominal");
     check(captureDuration(100,100,false,333333).to100ns()==333333,"missing sample stop uses nominal30fps");
     check(captureDuration(100,90,true,0).isUnknown(),"invalid sample and absent nominal stay unknown");
+    check(liveSourceInterval100ns({1,1000},60)==10000,"1000fps packet not clamped to120fps");
+    check(liveSourceInterval100ns({0,1},1000)==10000,"1000fps nominal fallback accepted");
     check(liveSourceInterval100ns({0,1},60)==166667,"known zero cannot turn60fps into120fps");
     check(liveSourceInterval100ns(captureDuration(0,0,false,333333),60)==333333,"30fps packet retained by scheduler");
     check(liveSourceInterval100ns({INT64_MAX,1},60)==1000000,"huge duration clamps before integer conversion");

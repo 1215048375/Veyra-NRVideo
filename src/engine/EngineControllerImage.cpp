@@ -2,6 +2,7 @@
 #include "veyra/engine/TiledImageProcessor.h"
 #include "veyra/engine/VideoPresenter.h"
 #include "veyra/gfx/CommandSlotRing.h"
+#include "veyra/RuntimePaths.h"
 #include <filesystem>
 #include <format>
 extern "C" {
@@ -45,7 +46,7 @@ void EngineController::runLargeImage(HWND window,const sink::RgbaImage& original
         if(requested.revision!=applied.revision){
             pipeline::EnhanceGraphDesc desc;desc.enableNr=requested.nr;desc.noFeatures=!requested.nr;
             desc.model=requested.model;desc.residual=requested.residual;desc.protection=requested.protection;desc.settingsRevision=requested.revision;
-            desc.runtimeAbsPath=(std::filesystem::path(VEYRA_PROJECT_ROOT)/"runtime_local/nvidia").wstring();
+            desc.runtimeAbsPath=runtime::localRuntimeDirectory().wstring();
             sink::RgbaImage candidate;TiledImageProcessor::Stats stats;
             status(L"正在分块增强大图，保留完整输出尺寸…");
             bool processed=false;

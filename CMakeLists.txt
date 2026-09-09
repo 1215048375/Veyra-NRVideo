@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(veyra VERSION 0.1.0 LANGUAGES CXX)
+project(veyra VERSION 0.0.1 LANGUAGES CXX)
 
 # ---------------------------------------------------------------------------
 # Veyra cache variables and feature switches (Playbook section 5.1).
@@ -9,6 +9,12 @@ project(veyra VERSION 0.1.0 LANGUAGES CXX)
 # ---------------------------------------------------------------------------
 set(VEYRA_DLSS_SDK_ROOT "" CACHE PATH "NVIDIA DLSS SDK root")
 set(VEYRA_NVOF_SDK_ROOT "" CACHE PATH "NVIDIA Optical Flow SDK root")
+if(NOT VEYRA_NVOF_SDK_ROOT)
+  set(VEYRA_NVOF_CANDIDATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party_local/nvidia/Optical_Flow_SDK_5.0.7")
+  if(EXISTS "${VEYRA_NVOF_CANDIDATE}/NvOFInterface/nvOpticalFlowCommon.h")
+    set(VEYRA_NVOF_SDK_ROOT "${VEYRA_NVOF_CANDIDATE}")
+  endif()
+endif()
 set(VEYRA_RUNTIME_ROOT "" CACHE PATH "Local NVIDIA runtime root")
 set(VEYRA_FFMPEG_ROOT "" CACHE PATH "vcpkg-installed x64-windows root with FFmpeg (player deps)")
 set(VEYRA_CLIP_TOOLS_ROOT "" CACHE PATH "vcpkg-installed x64-windows root with openh264-enabled FFmpeg (clip tooling only)")
@@ -35,6 +41,7 @@ add_library(veyra_base STATIC
   src/base/Log.cpp
   src/base/NgxResult.cpp
   src/base/FileIdentity.cpp
+  src/base/RuntimePaths.cpp
 )
 veyra_apply_warnings(veyra_base)
 target_compile_options(veyra_base PUBLIC /utf-8)
@@ -71,10 +78,17 @@ add_library(veyra_ngx STATIC
   src/ngx/DlssSrBackend.cpp
   src/ngx/VideoSrBackend.cpp
   src/ngx/DlssFgBackend.cpp
+  src/ngx/FrucBackend.cpp
 )
   veyra_apply_warnings(veyra_ngx)
   target_compile_features(veyra_ngx PUBLIC cxx_std_20)
-  target_link_libraries(veyra_ngx PUBLIC veyra_base veyra_gfx)
+  target_link_libraries(veyra_ngx PUBLIC veyra_base veyra_gfx d3d11)
+  add_executable(veyra_fruc_worker src/ngx/FrucWorker.cpp)
+  veyra_apply_warnings(veyra_fruc_worker)
+  target_compile_features(veyra_fruc_worker PRIVATE cxx_std_20)
+  target_link_libraries(veyra_fruc_worker PRIVATE veyra_base d3d11 dxgi)
+  target_include_directories(veyra_fruc_worker PRIVATE "${VEYRA_NVOF_SDK_ROOT}/NvOFFRUC/Interface" "${VEYRA_NVOF_SDK_ROOT}/NvOFFRUC/NvOFFRUCSample/cudart_header")
+  add_dependencies(veyra_ngx veyra_fruc_worker)
   target_include_directories(veyra_ngx PUBLIC
     "${VEYRA_DLSS_SDK_ROOT}/include")
   # NVIDIA ships the static core shim as MT-Release; the _dbg variants match
@@ -267,12 +281,6 @@ endif()
 
 # NVOF probe tool (phase5 gate expects veyra_nvof_probe.exe).
 set(VEYRA_NVOF_SDK_ROOT "" CACHE PATH "NVIDIA Optical Flow SDK root")
-if(NOT VEYRA_NVOF_SDK_ROOT)
-  set(VEYRA_NVOF_CANDIDATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party_local/nvidia/Optical_Flow_SDK_5.0.7")
-  if(EXISTS "${VEYRA_NVOF_CANDIDATE}/NvOFInterface/nvOpticalFlowCommon.h")
-    set(VEYRA_NVOF_SDK_ROOT "${VEYRA_NVOF_CANDIDATE}")
-  endif()
-endif()
 if(VEYRA_NVOF_SDK_ROOT AND EXISTS "${VEYRA_NVOF_SDK_ROOT}/NvOFInterface/nvOpticalFlowCommon.h")
   # Reusable NVOF D3D12 session (Phase 6 motion guidance for DLSSG).
   add_library(veyra_nvof STATIC src/ngx/NvOfSession.cpp)
@@ -432,6 +440,11 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_include_directories(veyra_repair_parameter_tests PRIVATE ${FFMPEG_INCLUDE_DIRS})
   target_compile_definitions(veyra_repair_parameter_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN VEYRA_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(veyra_repair_parameter_tests PRIVATE veyra_pipeline veyra_sinks veyra_nvof)
+  add_executable(veyra_fruc_tests tests/integration/FrucTests.cpp)
+  target_include_directories(veyra_fruc_tests PRIVATE ${FFMPEG_INCLUDE_DIRS})
+  target_compile_features(veyra_fruc_tests PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_fruc_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN VEYRA_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(veyra_fruc_tests PRIVATE veyra_pipeline veyra_sinks veyra_nvof)
   add_executable(veyra_repair_fg_tests tests/integration/RepairFgTests.cpp)
   add_executable(veyra_motion_validation_tests tests/integration/MotionValidationTests.cpp)
   add_executable(veyra_depth_response_tests tests/integration/DepthResponseTests.cpp)

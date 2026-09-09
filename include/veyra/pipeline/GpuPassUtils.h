@@ -17,10 +17,7 @@
 #include <vector>
 
 #include "veyra/Log.h"
-
-#ifndef VEYRA_SHADER_DIR
-#error "VEYRA_SHADER_DIR must be defined by the build system"
-#endif
+#include "veyra/RuntimePaths.h"
 
 namespace veyra::pipeline {
 
@@ -110,7 +107,7 @@ struct ComputePass {
 
     bool loadShader(const char* name, std::vector<uint8_t>& bytes) const
     {
-        const std::string path = std::string(VEYRA_SHADER_DIR "/") + name;
+        const std::string path = (runtime::shaderDirectory() / name).string();
         HANDLE f = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (f == INVALID_HANDLE_VALUE) {
@@ -191,7 +188,7 @@ struct ComputePass {
 
 inline bool loadShaderBytes(const char* name, std::vector<uint8_t>& bytes)
 {
-    const std::string path = std::string(VEYRA_SHADER_DIR "/") + name;
+    const std::string path = (runtime::shaderDirectory() / name).string();
     HANDLE f = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f == INVALID_HANDLE_VALUE) {

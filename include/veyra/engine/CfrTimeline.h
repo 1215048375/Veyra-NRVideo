@@ -13,7 +13,7 @@ public:
     CfrTimeline(int num, int den, double quantum, double origin)
         : num_(num), den_(den), quantum_(quantum), origin_(origin), low_(-quantum/2), high_(quantum/2) {}
     bool valid() const {
-        return num_ > 0 && den_ > 0 && fps() <= 120 && fps() >= 1 &&
+        return num_ > 0 && den_ > 0 && fps() <= 1000 && fps() >= 1 &&
             std::isfinite(origin_) && std::isfinite(quantum_) && quantum_ > 0 && quantum_ <= 1.0 / fps() + 1e-12;
     }
     double fps() const { return double(num_) / den_; }
