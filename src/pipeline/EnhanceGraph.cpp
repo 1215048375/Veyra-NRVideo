@@ -23,6 +23,7 @@
 #include "veyra/ngx/DlssNrParameters.h"
 #include "veyra/ngx/DlssNrRuntimeAdapter.h"
 #include "veyra/ngx/DlssSrBackend.h"
+#include "veyra/ngx/VideoSrBackend.h"
 #include "veyra/ngx/NgxCoreHost.h"
 #include "veyra/ngx/NgxParameters.h"
 #include "veyra/ngx/NvOfSession.h"
@@ -60,8 +61,16 @@ EnhanceGraph::~EnhanceGraph()
 bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
 {
     if(!desc.protection.validate().empty())return false;
+    if(desc.srMotionProbe){
+        const auto d=desc.srMotionProbe->GetDesc();ComPtr<ID3D12Device> device;
+        if(!desc.enableSr||desc.noFeatures||desc.noNgx||d.Dimension!=D3D12_RESOURCE_DIMENSION_TEXTURE2D||d.Width!=desc.workWidth||d.Height!=desc.workHeight||d.Format!=DXGI_FORMAT_R16G16_FLOAT||d.DepthOrArraySize!=1||d.MipLevels!=1||d.SampleDesc.Count!=1||(d.Flags&D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE)||FAILED(desc.srMotionProbe->GetDevice(IID_PPV_ARGS(&device)))||device.Get()!=context_.device()){
+            veyra::log::error("graph","invalid diagnostic SR motion resource/feature/device contract");return false;
+        }
+        veyra::log::info("graph","diagnostic SR motion override active; no product entry point enables this");
+    }
     desc_ = desc;tracker_={};prevValid_=false;cadence_.reset();scene_.reset();previousLuma_.clear();
     diagnostics::DiagnosticEvent initDiagnostic;initDiagnostic.stage="initialize";initDiagnostic.identity={epoch_+1,desc.settingsRevision,0};initDiagnostic.resolution.source={desc.sourceWidth,desc.sourceHeight};initDiagnostic.resolution.base=initDiagnostic.resolution.fg=initDiagnostic.resolution.output={desc.workWidth,desc.workHeight};initDiagnostic.resolution.nr={desc.nrWidth?desc.nrWidth:desc.workWidth,desc.nrHeight?desc.nrHeight:desc.workHeight};initDiagnostic.resolution.flow=initDiagnostic.resolution.source;initDiagnostic.flowApplied=std::to_string(unsigned(desc.flowQuality));initDiagnostic.runtimeHash="E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E";Logger::diagnosticContext(initDiagnostic);
+    if(desc.videoSrQuality>4)return false;
     srcW_ = desc.sourceWidth;
     srcH_ = desc.sourceHeight;
     workW_ = desc.workWidth;
@@ -140,6 +149,7 @@ bool EnhanceGraph::createResources()
         }
     }
     srcRgba_ = makeTexture(context_.device(), srcW_, srcH_, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
+    if(srEnabled_&&desc_.videoSrQuality){videoSrInput_=makeTexture(context_.device(),srcW_,srcH_,DXGI_FORMAT_R8G8B8A8_UNORM,true);videoSrOutput_=makeTexture(context_.device(),workW_,workH_,DXGI_FORMAT_R8G8B8A8_UNORM,true);if(!videoSrInput_||!videoSrOutput_)return false;}
     workRgba_ = makeTexture(context_.device(), workW_, workH_, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
     for(unsigned i=0;i<2;++i){sourceReferences_[i]=makeTexture(context_.device(),srcW_,srcH_,DXGI_FORMAT_R16G16B16A16_FLOAT,false);baseReferences_[i]=makeTexture(context_.device(),workW_,workH_,DXGI_FORMAT_R16G16B16A16_FLOAT,false);if(!sourceReferences_[i]||!baseReferences_[i])return false;}
     nrInput_=makeTexture(context_.device(),nrW_,nrH_,DXGI_FORMAT_R16G16B16A16_FLOAT,true);
@@ -395,7 +405,8 @@ bool EnhanceGraph::initNgxFeatures()
         sd.perfQuality = 1; sd.enableOutputSubrects = false;
         ID3D12GraphicsCommandList* list = ring_.acquire(0, st);
         if (list == nullptr) return false;
-        if (!srBackend_->create(*coreHost_, list, ngxParams_, sd, st) || !srBackend_->created()) {
+        if(desc_.videoSrQuality){videoSrBackend_=std::make_unique<ngx::VideoSrBackend>();if(!videoSrBackend_->create(*coreHost_,list))return false;veyra::log::info("video-sr",std::format("selected quality={} input={}x{} output={}x{}",desc_.videoSrQuality,srcW_,srcH_,workW_,workH_));}
+        else if (!srBackend_->create(*coreHost_, list, ngxParams_, sd, st) || !srBackend_->created()) {
             veyra::log::error("graph", "SR create failed");
             return false;
         }
@@ -477,7 +488,7 @@ bool EnhanceGraph::createComputePasses()
     if(desc_.rgbInput&&(!rgbPass_.loadShader("RgbToLinear.dxil",cs)||!rgbPass_.create(context_.device(),cs,4,1,1)))return false;
     if (!encPass_.loadShader("ParityEncode.dxil", cs) || !encPass_.create(context_.device(), cs, 8, 1, 1)) return false;
     if (!decPass_.loadShader("ParityDecode.dxil", cs) || !decPass_.create(context_.device(), cs, 8)) return false;
-    if (!blitPass_.loadShader("ScaleBlit.dxil", cs) || !blitPass_.create(context_.device(), cs, 16, 1, 1)) return false;
+    if (!blitPass_.loadShader("ScaleBlit.dxil", cs) || !blitPass_.create(context_.device(), cs, 18, 1, 1)) return false;
     // Nv12Upload stays: frame-time CopyTextureRegion is poisoned by the
     // injected layer (SEH in NGX evaluate, r33-final3 evidence); the compute
     // upload is the proven frame-path ingestion on this system.
@@ -559,6 +570,8 @@ bool EnhanceGraph::createViews()
     //  7/8: videoFrame SRV   9: nvofInB UAV       (NVOF B:=video)
     // 10: genTex SRV        11/12: videoFrame SRV (presents)
     // 13/14: genTex SRV (slot 2)
+    if(videoSrInput_&&viewsUav)makeUav(context_.device(),videoSrInput_.Get(),DXGI_FORMAT_R8G8B8A8_UNORM,cpu(blitPass_,16));
+    if(videoSrOutput_&&viewsTex)stagedSrv(videoSrOutput_.Get(),DXGI_FORMAT_R8G8B8A8_UNORM,blitPass_,17);
     if (viewsTex) stagedSrv(srcRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, blitPass_, 0);
     if (viewsUav) makeUav(context_.device(), workRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, cpu(blitPass_, 1));
     if (viewsTex) stagedSrv(nrEnabled_ ? residualRgba_.Get() : workRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, blitPass_, 2);
@@ -828,7 +841,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
 
     // Guidance from original source-space color before SR/NR. Queue waits are GPU-side.
     bool haveFlow = false;
-    const bool runMotion = nvofStandalone_ || fgEnabled_ || srEnabled_;
+    const bool runMotion = nvofStandalone_ || fgEnabled_ || (srEnabled_ && !desc_.videoSrQuality);
     if (runMotion && nvof_ && nvof_->initialized()) {
         const float dims[8] = {uintBits(nvofW_),uintBits(nvofH_),uintBits(nvofW_),uintBits(nvofH_),0,0,0,0};
         if (prevValid_) {
@@ -892,7 +905,18 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     out.batch.batchId=realFrameIndex_+1;out.batch.identity={epoch_,desc_.settingsRevision,sourceFrameId};
     out.batch.a100ns=static_cast<int64_t>(std::llround(prevPtsMs_*10000));
     out.batch.b100ns=static_cast<int64_t>(std::llround(ptsMs*10000));gpuTimer_.identity(out.batch.identity);
-    if (srEnabled_ && srBackend_ && srBackend_->created()) {
+    if(srEnabled_&&videoSrBackend_){
+        gpuTimer_.mark(list,GpuStage::Sr);
+        tracker_.transition(list,videoSrInput_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        const float enc[8]={uintBits(srcW_),uintBits(srcH_),uintBits(srcW_),uintBits(srcH_),1,0,0,0};
+        blitPass_.bind(list,enc,gpuHandleOf(blitPass_,0).ptr,gpuHandleOf(blitPass_,16).ptr);list->Dispatch((srcW_+15)/16,(srcH_+15)/16,1);tracker_.uavBarrier(list,videoSrInput_.Get());
+        tracker_.transition(list,videoSrInput_.Get(),D3D12_RESOURCE_STATE_COMMON);tracker_.transition(list,videoSrOutput_.Get(),D3D12_RESOURCE_STATE_COMMON);
+        if(!videoSrBackend_->evaluate(list,videoSrInput_.Get(),videoSrOutput_.Get(),desc_.videoSrQuality))return false;
+        tracker_.uavBarrier(list,videoSrOutput_.Get());tracker_.transition(list,videoSrOutput_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);tracker_.transition(list,workRgba_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        const float dec[8]={uintBits(workW_),uintBits(workH_),uintBits(workW_),uintBits(workH_),-1,0,0,0};
+        blitPass_.bind(list,dec,gpuHandleOf(blitPass_,17).ptr,gpuHandleOf(blitPass_,1).ptr);list->Dispatch((workW_+15)/16,(workH_+15)/16,1);tracker_.uavBarrier(list,workRgba_.Get());tracker_.transition(list,workRgba_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        ++metrics_.srEvaluateCount;gpuTimer_.mark(list,GpuStage::Sr,true);
+    } else if (srEnabled_ && srBackend_ && srBackend_->created()) {
         gpuTimer_.mark(list,GpuStage::Sr);
         tracker_.transition(list, workRgba_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         ngx::DlssSrBackend::EvalDesc ed{};
@@ -900,6 +924,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         ed.output = workRgba_.Get();
         ed.depth = nrZeroDepth_.Get();
         ed.motionVectors = haveFlow?baseFlow_.Get():nrZeroMotion_.Get();
+        if(desc_.srMotionProbe)ed.motionVectors=desc_.srMotionProbe;
         ed.reset = reset;
         if (!srBackend_->evaluate(list, ngxParams_, ed, st)) {
             veyra::log::error("graph", "sr evaluate failed");
@@ -1120,7 +1145,7 @@ bool EnhanceGraph::resolveGeneration(FrameOutputs& out)
 }
 
 bool EnhanceGraph::applySettings(const engine::EnhancementSettings& s){
-    if(!s.validate().empty()||(s.multiplier>1&&(!fgCapsAvailable_||s.multiplier-1>uint32_t(fgMultiFrameMax_))))return false;
+    if(s.videoSrQuality!=desc_.videoSrQuality||!s.validate().empty()||(s.multiplier>1&&(!fgCapsAvailable_||s.multiplier-1>uint32_t(fgMultiFrameMax_))))return false;
     desc_.contentRate=s.content;desc_.model=s.model;desc_.residual=s.residual;desc_.protection=s.protection;desc_.settingsRevision=s.revision;
     desc_.fgMultiplier=std::max(2u,s.multiplier);desc_.enableNvofStandalone=s.nr&&!desc_.stillImage;nvofStandalone_=desc_.enableNvofStandalone;
     setNrEnabled(s.nr);setFgEnabled(s.multiplier>1);
@@ -1187,6 +1212,7 @@ void EnhanceGraph::shutdown()
         nrHandle_ = nullptr;
     }
     if (fgBackend_) fgBackend_->release();
+    if(videoSrBackend_){videoSrBackend_->release();videoSrBackend_.reset();}
     if (srBackend_) srBackend_->release();
 
     // NVOF teardown in THREE phases (ownership rule proven by t10-L0-r2):
@@ -1240,7 +1266,7 @@ void EnhanceGraph::shutdown()
     neuralTex_.Reset();
     proxyTex_.Reset();
     for(auto& r:sourceReferences_)r.Reset();for(auto& r:baseReferences_)r.Reset();workRgba_.Reset();
-    srcRgba_.Reset();
+    srcRgba_.Reset();videoSrInput_.Reset();videoSrOutput_.Reset();
     chromaTex_.Reset();
     lumaTex_.Reset();
     upZeroMotion_.Reset();

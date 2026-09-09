@@ -39,6 +39,7 @@ struct EnhancementSettings {
     ResidualSettings residual;
     ProtectionSettings protection;
     bool nr=true,sr=false;
+    uint32_t videoSrQuality=0; // 0 DLSS SR; 1–4 RTX Video SR
     uint32_t multiplier=1;
     pipeline::NrSizePolicy nrPolicy=pipeline::NrSizePolicy::Realtime;
     FlowQuality flow=FlowQuality::Balanced;
@@ -52,6 +53,7 @@ struct EnhancementSettings {
         if(model.skin!=-1&&!range(model.skin,2))return "skin parameter out of range";
         if(model.style<0||model.style>2||model.autoMask<0||model.autoMask>1||model.uiCorrection<0||model.uiCorrection>1)return "invalid experimental parameter";
         for(float v:{residual.total,residual.darken,residual.brighten,residual.color,residual.luminance})if(!range(v,2))return "residual parameter out of range";
+        if(videoSrQuality>4)return "invalid video SR quality";
         if(multiplier<1||multiplier>4)return "unsupported multiplier";
         if(nrPolicy!=pipeline::NrSizePolicy::Realtime&&nrPolicy!=pipeline::NrSizePolicy::Native)return "invalid NR size policy";
         if(flow<FlowQuality::Performance||flow>FlowQuality::Quality||content<ContentRate::Transport||content>ContentRate::Fps60)return "invalid flow/content mode";

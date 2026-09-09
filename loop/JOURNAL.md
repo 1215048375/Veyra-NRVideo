@@ -1583,3 +1583,93 @@ Cycle77 independent initial review: two scenes reproduced17.861/22.122s, phase7 
 
 ## Cycle77 independent final PASS
 review_sr_reconstruction: full24frameSR/spatial metrics reproduced, SRrepeat exact; twoactualRTXinvocations17.861/22.122s, debug0; docs/REVIEW_SR_RECONSTRUCTION_2026-09-08.md. Independentpreflight71/phase7 268ee4b316bf4604bedafcd9b747b09c41.718s75PASS. DocumentationP2 initializationFGwarmup distinction fixedandreadonlyrereadclosed. No default/product/export change. Next isolate exactmotion vsestimated SR guidance, and natural material; recent-app source exists (ffprobe H2641920x1080,30000/1001,limitedBT709,56.689s), not native4K reference. FullGoalopen.
+
+## Cycle78 - isolate SR motion guidance
+Previous Goal turn progress:8fc00d4 measured real4K spatial/temporal tradeoff and independentreview. Clean/noSTOP. Extend reconstruction diagnostic with borrowed validated SR-only motion resource override, unset in product. Compare exactconstructed current-to-previous outputpixels, zero, inverse and exactrepeat; retain sameRGB/depth/jitter/settings. Exclude invalid/outofbounds correspondence fromoracle, firstframezero. Add post-first4frames metrics. Do not defaultinject synthetic motion or callit gameequivalent; no exportchanges. Eachprocess275s.
+
+## Cycle78 SR motion response candidate
+Actual two8mode 4K matrices final0-978ea39fa951411f9a3f9d82f2239c4148.652s andfinal1-f755274a89804bd19d4da245b3a712b255.509s exit0; resource width/format/disabled negativecontrols reject; SR24/NVOF23/reset1/debug0 andestimated/exact repeats identical. Exactmotion improveserrors, zero/inverseworsen spatial; defaultfilter slightlyworse thanlegacy onbothsyntheticcases. docs/SR_MOTION_RESPONSE_2026-09-08.md. NewSR-only borrowedprobe unsetinproduct; no defaults/export change. Frozen gate/reviewpending.
+
+Cycle78 independent diagnostic16casesPASS butphase7 FAIL565d2bc523b24281b1183d0d16a563cd:playerP95lateness54.38ms>50,251source250generated. Reviewer no introducedcodefindings; preserveFAIL,no checkpoint. Compareexistingtimestamps: actualhost-vsPTSdrift grows~57ms afterframe125; GPUstages onlymodestlyrise, sameEXEmakergateP952.88. No concurrentGPU; CPUsourcepreview ended37sbeforefailedplayer. Hypothesis diagnosticfile+stdout synchronousflush reducesbudget margin; bounded matched A/B file-vsNUL withfullstdout retained, no code/gate change. Notrerunninguntilgreen or assertingrootcause.
+
+
+Cycle78 timing attempt2 log A/B rejected as sufficientcause: player-log-ab-955f8d3058d94846a76d8850b393d4b5 file/nul/nul/file12s all exit0 butP95 7.83/4.44/351.96/477.54. GPUstage means similar; no lingeringVeyra; postrun GPU43C2percent (doesnotprovepastload). Attempt3 test standard Playback MMCSS scope onvideo/captureworker; officialMicrosoft Playback task, no registry/processpriority changes, failsoftandthreadRAIIrevert. Diagnosticdisableenvfor matched A/B, existinggate50msunchanged. This is a candidate, not rootcause/fixed claim.
+
+MMCSS matched on/off/off/on12s P95=18.92/4.15/4.85/1.81; registration/revertworked butlatenessbenefitnotestablished. Preservecandidateheader/diff/EXEidentityinignored player-mmcss-ab-04257f7df23a4641a8598792f0574766; removeunproven defaultintegration. No registry/process priority changes made. Existingplayer-timing proves decodeP95~.1ms, graphsubmit~3-5ms,GPUready~12-13ms,present~.7-1.2ms; these marginal distributions not additive worst-case bound, but serialized critical path warrantsflow-resolution budget investigation. Phase7 remains failed pendingactualfix, no checkpoint.
+
+## Cycle 79 — professional window move/resize crash (2026-09-08)
+User-reported repeated immediate crashes take priority over Cycle78 timing investigation. STOP absent. WER four Event1000 records at 23:18–23:24 share exception C000041D / RVA BB0F7. Local minidump 33456 and same-object MAP place fault inside __chkstk; AppShell proc prologue reserves 0x36A28 (223784) bytes each invocation. Stack includes nested AppShell proc, layout, control label callbacks and selector; move/resize naturally reenters Win32 callbacks. Plan: preserve existing diagnostics; move per-operation 32768-wide-character buffers off callback stack without reducing path capacity, add bounded native move/resize/selector regression and verify small compiled stack frame. No timing fix claimed; Cycle78 independent phase7 failed P95 lateness54.38ms. MMCSS A/B inconclusive and reverted; restore build succeeded.
+
+## Cycle79 — professional move/resize callback stack repair (2026-09-08)
+User WER dump 33456: C000041D at module RVA BB0F7, same-object linker MAP identifies __chkstk; AppShell WndProc reserves0x36A28 bytes, nested layout/control/modal callbacks exhaust stack. Move 32768-wchar per-operation path buffers to vector heap storage; retain path capacity and independent modal lifetime. Fixed compiler reservation0x6A48 bytes. No STACK linker increase or exception swallowing.
+Build: scripts/build.ps1 -Root <project> -Preset x64-release, exit0 (logs/optimization-goal-20260908/build-cycle79.log). Native bounded regression scripts/acceptance/ui-window-resize.py: empty18.265s (resize-1788881542706216600), playback18.578s (resize-1788881522216906600), each24moves/24sizes/4selectors, clean shutdown. Playback600NR/599NVOF, failed=false, P951.63ms. These are Win32 scripted operations, not physical mouse acceptance. Early old-binary probe did not reliably reproduce crash; old exit0 without smoke marker is not accepted evidence; final script requires actual completed smoke.
+Preflight71PASS; phase7FAIL player-sync in logs/delivery/966863bd15a54bd58849984c73b5105d/result.json. Prior independentCycle78 alsoFAIL54.38ms, preceding this UI edit. No overall gate pass or latency fix claimed. Review pending; no checkpoint marking product passed.
+
+Cycle79 independent product review scopedPASS, empty18.218s/playback18.594s. Reviewer P2: synchronous SetWindowPos could outlive in-worker timeout. Added external25s supervisor + bounded5s process-tree termination; this is test-only and pending recheck. Latest maker phase7 ran alongside user capture PID26044(start23:30:10), so1417.23ms P95 is contaminated performance evidence, not attributable to UI repair. Do not close user capture.
+
+Cycle79 watchdog review PASS, finalempty run resize-1788881814315581700 failed selector-count assertion (1 vs4) despite24moves/24sizes/clean app exit0/no crash. Fixed regression ordering: explicitly cancel selector and acknowledge CB_GETDROPPEDSTATE=false before next open; do not rely on anchor timer dismissal. Product binary unchanged.
+
+Cycle79 final independent scopedPASS: review_window_stack found no remainingP0/P1/P2 in product fix or regression. Final empty regression logs/optimization-goal-20260908/resize-1788881908641248600/result.json:18.234s,24moves,24sizes,4selectoropens,cleanSmoke=true,exit0. Prior same-binary playback resize-1788881714808561400:18.594s,600NR/599NVOF,failed=false. SHA25686E1EE322C86B539FC7C280F10726AC721F05FF322D5C0CA778EE1F9608C5D45. External25s supervisor+5s cleanup; forced timeout inspected not fault-injected. User mouse acceptance remains; full Phase7 not passed, no product-completion checkpoint. Latest gate concurrent usercapture means no clean latency conclusion.
+
+## Cycle80 — capture mode enumeration and device audit
+User asks why actual4K18p absent and no1440p30. FFmpeg native list (capture-native-options.txt) confirms3840x2160@18 YUY2 andMJPEG; no2560x1440. Product formats() hardcoded1080/2160 and29..61fps incorrectly hides18fps and allintermediate dimensions. Device VID345F PID2131 REV3100 MicrosoftUVC10.0.26100.8972 USB3 Video (different from historicUSB2 mode). Plan remove preset whitelist within existing4K capture envelope, labelnativepixel subtype, retainoriginalIAMStreamConfigindex, logselectednativeformat/SetFormat result. ReadUSBactualnegotiatedspeed andfirmwaredescriptors; noflash/driverchanges. ExternalresearchMS2131family, exactbrandpending. Single tests<=300sec.
+
+Cycle80 capture whitelist removed and labels identify native subtype. ActualUSB SS(noSSPlus), firmware UVC2x12 frame entries no1440p. 4K18 YUY2/MJPEG source testsPASS andapp107NR106NVOF,callback18.02fps,0drops. Details/commands/failures docs/CAPTURE_CARD_AUDIT_2026-09-08.md. User resumedcapture0:22:0 after update; no further exclusivehardware tests while in use. Independent scopedreview pending.
+
+Cycle80 independent scopedPASS: metadata list + offline rawUSBdescriptor independently verified, code and actualsource/NRlogs agree, noP0/P1/P2. Preflight71PASS. FullPhase7notretested while user4Kcaptureactive; priorlatenessissueunresolved. Finalexe2587E014D349402254C23C8B82108539B4C586E2C4C1D2C558BC636EB4AB34EB. Audit report contains complete evidence.
+
+## Cycle81 — user-authorized RTX Video SR / FRUC trials (2026-09-09)
+Official RTXVideo1.1 supportsRTX50/DX12, SR/artifactreduction/HDR, notinterpolation; download verified NVIDIAlogin bothweb/browser, user instructed download. LocalOpticalFlow5.0.7 includesNvOFFRUC andCUDA11runtime; testindependentD3D11FRUC first, notproductintegration. Screenshot99%GPU cannotattributeSRalone. No defaultbackendreplacement, no extraGPUCPUcopy inproduction; diagnosticreadback allowed. STOP absent. Eachprocess<=300s.
+
+## Cycle81 — video SDK trial 2026-09-09
+RTX5070 FRUC standalone natural-pan test generated 3 distinct intermediates; Create/Register/Process/Unregister/Destroy=0. Synthetic tests repeated frames and correctly failed. Evidence and build commands: docs/RTX_VIDEO_FRUC_TRIAL_2026-09-09.md. Each invocation external25s watchdog, final exit0. Player PID20272 remained running, no performance conclusion. RTX Video SDK requires official login and was not executed. No product changes or phase advancement; existing Phase7 timing failure remains. Next: SDK acquisition and isolated comparison before integration.
+
+## Cycle82 RTX Video SDK received
+User supplied official zip; inspect and extract only to ignored local directory; standalone D3D12 test, no default changes. Pinned binaries match. STOP absent.
+
+## Cycle82 — RTX Video D3D12 trial
+User SDK received and safely extracted ignored. Actual RTX5070 Init/Create/Evaluate0x1 Available1; 1080p->4K all5quality outputs nonblack/different. Warm static8sample GPU medians q1=1.374ms q2=1.774ms q4=5.857ms; not end-to-end/capture comparison. Debug errors0 with retained warnings. Build/readback/timing/logs/limits in docs/RTX_VIDEO_FRUC_TRIAL_2026-09-09.md. Preflight71PASS; per-process25s watchdog. No product code/default changes, Phase7 timing failure unchanged. Next optional shared backend and same-source A/B, not automatic default replacement.
+
+## Cycle83 optional RTX Video SR integration
+User authorized trying in player. Shared graph backend, encoded RGB boundary, quality selector and preset persistence; no default replacement or export-integrity changes. Single writer; test each <=300s.
+
+## Cycle83 independent final scoped PASS
+Independent review_video_sr: no remaining introduced P0/P1/P2; original backend-switch P1 and draft-loss P2 closed. Independent low->medium->DLSS->low:3 applied transitions, VSR Create/Evaluate/Release3/401/3 all0x1/SEH0; DLSS Create1. Draft0.314159 retained across all3 changes, never secretly applied. Preset v2 protection/feather and defaultquality0 retained; v3quality2 roundtrip and invalid5 rejection pass.
+Preflight71PASS; phase7 delivery a76caae2b03b4a96aaed4e4e1ab4eb71 45.295s/75PASS. Initial reviewer environment PSModulePath failure retained; fixed module search and reran. Evidence logs/video-sdk-trial-20260909/review-ui-switch.stdout.log, review-app-switch.log, review-preset.log. Tracked fingerprint98da728f82273048c095e9a12b2fe63c3114def9 unchanged during review; no tracked proprietary assets.
+Final exeSHA37574BF6ACCA4E78A26EF10BE0D3AD0CDD90470D8A2353C6D551ACC798006A5B. User can choose Professional/Enhancement/RTX Video SR low or medium, enable SR with realtimeNR; test FGoff then2X. Physicalcard not enumerated this turn, onlyOBS; physical capture/naturalquality/longstability/unresolved historical intermittenttiming remain unaccepted. No overallGoal completion or distribution approval; no new integratedGBV claim.
+
+## Cycle84 physical capture diagnosis
+Same userPID22300 USB3Video1920x1080YUY2/60 examined without reopening. NativeNR+highestVSR is bottleneck: NR22.911ms vs realtime6.100ms; same-source realtime/low restores59.51fps vs native/highabout30fps. Temporary q4/realtime,q1/realtime,q1/realtime/FGoff comparisons each13s; originalquality4/nativeNR/FG2 restored. No code/binary change. NRdial is not total latency; rolling1200sample P95 mixes prior settings, so noFGofflatency conclusion frommixedwindow. Report docs/PHYSICAL_CAPTURE_DIAGNOSIS_2026-09-09.md; evidence logs/video-sdk-trial-20260909/physical-*. FullGoal open. Next revise metric windows/UI clarity and user chooses realtime/low forlive60fps.
+
+## Cycle85 cross-page settings submission diagnosis
+User reported FG toggle changes NR20ms->6ms. Actualrev29 nativeNR3840x2160 torev30 realtime1920x1080 alongsideFG. read() reads all hiddencontrols when applyingFG; narrow212 toFG/flow/content and preserveenhancementdraft, regression invisible staleNRpolicy. No algorithm order change.
+
+Correction: Cycle84 final revision22 multiplier1 means FG was NOT restored to original2X; only NativeNR/quality4 restored. Hiddenlegacycheckbox was stale. See docs/SETTINGS_PAGE_SCOPE_REPAIR_2026-09-09.md.
+
+
+## Cycle85 — settings page submission isolation: independent PASS
+User anomaly log revision29 NR3840x2160 median22.135ms -> revision30 NR1920x1080 median6.154ms; RTX Video SR quality1/output4K unchanged. Historical exact clicks not logged. SettingsWindow FG apply previously submitted hidden enhancement fields; now FG and enhancement reads/submissions and dirty drafts are isolated. No GPU stage order change.
+Changed product file: apps/veyra/SettingsWindow.cpp. Regression: scripts/acceptance/ui-settings-page-scope.py. Build command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Root <project> -Preset x64-release; PASS, logs/video-sdk-trial-20260909/build-cycle85.log. Maker and independent command: python scripts/acceptance/ui-settings-page-scope.py; PASS (independent stdout logs/video-sdk-trial-20260909/review85-ui.stdout.log; app logs/settings-page-scope-72281e89bf974ce3a6f143945181cf2e.log). Independent actual revision4 intensity1/multiplier2 keeps nativeNR; revision5 applies realtimeNR with fg=1 and435 valid generated frames.
+Independent commands: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/loop-gate.ps1 -Gate preflight (71 PASS), same command -Gate phase7 (75 PASS,42.678s), logs/delivery/c2bd451c2bb844448b60e78a61714558/result.json. Reviewer review_video_sr: no new P0/P1/P2; no tracked writes. Frozen code fingerprint8f3ebcf6d5f68c02592f52a0194674b7b3f776ae. EXE SHA25688AE23C12616355858AE85A6F8D11E0AC441872A5117665578DF626CAA48306A. Actual RTX execution performed; proprietary assets remain untracked.
+Correction superseding Cycle84 restoration claim: nativeNR and VSRquality4 restored, but originalFG2 was left OFF (revision22 multiplier1). Hidden legacy checkbox was stale and was an invalid restoration source. User notified; future comparisons must use applied settings.
+Phase7 overall optimization remains in_progress. Scope PASS does not resolve historical intermittent timing or prove physical display latency. NR dial measures NR stage only; rolling windows still mix settings. Next task: configuration-specific timing windows and unambiguous metric display, followed by user real-card acceptance. User app was closed normally for rebuild; reopen updated app for real-card retest.
+
+
+## Cycle86 plan — user requested live settings and handoff
+Make every enhancement/FG field submit only its own change immediately; remove Apply buttons; one always-visible restore-default button. Block wheel adjustment over inspector controls and forward scrolling to page. Replace style0/1/2, mask0/1, UI correction0/1 with selected buttons. Build, actual GPU UI regression, independent read-only review, update guide/handoff and local checkpoint. Preserve pre-existing deletion loop/GOAL_PROMPT.md; do not stage that deletion. No runtime/SDK commit or push.
+
+
+Cycle86 safety stop: build passed (logs/video-sdk-trial-20260909/build-cycle86.log), but preflight reports file:loop/GOAL_PROMPT.md and control:loop/GOAL_PROMPT.md missing. This deletion was present before Cycle86 edits. Per AGENTS control-plane rule, stopped before GPU regression, independent review and checkpoint; no manifest/gate rebaseline and no restoration of user deletion. UI changes remain unverified candidate. Ask user to authorize restoring the exact tracked GOAL_PROMPT.md from HEAD, then resume verification/documentation/local checkpoint.
+
+Cycle86 resumed: user explicitly confirmed deletion and requested removal of its preflight requirements. Removed GOAL_PROMPT from required files, exact protected set and manifest; synchronized only manifest pin (remaining ten file identities unchanged). No restoration or weakening of binary/product checks. Global themed sliders also swallow wheel; inspector subclass forwards wheel to page.
+
+
+## Cycle86 最终独立验收与交接
+
+只读review_video_sr限定范围PASS，无新增P0/P1/P2。preflight69 PASS，phase7 73 PASS，实际命令 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/loop-gate.ps1 -Gate preflight` / `-Gate phase7`；delivery `logs/delivery/9f7468b334bc457db4b8bf125d4f5ddb/result.json`。减少的2项仅为用户明确删除的GOAL_PROMPT文件存在/hash检查，剩余10个控制文件身份保持。
+
+实际RTX独立UI回归通过（`python scripts/acceptance/ui-settings-page-scope.py`）；额外回归确认master-off保存.55/style1/FG2、重新开启真实应用；焦点内无效文本保留，失焦恢复；注入style2失败后回滚style1且按钮状态同步；滚轮确实滚页但不调参；还原默认生效。证据 `logs/video-sdk-trial-20260909/review86-ui.stdout.log`、`review86-extra-final.stdout.log`、`logs/settings-page-scope-79d029d4883e42fea08d53eecfcc65c6.log`。初次补测1秒等待不足，改为最长5秒观察真实回滚后通过，未用固定短等待误报产品失败。
+
+EXE SHA256: `3BD470D51AD43F7C461F23AB6F9F9B7234DC6F33D84C9DDEB35A463663264E2C`。构建日志 `logs/video-sdk-trial-20260909/build-cycle86.log`；独立review前后跟踪指纹 `9d45fe7ff6b19a67b3a42db2215928b1aecf5b4f`不变，之后仅更新交接记录。单次测试均不足300秒。Cycle86修复可交本机实测；整体Phase7优化仍in_progress，既有统计窗口/间歇时序/实卡体验/长期稳定风险未宣称消失。下一任务见HANDOFF优先处理配置相关统计窗口。
+
+本地Git checkpoint包括Cycles78–86已核对源码、使用指南、交接报告与授权的GOAL_PROMPT删除；不包含runtime/SDK/个人媒体，不push。实际提交ID以本次 `git log -1` 为准，避免在commit内容中制造自指hash。

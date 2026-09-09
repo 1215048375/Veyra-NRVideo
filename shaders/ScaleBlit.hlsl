@@ -55,6 +55,7 @@ void main(uint3 groupId : SV_GroupID, uint3 localId : SV_GroupThreadID, uint3 gl
         const float3 c = max(value.rgb, 0.0);
         value.rgb = select(c <= 0.0031308, c * 12.92, 1.055 * pow(c, 1.0/2.4) - 0.055);
     }
+    if(encodeSrgb < -0.5){const float3 c=max(value.rgb,0.0);value.rgb=select(c<=0.04045,c/12.92,pow((c+0.055)/1.055,2.4));}
     outputTex[globalId.xy] = value;
     (void)groupId;
     (void)localId;

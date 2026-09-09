@@ -32,30 +32,62 @@ LRESULT CALLBACK bodyProc(HWND h,UINT msg,WPARAM wp,LPARAM lp){
 const wchar_t* labels[]={L"模型强度",L"局部明暗",L"局部结构",L"肤质 · 未证实",L"风格 · 实验",L"自动遮罩 · 实验",L"UI修正 · 未证实",L"总变化强度",L"暗化变化",L"亮化变化",L"色彩变化",L"明度变化"};
 void loadStore(){if(!loaded){store.load();loaded=true;}}
 void message(const std::wstring& text){putText(401,text.c_str());}
-bool submit(engine::EnhancementSettings s){if(!apply(s)){dirty=true;message(L"总增强正在切换；草稿保留，请稍后应用。");return false;}dirty=false;return true;}
+bool submit(engine::EnhancementSettings s){if(!apply(s)){dirty=true;message(L"总增强正在切换；本次修改未接受，请稍后重试。");return false;}dirty=false;return true;}
 void syncProtection(const engine::ProtectionSettings& protection){
     check(206,protection.enabled?BST_CHECKED:BST_UNCHECKED);unsigned count=0;for(auto q:protection.regions)count+=!q.empty();
     putText(206,(L"NR保护区域 · "+std::to_wstring(count)+L"/4").c_str());
 }
-void populate(engine::EnhancementSettings s){populating=true;float v[]={s.model.intensity,s.model.tone,s.model.structure,s.model.skin,float(s.model.style),float(s.model.autoMask),float(s.model.uiCorrection),s.residual.total,s.residual.darken,s.residual.brighten,s.residual.color,s.residual.luminance};for(int i=0;i<12;++i){std::wostringstream o;o<<std::setprecision(7)<<v[i];putText(100+i,o.str().c_str());send(600+i,TBM_SETPOS,TRUE,LPARAM(v[i]*(i>=4&&i<=6?1:100)));}syncProtection(s.protection);check(200,s.nr?BST_CHECKED:BST_UNCHECKED);check(201,s.sr?BST_CHECKED:BST_UNCHECKED);send(202,CB_SETCURSEL,s.multiplier-1,0);send(203,CB_SETCURSEL,int(s.nrPolicy),0);send(204,CB_SETCURSEL,int(s.flow),0);send(205,CB_SETCURSEL,int(s.content),0);displayedRevision=s.revision;populating=false;dirty=false;}
-bool read(engine::EnhancementSettings& s){s=enhancementEnabled?controller->snapshot().desired:configuredSettings;float v[12]{};for(int i=0;i<12;++i){wchar_t b[64]{};GetWindowTextW(item(100+i),b,64);wchar_t* end=nullptr;v[i]=wcstof(b,&end);if(end==b||*end||!std::isfinite(v[i])){message(L"请输入完整的有限数值；未提交设置");return false;}}
+void selectDiscrete(int group,int value){for(int j=0;j<(group==0?3:2);++j){auto h=item(700+group*10+j);if(j==value)SetPropW(h,L"veyra.selected",HANDLE(1));else RemovePropW(h,L"veyra.selected");InvalidateRect(h,nullptr,FALSE);}}
+void populate(engine::EnhancementSettings s){populating=true;float v[]={s.model.intensity,s.model.tone,s.model.structure,s.model.skin,float(s.model.style),float(s.model.autoMask),float(s.model.uiCorrection),s.residual.total,s.residual.darken,s.residual.brighten,s.residual.color,s.residual.luminance};for(int i=0;i<12;++i){std::wostringstream o;o<<std::setprecision(7)<<v[i];if(i>=4&&i<=6){selectDiscrete(i-4,int(v[i]));continue;}if(GetFocus()!=item(100+i))putText(100+i,o.str().c_str());send(600+i,TBM_SETPOS,TRUE,LPARAM(v[i]*100));}syncProtection(s.protection);check(200,enhancementEnabled&&s.nr?BST_CHECKED:BST_UNCHECKED);check(201,enhancementEnabled&&s.sr?BST_CHECKED:BST_UNCHECKED);send(207,CB_SETCURSEL,s.videoSrQuality,0);send(202,CB_SETCURSEL,s.multiplier-1,0);send(203,CB_SETCURSEL,int(s.nrPolicy),0);send(204,CB_SETCURSEL,int(s.flow),0);send(205,CB_SETCURSEL,int(s.content),0);displayedRevision=s.revision;populating=false;dirty=false;}
+bool read(engine::EnhancementSettings& s,bool allPages=false){s=enhancementEnabled?controller->snapshot().desired:configuredSettings;float v[12]{};for(int i=0;i<12;++i){if(i>=4&&i<=6){v[i]=float(i==4?s.model.style:i==5?s.model.autoMask:s.model.uiCorrection);continue;}wchar_t b[64]{};GetWindowTextW(item(100+i),b,64);wchar_t* end=nullptr;v[i]=wcstof(b,&end);if(end==b||*end||!std::isfinite(v[i])){message(L"请输入完整的有限数值；未提交设置");return false;}}
     for(int i=4;i<7;++i)if(v[i]!=std::floor(v[i])||v[i]<0||v[i]>(i==4?2:1)){message(L"风格/遮罩/UI修正必须为整数");return false;}
-    s.model={v[0],v[1],v[2],v[3],int(v[4]),int(v[5]),int(v[6])};s.residual={v[7],v[8],v[9],v[10],v[11]};if(enhancementEnabled){s.nr=checked(200)==BST_CHECKED;s.sr=checked(201)==BST_CHECKED;}s.multiplier=uint32_t(send(202,CB_GETCURSEL,0,0)+1);s.nrPolicy=static_cast<pipeline::NrSizePolicy>(send(203,CB_GETCURSEL,0,0));s.flow=static_cast<engine::FlowQuality>(send(204,CB_GETCURSEL,0,0));s.content=static_cast<engine::ContentRate>(send(205,CB_GETCURSEL,0,0));if(!s.validate().empty()){message(L"参数越界，未提交。悬停数值框查看允许范围。");return false;}return true;}
+    s.model={v[0],v[1],v[2],v[3],int(v[4]),int(v[5]),int(v[6])};s.residual={v[7],v[8],v[9],v[10],v[11]};if(enhancementEnabled){s.nr=checked(200)==BST_CHECKED;s.sr=checked(201)==BST_CHECKED;}s.videoSrQuality=uint32_t(send(207,CB_GETCURSEL,0,0));if(allPages)s.multiplier=uint32_t(send(202,CB_GETCURSEL,0,0)+1);s.nrPolicy=static_cast<pipeline::NrSizePolicy>(send(203,CB_GETCURSEL,0,0));if(allPages){s.flow=static_cast<engine::FlowQuality>(send(204,CB_GETCURSEL,0,0));s.content=static_cast<engine::ContentRate>(send(205,CB_GETCURSEL,0,0));}if(!s.validate().empty()){message(L"参数越界，未提交。悬停数值框查看允许范围。");return false;}return true;}
+
+// Each notification changes one field on the latest desired settings. Hidden
+// controls and incomplete numeric text can never overwrite another field.
+bool liveField(int id){
+    auto s=enhancementEnabled?controller->snapshot().desired:configuredSettings;
+    if(id>=100&&id<=111){
+        wchar_t b[64]{};GetWindowTextW(item(id),b,64);wchar_t* end=nullptr;float v=wcstof(b,&end);
+        if(end==b||*end||!std::isfinite(v)){message(L"数值未完整；仍使用上次有效值");return false;}
+        switch(id){case 100:s.model.intensity=v;break;case 101:s.model.tone=v;break;case 102:s.model.structure=v;break;case 103:s.model.skin=v;break;
+        case 107:s.residual.total=v;break;case 108:s.residual.darken=v;break;case 109:s.residual.brighten=v;break;case 110:s.residual.color=v;break;case 111:s.residual.luminance=v;break;default:return false;}
+    }else switch(id){
+        case 202:s.multiplier=uint32_t(send(id,CB_GETCURSEL)+1);break;
+        case 203:s.nrPolicy=static_cast<pipeline::NrSizePolicy>(send(id,CB_GETCURSEL));break;
+        case 204:s.flow=static_cast<engine::FlowQuality>(send(id,CB_GETCURSEL));break;
+        case 205:s.content=static_cast<engine::ContentRate>(send(id,CB_GETCURSEL));break;
+        case 207:s.videoSrQuality=uint32_t(send(id,CB_GETCURSEL));break;
+        case 700:case 701:case 702:s.model.style=id-700;break;
+        case 710:case 711:s.model.autoMask=id-710;break;
+        case 720:case 721:s.model.uiCorrection=id-720;break;
+        default:return false;
+    }
+    if(!s.validate().empty()){message(L"数值超出范围；仍使用上次有效值");return false;}
+    if(!submit(s)){populate(enhancementEnabled?controller->snapshot().desired:configuredSettings);return false;}
+    populate(enhancementEnabled?controller->snapshot().desired:configuredSettings);
+    message(enhancementEnabled?L"实时生效 · 以已应用版本为准":L"增强关闭中 · 已保存待启用设置");return true;
+}
+LRESULT CALLBACK scrollOnly(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR){
+    if(msg==WM_MOUSEWHEEL||msg==WM_MOUSEHWHEEL){if(window)SendMessageW(window,WM_MOUSEWHEEL,wp,lp);return 0;}
+    if(msg==WM_NCDESTROY)RemoveWindowSubclass(h,scrollOnly,id);
+    return DefSubclassProc(h,msg,wp,lp);
+}
 
 void refreshPresets(){auto list=item(300);SendMessageW(list,CB_RESETCONTENT,0,0);for(auto& p:store.entries())SendMessageW(list,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(p.name.c_str()));if(!store.entries().empty())SendMessageW(list,CB_SETCURSEL,0,0);PostMessageW(GetParent(window),WM_APP+42,0,0);}
 void arrange(){
     if(!window||!body)return;RECT r{};GetClientRect(window,&r);int width=MulDiv(r.right,96,GetDpiForWindow(window)),height=MulDiv(r.bottom,96,GetDpiForWindow(window));
-    const int sticky=88,viewport=std::max(1,height-sticky);contentHeight=0;
+    const int sticky=128,viewport=std::max(1,height-sticky);contentHeight=0;
     for(auto& entry:items)if(entry.page==page){wchar_t cls[32]{};GetClassNameW(entry.h,cls,32);contentHeight=std::max(contentHeight,entry.y+(_wcsicmp(cls,L"COMBOBOX")==0?36:entry.height)+12);}
     scroll=std::clamp(scroll,0,std::max(0,contentHeight-viewport));
     SetWindowPos(body,nullptr,0,dip(window,sticky),r.right,dip(window,viewport),SWP_NOZORDER|SWP_NOACTIVATE|SWP_NOREDRAW);
     auto batch=BeginDeferWindowPos(int(items.size()));
-    for(auto& entry:items){bool fixed=entry.page==-1,visible=entry.page==page||fixed;int w=entry.w<0?width-entry.x-12:entry.w;int y=fixed?(GetDlgCtrlID(entry.h)==400?0:42):entry.y-scroll;
+    for(auto& entry:items){bool fixed=entry.page==-1,visible=entry.page==page||fixed;int w=entry.w<0?width-entry.x-12:entry.w;int y=fixed?(GetDlgCtrlID(entry.h)==400?0:GetDlgCtrlID(entry.h)==211?86:42):entry.y-scroll;
         if(fixed){SetWindowPos(entry.h,nullptr,dip(window,entry.x),dip(window,y),dip(window,std::max(1,w)),dip(window,42),SWP_NOACTIVATE|SWP_NOZORDER|SWP_NOREDRAW);continue;}batch=DeferWindowPos(batch,entry.h,nullptr,dip(window,entry.x),dip(window,y),dip(window,std::max(1,w)),dip(window,entry.height),SWP_NOACTIVATE|SWP_NOZORDER|SWP_NOREDRAW|SWP_NOCOPYBITS|(visible?SWP_SHOWWINDOW:SWP_HIDEWINDOW));}
     EndDeferWindowPos(batch);RedrawWindow(body,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN);InvalidateRect(window,nullptr,FALSE);
 }
 
-HWND add(const wchar_t* cls,const wchar_t* text,int id,DWORD style,int group,int x,int y,int width,int height){auto h=CreateWindowExW(0,cls,text,WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS|style,0,0,1,1,group==-1?window:body,reinterpret_cast<HMENU>(INT_PTR(id)),GetModuleHandleW(nullptr),nullptr);SendMessageW(h,WM_SETFONT,WPARAM(font),TRUE);themeControl(h);items.push_back({h,group,x,y,width,height});return h;}
+HWND add(const wchar_t* cls,const wchar_t* text,int id,DWORD style,int group,int x,int y,int width,int height){auto h=CreateWindowExW(0,cls,text,WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS|style,0,0,1,1,group==-1?window:body,reinterpret_cast<HMENU>(INT_PTR(id)),GetModuleHandleW(nullptr),nullptr);SendMessageW(h,WM_SETFONT,WPARAM(font),TRUE);themeControl(h);if(group!=-1)SetWindowSubclass(h,scrollOnly,950,0);items.push_back({h,group,x,y,width,height});return h;}
 void button(const wchar_t* title,int id,int group,int x,int y,int width=-1){add(L"BUTTON",title,id,BS_PUSHBUTTON|WS_TABSTOP,group,x,y,width,36);}
 void combo(int id,int group,int y,std::initializer_list<const wchar_t*> names){auto h=add(L"COMBOBOX",L"",id,CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP,group,12,y,-1,200);for(auto name:names)SendMessageW(h,CB_ADDSTRING,0,LPARAM(name));}
 LRESULT CALLBACK proc(HWND h,UINT msg,WPARAM wp,LPARAM lp){switch(msg){
@@ -63,19 +95,23 @@ case WM_CREATE:{window=h;font=makeFont(h);items.clear();
     WNDCLASSW bodyClass{};bodyClass.lpfnWndProc=bodyProc;bodyClass.hInstance=GetModuleHandleW(nullptr);bodyClass.lpszClassName=L"VeyraInspectorBody";bodyClass.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&bodyClass);
     body=CreateWindowExW(WS_EX_CONTROLPARENT,bodyClass.lpszClassName,L"滚动参数",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,0,88,300,300,h,nullptr,bodyClass.hInstance,nullptr);
     add(L"BUTTON",L"DLSS5 NR 增强",200,BS_AUTOCHECKBOX|WS_TABSTOP,0,12,12,-1,36);
-    add(L"BUTTON",L"DLSS 超分辨率 · 4K",201,BS_AUTOCHECKBOX|WS_TABSTOP,0,12,56,-1,36);
+    add(L"BUTTON",L"超分辨率 · 4K",201,BS_AUTOCHECKBOX|WS_TABSTOP,0,12,56,-1,36);
     combo(203,0,104,{L"实时NR · 约1080内部处理",L"原生NR · 高性能成本"});
     add(L"STATIC",L"模型参数",1100,0,0,12,146,-1,24);
-    for(int i=0;i<12;++i){const int y=174+i*62+(i>=7?32:0);add(L"STATIC",labels[i],1000+i,0,0,12,y,176,28);add(L"EDIT",L"",100+i,ES_AUTOHSCROLL|WS_TABSTOP|ES_RIGHT,0,202,y,-1,28);const wchar_t* ranges[]={L"范围：0–1",L"范围：0–1",L"范围：0–1",L"-1表示默认；其余范围0–2（效果未证实）",L"整数0、1、2（实验）",L"整数0或1（实验）",L"整数0或1（效果未证实）",L"范围：0–2",L"范围：0–2",L"范围：0–2",L"范围：0–2",L"范围：0–2"};SetPropW(item(100+i),L"veyra.tip",HANDLE(ranges[i]));auto slider=add(TRACKBAR_CLASSW,L"",600+i,TBS_HORZ|TBS_NOTICKS|WS_TABSTOP,0,12,y+32,-1,16);SendMessageW(slider,TBM_SETRANGE,TRUE,MAKELPARAM(i==3?-100:0,i>=4&&i<=6?(i==4?2:1):i<3?100:200));}
+    for(int i=0;i<12;++i){const int y=174+i*62+(i>=7?32:0);add(L"STATIC",labels[i],1000+i,0,0,12,y,176,28);
+        if(i>=4&&i<=6){const int group=i-4,count=group==0?3:2;for(int j=0;j<count;++j){const auto title=group==0?std::to_wstring(j):j==0?std::wstring(L"关闭"):std::wstring(L"开启");button(title.c_str(),700+group*10+j,0,12+j*88,y+28,80);}continue;}
+        add(L"EDIT",L"",100+i,ES_AUTOHSCROLL|WS_TABSTOP|ES_RIGHT,0,202,y,-1,28);
+        const wchar_t* range=i<3?L"范围：0–1":i==3?L"-1表示默认；其余范围0–2（效果未证实）":L"范围：0–2";SetPropW(item(100+i),L"veyra.tip",HANDLE(range));
+        auto slider=add(TRACKBAR_CLASSW,L"",600+i,TBS_HORZ|TBS_NOTICKS|WS_TABSTOP,0,12,y+32,-1,16);SendMessageW(slider,TBM_SETRANGE,TRUE,MAKELPARAM(i==3?-100:0,i<3?100:200));}
     add(L"STATIC",L"增强变化量",1101,0,0,12,606,-1,24);
     add(L"STATIC",L"肤质 / 风格 / 遮罩 / UI键为本地实验参数。未验证的效果不会标成可用能力。",1102,0,0,12,956,-1,70);
-    button(L"应用整套设置",210,0,12,1034);marked(item(210));button(L"恢复内建默认",211,0,12,1078);
+    button(L"还原默认",211,-1,12,86);
     add(L"STATIC",L"补帧与运动估算",1103,0,1,12,12,-1,30);
     combo(202,1,52,{L"关闭补帧",L"DLSSG 2X",L"DLSSG 3X · 需硬件支持",L"DLSSG 4X · 需硬件支持"});
     combo(204,1,104,{L"光流 · 性能",L"光流 · 平衡",L"光流 · 质量"});
     combo(205,1,156,{L"采用源时间戳",L"自动识别内容节奏",L"识别30fps内容节奏",L"识别50fps内容节奏",L"识别60fps内容节奏"});
     add(L"STATIC",L"运动为估算输入。倍率不代表实际显示帧率。比较时只展示真实帧；采集补帧需要等待下一张源帧。",1104,0,1,12,210,-1,100);
-    button(L"应用补帧与当前参数",212,1,12,326);marked(item(212));
+
     add(L"STATIC",L"用户预设",1105,0,2,12,12,-1,30);combo(300,2,56,{});add(L"EDIT",L"新预设",301,ES_AUTOHSCROLL|WS_TABSTOP,2,12,108,-1,36);send(301,EM_SETLIMITTEXT,48,0);
     const wchar_t* names[]={L"载入所选预设",L"新建内建默认预设",L"保存当前参数为新预设",L"重命名所选",L"删除所选",L"设为启动增强默认"};for(int i=0;i<6;++i)button(names[i],310+i,2,12,164+i*44);
     add(L"STATIC",L"启动界面始终为日常模式。默认预设只决定增强参数；预设文件损坏时保留原文件。",1106,0,2,12,438,-1,82);
@@ -90,6 +126,8 @@ case WM_CREATE:{window=h;font=makeFont(h);items.clear();
     add(L"BUTTON",L"NR保护区域",206,BS_AUTOCHECKBOX|WS_TABSTOP,0,12,146,-1,36);
     button(L"框选区域",213,0,12,188,140);button(L"清除区域",214,0,162,188);
     add(L"STATIC",L"最多4区，左键拖框，Esc取消。仅抑制NR变化；不保护SR或补帧。可随预设保存；换源清空。",1109,0,0,12,232,-1,82);
+    for(auto& entry:items)if(entry.page==0&&entry.y>=104)entry.y+=48;
+    combo(207,0,100,{L"DLSS SR",L"RTX 视频超分 · 低",L"RTX 视频超分 · 中",L"RTX 视频超分 · 高",L"RTX 视频超分 · 最高"});
     loadStore();refreshPresets();populate(controller->snapshot().desired);message(store.error());SetTimer(h,1,250,nullptr);arrange();return 0;}
 case WM_SIZE:arrange();return 0;
 case WM_ERASEBKGND:return 1;
@@ -97,21 +135,21 @@ case WM_PAINT:{PaintBuffer paint(h);fillSurface(paint.dc,paint.rect,h);return 0;
 case WM_VSCROLL:{switch(LOWORD(wp)){case SB_LINEUP:scroll-=40;break;case SB_LINEDOWN:scroll+=40;break;case SB_PAGEUP:scroll-=240;break;case SB_PAGEDOWN:scroll+=240;break;case SB_THUMBTRACK:{SCROLLINFO si{sizeof(si),SIF_TRACKPOS};GetScrollInfo(h,SB_VERT,&si);scroll=si.nTrackPos;break;}}arrange();return 0;}
 case WM_MOUSEWHEEL:scroll-=GET_WHEEL_DELTA_WPARAM(wp)/WHEEL_DELTA*90;arrange();return 0;
 case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:case WM_CTLCOLORBTN:return colors(msg,wp,lp);
-case WM_COMMAND:{const int id=LOWORD(wp);if((id==206||id==213||id==214)&&HIWORD(wp)==BN_CLICKED){KillTimer(h,2);const auto accepted=SendMessageW(GetParent(h),WM_APP+45,id,checked(206));message(accepted?(id==213?L"请在画面中左键拖动框选；Esc取消。":L"已请求更新NR保护区域；其他草稿保留。"):L"未能操作：请先打开画面，或清除已满的4个区域。");return 0;}if((id==200||id==201)&&HIWORD(wp)==BN_CLICKED){KillTimer(h,2);const bool accepted=SendMessageW(GetParent(h),WM_APP+44,id,checked(id))!=0;message(accepted?L"已请求开关；确认帧边界结果后生效。数值草稿保持。":L"总增强正在切换，请待当前事务完成。");return 0;}if(HIWORD(wp)==EN_SETFOCUS){for(auto& item:items)if(GetDlgCtrlID(item.h)==id&&item.page==page){RECT r{};GetClientRect(h,&r);int height=MulDiv(r.bottom,96,GetDpiForWindow(h))-88;if(item.y<scroll)scroll=item.y;if(item.y+item.height>scroll+height)scroll=item.y+item.height-height;arrange();break;}}if(!populating&&(HIWORD(wp)==EN_CHANGE&&id>=100&&id<=111||HIWORD(wp)==CBN_SELCHANGE&&id>=202&&id<=205)){dirty=true;message(L"参数草稿尚未应用。无效草稿保留；切换面板不会提交。");}
+case WM_COMMAND:{const int id=LOWORD(wp);if(!populating&&((id>=202&&id<=205||id==207)&&HIWORD(wp)==CBN_SELCHANGE||(id>=700&&id<=721)&&HIWORD(wp)==BN_CLICKED)){liveField(id);return 0;}if((id==206||id==213||id==214)&&HIWORD(wp)==BN_CLICKED){const auto accepted=SendMessageW(GetParent(h),WM_APP+45,id,checked(206));message(accepted?(id==213?L"请在画面中左键拖动框选；Esc取消。":L"已请求更新NR保护区域。"):L"未能操作：请先打开画面，或清除已满的4个区域。");return 0;}if((id==200||id==201)&&HIWORD(wp)==BN_CLICKED){const bool accepted=SendMessageW(GetParent(h),WM_APP+44,id,checked(id))!=0;message(accepted?L"已请求开关；确认帧边界结果后生效。":L"总增强正在切换，请待当前事务完成。");return 0;}if(HIWORD(wp)==EN_SETFOCUS){for(auto& item:items)if(GetDlgCtrlID(item.h)==id&&item.page==page){RECT r{};GetClientRect(h,&r);int height=MulDiv(r.bottom,96,GetDpiForWindow(h))-128;if(item.y<scroll)scroll=item.y;if(item.y+item.height>scroll+height)scroll=item.y+item.height-height;arrange();break;}}if(!populating&&id>=100&&id<=111&&HIWORD(wp)==EN_CHANGE){liveField(id);return 0;}
+    if(!populating&&id>=100&&id<=111&&HIWORD(wp)==EN_KILLFOCUS){populate(enhancementEnabled?controller->snapshot().desired:configuredSettings);return 0;}
     engine::EnhancementSettings s;wchar_t name[128]{};GetWindowTextW(item(301),name,128);const auto index=size_t(send(300,CB_GETCURSEL,0,0));bool ok=true;
-    if(id==210||id==212){KillTimer(h,2);if(read(s)&&submit(s)){message(L"设置已请求；在真实帧边界确认已应用后生效");}}
-    else if(id==211){s={};if(submit(s)){populate(s);message(L"已请求恢复内建默认；用户预设保留");}}
+    if(id==211){SetFocus(body);s={};if(submit(s)){populate(s);message(L"已还原内建默认；用户预设保留");}}
     else if(id==310&&index<store.entries().size()){s=store.entries()[index].settings;if(submit(s))populate(s);}
     else if(id==311){ok=store.put(name,{});refreshPresets();}
-    else if(id==312){if(read(s))ok=store.put(name,s);refreshPresets();}
+    else if(id==312){if(read(s,true))ok=store.put(name,s);refreshPresets();}
     else if(id==313){ok=store.rename(index,name);refreshPresets();}
     else if(id==314&&index<store.entries().size()){if(MessageBoxW(h,(L"删除预设“"+store.entries()[index].name+L"”？当前画质不受影响。").c_str(),L"删除预设",MB_YESNO|MB_ICONQUESTION)==IDYES){ok=store.erase(index);refreshPresets();}}
     else if(id==315)ok=store.setDefault(index);
     else if(id>=501&&id<=505)SendMessageW(GetParent(h),WM_APP+41,id,id==501?send(500,CB_GETCURSEL,0,0):id==505?checked(505):0);
     if(!ok)message(store.error());return 0;}
-case WM_HSCROLL:{int id=GetDlgCtrlID(reinterpret_cast<HWND>(lp));if(id>=600&&id<612){int index=id-600;float v=float(SendMessageW(reinterpret_cast<HWND>(lp),TBM_GETPOS,0,0))/(index>=4&&index<=6?1:100);if(index==3&&v<0)v=-1;std::wostringstream o;o<<std::setprecision(4)<<v;putText(100+index,o.str().c_str());SetTimer(h,2,120,nullptr);}return 0;}
-case WM_TIMER:{if(wp==2){KillTimer(h,2);engine::EnhancementSettings setting;if(read(setting)&&submit(setting)){message(enhancementEnabled?L"已请求参数；帧边界确认生效":L"增强关闭中：已保存待启用参数");}return 0;}auto s=controller->snapshot();syncProtection(enhancementEnabled?s.desired.protection:configuredSettings.protection);if(enhancementEnabled&&!dirty&&displayedRevision!=s.desired.revision)populate(s.desired);check(200,enhancementEnabled&&s.desired.nr?BST_CHECKED:BST_UNCHECKED);check(201,enhancementEnabled&&s.desired.sr?BST_CHECKED:BST_UNCHECKED);std::wostringstream o;if(!s.running&&!s.frames&&s.transport!=engine::TransportState::Opening)o<<L"未打开媒体 · 设置待启用\n";else o<<L"期望版本 "<<s.desired.revision<<L" / 已应用 "<<s.applied.revision<<(s.applying?L" · 应用中":L"")<<L"\n强度 "<<s.applied.model.intensity<<L" · 变化量 "<<s.applied.residual.total<<L" · 倍率 "<<s.applied.multiplier<<L"X";setText(item(400),o.str());return 0;}
-case WM_DESTROY:KillTimer(h,1);KillTimer(h,2);DeleteObject(font);window=nullptr;body=nullptr;items.clear();return 0;
+case WM_HSCROLL:{int id=GetDlgCtrlID(reinterpret_cast<HWND>(lp));if(id>=600&&id<612){int index=id-600;float v=float(SendMessageW(reinterpret_cast<HWND>(lp),TBM_GETPOS,0,0))/(index>=4&&index<=6?1:100);if(index==3&&v<0)v=-1;std::wostringstream o;o<<std::setprecision(4)<<v;putText(100+index,o.str().c_str());}return 0;}
+case WM_TIMER:{auto s=controller->snapshot();syncProtection(enhancementEnabled?s.desired.protection:configuredSettings.protection);if(enhancementEnabled&&!dirty&&displayedRevision!=s.desired.revision)populate(s.desired);check(200,enhancementEnabled&&s.desired.nr?BST_CHECKED:BST_UNCHECKED);check(201,enhancementEnabled&&s.desired.sr?BST_CHECKED:BST_UNCHECKED);std::wostringstream o;if(!s.running&&!s.frames&&s.transport!=engine::TransportState::Opening)o<<L"未打开媒体 · 设置待启用\n";else o<<L"期望版本 "<<s.desired.revision<<L" / 已应用 "<<s.applied.revision<<(s.applying?L" · 应用中":L"")<<L"\n强度 "<<s.applied.model.intensity<<L" · 变化量 "<<s.applied.residual.total<<L" · 倍率 "<<s.applied.multiplier<<L"X";setText(item(400),o.str());return 0;}
+case WM_DESTROY:KillTimer(h,1);DeleteObject(font);window=nullptr;body=nullptr;items.clear();return 0;
 }return DefWindowProcW(h,msg,wp,lp);}
 }
 engine::EnhancementSettings defaultSettings(){loadStore();return store.defaultSettings();}
@@ -119,8 +157,8 @@ HWND settingsControlForTest(int id){return item(id);}
 std::vector<std::wstring> presetNames(){loadStore();std::vector<std::wstring> out;for(auto& p:store.entries())out.push_back(p.name);return out;}
 bool presetAt(size_t index,engine::EnhancementSettings& out){loadStore();if(index>=store.entries().size())return false;out=store.entries()[index].settings;return true;}
 HWND createSettingsPanel(HWND parent,engine::EngineController& engine,std::function<bool(engine::EnhancementSettings)> callback){controller=&engine;apply=std::move(callback);WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"VeyraInspector";wc.hbrBackground=panelBrush();wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);return CreateWindowExW(WS_EX_CONTROLPARENT,wc.lpszClassName,L"专业参数",WS_CHILD|WS_CLIPCHILDREN,0,0,328,500,parent,nullptr,wc.hInstance,nullptr);}
-void settingsVisibility(bool visible){if(window&&!visible)KillTimer(window,2);}
-void settingsPage(int value){if(window)KillTimer(window,2);page=std::clamp(value,0,3);scroll=0;arrange();}
+void settingsVisibility(bool visible){if(window&&!visible&&IsChild(window,GetFocus()))SetFocus(GetParent(window));}
+void settingsPage(int value){if(window&&IsChild(window,GetFocus()))SetFocus(body);page=std::clamp(value,0,3);scroll=0;arrange();}
 void settingsEnabled(bool enabled,const engine::EnhancementSettings& configured){enhancementEnabled=enabled;configuredSettings=configured;if(window)syncProtection(enabled?controller->snapshot().desired.protection:configured.protection);if(window&&!enabled&&!dirty&&displayedRevision!=configured.revision)populate(configured);if(window){auto desired=controller->snapshot().desired;check(200,enabled&&desired.nr?BST_CHECKED:BST_UNCHECKED);check(201,enabled&&desired.sr?BST_CHECKED:BST_UNCHECKED);if(!enabled)message(L"增强已关闭。数值修改保存待启用配置；点击 NR / 超分可直接开启。");}}
 void settingsDpi(){if(!window)return;auto old=font;font=makeFont(window);for(auto& item:items)SendMessageW(item.h,WM_SETFONT,WPARAM(font),TRUE);DeleteObject(old);arrange();}
 void exportPanelStatus(const engine::ExportJobSnapshot& job,bool canExport,bool canSave){if(!window)return;setText(item(506),job.state==engine::ExportState::Idle?L"尚无导出任务":job.message+L"\n"+std::to_wstring(int(job.progress*100))+L"% · 源帧 "+std::to_wstring(job.sourceFrames)+L" / 编码 "+std::to_wstring(job.encoded)+L"\n生成 "+std::to_wstring(job.generated)+L" / CFR占位 "+std::to_wstring(job.holds)+L"\n作业 "+std::to_wstring(job.jobId)+L" · 冻结版本 "+std::to_wstring(job.frozenRevision));setText(item(507),job.output.empty()?L"目标由保存窗口选择":L"输出："+std::filesystem::path(job.output).filename().wstring());EnableWindow(item(501),canExport&&!job.active());EnableWindow(item(502),canSave);EnableWindow(item(503),job.state==engine::ExportState::Running||job.state==engine::ExportState::Paused);EnableWindow(item(504),job.active());}

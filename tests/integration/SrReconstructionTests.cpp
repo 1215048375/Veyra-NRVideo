@@ -21,16 +21,36 @@ uint64_t hash(const sink::RgbaImage& image){uint64_t v=14695981039346656037ull;f
 int experiment(const std::filesystem::path& dir,unsigned scene){
     std::array<float,256> linear{};for(unsigned i=0;i<256;++i){float s=i/255.f;linear[i]=s<=.04045f?s/12.92f:std::pow((s+.055f)/1.055f,2.4f);}
     auto encoded=[](float s){return uint8_t(std::clamp(std::lround((s<=.0031308f?s*12.92f:1.055f*std::pow(s,1/2.4f)-.055f)*255),0l,255l));};
-    std::vector<uint64_t> srHashes;std::vector<uint8_t> gt(size_t(W)*H*4);
-    for(unsigned mode=0;mode<3;++mode){
+    std::vector<uint64_t> srHashes,oracleHashes;std::vector<uint8_t> gt(size_t(W)*H*4);
+    for(unsigned mode=0;mode<8;++mode){
         gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;Status status;gfx::DeviceContextDesc dd;dd.enableDebugLayer=true;
         if(!ctx.initialize(dd,status)||!ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),6,status))return 2;
         pipeline::EnhanceGraph graph(ctx,ring);pipeline::EnhanceGraphDesc gd;gd.sourceWidth=W/2;gd.sourceHeight=H/2;gd.workWidth=W;gd.workHeight=H;gd.rgbInput=true;gd.enableNr=false;gd.enableFg=false;gd.enableSr=mode!=0;gd.enableNvofStandalone=true;gd.runtimeAbsPath=(std::filesystem::path(VEYRA_PROJECT_ROOT)/"runtime_local/nvidia").wstring();
+        pipeline::ComPtr<ID3D12Resource> motion,upload;
+        gd.validateMotion=mode!=7;
+        if(mode>=3&&mode<=6){motion=pipeline::makeTexture(ctx.device(),W,H,DXGI_FORMAT_R16G16_FLOAT,false);upload=pipeline::makeUploadBuffer(ctx.device(),uint64_t(W)*H*4);if(!motion||!upload)return 2;gd.srMotionProbe=motion.Get();}
+        if(mode==3){
+            auto invalid=gd;invalid.workWidth=W-1;if(graph.initialize(invalid))return 1;
+            invalid=gd;invalid.enableSr=false;if(graph.initialize(invalid))return 1;
+            auto wrongFormat=pipeline::makeTexture(ctx.device(),W,H,DXGI_FORMAT_R32_FLOAT,false);if(!wrongFormat)return 2;
+            invalid=gd;invalid.srMotionProbe=wrongFormat.Get();if(graph.initialize(invalid))return 1;
+            std::cout<<"SR_MOTION_CONTRACT rejectedWidth=1 rejectedDisabled=1 rejectedFormat=1"<<std::endl;
+        }
         if(!graph.initialize(gd)||!graph.createViews())return 2;
         AVFrame* f=av_frame_alloc();if(!f)return 2;f->width=W/2;f->height=H/2;f->format=AV_PIX_FMT_RGBA;f->color_range=AVCOL_RANGE_JPEG;f->color_trc=AVCOL_TRC_IEC61966_2_1;f->colorspace=AVCOL_SPC_RGB;if(av_frame_get_buffer(f,32)<0){av_frame_free(&f);return 2;}
         std::vector<int16_t> previousError(size_t(W)*H*3),currentError(previousError.size());std::vector<double> srTimes;
         uint64_t absolute=0,squared=0,samples=0,temporal=0,temporalSamples=0;unsigned maximum=0;bool ok=true;
+        uint64_t warmAbsolute=0,warmSamples=0,warmTemporal=0,warmTemporalSamples=0;
         for(unsigned frame=0;frame<N&&ok;++frame){
+            if(motion){
+                void* data=nullptr;if(FAILED(upload->Map(0,nullptr,&data))){ok=false;break;}
+                for(unsigned y=0;y<H;++y)for(unsigned x=0;x<W;++x){const bool object=scene==1&&foreground(x,y,frame);const int px=int(x)+(object?-8:4);const bool valid=frame>0&&mode!=4&&px>=0&&px<int(W)&&(scene==0||foreground(px,y,frame-1)==object);
+                    uint16_t dx=valid?(object?0xc800:0x4400):0;if(valid&&mode==5)dx^=0x8000;auto* p=static_cast<uint16_t*>(data)+(size_t(y)*W+x)*2;p[0]=dx;p[1]=0;}
+                upload->Unmap(0,nullptr);unsigned slot=0;auto* list=ring.acquireNext(slot,status);if(!list){ok=false;break;}
+                D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition={motion.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,frame?D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE:D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_COPY_DEST};list->ResourceBarrier(1,&b);
+                D3D12_TEXTURE_COPY_LOCATION dst{},src{};dst.pResource=motion.Get();dst.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;src.pResource=upload.Get();src.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;src.PlacedFootprint.Footprint={DXGI_FORMAT_R16G16_FLOAT,W,H,1,W*4};list->CopyTextureRegion(&dst,0,0,0,&src,nullptr);b.Transition.StateBefore=D3D12_RESOURCE_STATE_COPY_DEST;b.Transition.StateAfter=D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;list->ResourceBarrier(1,&b);
+                if(!ring.submitAndSignal(slot)||!ring.drainQueue()){ok=false;break;}
+            }
             // Every sample derives from the same exact high-resolution scene.
             for(unsigned y=0;y<H;++y)for(unsigned x=0;x<W;++x){
                 const int q=int(x)+int(frame)*4;const bool object=scene==1&&foreground(x,y,frame);
@@ -45,19 +65,22 @@ int experiment(const std::filesystem::path& dir,unsigned scene){
             pipeline::EnhanceGraph::FrameOutputs out;sink::RgbaImage image;ok=graph.process(f,frame*(1000.0/60),frame==0,out,frame+1)&&sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),image);
             if(!ok)break;ok=image.width==W&&image.height==H&&image.pixels.size()==gt.size();if(!ok)break;
             const auto h=hash(image);if(mode==1)srHashes.push_back(h);if(mode==2)ok=h==srHashes[frame];
+            if(mode==3)oracleHashes.push_back(h);if(mode==6)ok=h==oracleHashes[frame];
             for(unsigned y=0;y<H;++y)for(unsigned x=0;x<W;++x){const bool object=scene==1&&foreground(x,y,frame);const int px=int(x)+(object?-8:4);const bool temporalValid=frame>0&&px>=0&&px<int(W)&&(scene==0||foreground(px,y,frame-1)==object);
                 for(unsigned c=0;c<3;++c){const size_t i=(size_t(y)*W+x)*3+c;const int error=int(image.pixels[(size_t(y)*W+x)*4+c])-int(gt[(size_t(y)*W+x)*4+c]);currentError[i]=int16_t(error);const unsigned a=unsigned(std::abs(error));absolute+=a;squared+=uint64_t(a)*a;++samples;maximum=std::max(maximum,a);
-                    if(temporalValid){temporal+=std::abs(error-previousError[(size_t(y)*W+px)*3+c]);++temporalSamples;}}
+                    if(frame>=4){warmAbsolute+=a;++warmSamples;}
+                    if(temporalValid){const auto delta=std::abs(error-previousError[(size_t(y)*W+px)*3+c]);temporal+=delta;++temporalSamples;if(frame>=4){warmTemporal+=delta;++warmTemporalSamples;}}}
             }
             previousError.swap(currentError);const auto metrics=graph.gpuMetrics();const auto& timing=metrics.gpu[size_t(diagnostics::GpuStage::Sr)];
             if(frame>=4&&metrics.identity.sourceFrameId==frame+1&&timing.state==diagnostics::SampleState::Measured&&timing.milliseconds)srTimes.push_back(*timing.milliseconds);
             if(frame+1==N)ok=ok&&sink::saveImage((dir/("scene"+std::to_string(scene)+"-mode"+std::to_string(mode)+".png")).wstring(),image);
             if(frame+1==N&&mode==0){sink::RgbaImage reference{W,H,gt},input{W/2,H/2,{}};input.pixels.resize(size_t(W/2)*(H/2)*4);for(unsigned y=0;y<H/2;++y)std::copy_n(f->data[0]+size_t(y)*f->linesize[0],W/2*4,input.pixels.data()+size_t(y)*(W/2)*4);ok=ok&&sink::saveImage((dir/L"reference.png").wstring(),reference)&&sink::saveImage((dir/L"input.png").wstring(),input);}
         }
-        av_frame_free(&f);auto m=graph.metrics();ok=ok&&m.nrEvaluateCount==0&&m.srEvaluateCount==(mode?N:0)&&m.nvofExecuteCount==N-1&&m.nvofFrameFailures==0&&m.resetCount==1&&samples==uint64_t(N)*W*H*3&&temporalSamples>0;
+        av_frame_free(&f);auto m=graph.metrics();ok=ok&&m.nrEvaluateCount==0&&m.srEvaluateCount==(mode?N:0)&&m.nvofExecuteCount==N-1&&m.nvofFrameFailures==0&&m.resetCount==1&&samples==uint64_t(N)*W*H*3&&temporalSamples>0&&warmSamples==uint64_t(N-4)*W*H*3&&warmTemporalSamples>0;
         ok=ring.drainQueue()&&ok;graph.shutdown();pipeline::ComPtr<ID3D12InfoQueue> iq;unsigned errors=0;if(FAILED(ctx.device()->QueryInterface(IID_PPV_ARGS(&iq))))return 2;
         for(UINT64 i=0;i<iq->GetNumStoredMessages();++i){SIZE_T size=0;if(FAILED(iq->GetMessage(i,nullptr,&size)))return 2;std::vector<uint8_t> bytes(size);auto* msg=reinterpret_cast<D3D12_MESSAGE*>(bytes.data());if(FAILED(iq->GetMessage(i,msg,&size)))return 2;if(msg->Severity<=D3D12_MESSAGE_SEVERITY_ERROR){++errors;std::cerr<<msg->pDescription<<std::endl;}}
         std::sort(srTimes.begin(),srTimes.end());double mean=0;for(auto v:srTimes)mean+=v;mean=srTimes.empty()?-1:mean/srTimes.size();
+        std::cout<<"SR_MOTION scene="<<scene<<" mode="<<mode<<" warmMae8="<<double(warmAbsolute)/warmSamples<<" warmTemporalErrorMae8="<<double(warmTemporal)/warmTemporalSamples<<std::endl;
         std::cout<<"SR_RECON scene="<<scene<<" mode="<<mode<<" source=1920x1080 output=3840x2160 frames="<<N<<" sr="<<m.srEvaluateCount<<" nvof="<<m.nvofExecuteCount<<" reset="<<m.resetCount<<" mae8="<<double(absolute)/samples<<" psnr="<<(squared?10*std::log10(255.*255.*samples/squared):999)<<" max="<<maximum<<" temporalErrorMae8="<<double(temporal)/temporalSamples<<" gpuSrSamples="<<srTimes.size()<<" gpuSrMeanMs="<<mean<<" gpuSrP95Ms="<<(srTimes.empty()?-1:srTimes[size_t(std::ceil(srTimes.size()*.95))-1])<<" errors="<<errors<<" pass="<<(ok&&!errors)<<std::endl;
         if(!ok||errors)return 1;
     }

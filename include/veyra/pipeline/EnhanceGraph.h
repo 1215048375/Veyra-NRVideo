@@ -42,6 +42,7 @@ class CommandSlotRing;
 namespace veyra::ngx {
 class NgxCoreHost;
 class DlssSrBackend;
+class VideoSrBackend;
 class DlssFgBackend;
 class DlssNrRuntimeAdapter;
 class NvOfSession;
@@ -55,6 +56,7 @@ struct EnhanceGraphDesc {
     uint32_t sourceHeight = 0;
     uint32_t workWidth = 3840;
     uint32_t workHeight = 2160;
+    uint32_t videoSrQuality=0;
     bool enableSr = false;       // upscale source -> work extent (1:1 bypass otherwise)
     bool enableNr = true;
     bool enableFg = true;
@@ -78,6 +80,10 @@ struct EnhanceGraphDesc {
     // Isolated contract probes only. Unset by every product entry point.
     // Caller retains any supplied resources until graph drain/shutdown.
     std::function<void(NVSDK_NGX_Parameter*,ID3D12Resource*,ID3D12Resource*,uint32_t,uint32_t)> nrParameterProbe;
+    // Isolated SR diagnostics only; unset by product entry points. Borrowed
+    // working-extent RG16F current->previous pixel motion, ready in SRV state.
+    // Caller retains it through graph drain/shutdown, synchronizing any writes.
+    ID3D12Resource* srMotionProbe = nullptr;
 };
 
 class EnhanceGraph {
@@ -213,6 +219,7 @@ private:
     uint8_t* mappedRgb_[2]={};
     size_t rgbPitch_=0;
     ComPtr<ID3D12Resource> workRgba_;
+    ComPtr<ID3D12Resource> videoSrInput_,videoSrOutput_;
     ComPtr<ID3D12Resource> nrInput_,residualRgba_,nrFlow_,baseFlow_;
     ComPtr<ID3D12Resource> proxyTex_;
     ComPtr<ID3D12Resource> neuralTex_;
@@ -250,6 +257,7 @@ private:
     std::unique_ptr<ngx::NgxCoreHost> coreHost_;
     std::unique_ptr<ngx::DlssNrRuntimeAdapter> nrAdapter_;
     std::unique_ptr<ngx::DlssSrBackend> srBackend_;
+    std::unique_ptr<ngx::VideoSrBackend> videoSrBackend_;
     std::unique_ptr<ngx::DlssFgBackend> fgBackend_;
     NVSDK_NGX_Parameter* ngxParams_ = nullptr;
     NVSDK_NGX_Handle* nrHandle_ = nullptr;

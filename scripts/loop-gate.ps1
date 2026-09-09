@@ -44,7 +44,6 @@ function Get-ProjectSourceSnapshot {
             "VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md",
             "docs/COMPETITOR_AUDIT_2026-09-03.md",
             "loop/LOOP_ENGINE.md",
-            "loop/GOAL_PROMPT.md",
             "loop/REVIEW_PROMPT.md",
             "loop/CONTROL_HASHES.json",
             "loop/STATE.json",
@@ -141,7 +140,6 @@ $requiredFiles = @(
     "docs/COMPETITOR_AUDIT_2026-09-03.md",
     ".gitignore",
     "loop\LOOP_ENGINE.md",
-    "loop\GOAL_PROMPT.md",
     "loop\REVIEW_PROMPT.md",
     "loop\CONTROL_HASHES.json",
     "loop\STATE.json",
@@ -157,7 +155,7 @@ foreach ($requiredFile in $requiredFiles) {
 }
 
 $controlManifestPath = Join-Path $root "loop\CONTROL_HASHES.json"
-$expectedControlManifestHash = "4D5A30F73E06B59B3D6AD5D4A0AE106A0C3AD808D758418B21CC339D2E28779B"
+$expectedControlManifestHash = "547D8E6E11BF22FF44F88767FB0BF1A8410A70E7846681F4C63E7D998D9EB74C"
 if (Test-Path -LiteralPath $controlManifestPath -PathType Leaf) {
     $actualControlManifestHash = (Get-FileHash -LiteralPath $controlManifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
     $manifestHashValid = $actualControlManifestHash -eq $expectedControlManifestHash
@@ -175,7 +173,6 @@ if (Test-Path -LiteralPath $controlManifestPath -PathType Leaf) {
                 "VEYRA_PRODUCT_SPEC_V1.md",
                 "docs/COMPETITOR_AUDIT_2026-09-03.md",
                 "docs/ACTIVE_DELIVERY_PLAN.md",
-                "loop/GOAL_PROMPT.md",
                 "loop/LOOP_ENGINE.md",
                 "loop/REVIEW_PROMPT.md",
                 "scripts/gates/README.md"
@@ -189,7 +186,7 @@ if (Test-Path -LiteralPath $controlManifestPath -PathType Leaf) {
                     ([string]$_.sha256 -match '^[0-9A-Fa-f]{64}$')
             }).Count -eq $manifestEntries.Count
             $manifestSchemaValid = ($controlManifest.schemaVersion -eq 1) -and
-                ($manifestEntries.Count -eq 11) -and
+                ($manifestEntries.Count -eq 10) -and
                 $validManifestEntries -and
                 (($actualControlPaths -join "|") -ceq ($expectedControlPaths -join "|"))
             Add-Check "control-manifest-schema" $manifestSchemaValid "schemaVersion=$($controlManifest.schemaVersion) files=$($manifestEntries.Count) exactProtectedSet=$((($actualControlPaths -join '|') -ceq ($expectedControlPaths -join '|')))"

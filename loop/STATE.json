@@ -76,19 +76,19 @@
     }
   ],
   "cycle": {
-    "completed": 77,
+    "completed": 86,
     "maximum": 120,
     "sameFailureAttempts": 0,
     "maximumSameFailureAttempts": 3,
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "Cycle77 known4K reconstruction independently passed; spatial/temporal tradeoff measured",
+  "currentTask": "Cycle86 live settings independently passed; local checkpoint and handoff ready",
   "lastGate": {
     "name": "phase7",
     "status": "passed",
     "exitCode": 0,
-    "evidence": "logs/delivery/268ee4b316bf4604bedafcd9b747b09c/result.json;41.718s;75checks"
+    "evidence": "logs/delivery/9f7468b334bc457db4b8bf125d4f5ddb/result.json; preflight69/phase773 PASS; Cycle86 independent scoped PASS"
   },
   "lastFailureFingerprint": "",
   "failureLedger": [
@@ -104,11 +104,12 @@
   "lastGoodCommit": "d681541a8fca77e3bfd5f496c8ee2dfe2d6a9031",
   "openP0P1Findings": [],
   "blockers": [
-    "Current USB2 1080p50 physical throughput passed; user perceived latency/audio/actual FG display cadence still need confirmation.",
+    "User real-card perceived latency/audio/FG display cadence and long stability acceptance pending; USB3Video1080p60 and4K18 short throughput measured.",
+    "Historical intermittent player-sync timing and mixed-configuration timing windows remain unresolved.",
     "Public proprietary runtime distribution rights unresolved; local delivery only."
   ],
-  "nextAction": "Isolate accurate motion versus estimated SR guidance and supplement natural material; no default SR/depth replacement without benefit",
-  "updatedAt": "2026-09-08T12:41:17.8709040Z",
+  "nextAction": "Handoff: prioritize configuration-specific metric windows; user real-card acceptance; see docs/HANDOFF_2026-09-09.md. Do not restore intentionally removed GOAL_PROMPT.",
+  "updatedAt": "2026-09-09T01:52:39.336203+00:00",
   "deliveryPlan": "docs/ACTIVE_DELIVERY_PLAN.md",
   "captureAcceptance": "throughput_short_test_passed_user_latency_audio_pending",
   "testInvocationLimitSeconds": 300,
@@ -134,10 +135,12 @@
     "Cycle74 independent scopedPASS, docs/REVIEW_BIDIRECTIONAL_FLOW_2026-09-08.md:360/1080/4K controlledbidirectional plus640x129alignmentfix; no defaultintegration",
     "Cycle75 independent NRdepth24casesPASS:docs/REVIEW_NR_DEPTH_RESPONSE_2026-09-08.md; no depthresponse, strongMV/intensityresponse; no newmodels/defaults",
     "Cycle76 independent scopedPASS: docs/REVIEW_SR_FG_DEPTH_RESPONSE_2026-09-08.md; SR8bit negative depth response, FG tiny constructed benefit, no defaultmodel",
-    "Cycle77 independent scopedPASS: docs/REVIEW_SR_RECONSTRUCTION_2026-09-08.md; real4K SR spatialMAE lower, temporalerror/max higher; no natural/steady-state claim"
+    "Cycle77 independent scopedPASS: docs/REVIEW_SR_RECONSTRUCTION_2026-09-08.md; real4K SR spatialMAE lower, temporalerror/max higher; no natural/steady-state claim",
+    "Cycle85 scoped independent PASS: docs/SETTINGS_PAGE_SCOPE_REPAIR_2026-09-09.md; preflight71/phase775 and actual GPU double-direction settings regression passed",
+    "Cycle86 independent live-settings/master-off/focus/rollback/wheel/default PASS; delivery9f7468b334bc457db4b8bf125d4f5ddb; docs/HANDOFF_2026-09-09.md"
   ],
   "reviewBaseCommit": "6f0ebaa687e3966d989bf138c86b6882380f20fb",
-  "localDelivery": "capture_fix_candidate_needs_review",
+  "localDelivery": "cycle86_live_settings_scoped_pass_handoff_ready",
   "acceptanceScope": "User-approved short local software contract, default realtime4K-input/1080working, optional native4K playback, native4K exports; capture hardware acceptance reserved for user.",
   "repairV2": {
     "status": "known_fixes_review_passed",
@@ -273,10 +276,22 @@
     "productModified": true,
     "consecutiveBlockedGoalTurns": 0,
     "previousGoalTurnClassification": "progress: SR/FG depth response and exact half-frame GT measured; incomplete-sample P2 fixed, independent18cases andgate PASS; default model not justified",
-    "currentGoalTurnClassification": "progress: known4K downsample reconstruction and temporal errors measured, independentRTXreproduction andgatePASS; next isolate motion cause",
+    "currentGoalTurnClassification": "progress: optional shared RTX Video SR, actual playback/export and independent hot-switch/draft/legacy preset checks PASS; physical capture unavailable",
     "controlSynchronizationAuthorization": "2026-09-08 user: 确认，给你全部权限; applies to previously proposed exact two-hash synchronization",
     "diagnosticFindings": [
       "Q7 read-only dependency check: RTXVideoSDK not present in third_party_local; official1.1download redirects NVIDIA login. Localdepthfile vitl is Large, not permitted Small; no verified Small ONNX/provider. No dependency integrated or performance claimed."
     ]
+  },
+  "settingsScopeRepair": {
+    "status": "independent_scoped_pass",
+    "report": "docs/SETTINGS_PAGE_SCOPE_REPAIR_2026-09-09.md",
+    "exeSha256": "88AE23C12616355858AE85A6F8D11E0AC441872A5117665578DF626CAA48306A",
+    "cycle84Correction": "Original FG2 was left off by diagnostic restoration; nativeNR and VSRquality4 restored."
+  },
+  "liveSettingsRepair": {
+    "status": "independent_scoped_pass",
+    "report": "docs/HANDOFF_2026-09-09.md",
+    "exeSha256": "3BD470D51AD43F7C461F23AB6F9F9B7234DC6F33D84C9DDEB35A463663264E2C",
+    "controlChangeAuthorization": "User explicitly deleted GOAL_PROMPT and requested removal of associated preflight checks; remaining10 hashes unchanged."
   }
 }

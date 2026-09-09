@@ -11,6 +11,11 @@ extern "C" {
 #include <libavutil/frame.h>
 }
 int wmain(int argc,wchar_t** argv){
+    if(argc==2&&wcscmp(argv[1],L"--list")==0){
+        CoInitializeEx(nullptr,COINIT_MULTITHREADED);auto devices=veyra::source::CaptureCardSource::devices();
+        for(unsigned d=0;d<devices.size();++d){wprintf(L"DEVICE %u %ls\n",d,devices[d].c_str());for(const auto& f:veyra::source::CaptureCardSource::formats(d))wprintf(L"FORMAT %u:%d %ls\n",d,f.index,f.label.c_str());}
+        CoUninitialize();return devices.empty()?1:0;
+    }
     if(argc!=2){printf("Specify capture:device:format:audio; real hardware required\n");return 2;}
     CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     veyra::source::CaptureCardSource source;veyra::source::SourceOpenDesc d;d.path=argv[1];
