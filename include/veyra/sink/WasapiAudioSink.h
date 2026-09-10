@@ -14,6 +14,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <format>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -125,6 +126,7 @@ private:
 
 class AudioRenderer {
 public:
+    ~AudioRenderer(){shutdown();}
     bool start();
     void setGain(float value){gain_.store(value);}
 
@@ -147,10 +149,15 @@ public:
     bool started() const;
     uint64_t underruns() const;
     uint64_t framesWritten() const;
+    HRESULT lastError()const{return lastError_.load();}
+    double bufferedMs()const{return bufferedMs_.load();}
 
     void shutdown();
 
 private:
+    bool checked(HRESULT hr,const char* operation){if(SUCCEEDED(hr))return true;lastError_=hr;log::error("audio",std::format("{} hr=0x{:08X}",operation,unsigned(hr)));return false;}
+    std::atomic<HRESULT> lastError_{S_OK};
+    std::atomic<double> bufferedMs_{0};
     std::atomic<float> gain_{1};float smoothedGain_=1,loggedGain_=-1;
     IMMDeviceEnumerator* enum_ = nullptr;
     IMMDevice* device_ = nullptr;

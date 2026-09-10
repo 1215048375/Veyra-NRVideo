@@ -264,16 +264,18 @@ void AudioPipeline::closeAll()
 
 bool AudioRenderer::start()
 {
+    if(client_||enum_)return checked(E_UNEXPECTED,"Endpoint already initialized");
+    lastError_=S_OK;bufferedMs_=0;smoothedGain_=0;
     HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     comInited_ = SUCCEEDED(hr);
     hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
         __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&enum_));
-    if (FAILED(hr)) return false;
+    if (!checked(hr,"Create MMDeviceEnumerator")) return false;
     hr = enum_->GetDefaultAudioEndpoint(eRender, eConsole, &device_);
-    if (FAILED(hr)) return false;
+    if (!checked(hr,"GetDefaultAudioEndpoint")) return false;
     hr = device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
         reinterpret_cast<void**>(&client_));
-    if (FAILED(hr)) return false;
+    if (!checked(hr,"Activate AudioClient")) return false;
     WAVEFORMATEX mix{};
     mix.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
     mix.nChannels = 2;
@@ -285,17 +287,20 @@ bool AudioRenderer::start()
     hr = client_->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK |
         AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
         10 * 10000, 0, &mix, nullptr);
-    const bool initOk = SUCCEEDED(hr);
+    const bool initOk = checked(hr,"Initialize AudioClient");
     if (!initOk) return false;
-    if (FAILED(client_->GetBufferSize(&bufferFrames_))) return false;
+    if (!checked(client_->GetBufferSize(&bufferFrames_),"GetBufferSize")) return false;
     event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (event_ == nullptr || FAILED(client_->SetEventHandle(event_))) return false;
-    if (FAILED(client_->GetService(__uuidof(IAudioRenderClient),
-            reinterpret_cast<void**>(&render_)))) return false;
-    if (FAILED(client_->GetService(__uuidof(IAudioClock),
-            reinterpret_cast<void**>(&clock_)))) return false;
+    if(event_==nullptr)return checked(HRESULT_FROM_WIN32(GetLastError()),"CreateEvent");
+    if(!checked(client_->SetEventHandle(event_),"SetEventHandle"))return false;
+    if (!checked(client_->GetService(__uuidof(IAudioRenderClient),
+            reinterpret_cast<void**>(&render_)),"Get RenderClient")) return false;
+    if (!checked(client_->GetService(__uuidof(IAudioClock),
+            reinterpret_cast<void**>(&clock_)),"Get AudioClock")) return false;
     UINT64 freq = 0;
-    if (SUCCEEDED(clock_->GetFrequency(&freq))) clockFrequency_ = freq;
+    if(!checked(clock_->GetFrequency(&freq),"GetFrequency"))return false;
+    if(!freq)return checked(E_UNEXPECTED,"Zero audio clock frequency");
+    clockFrequency_=freq;
     running_ = true;
     veyra::log::info("audio", std::format("renderer opened {}Hz event-mode buffer={} frames (not started; prefill first)",
         sampleRate_, bufferFrames_));
@@ -307,10 +312,10 @@ bool AudioRenderer::startAnchored(AudioPcmSource& pipeline)
     double firstBufferPtsMs = -1;
     if (!pumpOnce(pipeline, &firstBufferPtsMs) || framesWritten_ == 0) return false;
     UINT64 pos = 0, qpc = 0;
-    if (FAILED(clock_->GetPosition(&pos, &qpc)) || !clockFrequency_) return false;
+    if (!checked(clock_->GetPosition(&pos, &qpc),"Anchor GetPosition") || !clockFrequency_) return false;
     anchorPos_ = pos;
     anchorPtsMs_.store(firstBufferPtsMs);
-    if (FAILED(client_->Start())) return false;
+    if (!checked(client_->Start(),"Start")) return false;
     started_ = true;
     veyra::log::info("audio", std::format("renderer STARTED anchored ptsMs={:.1f} devicePos={} freq={}",
         firstBufferPtsMs, pos, clockFrequency_));
@@ -320,18 +325,20 @@ bool AudioRenderer::startAnchored(AudioPcmSource& pipeline)
 bool AudioRenderer::pumpOnce(AudioPcmSource& pipeline, double* firstWrittenPtsMs)
 {
     if (!running_) return false;
-    if (started_ && WaitForSingleObject(event_, 50) != WAIT_OBJECT_0) return true;
+    if(started_){const auto wait=WaitForSingleObject(event_,50);if(wait==WAIT_FAILED)return checked(HRESULT_FROM_WIN32(GetLastError()),"Wait audio event");}
     UINT32 padding = 0;
-    if (FAILED(client_->GetCurrentPadding(&padding))) return false;
+    if (!checked(client_->GetCurrentPadding(&padding),"GetCurrentPadding")) return false;
+    if(padding>bufferFrames_)return checked(E_UNEXPECTED,"Invalid endpoint padding");
+    bufferedMs_=1000.0*padding/sampleRate_;
     const UINT32 avail = bufferFrames_ - padding;
     if (avail == 0) return true;
     chunk_.resize(static_cast<size_t>(avail) * 2);
     BYTE* dest = nullptr;
-    if (FAILED(render_->GetBuffer(avail, &dest))) return false;
+    if (!checked(render_->GetBuffer(avail, &dest),"GetBuffer")) return false;
     double firstPts = -1.0;
     const size_t got = pipeline.pull(chunk_.data(), avail, &firstPts);
     if (firstWrittenPtsMs) *firstWrittenPtsMs = firstPts;
-    if (!started_ && !got) { render_->ReleaseBuffer(0, 0); return true; }
+    if (!started_ && !got) return checked(render_->ReleaseBuffer(0, 0),"Release empty prefill");
     if (got > 0) {
         const float target=std::clamp(gain_.load(),0.0f,1.0f);
         applyStereoGain(chunk_.data(),got,target,smoothedGain_);
@@ -345,7 +352,8 @@ bool AudioRenderer::pumpOnce(AudioPcmSource& pipeline, double* firstWrittenPtsMs
         std::memset(dest, 0, static_cast<size_t>(avail) * 8);
         underruns_.fetch_add(1);
     }
-    if (FAILED(render_->ReleaseBuffer(avail, 0))) return false;
+    if (!checked(render_->ReleaseBuffer(avail, 0),"ReleaseBuffer")) return false;
+    bufferedMs_=1000.0*(padding+avail)/sampleRate_;
     framesWritten_ += avail;
     return true;
 }
@@ -365,8 +373,9 @@ double AudioRenderer::mediaTimeMs() const
 void AudioRenderer::stopAndReset()
 {
     started_ = false;
-    if (client_) { (void)client_->Stop(); (void)client_->Reset(); }
+    if (client_) { checked(client_->Stop(),"Stop for reset");checked(client_->Reset(),"Reset"); }
     framesWritten_ = 0;
+    bufferedMs_=0;smoothedGain_=0;
 }
 
 bool AudioRenderer::started() const { return started_; }
@@ -382,6 +391,7 @@ void AudioRenderer::shutdown()
     if (event_ != nullptr) { CloseHandle(event_); event_ = nullptr; }
     running_ = false;
     started_ = false;
+    bufferedMs_=0;framesWritten_=0;clockFrequency_=0;
     if (comInited_) { CoUninitialize(); comInited_ = false; }
 }
 

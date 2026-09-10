@@ -4,6 +4,21 @@
 
 ## 2026-09-11 续接实证（优先于下面历史进度）
 
+### 最新续接：采集音频总预算与输出设备恢复
+
+基线`8b36b4c`，工作树原先干净。本轮仍未打开实体采集设备，不修改默认系统音频设备、不发布。
+
+- 原始PCM队列和转换后PCM原先分别允许500ms，总量可能接近1秒。现在`CaptureAudioSession`以统一500ms预算覆盖原始、正在转换与转换后队列；回调入队/拉取/转换提交都更新水位，超过预算丢弃过期输入并让音频线程重锚。正在转换期间出现新discontinuity/overflow时不提交旧转换块。软件水位有明确high-water计数，WASAPI设备padding单列，不重复当额外补偿相加。
+- WASAPI初始化、buffer、Start、事件等待/重置等失败记录实际HRESULT；事件超时也检查padding，让失效端点有机会被发现。采集音频失败后释放自己的端点与旧PCM，每500ms尝试重新打开默认输出，期间保留视频会话、界面显示重连状态，恢复后重新等视频锚点。新增AudioRenderer RAII析构和启动/reset时5ms增益淡入。尚未实现旧PCM短淡出、物理设备热插拔验收或文件播放设备自动恢复。
+- 实际测试：`continuation-audio-recovery-final-normal`11.12秒PASS，自动80/160ms、手动100ms、关闭、负补偿钳制、350ms断流、停止/重启和600个10ms PCM块突发输入。突发high-water恰500ms、overflow11；普通阶段0overflow，平均软件偏差/预期偏差误差2.65至12.54ms。
+- `continuation-audio-recovery-final-loss`3.59秒PASS：仅通过test环境开关释放测试会话自有WASAPI端点，出现重连状态、初始化次数2、恢复后平均软件偏差13.12ms、队列78ms、0overflow。前序同类测试5.02ms是另一次样本，不是最终结果。该测试不冒充物理声卡失效或所有HRESULT路径验证。
+- `continuation-audio-renderer-timeline`0.523秒PASS：文件PCM44.1/48k完整750ms/36000输出样本、采样级seek、首缓冲/暂停/无效时钟仍通过。
+- **漂移回归失败，未修复**：新增`--drift-slow`持续120秒，输入源时钟相对host慢1000ppm。`continuation-audio-drift-baseline`120.007秒exit1，P95软件音画偏差31.7295ms（要求<=30），24次未运行/无有效clock采样，resets4（首帧1+漂移触发3），软件最高水位103ms。现有策略仍约35/72/111秒间歇重锚，不能称长期平滑同步完成。没有为了通过而放宽断言。后续需要重采样补偿与重采样样本的媒体时间映射一起实现，不能只改swr样本数而保留1:1 WASAPI时间公式。
+- 构建命令`powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Root <root> -Preset x64-release`，`build-audio-budget.log`、`build-audio-endpoint.log`、`build-audio-recovery-final.log`、`build-audio-drift-test.log`均exit0。测试统一`scripts/acceptance/scheduler-short-test.ps1 -Name <名称> -Exe out/build/x64-release/veyra_capture_audio_tests.exe -TestArgs @('--endpoint-loss'或'--drift-slow')`，普通无args。结果/stdout位于`logs/scheduler-repair-20260910/`。最终采集测试EXE SHA `24C7B03ACA8C159079E73A3B444A1E18E6F5115E5056963642EDA59701459958`。
+- 最终联合`scripts/gates/delivery.ps1 -Root <root>`23项PASS42.43秒，`logs/delivery/0325b097b61a42b0becf6dc71a900175/result.json`；应用SHA `1136543C02604020F877BAA8BE0F67442671DFC7805FBB28310CD57B2D3E8FC6`，worker保持`EC8150FF88C7C84FACDF92B920DED2D6CEC5F682990C375A92550AFD5E818695`。实际RTX NR/NVOF与NVENC按gate执行；此gate不覆盖漂移失败，不能覆盖为整体通过。
+
+下一条唯一任务：实现有界采集时钟漂移校正及正确的重采样后播放PTS，再跑120秒正负偏差。完整GPU所有者/计时覆盖、AMD NR依赖/provider、UI全DPI与实卡验收仍未完成。所有测试单次<300秒；运行时/SDK未加入Git，未push。
+
 ### 最新续接：设置隔离、生成帧关系和FRUC admission
 
 前序源码/文档本地存档 `6316376`，无push/发布。本段新增内容优先于下方同日旧快照，目标仍active。

@@ -62,6 +62,7 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
             rows.emplace_back(L"音画偏差 · 声音领先",ms(s.captureAudio.skewMs));
             rows.emplace_back(L"声音补偿",std::format(L"{:.1f} ms{}",s.captureAudio.compensationMs,s.captureAudio.limited?L" · 已达边界":L""));
             rows.emplace_back(L"PCM队列",std::format(L"{:.1f} ms",s.captureAudio.bufferedMs));
+            rows.emplace_back(L"音频设备队列",std::format(L"{:.1f} ms",s.captureAudio.endpointBufferedMs));
             rows.emplace_back(L"音频重锚 / 溢出",std::format(L"{} / {}",s.captureAudio.resets,s.captureAudio.overflows));
         }
         if(!s.backendWarning.empty())rows.emplace_back(L"后端状态",s.backendWarning);

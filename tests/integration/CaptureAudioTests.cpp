@@ -4,23 +4,46 @@
 #include <iostream>
 #include <vector>
 #include <cmath>
-int main(){
+#include <algorithm>
+#include <string_view>
+int main(int argc,char** argv){
     using namespace veyra::sink;using Clock=std::chrono::steady_clock;
+    const bool endpointTest=argc==2&&std::string_view(argv[1])=="--endpoint-loss";
+    const bool driftTest=argc==2&&std::string_view(argv[1])=="--drift-slow";
+    if(endpointTest)SetEnvironmentVariableW(L"VEYRA_TEST_CAPTURE_AUDIO_ENDPOINT_LOSS",L"1");
     CaptureAudioSession audio;WAVEFORMATEX f{};f.wFormatTag=WAVE_FORMAT_PCM;f.nChannels=2;f.nSamplesPerSec=48000;f.wBitsPerSample=16;f.nBlockAlign=4;f.nAvgBytesPerSec=192000;
     if(!audio.configure(f)||!audio.start())return 2;audio.setGain(0);
     std::vector<int16_t> pcm(960,0);const auto start=Clock::now();
-    double sum=0;unsigned count=0;bool bounded=true;
-    for(unsigned i=0;i<160;++i){
+    if(driftTest){
+        std::vector<double> errors;unsigned missing=0;
+        constexpr double speed=.999;
+        for(unsigned i=0;i<11980;++i){
+            std::this_thread::sleep_until(start+std::chrono::microseconds(int64_t(i*10000/speed)));
+            const auto host=std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count()/100;
+            if(!audio.push(pcm.data(),pcm.size()*2,i*10.0,i==0))return 6;
+            if(i>=8)audio.videoPresented(i*10.0-80,host);
+            const auto s=audio.snapshot();if(i>1000){if(s.running&&s.skewMs)errors.push_back(std::abs(*s.skewMs));else ++missing;}
+            if(i&&i%2000==0)std::cout<<"DRIFT seconds="<<i/100<<" skewMs="<<s.skewMs.value_or(-999)<<" resets="<<s.resets<<" queueMs="<<s.bufferedMs<<std::endl;
+        }
+        const auto state=audio.snapshot();audio.stop();std::sort(errors.begin(),errors.end());
+        const double p95=errors.empty()?999:errors[(errors.size()*95+99)/100-1];
+        const bool pass=p95<=30&&missing<100&&state.overflows==0&&state.bufferHighWaterMs<=500;
+        std::cout<<(pass?"PASS ":"FAIL ")<<"120s capture clock -1000ppm p95SkewMs="<<p95<<" missing="<<missing<<" resets="<<state.resets<<" highWaterMs="<<state.bufferHighWaterMs<<'\n';return pass?0:1;
+    }
+    double sum=0;unsigned count=0;bool bounded=true,sawReconnecting=false;
+    for(unsigned i=0;i<(endpointTest?350u:160u);++i){
         const auto due=start+std::chrono::milliseconds(i*10);std::this_thread::sleep_until(due);
         const auto time=std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count()/100;
         if(!audio.push(pcm.data(),pcm.size()*2,i*10.0,i==0))return 3;
         if(i>=8)audio.videoPresented(i*10.0-80,time);
         const auto s=audio.snapshot();bounded&=s.bufferedMs<=520;
-        if(i>70&&s.running&&s.skewMs){sum+=std::abs(*s.skewMs);++count;}
+        sawReconnecting|=!s.error.empty();
+        if(i>(endpointTest?240u:70u)&&s.running&&s.skewMs){sum+=std::abs(*s.skewMs);++count;}
     }
     const auto state=audio.snapshot();
     std::cout<<"capture_audio meanAbsSkewMs="<<(count?sum/count:-1)<<" samples="<<count<<" compensationMs="<<state.compensationMs<<" queueMs="<<state.bufferedMs<<" resets="<<state.resets<<" overflows="<<state.overflows<<" underruns="<<state.underruns<<'\n';
     bool ok=count>=60&&sum/count<25&&state.compensationMs>=65&&state.compensationMs<=95&&bounded&&state.overflows==0;
+    if(endpointTest){ok=ok&&sawReconnecting&&state.error.empty()&&state.endpointRetries>=2&&state.running;audio.stop();std::cout<<(ok?"PASS ":"FAIL ")<<"owned WASAPI endpoint recovered without reopening capture retries="<<state.endpointRetries<<'\n';return ok?0:1;}
     std::cout<<(ok?"PASS":"FAIL")<<" synthetic capture PTS with 80ms video delay; real WASAPI, no physical capture\n";
     unsigned sequence=160;
     auto phase=[&](unsigned mode,int offset,double delay,double expectedComp,double expectedSkew){
@@ -50,6 +73,15 @@ int main(){
     std::cout<<(stoppedClean?"PASS ":"FAIL ")<<"stopped audio has no stale clock or queued state\n";ok=stoppedClean&&ok;
     if(!audio.start())return 4;
     ok=phase(0,0,80,80,0)&&ok;
+    audio.stop();
+    if(!audio.start())return 5;
+    audio.setSync(0,0);
+    bool burstAccepted=true;
+    for(unsigned i=0;i<600;++i)burstAccepted=audio.push(pcm.data(),pcm.size()*2,i*10.0,i==0)&&burstAccepted;
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    const auto burst=audio.snapshot();
+    const bool burstBound=burstAccepted&&burst.bufferHighWaterMs<=500&&burst.overflows>0;
+    std::cout<<(burstBound?"PASS ":"FAIL ")<<"combined raw/converting/PCM burst budget highWaterMs="<<burst.bufferHighWaterMs<<" overflows="<<burst.overflows<<'\n';ok=burstBound&&ok;
     audio.stop();
     return ok?0:1;
 }
