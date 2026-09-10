@@ -3,11 +3,28 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include "veyra/pipeline/ResolutionPlan.h"
 namespace veyra::engine {
-enum class FrameGenerationBackend { Dlss, Fruc };
+enum class FrameGenerationBackend { Dlss, Fruc, XeSS };
 enum class FlowQuality { Performance, Balanced, Quality };
+enum class OpticalFlowBackend { Nvidia, AmdFidelityFx };
 enum class ContentRate { Transport, Auto, Fps30, Fps50, Fps60, Capture60To30 };
+constexpr std::string_view frameGenerationBackendName(FrameGenerationBackend backend) {
+    switch(backend) {
+    case FrameGenerationBackend::Dlss: return "DLSS";
+    case FrameGenerationBackend::Fruc: return "FRUC";
+    case FrameGenerationBackend::XeSS: return "XeSS";
+    }
+    return "unknown";
+}
+constexpr std::string_view opticalFlowBackendName(OpticalFlowBackend backend) {
+    switch(backend) {
+    case OpticalFlowBackend::Nvidia: return "NVIDIA_NVOF";
+    case OpticalFlowBackend::AmdFidelityFx: return "AMD_FIDELITYFX_OF";
+    }
+    return "unknown";
+}
 struct NrSettings {
     float intensity=1,tone=1,structure=1,skin=-1;
     int32_t style=0,autoMask=0,uiCorrection=0;
@@ -40,11 +57,14 @@ struct EnhancementSettings {
     ResidualSettings residual;
     ProtectionSettings protection;
     bool nr=true,sr=false;
+    pipeline::SrTarget srTarget=pipeline::SrTarget::Uhd4K;
     uint32_t videoSrQuality=0; // 0 DLSS SR; 1–4 RTX Video SR
     uint32_t multiplier=1;
     FrameGenerationBackend frameGenerationBackend=FrameGenerationBackend::Dlss;
     pipeline::NrSizePolicy nrPolicy=pipeline::NrSizePolicy::Realtime;
     FlowQuality flow=FlowQuality::Balanced;
+    OpticalFlowBackend opticalFlowBackend=OpticalFlowBackend::Nvidia;
+    bool amdFlowHalfResolution=false;
     ContentRate content=ContentRate::Transport;
     bool operator==(const EnhancementSettings&) const = default;
     std::string validate() const {
@@ -55,8 +75,11 @@ struct EnhancementSettings {
         if(model.skin!=-1&&!range(model.skin,2))return "skin parameter out of range";
         if(model.style<0||model.style>2||model.autoMask<0||model.autoMask>1||model.uiCorrection<0||model.uiCorrection>1)return "invalid experimental parameter";
         for(float v:{residual.total,residual.darken,residual.brighten,residual.color,residual.luminance})if(!range(v,2))return "residual parameter out of range";
-        if(frameGenerationBackend!=FrameGenerationBackend::Dlss&&frameGenerationBackend!=FrameGenerationBackend::Fruc)return "invalid frame generation backend";
+        if(frameGenerationBackend<FrameGenerationBackend::Dlss||frameGenerationBackend>FrameGenerationBackend::XeSS)return "invalid frame generation backend";
+        if(frameGenerationBackend==FrameGenerationBackend::XeSS&&multiplier>2)return "XeSS preview currently supports 2X only";
         if(videoSrQuality>4)return "invalid video SR quality";
+        if(!pipeline::validSrTarget(srTarget))return "invalid SR target";
+        if(opticalFlowBackend!=OpticalFlowBackend::Nvidia&&opticalFlowBackend!=OpticalFlowBackend::AmdFidelityFx)return "invalid optical flow backend";
         if(multiplier<1||multiplier>4)return "unsupported multiplier";
         if(nrPolicy!=pipeline::NrSizePolicy::Realtime&&nrPolicy!=pipeline::NrSizePolicy::Native)return "invalid NR size policy";
         if(flow<FlowQuality::Performance||flow>FlowQuality::Quality||content<ContentRate::Transport||content>ContentRate::Capture60To30)return "invalid flow/content mode";

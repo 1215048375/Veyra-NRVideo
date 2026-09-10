@@ -101,9 +101,9 @@ bool fillAdapterInfo(const DXGI_ADAPTER_DESC1& desc, AdapterInfo& info)
     info.dedicatedVideoMemoryBytes = desc.DedicatedVideoMemory;
     info.isNvidia = desc.VendorId == 0x10DE;
     info.isSoftware = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
-    info.driverVersion = queryNvidiaDriverVersion();
+    info.driverVersion = info.isNvidia?queryNvidiaDriverVersion():std::wstring{};
     info.driverVersionSource = info.driverVersion.empty() ? L"unavailable" : L"registry";
-    return info.isNvidia && !info.isSoftware;
+    return !info.isSoftware;
 }
 
 } // namespace
@@ -142,7 +142,7 @@ bool D3D12DeviceContext::initialize(const DeviceContextDesc& desc, Status& statu
         return false;
     }
 
-    // 3. Highest-performance NVIDIA adapter (vendor 0x10DE, non-software).
+    // Keep every backend on one hardware adapter. Never silently use WARP.
     DXGI_ADAPTER_DESC1 chosenDesc{};
     bool chosen = false;
     for (UINT index = 0;; ++index) {
@@ -172,7 +172,8 @@ bool D3D12DeviceContext::initialize(const DeviceContextDesc& desc, Status& statu
             candidateDesc.DedicatedVideoMemory / (1024 * 1024),
             narrow(candidateDesc.Description)));
 
-        if (candidateDesc.VendorId == 0x10DE && !isSoftware) {
+        if ((!desc.requiredVendorId||candidateDesc.VendorId==desc.requiredVendorId) && !isSoftware &&
+            SUCCEEDED(D3D12CreateDevice(candidate.Get(),D3D_FEATURE_LEVEL_12_0,__uuidof(ID3D12Device),nullptr))) {
             adapter_ = candidate;
             chosenDesc = candidateDesc;
             chosen = true;
@@ -182,7 +183,7 @@ bool D3D12DeviceContext::initialize(const DeviceContextDesc& desc, Status& statu
 
     if (!chosen) {
         status = Status::DeviceFailure;
-        veyra::log::error("gfx", "no NVIDIA (vendor 0x10DE) hardware adapter found; refusing WARP fallback");
+        veyra::log::error("gfx", "no compatible requested D3D12 hardware adapter found");
         return false;
     }
     fillAdapterInfo(chosenDesc, adapterInfo_);
@@ -283,6 +284,12 @@ bool D3D12DeviceContext::checkDeviceAlive(uint32_t& removedReason) const
     const HRESULT reason = device_->GetDeviceRemovedReason();
     removedReason = static_cast<uint32_t>(reason);
     return SUCCEEDED(reason);
+}
+
+bool D3D12DeviceContext::videoMemoryInfo(uint64_t& budget,uint64_t& usage) const {
+    ComPtr<IDXGIAdapter3> adapter;DXGI_QUERY_VIDEO_MEMORY_INFO info{};
+    if(!adapter_||FAILED(adapter_.As(&adapter))||FAILED(adapter->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_LOCAL,&info)))return false;
+    budget=info.Budget;usage=info.CurrentUsage;return true;
 }
 
 bool D3D12DeviceContext::exerciseSlotRing()

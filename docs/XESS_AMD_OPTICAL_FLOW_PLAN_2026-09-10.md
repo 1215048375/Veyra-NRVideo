@@ -1,10 +1,12 @@
 # XeSS 补帧与 AMD 光流接入方案
 
-日期：2026-09-10。状态：研究完成，尚未实施。产品仍为 Phase 7 `in_progress`，本文不改变阶段门槛或默认处理路线。
+日期：2026-09-10。状态：研究完成；已有窄范围产品接入，仍处于 Phase 7 `in_progress`。本文不改变阶段门槛或默认处理路线。
 
-最新扩展：[2K / 8K 超分与 AMD NR 接入方案](SR_TARGETS_AMD_NR_PLAN_2026-09-10.md)。增加统一SR目标，并核对真正的AMD网络运行项目；AMD光流与AMD执行NR是两个不同模块。合并施工先做新方案S0，再按依赖接本文的AMD OF / XeSS步骤。两个文档均不是新增功能已运行的证明。
+当前实现包含统一的 2K / 4K / 8K SR 目标、AMD FidelityFX 光流 provider 和 Intel XeSS-FG 代理交换链显示后端。`logs/backend-20260910` 的 RTX 5070 窄测记录了 AMD OF Create/Dispatch/Destroy 成功（48 次 dispatch）和 XeSS 初始化、资源标记、Present 成功（43 次 SDK generated 计数，debugErrors=0）；SR 2K/8K 输出非黑。它们只证明该机器上的 SDK 调用链，**不证明** AMD GPU 兼容性、实际扫描输出帧率、画质、8K 实时性或长时稳定性。
 
-用户要求：研究截图中作者提到的“DLSS5 + XeSS FG，以 AMD 光流给前两者提供运动信息”，先找方法、写方案。本轮只核对公开资料、源码和本地结构，没有运行新效果、占用采集卡或修改应用。
+最新扩展：[2K / 8K 超分与 AMD NR 接入方案](SR_TARGETS_AMD_NR_PLAN_2026-09-10.md)。AMD 光流与 AMD 执行 NR 是两个不同模块：当前接入不提供 AMD DLSS5/NR、DLSS SR、NVIDIA FRUC、DLSS 帧生成、NVENC 或 AMD AMF 导出。该文保留 AMD NR 的后续研究路线，不能把已有光流实现写成 AMD DLSS5。
+
+原始用户要求是研究截图中作者提到的“DLSS5 + XeSS FG，以 AMD 光流给前两者提供运动信息”。以下研究、接口合同和验收条件继续作为实现依据；其中“后续实施”段落应按当前已接入范围理解，尚未实际验收的部分仍需按证据完成。
 
 ## 1. 结论与推荐
 
@@ -212,7 +214,7 @@ R1 如没有速度收益但能在明确场景改善运动/NR，可以作为用�
 
 ## 9. 依赖与复用方式
 
-本轮没有复制第三方代码进入产品或引入新 DLL。建议从官方接口和 AMD 明确许可的 OF 源文件实现，不需要复制 Magpie 的整套 Renderer/UI。
+本轮没有复制 Magpie 代码进入产品或引入新的受版本控制 DLL。AMD OF 和 XeSS 开发依赖仍在本地忽略目录，产品以其公开接口独立接入，不需要复制 Magpie 的整套 Renderer/UI。
 
 - AMD 当前大 SDK 是混合许可证；已核对 OF `.h/.cpp` 和相关 shader 在 MIT 文件清单内，源文件本身也有 MIT notice。可以使用该子集，但必须保留逐文件来源、版权和完整 notice，不能把整个 Redstone SDK 当 MIT。
 - Intel `LICENSE.txt` 允许原样再分发二进制并保留许可/版权，禁止修改与逆向。后续成套 DLL、运行库、notice 和 manifest 外置，头文件不因 `main` 新增部分 MIT 文件就假定全部开放。本文不更改 Veyra 的 GPLv3；分发集成版时须核对相容性/所需链接许可，不能仅凭外置 DLL 判定已解决。
@@ -222,15 +224,15 @@ R1 如没有速度收益但能在明确场景改善运动/NR，可以作为用�
 
 ## 10. 本轮结果与下一步
 
-实际执行：Git 状态/日志、`rg`与源码读取、`gh api` 查询 Magpie/Intel/AMD 的固定提交、树、Release和compare，以及官方 raw 文档/源码下载到忽略目录；本机 Magpie版本读取；应用和指定NR hash/签名核对。
+实际执行：Git 状态/日志、`rg`与源码读取、`gh api` 查询 Magpie/Intel/AMD 的固定提交、树、Release和compare，以及官方 raw 文档/源码下载到忽略目录；本机 Magpie版本读取；应用和指定NR hash/签名核对。随后完成 Release 构建，并执行契约、预设、XeSS 和 AMD OF 短测。
 
-没有构建、没有执行 FFX Create/Dispatch、XeSS/XeLL 初始化或新的 RTX/NGX/实卡测试。可行性判断依据接口与实现，不是性能实测。
+`veyra_repair_contract_tests.exe` 的 36 项检查通过；`veyra_repair_preset_tests.exe` 使用临时预设文件路径通过。RTX 5070 上的 `veyra_experimental_backend_tests.exe xess` 成功完成 XeSS 初始化、资源标记和 Present，记录 `generated=43`、`debugErrors=0`；`... amd` 成功完成 AMD OF Create/Dispatch/Destroy，记录 `amdDispatches=48`、`debugErrors=0`；`... sr2k` 与 `... sr8k` 各完成三次 DLSS SR Evaluate，并读回确认非黑的 `2560x1440` 与 `7680x4320` 输出。每项执行均少于五秒。这些短测只证明本机 SDK 调用、资源提交和所测 SR 输出，不证明真实扫描输出帧率、画质、AMD GPU 兼容性、实卡效果、8K 实时性或长期稳定性。
 
-应用 EXE 仍为上一轮 UI 修复：SHA256 `E97B716B99116BEC942262FFEF1612299CBB2F4B0BDA7C308A5BFF318B3B5157`。指定 NR hash仍为 `E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E`，签名 Valid。本轮仅新增本文并同步 WORKLOG/交接索引，不修改控制面或原始产品方案。
+本轮应用 EXE 由当前 Release 构建生成；指定 NR hash 仍为 `E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E`，签名 Valid。没有修改控制面或原始产品方案，没有 push、Release 或 Runtime Pack 变更。
 
 查询失败留实记录：尝试 Intel Release 名称 `v3.0` 得到404，随后采用已核实存在的 `v3.0.2`；一次 Windows `rg`字面通配路径失败，已改用结构化manifest及实际文件枚举。均非效果测试失败或成功。
 
-本文原下一条任务为R0/R1的AMD光流诊断。用户随后新增2K/8K及AMD NR要求，合并后的下一条实施任务以 [补充方案](SR_TARGETS_AMD_NR_PLAN_2026-09-10.md) 的S0为准；本文R0/R1仍保留在后续步骤。研究阶段不自动运行未验证后端。
+本文原下一条任务为R0/R1的AMD光流诊断，现已完成窄范围实现与 SDK 提交测试。下一步是 AMD 实机兼容性、真实呈现节奏和画质对照；AMD NR 的后续边界仍以 [补充方案](SR_TARGETS_AMD_NR_PLAN_2026-09-10.md) 为准。当前不把实验后端标为可交付的 AMD DLSS5。
 
 ## 11. 原始来源
 

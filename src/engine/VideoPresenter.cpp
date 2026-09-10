@@ -7,6 +7,7 @@ namespace veyra::engine {
 bool VideoPresenter::open(gfx::D3D12DeviceContext& ctx,HWND window,pipeline::EnhanceGraph& graph) {
     gpuTimer_.initialize(ctx.device(),ctx.directQueue());window_=window;RECT rc{};GetClientRect(window,&rc);
     gfx::PresentSink::Desc d;d.targetWindow=window;d.width=std::max(1L,rc.right);d.height=std::max(1L,rc.bottom);d.vsync=false;
+    d.xess=graph.xessEnabled();lastXessFrame_={};lastXessIdentity_={};xessWasEnabled_=false;
     Status st=Status::Ok;if(!sink_.initialize(ctx.device(),ctx.directQueue(),d,st))return false;
     std::vector<uint8_t> vs,ps;
     if(!pipeline::loadShaderBytes("PresentBlit_vs.dxil",vs)||!pipeline::loadShaderBytes("PresentBlit_ps.dxil",ps)||!pass_.create(ctx.device(),vs,ps,12))return false;
@@ -25,8 +26,9 @@ bool VideoPresenter::present(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotRing& 
     if((unsigned(rc.right)!=sink_.width()||unsigned(rc.bottom)!=sink_.height())&&GetTickCount64()>=deferUntil&&now-lastResize_>=std::chrono::milliseconds(100)) {
         if(!ring.drainQueue())return false;sink_.resize(rc.right,rc.bottom);
         if(sink_.bufferWidth()!=unsigned(rc.right)||sink_.bufferHeight()!=unsigned(rc.bottom))return false;
-        refresh(ctx.device());lastResize_=now;
+        refresh(ctx.device());lastResize_=now;xessWasEnabled_=false;
     }
+    if(sink_.xess()&&!sink_.xess()->beginFrame())return false;
     Status st=Status::Ok;uint32_t commandSlot=0;auto* list=ring.acquireNext(commandSlot,st);if(!list)return false;
     gpuTimer_.frame(identity.sourceFrameId?identity:pipeline::FrameIdentity{0,0,submittedCount()+1},ctx.fence());gpuTimer_.mark(list,diagnostics::GpuStage::Blit);
     auto* source=generated?graph.generatedFrameResource(slot):graph.videoFrameResource(slot);auto* bb=sink_.currentBackBuffer();if(!bb)return false;
@@ -55,6 +57,34 @@ bool VideoPresenter::present(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotRing& 
         if(veyra::log::verboseFrameLogs())veyra::log::info("comparison",std::format("real-frame source={} epoch={} revision={} reference={} mode={} split={} (same leased frame)",identity.sourceFrameId,identity.epoch,identity.settingsRevision,baseReference?"base":"input",comparison,split));
     }
     for(auto& b:barriers)std::swap(b.Transition.StateBefore,b.Transition.StateAfter);list->ResourceBarrier(2,barriers);
+    if(auto* xess=sink_.xess()){
+        const float fit=std::min(float(sink_.bufferWidth())/graph.workWidth(),float(sink_.bufferHeight())/graph.workHeight());
+        const LONG w=std::max(1L,LONG(std::lround(graph.workWidth()*fit))),h=std::max(1L,LONG(std::lround(graph.workHeight()*fit)));
+        const LONG left=(LONG(sink_.bufferWidth())-w)/2,top=(LONG(sink_.bufferHeight())-h)/2;
+        const bool enabled=!generated&&!comparison&&view==PreviewView{}&&graph.presentMotionValid(slot)&&identity.sourceFrameId!=lastXessIdentity_.sourceFrameId;
+        const bool reset=!xessWasEnabled_||identity.epoch!=lastXessIdentity_.epoch||identity.settingsRevision!=lastXessIdentity_.settingsRevision||graph.motionPreviousSource(slot)!=lastXessIdentity_.sourceFrameId;
+        const float elapsed=lastXessFrame_==std::chrono::steady_clock::time_point{}?0.0f:float(std::chrono::duration<double,std::milli>(now-lastXessFrame_).count());
+        auto* motion=graph.presentMotion(slot);
+        auto* depth=graph.presentDepth();
+        if(enabled){
+            // XeSS-FG ONLY_NOW records its input copies on this same command
+            // list. Keep the Veyra state contract explicit on both sides.
+            ID3D12Resource* resources[]={bb,motion,depth};
+            D3D12_RESOURCE_BARRIER toCopy[3]{};
+            for(unsigned i=0;i<3;++i){
+                toCopy[i].Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                toCopy[i].Transition.pResource=resources[i];
+                toCopy[i].Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                toCopy[i].Transition.StateBefore=D3D12_RESOURCE_STATE_COMMON;
+                toCopy[i].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_SOURCE;
+            }
+            list->ResourceBarrier(3,toCopy);
+            if(!xess->tag(list,bb,motion,depth,{left,top,left+w,top+h},true,reset,elapsed))return false;
+            for(auto& barrier:toCopy)std::swap(barrier.Transition.StateBefore,barrier.Transition.StateAfter);
+            list->ResourceBarrier(3,toCopy);
+        }else if(!xess->tag(list,bb,motion,depth,{left,top,left+w,top+h},false,reset,elapsed))return false;
+        lastXessFrame_=now;lastXessIdentity_=identity;xessWasEnabled_=enabled;
+    }
     gpuTimer_.mark(list,diagnostics::GpuStage::Blit,true);gpuTimer_.resolve(list);
     if(!ring.submitAndSignal(commandSlot))return false;gpuTimer_.submitted(ring.lastSignaledValue());lastBuffer_=sink_.swapChain()->GetCurrentBackBufferIndex();hasPresented_=true;return sink_.present(st);
 }

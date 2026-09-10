@@ -15,6 +15,7 @@
 #include <string>
 
 #include "veyra/Result.h"
+#include "veyra/gfx/XessPresenter.h"
 
 namespace veyra::gfx {
 
@@ -33,6 +34,7 @@ public:
         uint32_t width = 1280;
         uint32_t height = 720;
         bool vsync = true;
+        bool xess = false;
         // Probe runs create their own window class name per process.
         std::wstring title = L"Veyra";
         HWND targetWindow = nullptr; // borrowed UI-owned child HWND; never destroyed by sink
@@ -69,6 +71,7 @@ public:
     bool tearingSupported() const { return tearingSupported_; }
     HWND hwnd() const { return hwnd_; }
     IDXGISwapChain3* swapChain() const { return swapChain_.Get(); }
+    XessPresenter* xess() const { return xess_.get(); }
 
     void shutdown();
 
@@ -76,6 +79,7 @@ private:
     static LRESULT CALLBACK wndProcThunk(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 
     bool refetchBackBuffers();
+    bool waitForQueueIdle();
     void recreateSwapChain(UINT flags);
 
     HWND hwnd_ = nullptr;
@@ -96,6 +100,7 @@ private:
     ID3D12CommandQueue* queue_ = nullptr;
     ComPtr<IDXGIFactory2> factory_;
     ComPtr<IDXGISwapChain3> swapChain_;
+    std::unique_ptr<XessPresenter> xess_;
     ComPtr<ID3D12Resource> backBuffers_[3];
     UINT backBufferIndex_ = 0;
     bool closed_ = false;

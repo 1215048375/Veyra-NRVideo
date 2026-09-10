@@ -29,6 +29,7 @@ struct AdapterInfo {
 struct DeviceContextDesc {
     bool enableDebugLayer = false;
     uint32_t commandSlotCount = 4;
+    uint32_t requiredVendorId = 0; // 0: highest-performance hardware adapter
 };
 
 // One DXGI adapter + one ID3D12Device + one direct command queue + one fence
@@ -63,6 +64,7 @@ public:
     const AdapterInfo& adapter() const { return adapterInfo_; }
     const std::string& featureLevelString() const { return featureLevel_; }
     uint32_t commandSlotCount() const { return commandSlotCount_; }
+    bool videoMemoryInfo(uint64_t& budget,uint64_t& usage) const;
 
     // CPU wait until `value` completes; returns false on wait timeout/failure.
     bool waitForFenceValue(uint64_t value, uint32_t timeoutMs = 10000);

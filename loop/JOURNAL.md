@@ -1,5 +1,11 @@
 # Veyra Loop Journal
 
+## 2026-09-10 XeSS, AMD OF and SR target implementation
+
+User authorized implementation of experimental AMD DLSS5-related options, XeSS FG, AMD optical flow and SR targets. The committed worktree candidate adds 2K/4K/8K target selection, AMD FidelityFX optical-flow dispatch, XeSS proxy-swapchain display FG and adapter-specific capability messages. Professional-page layout was corrected after static inspection found the AMD/XeSS explanation text overlapped the NVOF-quality combo box.
+
+Actual commands: Release build exited 0; `veyra_repair_contract_tests.exe` reported 36 checks and 0 failures; `veyra_repair_preset_tests.exe .\\logs\\backend-20260910-final\\presets.v1` passed; RTX 5070 `veyra_experimental_backend_tests.exe xess` passed with generated=43 and debugErrors=0; `... amd` passed with amdDispatches=48 and debugErrors=0; `... sr2k` and `... sr8k` each performed 3 DLSS SR Evaluates and read back nonblack 2560x1440 and 7680x4320 outputs. Each test process was under five seconds. The executable tests prove local SDK submission and the tested SR outputs only; they do not prove scanout FPS, visual quality, AMD-GPU compatibility, 8K realtime behavior, physical capture behavior or long-term stability. No runtime/SDK/media was tracked, and no remote mutation occurred. Phase 7 remains in progress; FRUC reset pixels and full native-NR performance remain open.
+
 ## 2026-09-10 SR targets and AMD NR research plan
 
 Scope follows the user's preceding plan-first request, extended with 2K/8K SR targets and actual AMD GPU NR research. Read-only source/API/license/hardware inspection is complete; next write the implementation supplement and cross-link the XeSS/AMD OF plan and handoff. No product code, runtime, driver, protected control or remote changes. Hypothesis to preserve for implementation: a native D3D12 network port is a viable candidate, not yet a verified Veyra backend. Validation for this documentation task: source citations, local links/fences, JSON parse and git diff --check; no GPU gate or new backend success will be claimed.

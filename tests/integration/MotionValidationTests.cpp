@@ -25,14 +25,15 @@ int run(bool vertical){
        !upload(previous.Get(),32,32,16,[&](uint8_t* p,unsigned x,unsigned y){if(vertical)std::swap(x,y);float v[4]={x/40.f,x/40.f,x/40.f,1};memcpy(p,v,16);})||
        !upload(current.Get(),32,32,16,[&](uint8_t* p,unsigned x,unsigned y){if(vertical)std::swap(x,y);float shift=y>=24?-2.5f:y>=16?2.5f:2.f;float c=(x+shift)/40.f+(y>=8&&y<16?.3f:y>=16&&y<24?.08f:0);float v[4]={c,c,c,1};memcpy(p,v,16);}))return 2;
     if(!ring.submitAndSignal(slot)||!ring.waitIdle())return 2;
-    ComputePass pass;std::vector<uint8_t> shader;if(!pass.loadShader("NvofDensify.dxil",shader)||!pass.create(ctx.device(),shader,6,4,2))return 2;
+    ComputePass pass;std::vector<uint8_t> shader;if(!pass.loadShader("NvofDensify.dxil",shader)||!pass.create(ctx.device(),shader,7,5,2))return 2;
     unsigned index=0;for(auto* r:{flow.Get(),cost.Get(),previous.Get(),current.Get()})makeSrv(ctx.device(),r,r->GetDesc().Format,cpuHandleOf(pass,index++));
-    makeUav(ctx.device(),output.Get(),DXGI_FORMAT_R16G16_FLOAT,cpuHandleOf(pass,4));makeUav(ctx.device(),confidence.Get(),DXGI_FORMAT_R8_UNORM,cpuHandleOf(pass,5));
+    makeSrv(ctx.device(),nullptr,DXGI_FORMAT_R32_UINT,cpuHandleOf(pass,4));
+    makeUav(ctx.device(),output.Get(),DXGI_FORMAT_R16G16_FLOAT,cpuHandleOf(pass,5));makeUav(ctx.device(),confidence.Get(),DXGI_FORMAT_R8_UNORM,cpuHandleOf(pass,6));
     D3D12_HEAP_PROPERTIES hp{};hp.Type=D3D12_HEAP_TYPE_READBACK;D3D12_RESOURCE_DESC bd{};bd.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;bd.Width=16384;bd.Height=1;bd.DepthOrArraySize=bd.MipLevels=1;bd.SampleDesc.Count=1;bd.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;ComPtr<ID3D12Resource> readback;if(FAILED(ctx.device()->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&readback))))return 2;
     bool ok=true;
-    for(unsigned flags:{0u,3u}){
+    for(unsigned flags:{0u,3u,8u}){
         list=ring.acquireNext(slot,st);if(!list)return 2;states.transition(list,output.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);states.transition(list,confidence.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        float c[8];unsigned values[8]={8,8,32,32,4,0,32,flags};memcpy(c,values,sizeof c);pass.bind(list,c,gpuHandleOf(pass,0).ptr,gpuHandleOf(pass,4).ptr);list->Dispatch(2,2,1);
+        float c[8];unsigned values[8]={8,8,32,32,4,0,32,flags};memcpy(c,values,sizeof c);pass.bind(list,c,gpuHandleOf(pass,0).ptr,gpuHandleOf(pass,5).ptr);list->Dispatch(2,2,1);
         auto copy=[&](ID3D12Resource* tex,UINT64 offset){states.uavBarrier(list,tex);states.transition(list,tex,D3D12_RESOURCE_STATE_COPY_SOURCE);D3D12_TEXTURE_COPY_LOCATION a{},b{};a.pResource=tex;a.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;b.pResource=readback.Get();b.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;b.PlacedFootprint.Offset=offset;b.PlacedFootprint.Footprint={tex->GetDesc().Format,32,32,1,256};list->CopyTextureRegion(&b,0,0,0,&a,nullptr);};copy(output.Get(),0);copy(confidence.Get(),8192);
         if(!ring.submitAndSignal(slot)||!ring.waitIdle())return 2;void* ptr=nullptr;D3D12_RANGE read{0,16384};if(FAILED(readback->Map(0,&read,&ptr)))return 2;
         unsigned rejected=0,retained=0,attenuated=0;bool passOk=true;
@@ -40,12 +41,12 @@ int run(bool vertical){
             unsigned sx=vertical?y:x,sy=vertical?x:y;if(vertical)std::swap(vx,vy);
             float expected=sy>=24?-2.5f:sy>=16?2.5f:2.f;bool outside=sx+expected<0||sx+expected>31;
             unsigned expectedCost=sx/4==3?255:sx/4==5?31:sx/4==6?32:sx/4==7?16:0;
-            bool reject=expectedCost>=32||(flags&&(outside||(sy>=8&&sy<16)));bool attenuate=flags&&!reject&&sy>=16&&sy<24;
+            bool reject=flags==8||expectedCost>=32||(flags&&(outside||(sy>=8&&sy<16)));bool attenuate=flags&&!reject&&sy>=16&&sy<24;
             if(reject){++rejected;passOk=passOk&&vx==0&&vy==0&&conf==0;}
             else if(attenuate){++attenuated;passOk=passOk&&vx>0&&vx<expected&&vy==0&&conf>0&&conf<255-expectedCost;}
             else{++retained;passOk=passOk&&vx==expected&&vy==0&&conf==255-expectedCost;}
         }
-        D3D12_RANGE written{0,0};readback->Unmap(0,&written);ok=ok&&passOk&&retained>100&&rejected>100&&(!flags||attenuated>100);
+        D3D12_RANGE written{0,0};readback->Unmap(0,&written);ok=ok&&passOk&&(flags==8?rejected==1024:retained>100&&rejected>100&&(!flags||attenuated>100));
         std::cout<<"MOTION_VALIDATION vertical="<<vertical<<" flags="<<flags<<" rejected="<<rejected<<" retained="<<retained<<" attenuated="<<attenuated<<" pass="<<passOk<<std::endl;
     }
     ring.drainQueue();ComPtr<ID3D12InfoQueue> iq;unsigned errors=0;if(FAILED(ctx.device()->QueryInterface(IID_PPV_ARGS(&iq))))return 2;

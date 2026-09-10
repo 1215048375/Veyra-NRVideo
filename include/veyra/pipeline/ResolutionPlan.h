@@ -10,14 +10,25 @@ struct Extent {
     bool valid() const {return width>=1&&height>=1&&width<=16384&&height<=16384;}
 };
 enum class NrSizePolicy { Realtime, Native };
+enum class SrTarget : uint32_t { Qhd, Uhd4K, Uhd8K };
+constexpr bool validSrTarget(SrTarget target) { return target<=SrTarget::Uhd8K; }
+constexpr Extent srTargetExtent(SrTarget target) {
+    switch(target) {
+    case SrTarget::Qhd:return {2560,1440};
+    case SrTarget::Uhd4K:return {3840,2160};
+    case SrTarget::Uhd8K:return {7680,4320};
+    }
+    return {};
+}
 struct ResolutionPlan {
     Extent source,base,nr,flow,fg,output;
     bool srApplied=false;
     uint64_t settingsRevision=0;
-    static ResolutionPlan make(Extent source,bool sr,NrSizePolicy policy,bool exporting,uint64_t revision=0) {
+    static ResolutionPlan make(Extent source,bool sr,NrSizePolicy policy,bool exporting,uint64_t revision=0,SrTarget target=SrTarget::Uhd4K) {
         if(!source.valid())throw std::invalid_argument("invalid SDR source extent");
+        if(!validSrTarget(target))throw std::invalid_argument("invalid SR target");
         ResolutionPlan p; p.source=source;p.base=source;
-        if(sr){const double scale=std::min(3840.0/source.width,2160.0/source.height);if(scale>1.0)p.base={std::max(2u,uint32_t(source.width*scale+1e-6)&~1u),std::max(2u,uint32_t(source.height*scale+1e-6)&~1u)};}
+        if(sr){const auto limit=srTargetExtent(target);const double scale=std::min(double(limit.width)/source.width,double(limit.height)/source.height);if(scale>1.0)p.base={std::max(2u,uint32_t(source.width*scale+1e-6)&~1u),std::max(2u,uint32_t(source.height*scale+1e-6)&~1u)};}
         p.srApplied=sr&&p.base!=source;p.nr=p.base;
         if(!exporting&&policy==NrSizePolicy::Realtime) {
             const double scale=std::min({1.0,1920.0/p.base.width,1080.0/p.base.height});

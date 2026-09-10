@@ -1,3 +1,13 @@
+# 2026-09-10 XeSS、AMD 光流与 SR 目标接入
+
+用户要求把 AMD DLSS5 作为实验功能接入，并同时完成 XeSS FG、AMD 光流和 2K/4K/8K SR 目标。当前实现新增统一 SR 目标设置、专业模式 2K/4K/8K 选择、Intel XeSS 实验显示补帧 2X，以及 AMD FidelityFX 光流 provider 与半分辨率性能档。XeSS 只作用于预览，不能导出；AMD 光流只替换运动估算，不提供 AMD NR、DLSS SR、NVIDIA FRUC/DLSS 补帧、NVENC 或 AMD AMF。
+
+专业模式第二页已按实际控件高度重排：补帧后端、光流后端、AMD 性能档、能力说明、光流档位、内容节奏和 FRUC 说明不再占用同一区域。此前新增说明文本与光流档位下拉框重叠，滚动时会影响可见性和点击范围；这是布局错误，不是渲染能力问题。
+
+实际验证：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Root . -Preset x64-release` exit 0；`veyra_repair_contract_tests.exe` 36 项通过；`veyra_repair_preset_tests.exe .\logs\backend-20260910-final\presets.v1` 通过；RTX 5070 上 `veyra_experimental_backend_tests.exe xess` 成功初始化、标记资源并 Present，`generated=43`、`debugErrors=0`；`... amd` 成功执行 AMD OF Create/Dispatch/Destroy，`amdDispatches=48`、`debugErrors=0`；`... sr2k` 3 次 DLSS SR Evaluate 并读回得到非黑 `2560x1440`，`... sr8k` 3 次 Evaluate 并读回得到非黑 `7680x4320`。每个测试进程少于五秒。它们不证明真实扫描输出帧率、画质、AMD GPU 兼容性、实卡效果、8K 实时性或长期稳定性。
+
+没有提交 NVIDIA SDK/runtime、模型、头文件、库、样例或测试媒体；没有 push、Release 或 Runtime Pack 变更。Phase 7 仍为 `in_progress`。本地 checkpoint 前还需复跑本轮构建和短测、检查 Git 跟踪范围与差异；AMD 实机兼容、XeSS 实际显示节奏、FRUC reset 像素和原生 NR 全链路性能仍未解决。
+
 # 2026-09-10 2K / 8K SR 与 AMD NR 研究补充
 
 用户继续增加2K/8K超分和AMD显卡运行DLSS5的研究要求。按上一请求先写方案，交付 `docs/SR_TARGETS_AMD_NR_PLAN_2026-09-10.md`，同步XeSS方案/交接/loop研究记录。已确认Daniel HIP、RedDuke ZLUDA、Kien D3D12/HLSL三条真实技术路线；公开源码/作者自述/本机实测严格分开。推荐MIT D3D12网络作为RDNA4候选；其当前网络固定1080及SM6.10/FP8依赖、HIP原许可与无公开API、ZLUDA逐帧CPU等待与黑图问题均明确列出。社区4K60帖子混合FSR/FG，不能当原生4K NR60证据。

@@ -20,7 +20,15 @@ int main(){
     check(p.nr==p.source&&p.flow==p.source,"native mode retains native4K NR and flow");
     p=pipeline::ResolutionPlan::make({3840,2160},true,pipeline::NrSizePolicy::Realtime,true);
     check(!p.srApplied&&p.nr==p.base,"native export and 1:1 SR bypass");
+    for(auto target:{pipeline::SrTarget::Qhd,pipeline::SrTarget::Uhd4K,pipeline::SrTarget::Uhd8K}){
+        const auto plan=pipeline::ResolutionPlan::make({1920,1080},true,pipeline::NrSizePolicy::Realtime,false,7,target);
+        check(plan.output==pipeline::srTargetExtent(target)&&plan.nr==pipeline::Extent{1920,1080}&&plan.settingsRevision==7,"SR target changes real output, retains realtime NR and revision");
+    }
+    check(pipeline::ResolutionPlan::make({1448,1086},true,pipeline::NrSizePolicy::Native,true,1,pipeline::SrTarget::Uhd8K).output==pipeline::Extent{5760,4320},"8K 4:3 aspect preserved");
+    check(pipeline::ResolutionPlan::make({8000,2000},true,pipeline::NrSizePolicy::Native,true,1,pipeline::SrTarget::Qhd).output==pipeline::Extent{8000,2000},"small target never shrinks long image");
     engine::EnhancementSettings s;check(s.validate().empty(),"default settings valid");
+    check(engine::frameGenerationBackendName(engine::FrameGenerationBackend::Dlss)=="DLSS"&&engine::frameGenerationBackendName(engine::FrameGenerationBackend::Fruc)=="FRUC"&&engine::frameGenerationBackendName(engine::FrameGenerationBackend::XeSS)=="XeSS","frame-generation backend names identify every backend");
+    check(engine::opticalFlowBackendName(engine::OpticalFlowBackend::Nvidia)=="NVIDIA_NVOF"&&engine::opticalFlowBackendName(engine::OpticalFlowBackend::AmdFidelityFx)=="AMD_FIDELITYFX_OF","optical-flow backend names identify every backend");
     s.model.intensity=std::numeric_limits<float>::quiet_NaN();check(!s.validate().empty(),"reject NaN transaction");
     s={};s.multiplier=5;check(!s.validate().empty(),"reject unsupported multiplier");
     check(pipeline::FrameBatch::interpolate(-200000,0,1,2)==-100000,"negative PTS midpoint");

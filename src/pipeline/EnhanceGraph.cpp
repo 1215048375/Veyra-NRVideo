@@ -28,6 +28,7 @@
 #include "veyra/ngx/NgxCoreHost.h"
 #include "veyra/ngx/NgxParameters.h"
 #include "veyra/ngx/NvOfSession.h"
+#include "veyra/guidance/AmdOpticalFlow.h"
 
 extern "C" {
 #include <libavutil/frame.h>
@@ -88,8 +89,15 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
     veyra::log::info("resolution",std::format("source={}x{} base={}x{} nr={}x{} flow={}x{} fg={}x{} output={}x{}",srcW_,srcH_,workW_,workH_,nrW_,nrH_,nvofW_,nvofH_,workW_,workH_,workW_,workH_));
     srEnabled_ = desc.enableSr && (srcW_ != workW_ || srcH_ != workH_);
     nrEnabled_ = desc.enableNr && !desc.noFeatures && !desc.noNgx;
-    fgEnabled_ = desc.enableFg && !desc.noNgx && !desc.stillImage;
+    fgEnabled_ = desc.enableFg && !desc.noNgx && !desc.stillImage && desc.frameGenerationBackend!=engine::FrameGenerationBackend::XeSS;
     nvofStandalone_ = desc.enableNvofStandalone && !desc.noFeatures;
+    if(desc.opticalFlowBackend==engine::OpticalFlowBackend::AmdFidelityFx&&desc.amdFlowHalfResolution){nvofW_=std::max(1u,nvofW_/2);nvofH_=std::max(1u,nvofH_/2);}
+    uint64_t budget=0,usage=0;
+    const uint64_t estimate=uint64_t(workW_)*workH_*(fgEnabled_?100:76)+uint64_t(nrW_)*nrH_*32+uint64_t(srcW_)*srcH_*32;
+    if(context_.videoMemoryInfo(budget,usage)){
+        veyra::log::info("memory",std::format("graph lower-bound={}MiB budget={}MiB usage={}MiB; SDK allocations additional",estimate>>20,budget>>20,usage>>20));
+        if(usage>=budget||estimate>budget-usage){veyra::log::error("memory","insufficient adapter budget for requested graph textures");return false;}
+    }
     Status st = Status::Ok;
 
     lumaPitch_ = (static_cast<size_t>(srcW_) + 255) & ~size_t(255);
@@ -162,6 +170,7 @@ bool EnhanceGraph::createResources()
     residualRgba_=makeTexture(context_.device(),workW_,workH_,DXGI_FORMAT_R16G16B16A16_FLOAT,true);
     nrFlow_=makeTexture(context_.device(),nrW_,nrH_,DXGI_FORMAT_R16G16_FLOAT,true);
     baseFlow_=makeTexture(context_.device(),workW_,workH_,DXGI_FORMAT_R16G16_FLOAT,true);
+    if(xessEnabled())for(auto& motion:presentMotion_){motion=makeTexture(context_.device(),workW_,workH_,DXGI_FORMAT_R16G16_FLOAT,false);if(!motion)return false;}
     if(!nrInput_||!residualRgba_||!nrFlow_||!baseFlow_)return false;
     proxyTex_ = makeTexture(context_.device(), nrW_, nrH_, DXGI_FORMAT_R8G8B8A8_UNORM, true);
     neuralTex_ = makeTexture(context_.device(), nrW_, nrH_, DXGI_FORMAT_R8G8B8A8_UNORM, true);
@@ -171,9 +180,9 @@ bool EnhanceGraph::createResources()
     confTex_ = makeTexture(context_.device(), nvofW_, nvofH_, DXGI_FORMAT_R8_UNORM, true);
     flowTex_ = makeTexture(context_.device(), nvofW_, nvofH_, DXGI_FORMAT_R16G16_FLOAT, true);
     depthTex_ = makeTexture(context_.device(), workW_, workH_, DXGI_FORMAT_R32_FLOAT, false);
-    genFrame_[0] = makeTexture(context_.device(), workW_, workH_, DXGI_FORMAT_R8G8B8A8_UNORM, true);
-    genFrame_[1] = makeTexture(context_.device(), workW_, workH_, DXGI_FORMAT_R8G8B8A8_UNORM, true);
-    for(unsigned i=2;i<6;++i){genFrame_[i]=makeTexture(context_.device(),workW_,workH_,DXGI_FORMAT_R8G8B8A8_UNORM,true);if(!genFrame_[i])return false;}
+    // Valid placeholder descriptors keep disabled FG inexpensive. Enabling it
+    // is a graph rebuild, so no in-flight descriptor is resized in place.
+    for(auto& frame:genFrame_){frame=makeTexture(context_.device(),fgEnabled_?workW_:1,fgEnabled_?workH_:1,DXGI_FORMAT_R8G8B8A8_UNORM,true);if(!frame)return false;}
     nrZeroMotion_ = makeTexture(context_.device(), workW_, workH_, DXGI_FORMAT_R16G16_FLOAT, false);
     nrZeroDepth_ = makeTexture(context_.device(), workW_, workH_, DXGI_FORMAT_R32_FLOAT, false);
     rawW_ = (nvofW_ + nvofGrid_ - 1) / nvofGrid_;
@@ -280,8 +289,15 @@ bool EnhanceGraph::initZeroAndDepthTextures()
 bool EnhanceGraph::initNvof()
 {
     if(desc_.stillImage){mvecSource_="single-image (no temporal motion)";return true;}
-    if (desc_.noFeatures) {
+    if (desc_.noFeatures || !(nvofStandalone_ || xessEnabled() || (fgEnabled_&&desc_.frameGenerationBackend==engine::FrameGenerationBackend::Dlss) || (srEnabled_&&!desc_.videoSrQuality))) {
         veyra::log::info("graph", "VEYRA_NO_FEATURES: NVOF session skipped");
+        return true;
+    }
+    if(desc_.opticalFlowBackend==engine::OpticalFlowBackend::AmdFidelityFx){
+        amdOf_=std::make_unique<guidance::AmdOpticalFlow>();
+        if(!amdOf_->initialize(context_.device(),nvofW_,nvofH_))return false;
+        nvofRawTex_=amdOf_->vectors();rawW_=amdOf_->width();rawH_=amdOf_->height();selectedGrid_=8;
+        mvecSource_="amd-fidelityfx + photometric confidence";
         return true;
     }
     nvof_ = std::make_unique<ngx::NvOfSession>();
@@ -314,7 +330,7 @@ bool EnhanceGraph::initNvof()
 
 bool EnhanceGraph::initNgxFeatures()
 {
-    if (desc_.noNgx || desc_.noFeatures) {
+    if (desc_.noNgx || desc_.noFeatures || (!nrEnabled_&&!srEnabled_&&!fgEnabled_)) {
         veyra::log::info("graph", "NGX core/features skipped by disabled-feature configuration");
         return true;
     }
@@ -349,7 +365,7 @@ bool EnhanceGraph::initNgxFeatures()
 
     fgCapsAvailable_ = false;
     fgMultiFrameMax_ = 0;
-    if (!desc_.stillImage && desc_.frameGenerationBackend==engine::FrameGenerationBackend::Dlss) {
+    if (fgEnabled_ && desc_.frameGenerationBackend==engine::FrameGenerationBackend::Dlss) {
     fgBackend_ = std::make_unique<ngx::DlssFgBackend>();
     ngx::DlssFgBackend::Capability fgCaps{};
     const bool fgAvailable = fgBackend_->queryCapability(*coreHost_, fgCaps, st);
@@ -371,6 +387,7 @@ bool EnhanceGraph::initNgxFeatures()
         }
         fgCapsAvailable_=true;fgMultiFrameMax_=3;
     }
+    if(nrEnabled_){
     nrAdapter_ = std::make_unique<ngx::DlssNrRuntimeAdapter>();
     if (!nrAdapter_->load(desc_.runtimeAbsPath.c_str(), st) ||
         !nrAdapter_->installCallerCompatibility(st) ||
@@ -379,13 +396,14 @@ bool EnhanceGraph::initNgxFeatures()
         veyra::log::error("graph", std::format("NR snippet init failed 0x{:X}", nrResult_));
         return false;
     }
+    }
     ngxParams_ = coreHost_->allocateParameters(st);
     if (ngxParams_ == nullptr) return false;
 
     srBackend_ = std::make_unique<ngx::DlssSrBackend>();
 
     // NR feature create (8.5 create parameter contract).
-    {
+    if(nrEnabled_) {
         namespace p = ngx::dlssnr;
         ngx::ParameterBlock pb(ngxParams_);
         pb.setU32(p::kWidth, nrW_); pb.setU32(p::kHeight, nrH_);
@@ -431,7 +449,7 @@ bool EnhanceGraph::initNgxFeatures()
     // FG create + warm-up evaluate BEFORE descriptor views (the runtime
     // allocates internals at the first evaluate and would fail after views
     // exist on this system).
-    if (!desc_.stillImage && desc_.frameGenerationBackend==engine::FrameGenerationBackend::Dlss) {
+    if (fgEnabled_ && desc_.frameGenerationBackend==engine::FrameGenerationBackend::Dlss) {
         ngx::DlssFgBackend::CreateDesc fd{};
         fd.width = workW_; fd.height = workH_;
         fd.renderWidth = workW_; fd.renderHeight = workH_;
@@ -507,7 +525,7 @@ bool EnhanceGraph::createComputePasses()
     // upload is the proven frame-path ingestion on this system.
     if (!uploadPass_.loadShader("Nv12Upload.dxil", cs) || !uploadPass_.create(context_.device(), cs, 4, 1, 2)) return false;
     if (!densifyPass_.loadShader("NvofDensify.dxil", cs) ||
-        !densifyPass_.create(context_.device(), cs, 6, 4, 2)) return false;
+        !densifyPass_.create(context_.device(), cs, 7, 5, 2)) return false;
     if (!stager_.initialize(context_.device(), 64)) {
         veyra::log::error("graph", "descriptor stager init failed");
         return false;
@@ -601,7 +619,7 @@ bool EnhanceGraph::createViews()
     if (viewsTex) stagedSrv(videoFrame_[1].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 12);
 
     // Densify pass views: 0=rawFlow SRV(int2) 1=cost SRV(uint)
-    // 2=previous RGB SRV,3=current RGB SRV;4=flow UAV,5=confidence UAV.
+    // 2=previous RGB,3=current RGB,4=AMD SCD;5=flow UAV,6=confidence UAV.
     {
         D3D12_SHADER_RESOURCE_VIEW_DESC rf{};
         rf.Format = DXGI_FORMAT_R16G16_SINT;
@@ -622,14 +640,15 @@ bool EnhanceGraph::createViews()
         rc.Texture2D.ResourceMinLODClamp = 0.0f;
         if (viewsTex) stager_.stageSrv(nvofCostTex_.Get(), &rc, densifyPass_.heap.Get(), 1);
         if(viewsTex){stagedSrv(nvofInA_.Get(),DXGI_FORMAT_B8G8R8A8_UNORM,densifyPass_,2);stagedSrv(nvofInB_.Get(),DXGI_FORMAT_B8G8R8A8_UNORM,densifyPass_,3);}
+        if(viewsTex){rc.Format=DXGI_FORMAT_R32_UINT;stager_.stageSrv(amdOf_?amdOf_->sceneChanges():nullptr,&rc,densifyPass_.heap.Get(),4);}
         D3D12_UNORDERED_ACCESS_VIEW_DESC uf{};
         uf.Format = DXGI_FORMAT_R16G16_FLOAT;
         uf.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-        context_.device()->CreateUnorderedAccessView(flowTex_.Get(), nullptr, &uf, cpu(densifyPass_, 4));
+        context_.device()->CreateUnorderedAccessView(flowTex_.Get(), nullptr, &uf, cpu(densifyPass_, 5));
         D3D12_UNORDERED_ACCESS_VIEW_DESC uc{};
         uc.Format = DXGI_FORMAT_R8_UNORM;
         uc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-        context_.device()->CreateUnorderedAccessView(confTex_.Get(), nullptr, &uc, cpu(densifyPass_, 5));
+        context_.device()->CreateUnorderedAccessView(confTex_.Get(), nullptr, &uc, cpu(densifyPass_, 6));
     }
     return true;
 }
@@ -855,8 +874,8 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
 
     // Guidance from original source-space color before SR/NR. Queue waits are GPU-side.
     bool haveFlow = false;
-    const bool runMotion = nvofStandalone_ || (fgEnabled_&&!frucBackend_) || (srEnabled_ && !desc_.videoSrQuality);
-    if (runMotion && nvof_ && nvof_->initialized()) {
+    const bool runMotion = nvofStandalone_ || xessEnabled() || (fgEnabled_&&!frucBackend_) || (srEnabled_ && !desc_.videoSrQuality);
+    if (runMotion && (amdOf_ || (nvof_ && nvof_->initialized()))) {
         const float dims[8] = {uintBits(nvofW_),uintBits(nvofH_),uintBits(nvofW_),uintBits(nvofH_),0,0,0,0};
         if (prevValid_) {
             tracker_.transition(list,nvofInB_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -872,7 +891,14 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         list->Dispatch((nvofW_+15)/16,(nvofH_+15)/16,1);
         tracker_.uavBarrier(list,nvofInB_.Get());
         tracker_.transition(list,nvofInB_.Get(),D3D12_RESOURCE_STATE_COMMON);
+        if(amdOf_){
+            gpuTimer_.mark(list,GpuStage::Flow);
+            if(!amdOf_->dispatch(list,nvofInB_.Get(),!prevValid_))return false;
+            ++metrics_.amdOfExecuteCount;haveFlow=prevValid_;
+            gpuTimer_.mark(list,GpuStage::Flow,true);
+        }
         if (prevValid_) {
+            if(!amdOf_){
             gpuTimer_.mark(list,GpuStage::Flow);
             if(!ring_.submitAndSignal(slot))return false;
             haveFlow=nvof_->execute(ring_.lastSignaledValue(),st);
@@ -883,7 +909,9 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             }
             list=ring_.acquireNext(slot,st);if(!list)return false;
             gpuTimer_.mark(list,GpuStage::Flow,true);
+            }
             if(haveFlow) {
+                if(amdOf_)tracker_.transition(list,amdOf_->sceneChanges(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 tracker_.transition(list,nvofRawTex_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 tracker_.transition(list,nvofCostTex_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 tracker_.transition(list,flowTex_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -891,13 +919,14 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
                 tracker_.transition(list,nvofInA_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 tracker_.transition(list,nvofInB_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 const float dc[8]={uintBits(rawW_),uintBits(rawH_),uintBits(nvofW_),uintBits(nvofH_),
-                    uintBits(selectedGrid_),uintBits(0),uintBits(32),uintBits(desc_.validateMotion?3u:0u)};
-                densifyPass_.bind(list,dc,gpuHandleOf(densifyPass_,0).ptr,gpuHandleOf(densifyPass_,4).ptr);
+                    uintBits(selectedGrid_),uintBits(0),uintBits(32),uintBits((desc_.validateMotion?3u:0u)|(amdOf_?4u:0u)|(amdOf_&&!amdOf_->warmedUp()?8u:0u))};
+                densifyPass_.bind(list,dc,gpuHandleOf(densifyPass_,0).ptr,gpuHandleOf(densifyPass_,5).ptr);
                 list->Dispatch((nvofW_+15)/16,(nvofH_+15)/16,1);
                 tracker_.uavBarrier(list,flowTex_.Get());tracker_.uavBarrier(list,confTex_.Get());
                 tracker_.transition(list,nvofInA_.Get(),D3D12_RESOURCE_STATE_COMMON);
                 tracker_.transition(list,nvofInB_.Get(),D3D12_RESOURCE_STATE_COMMON);
                 tracker_.transition(list,nvofRawTex_.Get(),D3D12_RESOURCE_STATE_COMMON);
+                if(amdOf_)tracker_.transition(list,amdOf_->sceneChanges(),D3D12_RESOURCE_STATE_COMMON);
                 tracker_.transition(list,nvofCostTex_.Get(),D3D12_RESOURCE_STATE_COMMON);
                 tracker_.transition(list,flowTex_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 tracker_.transition(list,confTex_.Get(),D3D12_RESOURCE_STATE_COMMON);
@@ -1075,6 +1104,17 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         tracker_.transition(list, videoFrame_[parity].Get(), D3D12_RESOURCE_STATE_COMMON);
 
     }
+    if(xessEnabled()){
+        auto* input=haveFlow?baseFlow_.Get():nrZeroMotion_.Get();
+        tracker_.transition(list,input,D3D12_RESOURCE_STATE_COPY_SOURCE);
+        tracker_.transition(list,presentMotion_[parity].Get(),D3D12_RESOURCE_STATE_COPY_DEST);
+        list->CopyResource(presentMotion_[parity].Get(),input);
+        tracker_.transition(list,input,D3D12_RESOURCE_STATE_COMMON);
+        tracker_.transition(list,presentMotion_[parity].Get(),D3D12_RESOURCE_STATE_COMMON);
+        presentMotionValid_[parity]=haveFlow&&!reset;
+        motionPreviousSource_[parity]=previousSource_;
+    }
+    previousSource_=sourceFrameId;
     if(!fgEnabled_)gpuTimer_.resolve(list);
     if (!ring_.submitAndSignal(slot)) return false;
     if(!fgEnabled_)gpuTimer_.submitted(ring_.lastSignaledValue());
@@ -1191,10 +1231,18 @@ bool EnhanceGraph::resolveGeneration(FrameOutputs& out)
 }
 
 bool EnhanceGraph::applySettings(const engine::EnhancementSettings& s){
-    if((s.frameGenerationBackend==engine::FrameGenerationBackend::Fruc&&s.multiplier>1&&!frucBackend_)||s.frameGenerationBackend!=desc_.frameGenerationBackend||(frucBackend_&&s.multiplier>1&&s.multiplier!=desc_.fgMultiplier)||s.videoSrQuality!=desc_.videoSrQuality||!s.validate().empty()||(s.multiplier>1&&(!fgCapsAvailable_||s.multiplier-1>uint32_t(fgMultiFrameMax_))))return false;
+    // A non-NVIDIA adapter keeps the user's requested NR setting in the UI
+    // but has this NGX-only stage explicitly disabled in the graph. Do not
+    // reject unrelated live settings in that degraded, playable state.
+    if(s.nr&&desc_.enableNr&&!nrHandle_)return false;
+    if(s.opticalFlowBackend!=desc_.opticalFlowBackend||s.amdFlowHalfResolution!=desc_.amdFlowHalfResolution)return false;
+    // DLSS and FRUC allocate multiplier-specific feature/output resources;
+    // XeSS has a fixed 2X proxy swapchain contract. Settings callers must
+    // rebuild instead of accepting a change that cannot take effect in place.
+    if(s.multiplier!=desc_.fgMultiplier||(s.frameGenerationBackend==engine::FrameGenerationBackend::Fruc&&s.multiplier>1&&!frucBackend_)||s.frameGenerationBackend!=desc_.frameGenerationBackend||s.videoSrQuality!=desc_.videoSrQuality||!s.validate().empty()||(s.multiplier>1&&s.frameGenerationBackend!=engine::FrameGenerationBackend::XeSS&&(!fgCapsAvailable_||s.multiplier-1>uint32_t(fgMultiFrameMax_))))return false;
     desc_.contentRate=s.content;desc_.model=s.model;desc_.residual=s.residual;desc_.protection=s.protection;desc_.settingsRevision=s.revision;
     desc_.fgMultiplier=std::max(2u,s.multiplier);desc_.enableNvofStandalone=s.nr&&!desc_.stillImage;nvofStandalone_=desc_.enableNvofStandalone;
-    setNrEnabled(s.nr);setFgEnabled(s.multiplier>1);
+    setNrEnabled(s.nr);setFgEnabled(s.multiplier>1&&s.frameGenerationBackend!=engine::FrameGenerationBackend::XeSS);
     veyra::log::info("settings",std::format("requested revision={} intensity={} tone={} structure={} skin={} style={} autoMask={} UI={} residual={}/{}/{}/{}/{} multiplier={}",s.revision,s.model.intensity,s.model.tone,s.model.structure,s.model.skin,s.model.style,s.model.autoMask,s.model.uiCorrection,s.residual.total,s.residual.darken,s.residual.brighten,s.residual.color,s.residual.luminance,s.multiplier));
     return true;
 }
@@ -1258,6 +1306,8 @@ void EnhanceGraph::shutdown()
         nrHandle_ = nullptr;
     }
     frucBackend_.reset();
+    amdOf_.reset();
+    for(auto& motion:presentMotion_)motion.Reset();
     if (fgBackend_) fgBackend_->release();
     if(videoSrBackend_){videoSrBackend_->release();videoSrBackend_.reset();}
     if (srBackend_) srBackend_->release();

@@ -6,6 +6,7 @@ Texture2D<int2> rawFlow : register(t0);   // grid-extent SHORT2
 Texture2D<float4> previousColor : register(t2);
 Texture2D<float4> currentColor : register(t3);
 Texture2D<uint> rawCost : register(t1);   // grid-extent cost (0..255, higher = worse)
+Texture2D<uint> sceneChanges : register(t4); // FidelityFX SCD: history bits at (1,0)
 
 RWTexture2D<float2> flowOut : register(u0);  // source extent, pixels
 RWTexture2D<float> confOut : register(u1);   // source extent [0,1], cost and reprojection
@@ -26,12 +27,17 @@ cbuffer NvofDensifyConstants : register(b0)
 void main(uint3 globalId : SV_DispatchThreadID)
 {
     if (globalId.x >= workingW || globalId.y >= workingH) return;
+    // FidelityFX excludes frame indices 0..5 and the four-frame cut history.
+    if ((validationFlags & 8u) != 0 || ((validationFlags & 4u) != 0 && (sceneChanges[uint2(1,0)] & 15u) != 0)) {
+        flowOut[globalId.xy]=0;confOut[globalId.xy]=0;return;
+    }
     const uint gx = min(globalId.x / gridSize, gridW - 1);
     const uint gy = min(globalId.y / gridSize, gridH - 1);
     const int2 raw = rawFlow[uint2(gx, gy)];
-    float2 v = float2(raw) / 32.0;          // S10.5 -> float pixels (fixed)
+    const bool amd = (validationFlags & 4u) != 0;
+    float2 v = float2(raw) / (amd ? 1.0 : 32.0);
     if (negate != 0) v = -v;
-    const uint cost = rawCost[uint2(gx, gy)];
+    const uint cost = amd ? 0 : rawCost[uint2(gx, gy)];
     // Higher cost = less reliable: confidence falls as cost rises.
     float confidence = float(255u - min(cost, 255u)) / 255.0;
     if (cost >= costThreshold) { v = 0; confidence = 0; }

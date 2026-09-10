@@ -41,6 +41,15 @@ bool NvencD3D12Encoder::open(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotRing& 
     NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS open{};open.version=NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;open.apiVersion=NVENCAPI_VERSION;open.device=ctx.device();open.deviceType=NV_ENC_DEVICE_TYPE_DIRECTX;
     if(!p.check(p.api.nvEncOpenEncodeSessionEx(&open,&p.encoder),"OpenD3D12Session"))return false;
     const GUID codec=hevc?NV_ENC_CODEC_HEVC_GUID:NV_ENC_CODEC_H264_GUID;
+    int maxWidth=0,maxHeight=0;
+    NV_ENC_CAPS_PARAM caps{};caps.version=NV_ENC_CAPS_PARAM_VER;caps.capsToQuery=NV_ENC_CAPS_WIDTH_MAX;
+    if(!p.check(p.api.nvEncGetEncodeCaps(p.encoder,codec,&caps,&maxWidth),"WidthMax"))return false;
+    caps.capsToQuery=NV_ENC_CAPS_HEIGHT_MAX;
+    if(!p.check(p.api.nvEncGetEncodeCaps(p.encoder,codec,&caps,&maxHeight),"HeightMax"))return false;
+    veyra::log::info("nvenc",std::format("codec={} requested={}x{} maximum={}x{}",hevc?"HEVC":"H264",p.w,p.h,maxWidth,maxHeight));
+    if(maxWidth<=0||maxHeight<=0||p.w>unsigned(maxWidth)||p.h>unsigned(maxHeight)||(p.w&1)||(p.h&1)){
+        veyra::log::error("nvenc","requested dimensions unsupported by selected codec/NV12 input");return false;
+    }
     NV_ENC_PRESET_CONFIG preset{};preset.version=NV_ENC_PRESET_CONFIG_VER;preset.presetCfg.version=NV_ENC_CONFIG_VER;
     if(!p.check(p.api.nvEncGetEncodePresetConfigEx(p.encoder,codec,NV_ENC_PRESET_P4_GUID,NV_ENC_TUNING_INFO_LOW_LATENCY,&preset),"GetPreset"))return false;
     preset.presetCfg.frameIntervalP=1;preset.presetCfg.gopLength=120;preset.presetCfg.rcParams.rateControlMode=NV_ENC_PARAMS_RC_CONSTQP;

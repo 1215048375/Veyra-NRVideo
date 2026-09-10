@@ -16,6 +16,8 @@ public:
     // Explicit integration-test capture only; never called by playback/export.
     bool readPresentedFrameForTest(gfx::D3D12DeviceContext&,gfx::CommandSlotRing&,sink::RgbaImage&);
     uint64_t submittedCount() const {return sink_.presentCount();}
+    uint64_t xessGeneratedCount() const {return sink_.xess()?sink_.xess()->generatedCount():0;}
+    bool xessActive() const {return sink_.xess()!=nullptr;}
 diagnostics::GpuSample blitTiming(ID3D12Fence* f,uint64_t revision=0){gpuTimer_.collect(f);if(revision&&gpuTimer_.last().identity.settingsRevision!=revision){diagnostics::GpuSample pending;pending.state=diagnostics::SampleState::Pending;return pending;}return gpuTimer_.last().gpu[size_t(diagnostics::GpuStage::Blit)];}
 private:
     diagnostics::GpuTimer gpuTimer_;
@@ -26,6 +28,9 @@ private:
     unsigned lastBuffer_=0;bool hasPresented_=false;
     HWND window_=nullptr;
     std::chrono::steady_clock::time_point lastResize_{};
+    std::chrono::steady_clock::time_point lastXessFrame_{};
+    pipeline::FrameIdentity lastXessIdentity_{};
+    bool xessWasEnabled_=false;
     void refresh(ID3D12Device*);
 };
 }

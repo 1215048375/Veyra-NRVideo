@@ -21,6 +21,11 @@ namespace veyra::engine {
 namespace { std::string utf8(const std::wstring& s){const int n=WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),nullptr,0,nullptr,nullptr);std::string r(n,0);WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),r.data(),n,nullptr,nullptr);return r;} }
 bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOptions options,bool hevc,std::atomic<bool>& cancel,const std::function<void(double,const std::wstring&)>& progress,unsigned maxFrames,const std::function<bool()>& frameBoundary,const std::function<void(const ExportCounts&)>& counts){
     if(std::filesystem::exists(output)||std::filesystem::exists(output+L".partial")){progress(0,L"目标或partial文件已存在，请使用其他名称");return false;}
+    if(options.fg&&options.settings.frameGenerationBackend==FrameGenerationBackend::XeSS){
+        progress(0,L"XeSS 帧生成目前仅支持预览；导出请选择 DLSS、FRUC 或关闭补帧");
+        veyra::log::warn("export","XeSS FG export rejected: public XeSS swapchain API has no encoder texture output contract");
+        return false;
+    }
     gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;source::MediaFileSource source;pipeline::EnhanceGraph graph(ctx,ring);sink::NvencD3D12Encoder enc;
     AVFormatContext *mux=nullptr,*audioInput=nullptr;AVStream* videoStream=nullptr;AVStream* audioStream=nullptr;AVPacket* audioPacket=av_packet_alloc();
     int audioIndex=-1;bool audioPending=false,audioEof=false,ok=false,headerWritten=false;int64_t written=0;double audioEndSeconds=0,videoOriginSeconds=0;
@@ -28,8 +33,13 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
     try { do {
         Status st=Status::Ok;gfx::DeviceContextDesc dd;dd.commandSlotCount=6;
         if(!ctx.initialize(dd,st)||!ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),6,st))break;
+        if(!ctx.adapter().isNvidia){
+            progress(0,L"当前视频导出使用 NVIDIA NVENC；尚未实现 AMD AMF 或 Intel 编码后端");
+            veyra::log::warn("export","export rejected: selected adapter has no NVIDIA NVENC; AMD AMF and Intel encoder backends are not implemented");
+            break;
+        }
         source::SourceOpenDesc od;od.path=input;od.preferHardwareDecode=false;if(!source.open(od))break;
-        const auto info=source.info();if(info.width>3840||info.height>2160||!info.width||!info.height)break;
+        const auto info=source.info();if(!pipeline::Extent{info.width,info.height}.valid()){progress(0,L"输入尺寸超出GPU单纹理能力");break;}
         // Bounded metadata scan; decoded pixels are not retained. Rewind the
         // file source afterwards, preserving all source frames for the export.
         std::vector<double> samples;bool scanError=false;
@@ -41,8 +51,8 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
         source.close();if(!source.open(od))break; // reopen from the true beginning, including negative PTS
         const AVRational rate=av_mul_q({rateNum,rateDen},{int(options.fg?options.fgMultiplier:1),1});
         veyra::log::info("export-timeline",std::format("CFR declared={}/{} candidate={}/{} timestampQuantum={} sampled={} output={}/{} (timestamp-consistent candidate, quantized short clips may be ambiguous; every PTS validated)",info.nominalRateNum,info.nominalRateDen,rateNum,rateDen,info.timestampQuantum,samples.size(),rate.num,rate.den));
-        const auto resolution=pipeline::ResolutionPlan::make({info.width,info.height},options.sr,pipeline::NrSizePolicy::Native,true,options.settings.revision);
-        pipeline::EnhanceGraphDesc gd;gd.sourceWidth=info.width;gd.sourceHeight=info.height;gd.workWidth=resolution.base.width;gd.workHeight=resolution.base.height;gd.nrWidth=resolution.nr.width;gd.nrHeight=resolution.nr.height;gd.flowWidth=resolution.flow.width;gd.flowHeight=resolution.flow.height;gd.enableSr=resolution.srApplied;gd.videoSrQuality=options.settings.videoSrQuality;gd.enableNr=options.nr;gd.enableFg=options.fg;gd.fgMultiplier=options.fgMultiplier;gd.frameGenerationBackend=options.settings.frameGenerationBackend;gd.enableNvofStandalone=options.nr;gd.model=options.settings.model;gd.residual=options.settings.residual;gd.protection=options.settings.protection;gd.settingsRevision=options.settings.revision;gd.flowQuality=options.settings.flow;gd.contentRate=options.settings.content;gd.runtimeAbsPath=runtime::localRuntimeDirectory().wstring();
+        const auto resolution=pipeline::ResolutionPlan::make({info.width,info.height},options.sr,pipeline::NrSizePolicy::Native,true,options.settings.revision,options.settings.srTarget);
+        pipeline::EnhanceGraphDesc gd;gd.sourceWidth=info.width;gd.sourceHeight=info.height;gd.workWidth=resolution.base.width;gd.workHeight=resolution.base.height;gd.nrWidth=resolution.nr.width;gd.nrHeight=resolution.nr.height;gd.flowWidth=resolution.flow.width;gd.flowHeight=resolution.flow.height;gd.enableSr=resolution.srApplied;gd.videoSrQuality=options.settings.videoSrQuality;gd.enableNr=options.nr;gd.enableFg=options.fg;gd.fgMultiplier=options.fgMultiplier;gd.frameGenerationBackend=options.settings.frameGenerationBackend;gd.enableNvofStandalone=options.nr;gd.model=options.settings.model;gd.residual=options.settings.residual;gd.protection=options.settings.protection;gd.settingsRevision=options.settings.revision;gd.flowQuality=options.settings.flow;gd.opticalFlowBackend=options.settings.opticalFlowBackend;gd.amdFlowHalfResolution=options.settings.amdFlowHalfResolution;gd.contentRate=options.settings.content;gd.runtimeAbsPath=runtime::localRuntimeDirectory().wstring();
         if(!graph.initialize(gd)||!graph.createViews())break;
         if(avformat_alloc_output_context2(&mux,nullptr,"mp4",utf8(partial).c_str())<0||!mux)break;
         videoStream=avformat_new_stream(mux,nullptr);if(!videoStream)break;videoStream->time_base={rate.den,rate.num};videoStream->avg_frame_rate=rate;

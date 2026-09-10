@@ -33,6 +33,7 @@ struct AVFrame;
 struct SwsContext;
 struct NVSDK_NGX_Parameter;
 struct NVSDK_NGX_Handle;
+namespace veyra::guidance { class AmdOpticalFlow; }
 
 namespace veyra::gfx {
 class D3D12DeviceContext;
@@ -74,6 +75,8 @@ struct EnhanceGraphDesc {
     engine::FrameGenerationBackend frameGenerationBackend=engine::FrameGenerationBackend::Dlss;
     uint64_t settingsRevision=1;
     engine::FlowQuality flowQuality=engine::FlowQuality::Balanced;
+    engine::OpticalFlowBackend opticalFlowBackend=engine::OpticalFlowBackend::Nvidia;
+    bool amdFlowHalfResolution=false;
     engine::ContentRate contentRate=engine::ContentRate::Transport;
     engine::NrSettings model;
     engine::ResidualSettings residual;
@@ -139,6 +142,7 @@ public:
         uint64_t nrEvaluateCount = 0;
         uint64_t srEvaluateCount = 0;
         uint64_t nvofExecuteCount = 0;
+        uint64_t amdOfExecuteCount = 0;
         uint64_t nvofFrameFailures = 0;
         uint64_t fgGeneratedFrames = 0;
         uint64_t fgSubmittedCandidates = 0, fgDisabledFrames = 0;
@@ -164,6 +168,11 @@ public:
     bool srEnabled() const { return srEnabled_; }
     bool nrEnabled() const { return nrEnabled_; }
     bool fgEnabled() const { return fgEnabled_; }
+    bool xessEnabled() const { return desc_.enableFg && !desc_.noFeatures && !desc_.stillImage && desc_.frameGenerationBackend==engine::FrameGenerationBackend::XeSS; }
+    ID3D12Resource* presentMotion(uint32_t slot) const { return presentMotion_[slot%2].Get(); }
+    ID3D12Resource* presentDepth() const { return depthTex_.Get(); }
+    bool presentMotionValid(uint32_t slot) const { return presentMotionValid_[slot%2]; }
+    uint64_t motionPreviousSource(uint32_t slot) const { return motionPreviousSource_[slot%2]; }
     uint64_t lastNvofSignal() const;
 
     // Present-side access to the produced frame slots (probe sink path).
@@ -227,6 +236,9 @@ private:
     ComPtr<ID3D12Resource> workRgba_;
     ComPtr<ID3D12Resource> videoSrInput_,videoSrOutput_;
     ComPtr<ID3D12Resource> nrInput_,residualRgba_,nrFlow_,baseFlow_;
+    ComPtr<ID3D12Resource> presentMotion_[2];
+    bool presentMotionValid_[2]={};
+    uint64_t motionPreviousSource_[2]={},previousSource_=0;
     ComPtr<ID3D12Resource> proxyTex_;
     ComPtr<ID3D12Resource> neuralTex_;
     ComPtr<ID3D12Resource> finalRgba_;
@@ -263,6 +275,7 @@ private:
     std::unique_ptr<ngx::NgxCoreHost> coreHost_;
     std::unique_ptr<ngx::DlssNrRuntimeAdapter> nrAdapter_;
     std::unique_ptr<ngx::DlssSrBackend> srBackend_;
+    std::unique_ptr<guidance::AmdOpticalFlow> amdOf_;
     std::unique_ptr<ngx::VideoSrBackend> videoSrBackend_;
     std::unique_ptr<ngx::DlssFgBackend> fgBackend_;
     std::unique_ptr<ngx::FrucBackend> frucBackend_;

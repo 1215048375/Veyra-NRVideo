@@ -25,6 +25,8 @@ option(VEYRA_ENABLE_DLSS_SR "Enable public DLSS SR backend" OFF)
 option(VEYRA_ENABLE_DLSS_FG "Enable public DLSSG backend" OFF)
 option(VEYRA_ENABLE_NVOF "Enable NVIDIA Optical Flow guidance" OFF)
 option(VEYRA_ENABLE_D3D12_DEBUG "Enable D3D12 debug layer" ON)
+set(VEYRA_FIDELITYFX_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party_local/amd/FidelityFX-SDK/sdk" CACHE PATH "Local official FidelityFX SDK 1.1.4")
+set(VEYRA_XESS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party_local/intel/xess-3.0.2" CACHE PATH "Local Intel XeSS SDK 3.0.2")
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(VeyraWarnings)
@@ -55,10 +57,15 @@ add_library(veyra_gfx STATIC
   src/gfx/D3D12DeviceContext.cpp
   src/gfx/CommandSlotRing.cpp
   src/gfx/PresentSink.cpp
+  src/gfx/XessPresenter.cpp
 )
 veyra_apply_warnings(veyra_gfx)
 target_compile_features(veyra_gfx PUBLIC cxx_std_20)
 target_link_libraries(veyra_gfx PUBLIC veyra_base d3d12 dxgi dxguid)
+if(EXISTS "${VEYRA_XESS_ROOT}/inc/xess_fg/xefg_swapchain_d3d12.h")
+  target_include_directories(veyra_gfx PRIVATE "${VEYRA_XESS_ROOT}/inc")
+  target_compile_definitions(veyra_gfx PRIVATE VEYRA_HAS_XESS=1)
+endif()
 if(VEYRA_ENABLE_D3D12_DEBUG)
   target_compile_definitions(veyra_gfx PUBLIC VEYRA_D3D12_DEBUG=1)
 endif()
@@ -456,6 +463,11 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_compile_definitions(veyra_image_dimension_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN VEYRA_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(veyra_image_dimension_tests PRIVATE veyra_engine)
   add_executable(veyra_preview_geometry_tests tests/integration/PreviewGeometryTests.cpp)
+  add_executable(veyra_experimental_backend_tests tests/integration/ExperimentalBackendTests.cpp)
+  target_compile_features(veyra_experimental_backend_tests PRIVATE cxx_std_20)
+  target_include_directories(veyra_experimental_backend_tests PRIVATE ${FFMPEG_INCLUDE_DIRS})
+  target_compile_definitions(veyra_experimental_backend_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_link_libraries(veyra_experimental_backend_tests PRIVATE veyra_engine)
   target_compile_features(veyra_preview_geometry_tests PRIVATE cxx_std_20)
   target_include_directories(veyra_preview_geometry_tests PRIVATE ${FFMPEG_INCLUDE_DIRS})
   target_compile_definitions(veyra_preview_geometry_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -501,6 +513,14 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
 
   # Headless quality-core runner (Playbook R3.3): the phase5 gate's quality
   add_library(veyra_engine STATIC src/engine/EngineController.cpp src/engine/EngineControllerImage.cpp src/engine/TiledImageProcessor.cpp src/engine/PresetStore.cpp src/engine/VideoPresenter.cpp src/engine/VideoExportJob.cpp src/engine/ExportJobManager.cpp src/engine/Subtitles.cpp)
+  target_sources(veyra_pipeline PRIVATE src/guidance/AmdOpticalFlow.cpp)
+  if(EXISTS "${VEYRA_FIDELITYFX_ROOT}/bin/ffx_sdk/ffx_opticalflow_x64.lib")
+    target_compile_definitions(veyra_pipeline PRIVATE VEYRA_HAS_AMD_OF=1)
+    target_include_directories(veyra_pipeline PRIVATE "${VEYRA_FIDELITYFX_ROOT}/include")
+    target_link_libraries(veyra_pipeline PRIVATE
+      "${VEYRA_FIDELITYFX_ROOT}/bin/ffx_sdk/ffx_opticalflow_x64.lib"
+      "${VEYRA_FIDELITYFX_ROOT}/bin/ffx_sdk/ffx_backend_dx12_x64.lib")
+  endif()
   target_compile_features(veyra_engine PUBLIC cxx_std_20)
   target_compile_options(veyra_engine PRIVATE /utf-8)
   target_compile_definitions(veyra_engine PUBLIC VEYRA_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}" VEYRA_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")

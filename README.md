@@ -11,7 +11,8 @@ Veyra is a native Windows video player and image-enhancement workspace. It combi
 - 默认日常模式：大画面、底部播放控制、打开媒体、采集卡、音量、字幕和全屏。
 - 专业模式：带展开动画的参数工作台；同一播放会话不中断。
 - H.264 / HEVC 视频、PNG / JPEG 图片、DirectShow / UVC 采集设备。
-- 可选 DLSS SR、RTX Video SR、实验性 NR、NVOF 运动置信度，以及 DLSS / FRUC 补帧后端。
+- 可选 DLSS SR、RTX Video SR、实验性 NVIDIA NR、NVOF 运动置信度，以及 DLSS / FRUC 补帧后端。
+- 实验性 Intel XeSS 显示补帧 2X，以及 AMD FidelityFX 光流运动估算；XeSS 当前只用于预览。
 - 原图与增强结果的即时对比、分屏拖动、专业模式内的画面缩放和性能诊断。
 - PNG / JPEG 图片导出，D3D12 NVENC H.264 / HEVC 视频导出。
 - Windows 11 Desktop Acrylic 控制面板；视频区域保持不透明，未打开媒体时为纯黑。
@@ -19,7 +20,8 @@ Veyra is a native Windows video player and image-enhancement workspace. It combi
 - Daily mode by default: a large picture area with playback, media opening, capture, volume, subtitles, and fullscreen controls.
 - Professional mode: an expanding settings workspace without interrupting the current session.
 - H.264 / HEVC video, PNG / JPEG images, and DirectShow / UVC capture devices.
-- Optional DLSS SR, RTX Video SR, experimental NR, NVOF motion confidence, plus DLSS and FRUC frame-generation backends.
+- Optional DLSS SR, RTX Video SR, experimental NVIDIA NR, NVOF motion confidence, plus DLSS and FRUC frame-generation backends.
+- Experimental Intel XeSS 2X display frame generation and AMD FidelityFX optical-flow estimation; XeSS is currently preview-only.
 - Same-frame comparison, split view, preview zoom in Professional mode, and performance diagnostics.
 - PNG / JPEG image export and D3D12 NVENC H.264 / HEVC video export.
 - Windows 11 Desktop Acrylic for controls; the video area stays opaque and is pure black with no media open.
@@ -91,6 +93,8 @@ Video / image / capture card
 - Depth is not a shipped default provider. Current motion guidance uses NVOF confidence handling where available.
 - 3X and 4X frame generation are experimental. A selected multiplier does not guarantee that every source-frame pair produces a valid generated frame or that every configuration runs in real time.
 - Actual scanout latency, long-term stability, capture audio behavior, and every GPU / driver combination require further real-device validation.
+- AMD FidelityFX supplies optical-flow estimation only. There is no AMD implementation of DLSS5/NR, DLSS SR, NVIDIA FRUC, DLSS frame generation, NVENC export, or an AMD AMF export backend. On a non-NVIDIA adapter, Veyra disables those NVIDIA paths; XeSS may still initialize when its runtime and device support it.
+- XeSS 2X diagnostics confirm SDK submissions only. They do not prove scanout frame rate, visual quality, or AMD-GPU compatibility.
 - No NVIDIA runtime, SDK archive, headers, libraries, models, or samples are in this Git repository. The user-authorized Release Runtime Pack is a separate Release-only payload and remains experimental.
 
 ## 项目结构 / Project layout

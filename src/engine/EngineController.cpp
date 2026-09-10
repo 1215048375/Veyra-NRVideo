@@ -100,12 +100,20 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             pipeline::EnhanceGraphDesc gd;gd.sourceWidth=width;gd.sourceHeight=height;
             gd.rgbInput=isImage||(isCapture&&activeSource->info().color.pixelFormat==pipeline::SourcePixelFormat::Bgra8);
             gd.yuy2Input=isCapture&&activeSource->info().color.pixelFormat==pipeline::SourcePixelFormat::Yuy2;gd.stillImage=isImage;
-            const auto resolution=pipeline::ResolutionPlan::make({width,height},options.sr,options.realtime?pipeline::NrSizePolicy::Realtime:pipeline::NrSizePolicy::Native,isImage,1);
+            const auto resolution=pipeline::ResolutionPlan::make({width,height},options.sr,options.realtime?pipeline::NrSizePolicy::Realtime:pipeline::NrSizePolicy::Native,isImage,options.settings.revision,options.settings.srTarget);
             gd.workWidth=resolution.base.width;gd.workHeight=resolution.base.height;gd.nrWidth=resolution.nr.width;gd.nrHeight=resolution.nr.height;gd.flowWidth=resolution.flow.width;gd.flowHeight=resolution.flow.height;
-            gd.enableSr=resolution.srApplied;gd.videoSrQuality=options.settings.videoSrQuality;gd.enableNr=options.nr;gd.enableFg=options.fg;gd.fgMultiplier=options.fgMultiplier;gd.frameGenerationBackend=options.settings.frameGenerationBackend;gd.enableNvofStandalone=options.nr;
+            const bool nvidiaAdapter=ctx.adapter().isNvidia;
+            const bool xessFg=options.settings.frameGenerationBackend==FrameGenerationBackend::XeSS;
+            gd.enableSr=resolution.srApplied&&nvidiaAdapter;gd.videoSrQuality=options.settings.videoSrQuality;gd.enableNr=options.nr&&nvidiaAdapter;gd.enableFg=options.fg&&(nvidiaAdapter||xessFg);gd.fgMultiplier=options.fgMultiplier;gd.frameGenerationBackend=options.settings.frameGenerationBackend;gd.enableNvofStandalone=gd.enableNr;
             gd.noFeatures=false;gd.model=options.settings.model;gd.residual=options.settings.residual;gd.protection=options.settings.protection;gd.settingsRevision=options.settings.revision;gd.flowQuality=options.settings.flow;gd.contentRate=options.settings.content;
+            gd.opticalFlowBackend=options.settings.opticalFlowBackend;gd.amdFlowHalfResolution=options.settings.amdFlowHalfResolution;
             gd.runtimeAbsPath=runtime::localRuntimeDirectory().wstring();
             if(!graph.initialize(gd)||!presenter.open(ctx,window,graph)||!graph.createViews()){status(L"增强初始化失败，请核对本地运行时",true);break;}
+            if(!nvidiaAdapter&&(options.nr||options.sr||(options.fg&&!xessFg))){
+                veyra::log::warn("capability",std::format("non-NVIDIA adapter disabled requested features: nr={} sr={} fgBackend={} flowBackend={}",options.nr,options.sr,frameGenerationBackendName(options.settings.frameGenerationBackend),opticalFlowBackendName(options.settings.opticalFlowBackend)));
+                status(L"当前非 NVIDIA 适配器：NR、NVIDIA 超分与 DLSS/FRUC 已禁用；可使用 XeSS 预览和 AMD 光流",false);
+            }
+            if(graph.xessEnabled()&&!presenter.xessActive())status(L"XeSS 未启用：运行时或设备不兼容；当前为普通呈现",false);
             if(physicalCapture&&!captureSource.start()){status(L"无法启动采集，请查看诊断",true);break;}
             {std::lock_guard lock(mutex_);snapshot_.duration=duration;snapshot_.running=true;snapshot_.transport=TransportState::Playing;snapshot_.image=isImage;snapshot_.capture=isCapture;snapshot_.applied=options.snapshot();snapshot_.desired=desired_;}
             status(isImage?L"图片已增强，可保存PNG/JPEG":std::format(L"{} | 输入 {}×{} / 底图 {}×{} / NR {}×{} / 光流 {}×{} / FG与输出 {}×{} | {}",isCapture?L"实时采集":L"播放",width,height,gd.workWidth,gd.workHeight,gd.nrWidth,gd.nrHeight,gd.flowWidth,gd.flowHeight,gd.workWidth,gd.workHeight,gd.nrWidth<gd.workWidth?L"实时内部处理并回填":L"原生NR（性能成本较高）"));
@@ -149,16 +157,22 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 if(requested.revision!=previous.revision){
                     drainLivePresentation();
                     auto next=PlayerOptions::from(requested);auto nextDesc=gd;
-                    const auto plan=pipeline::ResolutionPlan::make({width,height},next.sr,requested.nrPolicy,isImage,requested.revision);
+                    const auto plan=pipeline::ResolutionPlan::make({width,height},next.sr,requested.nrPolicy,isImage,requested.revision,requested.srTarget);
                     nextDesc.workWidth=plan.base.width;nextDesc.workHeight=plan.base.height;nextDesc.nrWidth=plan.nr.width;nextDesc.nrHeight=plan.nr.height;nextDesc.flowWidth=plan.flow.width;nextDesc.flowHeight=plan.flow.height;
-                    nextDesc.enableSr=plan.srApplied;nextDesc.videoSrQuality=next.settings.videoSrQuality;nextDesc.enableNr=next.nr;nextDesc.enableFg=next.fg;nextDesc.fgMultiplier=next.fgMultiplier;nextDesc.frameGenerationBackend=next.settings.frameGenerationBackend;nextDesc.enableNvofStandalone=next.nr;
+                    const bool nvidiaAdapter=ctx.adapter().isNvidia;
+                    const bool xessFg=next.settings.frameGenerationBackend==FrameGenerationBackend::XeSS;
+                    nextDesc.enableSr=plan.srApplied&&nvidiaAdapter;nextDesc.videoSrQuality=next.settings.videoSrQuality;nextDesc.enableNr=next.nr&&nvidiaAdapter;nextDesc.enableFg=next.fg&&(nvidiaAdapter||xessFg);nextDesc.fgMultiplier=next.fgMultiplier;nextDesc.frameGenerationBackend=next.settings.frameGenerationBackend;nextDesc.enableNvofStandalone=nextDesc.enableNr;
                     nextDesc.model=requested.model;nextDesc.residual=requested.residual;nextDesc.protection=requested.protection;nextDesc.settingsRevision=requested.revision;nextDesc.flowQuality=requested.flow;nextDesc.contentRate=requested.content;
-                    const bool rebuild=gd.frameGenerationBackend!=nextDesc.frameGenerationBackend||(nextDesc.frameGenerationBackend==FrameGenerationBackend::Fruc&&(gd.fgMultiplier!=nextDesc.fgMultiplier||gd.enableFg!=nextDesc.enableFg))||gd.videoSrQuality!=nextDesc.videoSrQuality||gd.flowQuality!=nextDesc.flowQuality||gd.workWidth!=nextDesc.workWidth||gd.workHeight!=nextDesc.workHeight||gd.nrWidth!=nextDesc.nrWidth||gd.nrHeight!=nextDesc.nrHeight||gd.flowWidth!=nextDesc.flowWidth||gd.flowHeight!=nextDesc.flowHeight;
+                    nextDesc.opticalFlowBackend=requested.opticalFlowBackend;nextDesc.amdFlowHalfResolution=requested.amdFlowHalfResolution;
+                    const bool rebuild=gd.opticalFlowBackend!=nextDesc.opticalFlowBackend||gd.amdFlowHalfResolution!=nextDesc.amdFlowHalfResolution||gd.enableNr!=nextDesc.enableNr||gd.enableFg!=nextDesc.enableFg||gd.frameGenerationBackend!=nextDesc.frameGenerationBackend||gd.fgMultiplier!=nextDesc.fgMultiplier||gd.videoSrQuality!=nextDesc.videoSrQuality||gd.flowQuality!=nextDesc.flowQuality||gd.workWidth!=nextDesc.workWidth||gd.workHeight!=nextDesc.workHeight||gd.nrWidth!=nextDesc.nrWidth||gd.nrHeight!=nextDesc.nrHeight||gd.flowWidth!=nextDesc.flowWidth||gd.flowHeight!=nextDesc.flowHeight;
                     bool accepted=ring.drainQueue();out={};hasOutput=false;
                     if(accepted&&rebuild){presenter.close();graph.shutdown();accepted=graph.initialize(nextDesc)&&presenter.open(ctx,window,graph)&&graph.createViews();
                         if(!accepted){presenter.close();graph.shutdown();if(!graph.initialize(gd)||!presenter.open(ctx,window,graph)||!graph.createViews()){status(L"设置失败且旧资源恢复失败，已停止",true);break;}}
                     }else if(accepted)accepted=graph.applySettings(requested);
-                    if(accepted){options=next;gd=nextDesc;transaction=true;reset=true;}
+                    if(accepted){
+                        options=next;gd=nextDesc;transaction=true;reset=true;
+                        if(!nvidiaAdapter&&(next.nr||next.sr||(next.fg&&!xessFg)))veyra::log::warn("capability",std::format("non-NVIDIA adapter disabled requested settings revision={} nr={} sr={} fgBackend={} flowBackend={}",requested.revision,next.nr,next.sr,frameGenerationBackendName(requested.frameGenerationBackend),opticalFlowBackendName(requested.opticalFlowBackend)));
+                    }
                     else {std::lock_guard lock(mutex_);if(desired_.revision==requested.revision)desired_=previous;snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.applying=desired_.revision!=previous.revision;snapshot_.status=L"设置应用失败，已恢复上一套参数";}
                 }
                 const double seek=seekSeconds_.exchange(-1);
@@ -230,7 +244,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                         }else{status(L"参数回滚失败，已停止",true);break;}
                     }else{status(L"增强执行失败；请查看日志",true);break;}
                 }
-                if(transaction){std::lock_guard lock(mutex_);snapshot_.applied=options.snapshot();snapshot_.applying=desired_.revision!=options.settings.revision;snapshot_.status=std::format(L"输入 {}×{} / 底图 {}×{} / NR {}×{} / 光流 {}×{} / FG与输出 {}×{} | {}",width,height,gd.workWidth,gd.workHeight,gd.nrWidth,gd.nrHeight,gd.flowWidth,gd.flowHeight,gd.workWidth,gd.workHeight,gd.nrWidth<gd.workWidth?L"实时内部处理并回填":L"原生NR（性能成本较高）");veyra::log::info("settings",std::format("Applied revision={} sourcePtsMs={} backend={} multiplier={} (source kept open)",options.settings.revision,pts,options.settings.frameGenerationBackend==FrameGenerationBackend::Fruc?"FRUC":"DLSS",options.snapshot().multiplier));}
+                if(transaction){std::lock_guard lock(mutex_);snapshot_.applied=options.snapshot();snapshot_.applying=desired_.revision!=options.settings.revision;snapshot_.status=std::format(L"输入 {}×{} / 底图 {}×{} / NR {}×{} / 光流 {}×{} / FG与输出 {}×{} | {}",width,height,gd.workWidth,gd.workHeight,gd.nrWidth,gd.nrHeight,gd.flowWidth,gd.flowHeight,gd.workWidth,gd.workHeight,gd.nrWidth<gd.workWidth?L"实时内部处理并回填":L"原生NR（性能成本较高）");veyra::log::info("settings",std::format("Applied revision={} sourcePtsMs={} fgBackend={} flowBackend={} multiplier={} (source kept open)",options.settings.revision,pts,frameGenerationBackendName(options.settings.frameGenerationBackend),opticalFlowBackendName(options.settings.opticalFlowBackend),options.snapshot().multiplier));}
                 if(veyra::log::verboseFrameLogs())veyra::log::info("source-identity",std::format("source={} totalRead={} graphProcessed={} cached={} revision={} nvofStandalone={}",pkt.sequence,sourceFrames,frames+1,rereadCached,options.settings.revision,gd.enableNvofStandalone));
                 reset=false;hasOutput=true;
                 const auto processDone=Clock::now();processTimes.add(elapsedMs(processStart));
@@ -325,8 +339,12 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 diagnostics::FrameMetrics measured;pipeline::EnhanceGraph::Metrics graphStats;uint64_t slotWaitCount=0,commandSubmits=0;double slotWaitMilliseconds=0;
                 {std::lock_guard gpuLock(gpuMutex);measured=graph.gpuMetrics();graphStats=graph.metrics();measured.gpu[size_t(diagnostics::GpuStage::Blit)]=presenter.blitTiming(ctx.fence(),options.settings.revision);slotWaitCount=ring.cpuWaitCount()-slotWaitBase;slotWaitMilliseconds=ring.cpuWaitMilliseconds()-slotWaitMsBase;commandSubmits=ring.submitCount()-submitBase;}
                 if(measured.identity.settingsRevision!=options.settings.revision){measured={};measured.identity=out.batch.identity;for(auto& sample:measured.gpu)sample.state=diagnostics::SampleState::Pending;}
+                if(graph.xessEnabled()){
+                    std::lock_guard gpuLock(gpuMutex);
+                    graphStats.fgGeneratedFrames=presenter.xessGeneratedCount();
+                }
                 for(size_t stage=0;stage<measured.gpu.size();++stage){const auto& sample=measured.gpu[stage];if(sample.state==diagnostics::SampleState::Measured&&sample.milliseconds&&sample.end&&sample.end!=lastGpuSampleEnd[stage]){gpuStageTimes[stage].add(*sample.milliseconds);lastGpuSampleEnd[stage]=sample.end;}}
-                measured.resolution=pipeline::ResolutionPlan::make({width,height},options.sr,options.realtime?pipeline::NrSizePolicy::Realtime:pipeline::NrSizePolicy::Native,isImage,options.settings.revision);measured.decodeCpuMs=decodeMs;measured.submitCpuMs=std::chrono::duration<double,std::milli>(processDone-processStart).count();measured.gpuWaitCpuMs=gpuWaitMs;measured.deadlineWaitCpuMs=frameWaitMs;measured.presentCpuMs=framePresentMs;measured.submitted=submitted;measured.expired=expired;measured.sourceFrames=sourceFrames-statsSourceBase;measured.validGenerated=graphStats.fgGeneratedFrames-statsGeneratedBase;measured.queueWatermark=out.batch.count;
+                measured.resolution=pipeline::ResolutionPlan::make({width,height},options.sr,options.realtime?pipeline::NrSizePolicy::Realtime:pipeline::NrSizePolicy::Native,isImage,options.settings.revision,options.settings.srTarget);measured.decodeCpuMs=decodeMs;measured.submitCpuMs=std::chrono::duration<double,std::milli>(processDone-processStart).count();measured.gpuWaitCpuMs=gpuWaitMs;measured.deadlineWaitCpuMs=frameWaitMs;measured.presentCpuMs=framePresentMs;measured.submitted=submitted;measured.expired=expired;measured.sourceFrames=sourceFrames-statsSourceBase;measured.validGenerated=graphStats.fgGeneratedFrames-statsGeneratedBase;measured.queueWatermark=out.batch.count;
                 LiveStats completed;if(liveWorker){std::lock_guard statsLock(liveStatsMutex);completed=liveStats;}
                 const double ageP95=liveWorker?completed.ageP95:captureAges.p95(),waitP95=liveWorker?completed.waitP95:scheduleWaits.p95(),presentP95=liveWorker?completed.presentP95:presentTimes.p95();
                 ++frames;{std::lock_guard lock(mutex_);snapshot_.metrics=measured;if(liveWorker)snapshot_.submissionFps=completed.fps;else snapshot_.submissionFps=submissionTimes.size()>1?double(submissionTimes.size()-1)*1e7/(submissionTimes.back()-submissionTimes.front()):0;snapshot_.position=pts/1000;snapshot_.frames=sourceFrames;snapshot_.generated=graphStats.fgGeneratedFrames;snapshot_.lateMs=lateness;snapshot_.lateP95Ms=sorted.empty()?0:sorted[size_t((sorted.size()-1)*0.95)];snapshot_.fps=(sourceFrames-statsSourceBase)/std::max(0.001,std::chrono::duration<double>(Clock::now()-statsStart).count());
