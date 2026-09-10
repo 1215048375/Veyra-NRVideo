@@ -116,6 +116,12 @@ int main(){
     check(timing.cpuTiming[size_t(diagnostics::CpuStage::Present)].mean==20&&timing.cpuTiming[size_t(diagnostics::CpuStage::Present)].p95==30&&timing.gpuTiming[0].samples==1,"stage window averages actual samples and deduplicates GPU timestamps");
     const auto expiredTiming=stageMetrics.snapshot(14000000);
     check(!expiredTiming.cpuTiming[size_t(diagnostics::CpuStage::Present)].mean&&!expiredTiming.gpuTiming[0].mean,"expired stage samples become unmeasured rather than stale zero");
+    engine::FrameFlowWindow deliveredTiming(1,{1,1,1},0);
+    diagnostics::GpuFrameTiming delivered{{1,1,2},gpuSamples};
+    deliveredTiming.gpuFrame(delivered,1000000);delivered.identity.sourceFrameId=3;deliveredTiming.gpuFrame(delivered,1000000);
+    delivered.identity.settingsRevision=2;deliveredTiming.gpuFrame(delivered,1000000);
+    delivered.identity.settingsRevision=1;delivered.identity.epoch=2;deliveredTiming.gpuFrame(delivered,1000000);
+    check(deliveredTiming.snapshot(2000000).gpuTiming[0].samples==2,"dequeued GPU frames each count once even with equal timestamps; old epoch and revision rejected");
     check(!oldStats.latest.sameWindow(2,{3,4,5})&&!oldStats.latest.sameWindow(1,{4,4,5})&&!oldStats.latest.sameWindow(1,{3,5,5}),"session, epoch and revision all partition flow counters");
     for(int i=0;i<100;++i){e.fingerprint=std::to_string(i);h.add(e);}check(h.size()==64,"bounded diagnostic queue");
     engine::ContentCadence cadence;for(int i=0;i<120;++i)cadence.observe(i*1000.0/60,i%2?.01:0,true);check(cadence.measuredRate()==30,"moving 30 in 60 cadence");

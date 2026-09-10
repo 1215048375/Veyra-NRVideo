@@ -4,6 +4,19 @@
 
 ## 2026-09-11 续接实证（优先于下面历史进度）
 
+### 最新续接：逐帧GPU时间戳交付
+
+音频修复已本地存档`1821120`，随后修复阶段时间戳漏样，不改NR/SR/FG处理顺序。
+
+- 根因一：`GpuTimer::collect`一次收回多个完成查询，但只保留`last_`，上层仅上报最新结果；现增加按需启用的64条完成队列，graph与presenter逐条交给`FrameFlowWindow::gpuFrame`，按epoch/revision过滤，不能重复消费latest。旧harness只读取latest时不启用队列。队列超限丢最旧并记录overflow，不增加GPU等待或像素回读。
+- 根因二：查询槽按source id取模，多张同源补帧争抢一个槽，其余空闲槽未被使用；现从建议槽开始寻找四个槽中的空位，全部未完成才跳过并记缺失数。日志按1/2/4等次数输出，避免持续过载刷屏。
+- 新`veyra_gpu_timing_tests`使用实际RTX5070 D3D12 queue/fence，测试自有hold fence阻止五次同源提交提前完成：四份真实时间戳全部收回，第五份明确skipped1，未完成不返回、take只消费一次。70份不消费测试保留最后64份、overflow6，close清状态。`continuation-gpu-timing-queue`6项PASS0.519秒，测试EXE `959AA7B3FEA1426D86EF01E968ED9E4E0747B40E0B12032C17CFD0E948975301`；等待/人工hold只在此隔离测试。
+- `continuation-gpu-timing-contract`71项PASS0.077秒，验证多帧同timestamp可计数、旧revision/epoch拒绝。`continuation-gpu-timing-final-live`30项PASS8.812秒，真实controller回放60->30->60、NR/2X/4X、暂停和设置；观测源30fps、最近一秒Color样本30，engine日志无query skipped或completion overflow。输入`loop/local/fixed_clips/test_av_1080p.mp4` SHA `7952AD2904C8FED78402BC299EA2A04D1D869663EBCE17BBAC0C297F84FA2A91`，live测试EXE `87AD62DE0F88D4E6BE6389F23B52021FB40D1DBA57D4CC7B3BC91A39BECBC3D8`，worker未变。
+- 构建`build-gpu-timing-queue.log`/`build-gpu-timing-final.log`exit0，使用`scripts/build.ps1 -Root <root> -Preset x64-release`。测试仍经`scripts/acceptance/scheduler-short-test.ps1`，结果在`logs/scheduler-repair-20260910/<名称>.result.json`，最终live args为`@('loop/local/fixed_clips/test_av_1080p.mp4','logs/continuation-repair-20260910/timing-final-live','--half-rate')`。
+- 最终`delivery.ps1 -Root <root>`23项PASS42.146秒，`logs/delivery/88753f608465497dba0c2660bf7755dd/result.json`；应用SHA `F6B5F0E96B81B223FE856E888221CFF51ABBE706C9898A6609A49B7EF90413A2`。实际RTX NR/NVOF/NVENC已执行，gate不证明实卡或原生4K实时60。`git diff --check`通过，新增测试源码不含SDK/运行时。
+
+本项修复收回后丢样与同源查询冲突，不等于全GPU所有者调度完成；样本仍在主循环收集时进入统计窗口，回调/提交阻塞带来的观测滞后、EOF最后未采集样本和完整S3待处理。无实卡/AMD NR验收，无push/发布。下一条唯一任务：把完成观测、deadline与present推进收敛到单GPU所有者状态机，保持最多两批与历史/租约规则，不能靠移除现有反压制造吞吐假象。
+
 ### 最新续接：采集时钟漂移与真实PCM播放位置
 
 基线本地提交`ed5aed3`。本轮仅合成PCM/PTS与静音WASAPI测试，没有打开实体采集卡、修改系统默认音频设备或发布。

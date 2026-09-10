@@ -10,6 +10,7 @@ enum class CpuStage { Decode, Submit, SlotWait, ReadyWait, DeadlineWait, Present
 enum class PairTiming { ArrivalInterval, GeneratedFromA, GeneratedFromB, Count };
 struct TimingAggregate {std::optional<double> mean,p95;uint64_t samples=0;};
 struct GpuSample {SampleState state=SampleState::NotExecuted;std::optional<double> milliseconds;uint64_t begin=0,end=0,frequency=0;};
+struct GpuFrameTiming {pipeline::FrameIdentity identity;std::array<GpuSample,size_t(GpuStage::Count)> gpu{};};
 // Live presentation is asynchronous. Keep the identity of the window that
 // owns these counters so a finished job from a prior reset cannot be reported
 // as work performed by the current settings or temporal epoch.

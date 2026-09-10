@@ -80,6 +80,13 @@ public:
         std::lock_guard lock(mutex_);
         for(unsigned i=0;i<gpuCount;++i){const auto& s=samples[i];if(s.state==diagnostics::SampleState::Measured&&s.milliseconds&&s.end&&s.end!=lastGpuEnd_[i]){lastGpuEnd_[i]=s.end;stage(i,*s.milliseconds,now);}}
     }
+    void gpuFrame(const diagnostics::GpuFrameTiming& frame,int64_t now){
+        std::lock_guard lock(mutex_);
+        if(!metrics_.latest.sameWindow(metrics_.latest.sessionId,frame.identity))return;
+        // Every dequeued record is delivered once. Different frames may have
+        // equal timestamp endpoints, especially empty diagnostic passes.
+        for(unsigned i=0;i<gpuCount;++i){const auto& s=frame.gpu[i];if(s.state==diagnostics::SampleState::Measured&&s.milliseconds)stage(i,*s.milliseconds,now);}
+    }
     void ready(uint64_t batch,bool real,unsigned valid,unsigned invalid,int64_t now){
         std::lock_guard lock(mutex_);
         if(!batch||readyBatches_[batch%readyBatches_.size()]==batch)return;

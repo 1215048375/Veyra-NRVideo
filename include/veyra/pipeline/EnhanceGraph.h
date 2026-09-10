@@ -165,6 +165,8 @@ public:
     uint32_t flowHeight() const {return nvofH_;}
     uint32_t actualFlowPerf() const;
     diagnostics::FrameMetrics gpuMetrics(){gpuTimer_.collect(contextFence());return gpuTimer_.last();}
+    std::vector<diagnostics::GpuFrameTiming> takeGpuTimings(){gpuTimer_.collect(contextFence());return gpuTimer_.takeCompleted();}
+    void recordGpuTimings(){gpuTimer_.recordCompleted();}
     ID3D12Fence* contextFence() const;
     ID3D12Resource* baseReference(unsigned slot=0)const{return baseReferences_[slot%2].Get();}
     ID3D12Resource* sourceReference(unsigned slot=0)const{return sourceReferences_[slot%2].Get();}

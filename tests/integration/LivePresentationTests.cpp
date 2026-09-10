@@ -49,6 +49,9 @@ int wmain(int argc,wchar_t**argv){
     if(halfRate){
         check(until([](const auto& s){return s.processedCompleted>=80;}),"sampled capture sustains more than two seconds");
         const auto s=engine.snapshot();check(s.fps>=27&&s.fps<=33,"GPU completed throughput is about 30fps, not transport60");
+        const auto colorSamples=s.metrics.flow.gpuTiming[size_t(diagnostics::GpuStage::Color)].samples;
+        std::cout<<"GPU_TIMING sourceFps="<<s.fps<<" colorSamples="<<colorSamples<<'\n';
+        check(colorSamples>=20&&colorSamples<=35,"one-second stage window receives completed source-frame timings");
     }
     auto state=engine.snapshot();auto settings=state.desired;settings.nr=true;settings.multiplier=2;engine.requestSettings(settings);
     check(until([](const auto& s){return s.applied.nr&&s.applied.multiplier==2&&!s.applying&&s.nrEvaluated>2&&s.generated>0;}),"NR and 2x transaction while two batches are in flight");

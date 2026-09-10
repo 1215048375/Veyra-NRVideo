@@ -160,6 +160,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             // Only the live source may discard stale input. File playback keeps
             // its audio-clock scheduler and lossless source ordering.
             std::mutex gpuMutex,liveStatsMutex;
+            graph.recordGpuTimings();presenter.recordGpuTimings();
             struct LiveStats {pipeline::FrameIdentity identity;uint64_t submitted=0,expired=0;double waitMs=0,presentMs=0,readyMs=0,ageMs=0,fps=0,ageP95=0,waitP95=0,presentP95=0,readyP95=0;diagnostics::GpuSample blit;};
             LiveStats liveStats;std::deque<int64_t> liveSubmissions;
             TimingWindow liveAges,liveWaits,livePresent,liveReady,liveCompletion;
@@ -486,9 +487,11 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 std::vector<double> sorted(latenessSamples.begin(),latenessSamples.end());std::sort(sorted.begin(),sorted.end());
                 const auto captureStats=isCapture?captureSource.metrics():source::CaptureMetrics{};
                 diagnostics::FrameMetrics measured;pipeline::EnhanceGraph::Metrics graphStats;uint64_t slotWaitCount=0,commandSubmits=0;double slotWaitMilliseconds=0;uint32_t slotsInFlight=0;
-                {std::lock_guard gpuLock(gpuMutex);measured=graph.gpuMetrics();graphStats=graph.metrics();measured.gpu[size_t(diagnostics::GpuStage::Blit)]=presenter.blitTiming(ctx.fence(),options.settings.revision,out.batch.identity.epoch);slotWaitCount=ring.cpuWaitCount()-slotWaitBase;slotWaitMilliseconds=ring.cpuWaitMilliseconds()-slotWaitMsBase;commandSubmits=ring.submitCount()-submitBase;slotsInFlight=ring.inFlightCount();}
+                {std::lock_guard gpuLock(gpuMutex);measured=graph.gpuMetrics();graphStats=graph.metrics();measured.gpu[size_t(diagnostics::GpuStage::Blit)]=presenter.blitTiming(ctx.fence(),options.settings.revision,out.batch.identity.epoch);slotWaitCount=ring.cpuWaitCount()-slotWaitBase;slotWaitMilliseconds=ring.cpuWaitMilliseconds()-slotWaitMsBase;commandSubmits=ring.submitCount()-submitBase;slotsInFlight=ring.inFlightCount();
+                    for(const auto& sample:graph.takeGpuTimings())frameFlow->gpuFrame(sample,host100ns());
+                    for(const auto& sample:presenter.takeGpuTimings(ctx.fence()))frameFlow->gpuFrame(sample,host100ns());
+                }
                 if(measured.identity.settingsRevision!=options.settings.revision||measured.identity.epoch!=out.batch.identity.epoch){measured={};measured.identity=out.batch.identity;for(auto& sample:measured.gpu)sample.state=diagnostics::SampleState::Pending;}
-                frameFlow->gpu(measured.gpu,host100ns());
                 if(graph.xessEnabled()){
                     std::lock_guard gpuLock(gpuMutex);
                     graphStats.fgGeneratedFrames=presenter.xessGeneratedCount();
