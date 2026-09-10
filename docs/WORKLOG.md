@@ -1,3 +1,21 @@
+# 2026-09-10 2K / 8K SR 与 AMD NR 研究补充
+
+用户继续增加2K/8K超分和AMD显卡运行DLSS5的研究要求。按上一请求先写方案，交付 `docs/SR_TARGETS_AMD_NR_PLAN_2026-09-10.md`，同步XeSS方案/交接/loop研究记录。已确认Daniel HIP、RedDuke ZLUDA、Kien D3D12/HLSL三条真实技术路线；公开源码/作者自述/本机实测严格分开。推荐MIT D3D12网络作为RDNA4候选；其当前网络固定1080及SM6.10/FP8依赖、HIP原许可与无公开API、ZLUDA逐帧CPU等待与黑图问题均明确列出。社区4K60帖子混合FSR/FG，不能当原生4K NR60证据。
+
+SR方案列出2560x1440、3840x2160、7680x4320，默认4K、等比、预设schema5、实时回滚、8K资源峰值与后端实际测试、大图不静默忽略SR、NVENC能力查询且保留既有完整性检查。AMD完整路线还须设备/NGX按需初始化、AMD OF、可选FSR1、XeSS与AMF，不能只换DLL。具体文件/顺序/来源/本轮命令见报告。
+
+实际仅Git/rg/文件读取、gh api/固定raw文本、CIM硬件枚举与hash/签名；无构建、SR2K/8K或AMD Create/Evaluate、GPU/实卡/gate执行，无push/Release。RTX5070外还有9700X核显，不是已验证RDNA4目标。EXE仍E97B716B99116BEC942262FFEF1612299CBB2F4B0BDA7C308A5BFF318B3B5157；NR固定SHA一致/签名Valid。原UI工作树和FRUC失败保留，Phase7仍in_progress；下一实施任务S0共享SR目标与预设兼容。资料检索的404/大小写/不存在路径及一次未应用patch均记录在报告，不记GPU结果。
+
+# 2026-09-10 XeSS / AMD 光流接入研究
+
+用户要求针对“067内测：DLSS5+XeSSFG+AMD光流”先找方法写方案。新增 `docs/XESS_AMD_OPTICAL_FLOW_PLAN_2026-09-10.md`。固定 Magpie experimental ac1cc8b、Intel de0fb9c（Release v3.0.2）、AMD 60f4ea8 核对公开接口/代码及许可证；本机Magpie0.6.6已有XeSS DLL与标记文件，公开未查到0.6.7 Release。XeSS非Intel当前仅2X，必须XeLL和代理交换链；AMD OF为跨厂商compute，性能/质量档主要是宽高各半/全尺寸。平面深度、原生资源生命周期、双重调度、guidance每帧lease、导出接口限制及同配置A/B已写入方案。AMD成本不等于NVOF，也不证明NR自身推理变快。
+
+只运行Git/rg/文件读取、gh api与官方raw文本下载、hash/签名核查；没有构建、新GPU效果/采集测试、SDK执行或产品改动，没有push/Release。上一轮UI改动保留，EXE仍E97B716B99116BEC942262FFEF1612299CBB2F4B0BDA7C308A5BFF318B3B5157。Phase7仍in_progress，所有新后端未实施；下一实施项是官方AMD OF同设备诊断及NR-only对照。本轮按用户要求停在可执行方案，不自动施工。
+
+# 2026-09-10 原生 UI 闪白修复
+
+控件原先只接管 WM_PAINT，状态更新同步绘制与 WM_PRINTCLIENT 可能露出原生外观。Theme/PopupSelector 已统一缓冲绘制并抑制模型更新期间的原生绘制，保留输入、隐藏及外部禁重绘状态。Release 构建、21项控件回归、14个菜单场景、实际RTX设置页、24次移动/缩放及三种FPS布局检查通过。首轮设置页固定1秒等待失败，改为限时等待实际尺寸日志后通过。命令、文件、真实Create/Evaluate统计和失败路径见 `docs/UI_PAINT_REPAIR_2026-09-10.md`。没有长时录屏、实卡或新增独立Reviewer验收；没有重跑delivery，不修改控制面、不发布。Phase7仍in_progress；下一步用户重启复核原先闪烁操作。
+
 # 2026-09-10 当前修复与本地存档
 
 新增一秒GPU完成FPS和采集60→30；同步此前颜色/异步呈现/Drop reset/实时光流/日志改动。文件、命令与边界见 `docs/HANDOFF_2026-09-10.md`。Release exit0；CPU41/worker11/预设PASS；真实engine half-rate19 PASS；UI日常/专业/窄窗口PASS；delivery23 PASS45.317秒，run `910fe667d2574babaa3b02a7aa9bb3e2`。未打开实卡，不是整体Phase7通过。

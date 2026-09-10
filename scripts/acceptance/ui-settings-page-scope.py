@@ -45,9 +45,9 @@ try:
   for delta in [-120,120,-120]:send(h,0x20a,(delta&0xffff)<<16,0)
   new=send(h,0x400) if ident>=600 and ident<612 else send(h,0x147) if ident in [202,203,207] else textOf(ident)
   assert old==new,('wheel changed',ident,old,new)
- edit(100,'-');select(203,0);time.sleep(1)
+ edit(100,'-');select(203,0)
  # Invalid numeric input must not block a valid change on another control.
- assert 'nr=1920x1080' in log.read_text()
+ waitFor('nr=1920x1080')
  edit(100,'0.42');waitFor('intensity=0.42')
  click(702);waitFor('style=2');assert send(controls[202],0x147)==1
  click(711);waitFor('autoMask=1');click(721);waitFor('UI=1')

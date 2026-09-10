@@ -419,6 +419,11 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_link_libraries(veyra_capture_tests PRIVATE veyra_sources)
 
   add_executable(veyra_live_timing_tests tests/unit/LivePresentationTimingTests.cpp)
+  add_executable(veyra_control_paint_tests tests/integration/ControlPaintTests.cpp)
+  target_compile_features(veyra_control_paint_tests PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_control_paint_tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_include_directories(veyra_control_paint_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps/veyra/ui)
+  target_link_libraries(veyra_control_paint_tests PRIVATE veyra_base comctl32 gdiplus uxtheme gdi32 user32 ole32)
   target_compile_features(veyra_live_timing_tests PRIVATE cxx_std_20)
   target_include_directories(veyra_live_timing_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 

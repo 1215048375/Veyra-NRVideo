@@ -1,5 +1,22 @@
 {
   "schemaVersion": 1,
+  "srTargetsAmdNrResearch": {
+    "report": "docs/SR_TARGETS_AMD_NR_PLAN_2026-09-10.md",
+    "relatedReport": "docs/XESS_AMD_OPTICAL_FLOW_PLAN_2026-09-10.md",
+    "status": "plan_delivered_not_implemented",
+    "scope": "Plan-first extension: QHD 2K / 4K / 8K SR targets; real AMD NR approaches, integration boundaries and acceptance steps.",
+    "findings": "HIP, ZLUDA and MIT native D3D12 network ports exist. Native D3D12 is the preferred RDNA4 research candidate, currently fixed 1080 geometry. Author performance claims are not Veyra measurements.",
+    "validation": "Read-only GitHub source/API/license and local code/hardware/hash inspection. No build, new GPU backend, capture, phase gate or publication.",
+    "hardware": "RTX 5070 plus Ryzen 7 9700X AMD integrated graphics; no upstream-validated RX 9070 XT. Integrated GPU capability and AMD NR execution not tested.",
+    "next": "S0: shared SR target settings, ResolutionPlan and backward-compatible preset schema, then UI and actual 2K/8K GPU validation."
+  },
+  "nativeControlPaintRepair": {
+    "report": "docs/UI_PAINT_REPAIR_2026-09-10.md",
+    "status": "scoped_software_verified_user_reproduction_pending",
+    "validation": "Release build; native control21; popup14; actual RTX settings; resize24/move24; FPS3 layouts PASS",
+    "limits": "No physical capture, long desktop recording, independent Reviewer or full delivery rerun. Phase7 unchanged.",
+    "next": "Restart Veyra.cmd and recheck the user's original white-flash interaction."
+  },
   "captureFpsCheckpoint": {
     "report": "docs/HANDOFF_2026-09-10.md",
     "status": "implemented_software_verified_user_capture_pending",

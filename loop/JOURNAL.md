@@ -1,5 +1,15 @@
 # Veyra Loop Journal
 
+## 2026-09-10 SR targets and AMD NR research plan
+
+Scope follows the user's preceding plan-first request, extended with 2K/8K SR targets and actual AMD GPU NR research. Read-only source/API/license/hardware inspection is complete; next write the implementation supplement and cross-link the XeSS/AMD OF plan and handoff. No product code, runtime, driver, protected control or remote changes. Hypothesis to preserve for implementation: a native D3D12 network port is a viable candidate, not yet a verified Veyra backend. Validation for this documentation task: source citations, local links/fences, JSON parse and git diff --check; no GPU gate or new backend success will be claimed.
+
+Documentation delivered: docs/SR_TARGETS_AMD_NR_PLAN_2026-09-10.md, with links from the XeSS plan and handoff, plus WORKLOG/EVIDENCE/STATE records. PowerShell local-link, balanced-fence and whitespace checks passed for both plans and the handoff; ConvertFrom-Json confirmed plan_delivered_not_implemented and Phase 7 in_progress. git check-ignore confirmed the downloaded text research cache is ignored; git diff --check passed. Final source reread confirmed the native D3D12 project's fixed 1080 geometry and author-only performance numbers, and the HIP project's redistribution restriction. No build, 2K/8K Create/Evaluate, AMD GPU execution, capture test, gate, commit or remote publication was performed for this research task. Next implementation task remains S0.
+
+## 2026-09-10 User-directed native UI paint repair
+
+Retrospective task record: native state setters/WM_PRINTCLIENT could bypass the custom buffered WM_PAINT path. Theme and selector now suppress direct native state-change drawing and share the print painter. Added native interaction/pixel tests; actual settings, popup, resize and FPS checks pass. One fixed1s settings assertion initially failed during GPU teardown; retained assertion with bounded existing log polling then passed. Exact results: docs/UI_PAINT_REPAIR_2026-09-10.md. No phase advancement, runtime/control changes, capture use or remote publication; user transient-flicker validation remains pending.
+
 ## 2026-09-10 User-directed FPS / capture sampling checkpoint
 
 Added GPU-completed one-second FPS, explicit PS5 30-in-60 sampling before GPU, UI and focused regressions. Original PTS, capacity-one ingress and two-batch worker retained; files/export never decimate. No Goal phase advancement or protected control edits. Initial Windows min compile failure and UI root-window test error corrected. CPU41/worker11/preset, RTX half-rate19, UI three layouts and original delivery23 PASS45.317s. Details: docs/HANDOFF_2026-09-10.md. User explains prior FPS changes as quality adjustments; no fixed-config failure inferred. No physical capture this turn. Local source/docs commit authorized; no remote publication.

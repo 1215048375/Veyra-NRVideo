@@ -1,5 +1,13 @@
 # Veyra Gate Evidence
 
+## 2026-09-10 SR targets / AMD NR research, not a gate
+
+Report: `docs/SR_TARGETS_AMD_NR_PLAN_2026-09-10.md`; extends the XeSS/AMD OF plan. Pinned GitHub source/README/license/release records confirm three different AMD NR approaches; no new backend was executed. Local read-only checks confirm the original NR hash/signature and unchanged UI-repair EXE. CIM shows RTX5070 and 9700X integrated AMD graphics, not the RX9070XT used by upstream tests. Research texts are ignored under `logs/amd-nr-research-20260910/`. No build, 2K/8K SR Create/Evaluate, AMD inference, capture or phase acceptance; implementation starts at planned S0. Documentation checks are recorded separately from GPU evidence.
+
+## 2026-09-10 Native control paint repair
+
+Scoped build/UI checks PASS: native control21, popup14, actual RTX settings, resize24/move24/menu4, FPS3 layouts. Report with exact commands/failure evidence: `docs/UI_PAINT_REPAIR_2026-09-10.md`. Initial fixed1s settings wait failed during feature teardown; bounded actual-log wait passes. No full delivery rerun, physical capture, long desktop recording or independent Reviewer; no phase advancement. User reproduction confirmation remains pending.
+
 ## 2026-09-10 FPS / capture60-to30
 
 Release build exit0; CPU41, worker11, preset roundtrip PASS; actual RTX engine replay half-rate19 PASS with ~30 completed FPS and return to ~60. UI daily/professional/small visible bounded live FPS and pause-zero PASS. Original delivery23 PASS45.317s: `logs/delivery/910fe667d2574babaa3b02a7aa9bb3e2/result.json`. Full commands, hash and failure records: `docs/HANDOFF_2026-09-10.md`. No new physical capture or independent Reviewer verdict. Phase7 remains in_progress; known FRUC reset pixels unresolved; no claim of scanout FPS or end-to-end latency. Runtime hash/signature unchanged, local Git only.
