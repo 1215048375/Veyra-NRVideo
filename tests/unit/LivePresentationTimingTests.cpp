@@ -1,5 +1,8 @@
 #include "veyra/engine/LivePresentationTiming.h"
+#include "veyra/engine/LivePresentationResetPolicy.h"
 #include "veyra/source/CaptureTiming.h"
+#include "veyra/engine/CaptureHalfRate.h"
+#include "veyra/engine/FrameRateWindow.h"
 #include <cmath>
 #include <limits>
 #include <cstdio>
@@ -7,7 +10,40 @@ int main(){
     using veyra::engine::livePairHoldMs;
     int failed=0;
     auto check=[&](bool ok,const char* label){printf("%s %s\n",ok?"PASS":"FAIL",label);if(!ok)++failed;};
+    using veyra::engine::CaptureHalfRate;
+    for(double fps:{60.0,60000.0/1001.0}){
+        CaptureHalfRate sampler;const auto dt=int64_t(std::llround(10000000.0/fps));int kept=0;bool ordered=true;
+        for(int i=0;i<600;++i){const bool accepted=sampler.accept(i*dt+(i%3-1)*1000,dt,false);kept+=accepted;ordered&=accepted==(i%2==0);}
+        check(kept==300&&ordered,"60/59.94 transport selects one original-PTS frame per pair despite jitter");
+        check(sampler.accept(0,dt,false),"backward timestamp reanchors capture sampling");
+        check(sampler.accept(dt,dt,true),"history boundary cannot be swallowed by sampling");
+        sampler.reset();check(sampler.accept(dt,dt,false),"reset accepts first new frame immediately");
+    }
+    check(!CaptureHalfRate::supported(30)&&!CaptureHalfRate::supported(18)&&!CaptureHalfRate::supported(120)&&CaptureHalfRate::supported(59.94),"60-to-30 setting does not halve other transport modes");
+    veyra::engine::FrameRateWindow rate;rate.reset(0);
+    for(int i=1;i<=60;++i)rate.complete(i*166666);
+    check(std::abs(rate.rate(10000000)-60)<.01,"one second counts 60 actual completion events");
+    check(rate.rate(15000000)==30&&rate.rate(20000000)==0,"stalled GPU rate decays to zero without new events");
+    rate.reset(20000000);check(rate.rate(21000000)==0,"revision reset discards old FPS");
+    for(int i=1;i<=30;++i)rate.complete(20000000+i*333333);
+    check(std::abs(rate.rate(30000000)-30)<.01,"30 real completions are not multiplied by FG");
+    rate.reset(0);for(int i=1;i<=1000;++i)rate.complete(i*10000);
+    check(rate.rate(10000000)==1000,"completion rate has no 60 or 120fps cap");
     using veyra::source::captureDuration;using veyra::engine::liveSourceInterval100ns;
+    using veyra::source::captureDiscontinuity;
+    check(!captureDiscontinuity(true,false,false,true,1,1+1.0/60,60),"continuous callbacks remain continuous while mailbox is overwritten");
+    check(captureDiscontinuity(true,true,false,true,1,1+1.0/60,60),"driver discontinuity survives mailbox overwrite");
+    check(!captureDiscontinuity(false,true,false,true,1,1+1.0/60,60),"consumed driver discontinuity does not leak to next packet");
+    check(captureDiscontinuity(false,false,true,true,1,1+1.0/60,60),"driver discontinuity retained at normal cadence");
+    check(captureDiscontinuity(false,false,false,true,1,0.5,60),"backwards callback clock remains hard discontinuity");
+    check(captureDiscontinuity(false,false,false,true,1,1.2,60),"callback gap remains hard discontinuity");
+    constexpr auto drop=static_cast<veyra::pipeline::FrameFlags>(veyra::pipeline::FrameFlagBits::Drop);
+    constexpr auto resize=static_cast<veyra::pipeline::FrameFlags>(veyra::pipeline::FrameFlagBits::Resize);
+    check(veyra::pipeline::breaksHistory(drop),"mailbox overwrite resets temporal history");
+    check(!veyra::engine::presentationDrainRequired(false,drop),"mailbox overwrite retains queued real presentation");
+    check(veyra::engine::presentationDrainRequired(false,resize),"resize drains resource-bound presentation");
+    check(!veyra::engine::generatedPresentationCurrent(4,5),"history reset suppresses queued generated frame");
+    check(veyra::engine::generatedPresentationCurrent(5,5),"current generation remains presentable");
     check(veyra::pipeline::FramePacket{}.duration.isUnknown(),"unset packet duration is unknown, not known zero");
     check(captureDuration(100,166767,true,333333).to100ns()==166667,"sample duration wins over nominal");
     check(captureDuration(100,100,false,333333).to100ns()==333333,"missing sample stop uses nominal30fps");

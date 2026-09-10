@@ -29,7 +29,8 @@ int wmain(int argc,wchar_t** argv){
     auto readFrame=[&](){while(std::chrono::steady_clock::now()<deadline){auto r=source.read(packet,&frame);if(r==veyra::source::SourceReadStatus::Frame)return true;if(r==veyra::source::SourceReadStatus::Error)return false;}return false;};
     if(!readFrame()){printf("FAIL first frame\n");return 5;}
     const auto initialPts=packet.pts.toDouble();const auto initialReceived=source.metrics().received;
-    std::vector<unsigned char> row(frame->data[0],frame->data[0]+frame->width*4);
+    const int rowBytes=frame->width*(frame->format==AV_PIX_FMT_YUYV422?2:frame->format==AV_PIX_FMT_NV12?1:4);
+    std::vector<unsigned char> row(frame->data[0],frame->data[0]+rowBytes);
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     auto stalled=source.metrics();
     check(stalled.received>=initialReceived+3,"callbacks continue while reader retains frame");

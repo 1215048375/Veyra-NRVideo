@@ -158,6 +158,8 @@ endif()
 # YUV→RGB shader is shared between the media pipeline and the harness.
 veyra_add_compute_shader(veyra_shader_yuv_to_rgb YuvToLinearRgb)
 veyra_add_compute_shader(veyra_shader_rgb_to_linear RgbToLinear)
+veyra_add_compute_shader(veyra_shader_yuy2_to_linear Yuy2ToLinear)
+add_dependencies(veyra_shader_rgb_to_linear veyra_shader_yuy2_to_linear)
 # ScaleBlit: working frame -> swapchain backbuffer (Phase 6 present path).
 veyra_add_compute_shader(veyra_shader_scale_blit ScaleBlit)
 # Nv12Upload: byte buffer -> luma/chroma planes (copy-free upload path).
@@ -387,6 +389,7 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   # composes veyra_media; no second decode implementation exists.
   add_dependencies(veyra_pipeline veyra_shader_nr_downsample veyra_shader_nr_residual veyra_shader_flow_adapt)
   add_library(veyra_sources STATIC
+    src/source/NativeCaptureSink.cpp
     src/source/MediaFileSource.cpp
     src/source/CaptureCardSource.cpp
   )
@@ -427,6 +430,22 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
 
   add_executable(veyra_repair_parameter_tests tests/integration/RepairParameterTests.cpp)
   add_executable(veyra_image_dimension_tests tests/integration/ImageDimensionTests.cpp)
+  add_executable(veyra_capture_color_probe tools/capture_color_probe/main.cpp)
+  add_executable(veyra_capture_color_tests tests/unit/CaptureColorContractTests.cpp)
+  add_executable(veyra_presentation_worker_tests tests/unit/PresentationWorkerTests.cpp)
+  target_compile_features(veyra_presentation_worker_tests PRIVATE cxx_std_20)
+  target_include_directories(veyra_presentation_worker_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_executable(veyra_live_presentation_tests tests/integration/LivePresentationTests.cpp)
+  target_compile_features(veyra_live_presentation_tests PRIVATE cxx_std_20)
+  target_link_libraries(veyra_live_presentation_tests PRIVATE veyra_engine)
+  target_compile_features(veyra_capture_color_tests PRIVATE cxx_std_20)
+  target_link_libraries(veyra_capture_color_tests PRIVATE veyra_sources)
+  add_executable(veyra_yuy2_color_tests tests/integration/Yuy2ColorTests.cpp)
+  target_compile_features(veyra_yuy2_color_tests PRIVATE cxx_std_20)
+  target_link_libraries(veyra_yuy2_color_tests PRIVATE veyra_engine)
+  target_compile_features(veyra_capture_color_probe PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_capture_color_probe PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_link_libraries(veyra_capture_color_probe PRIVATE veyra_engine)
   target_compile_features(veyra_image_dimension_tests PRIVATE cxx_std_20)
   target_include_directories(veyra_image_dimension_tests PRIVATE ${FFMPEG_INCLUDE_DIRS})
   target_compile_definitions(veyra_image_dimension_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN VEYRA_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")

@@ -140,7 +140,7 @@ bool WorkerKernel::execute(FrucWorkerMessage& info) {
         out.uSyncSignal.FenceSignalValue.uiFenceValueToSignalOn=++wait;
         unsigned seh=0;auto result=callSafe(seh,process,handles[j],&in,&out);
         info.result=uint32_t(result);info.seh=seh;
-        log::info("fruc",std::format("Process inputMs={} outputMs={} sub={} result={} seh={} repeated={}",info.currentMs,out.stFrameDataOutput.nTimeStamp,j+1,int(result),seh,info.repeated[j]));
+        if(result!=NvOFFRUC_SUCCESS||seh||log::verboseFrameLogs())log::info("fruc",std::format("Process inputMs={} outputMs={} sub={} result={} seh={} repeated={}",info.currentMs,out.stFrameDataOutput.nTimeStamp,j+1,int(result),seh,info.repeated[j]));
         if(result!=NvOFFRUC_SUCCESS||seh)return false;
     }
     info.outputFence=wait;return true;

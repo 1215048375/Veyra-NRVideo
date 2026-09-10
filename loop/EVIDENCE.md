@@ -1,5 +1,9 @@
 # Veyra Gate Evidence
 
+## 2026-09-10 FPS / capture60-to30
+
+Release build exit0; CPU41, worker11, preset roundtrip PASS; actual RTX engine replay half-rate19 PASS with ~30 completed FPS and return to ~60. UI daily/professional/small visible bounded live FPS and pause-zero PASS. Original delivery23 PASS45.317s: `logs/delivery/910fe667d2574babaa3b02a7aa9bb3e2/result.json`. Full commands, hash and failure records: `docs/HANDOFF_2026-09-10.md`. No new physical capture or independent Reviewer verdict. Phase7 remains in_progress; known FRUC reset pixels unresolved; no claim of scanout FPS or end-to-end latency. Runtime hash/signature unchanged, local Git only.
+
 ## 2026-09-08 optimization Goal startup — preflight FAIL
 
 Executed `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate preflight`: exit1, 2.604 seconds, sole failure control:README.md. Other controls and both binary identities passed. README matches user-authorized f79ef95; manifest expects earlier README. Full output is in the task tool record; logs/optimization-goal-20260908/control-rebaseline-proposal.json is explicitly an observation/proposal, not fabricated gate output. Proposal is unexecuted; see cycle49/INBOX. No product build/Create/Evaluate this cycle; previous Phase7 records do not approve the new Goal's changes.
@@ -596,3 +600,41 @@ Cycle86 safety stop: build passed (logs/video-sdk-trial-20260909/build-cycle86.l
 EXE SHA256: `3BD470D51AD43F7C461F23AB6F9F9B7234DC6F33D84C9DDEB35A463663264E2C`。构建日志 `logs/video-sdk-trial-20260909/build-cycle86.log`；独立review前后跟踪指纹 `9d45fe7ff6b19a67b3a42db2215928b1aecf5b4f`不变，之后仅更新交接记录。单次测试均不足300秒。Cycle86修复可交本机实测；整体Phase7优化仍in_progress，既有统计窗口/间歇时序/实卡体验/长期稳定风险未宣称消失。下一任务见HANDOFF优先处理配置相关统计窗口。
 
 本地Git checkpoint包括Cycles78–86已核对源码、使用指南、交接报告与授权的GOAL_PROMPT删除；不包含runtime/SDK/个人媒体，不push。实际提交ID以本次 `git log -1` 为准，避免在commit内容中制造自指hash。
+
+
+## Cycle87–88 FRUC/high-FPS candidate
+
+User requested1000fps support andFRUC2/3/4. Source timing admission120→1000, exact timestamp validation retained. OptionalFRUC behind sharedgraph, UI/preset/export propagated, DLSS retained. Same-process multiinstance required per-instanceCUDAcontext; destroy/recreate repeatedlyRegister4/warpSEH, so stopped that approach and isolated runtime in hidden ownedworker with GPUsharedtextures/fence. No normal pixelreadback. Fullreset freshworker is correct in triple-reset tests but has startupcost/capture-drop feedbackrisk. Maker pixel/PTS2/3/4PASS; playbackknownpan有效5/10/15子帧与实际播放计数、NVENC24/36/48frame输出、1000fps2000frames/999.34processedfps及UI切换PASS. Specificcommands/logs/failures in docs/FRUC_INTEGRATION_2026-09-09.md. 最终lazy创建候选等待独立review/preflight/phase7；整体Phase7未完成，不push。
+
+
+## 独立检查与用户反馈补充
+
+独立review_fruc已报告CPU16+27项/preset、实际2/3/4pixel/PTS/连续reset、UI全后端切换和自有worker进程故障测试通过，无新增已确认P0/P1/P2消息。preflight69 PASS；其实际phase7日志 `logs/video-sdk-trial-20260909/review-fruc-gate-phase7.log` 为73 PASS，delivery `logs/delivery/1c195ef6d3684879b220fc8c13439e83/result.json`。Reviewer随后额度耗尽，未返回最终整体结论；因此记录为independent_checks_passed / final_verdict_unavailable，不伪造最终Reviewer PASS。用户随后明确“我已经测试没问题”，记录用户本次体验通过，不外推其未说明的配置与长期稳定性。程序SHA256 BD76BA1F3D66DF30286E450AD1742E773F48989B5815C175BDC0A297ABF4E94D；workerSHA256 B6F267C3B1C73DE0CB99C4BAD4B5DA9355C42DF7E7F37F21C9891B02B80412A3。
+
+
+## 用户新请求：GitHub性能归因
+
+已固定7个仓库head，只读源码/官方文档+既有GPU日志；报告docs/GITHUB_PERFORMANCE_AUDIT_2026-09-09.md。确认原生4KNR硬预算与软件同步/日志/重置/统计问题并存，不提供未测占比。未运行竞品、未改runtime/产品代码、未占实卡。下一条任务：配置revision隔离统计，再同源逐项A/B定位等待与计算；不先建议换卡。
+
+## 2026-09-09 竞品对照改进方案（仅文档）
+
+用户暂停间歇卡顿现场追查，要求先对照已有竞品写改进方案。新增 docs/COMPETITOR_IMPROVEMENT_PLAN_2026-09-09.md，按固定 GitHub 审计、当前 controller/FRUC 源码、旧质量方案及已完成专项整理。先统计/日志/有界调度与 reset，再做 CUDA FRUC、硬解和拷贝消减实验；深度/缓存不加入默认路径。明确每项证据、动作、验收与回退，保留导出完整性检查和单次 300 秒约定。最新自然日志未包含用户所述卡顿的处理证据，不给周期性卡顿下确定归因。同步 HANDOFF 索引和 STATE 文档条目，未改产品代码/依赖/默认设置或保护门禁。未运行新的构建/GPU/实卡测试，未推进 Phase 7 或补造 Reviewer 结论。
+## 2026-09-09 基础画质审计 — 已执行范围
+
+新交接 docs/BASELINE_QUALITY_PERFORMANCE_REPAIR_2026-09-09.md；本地证据 logs/obs-magpie-rootcause-20260909/audit-manifest.json。真实 GPU 合成 RGB/BGR0 无增强旁路：python logs/obs-magpie-rootcause-20260909/build_probe.py，最终 build/run exit 0，两项 maxError8=0；只覆盖已编译共享图，不包含实卡转换与 VideoPresenter/DWM。未新执行 NR/SR/FG、同条件竞品性能、delivery 或独立 Reviewer。原生 YUY2 强制转 RGB32 的元数据缺口和显示缩放为优先排查方向；色带根因未闭环，产品未修。
+
+Magpie 本地日志显示多数 1440p 处理，不能由 GPU60% 推断同4K速度。用户授权必要兼容 OSS 模块复用，归因/许可证和运行时分离保持。远端 v0.0.1 已公开经 gh 查询确认，本轮未变更。Phase7 仍 in_progress；下一条 R1 同帧四段定位。
+
+## 2026-09-09 原生 YUY2 与实时呈现修复交付
+
+用户撤回实卡 A/B（“不用测试这个，可以确定就是YUY2的转换”），本轮未打开采集设备。实际实现见 docs/BASELINE_REPAIR_IMPLEMENTATION_2026-09-09.md：原生 YUY2/NV12 DirectShow 接收、一次 GPU YUY2→linearFP16、颜色元数据/stride/方向校正，同尺寸 blit/copy 消减、两个批次的异步采集呈现、revision 隔离统计与批量文件日志。保存/暂停/重配置/退出仍按 lease/fence 排空。不能说已同帧实测证明全部色带只有一个根因。
+
+Release 构建 final-build4.log exit0；CPU契约26项、worker11项；YUY2 601/709×full/limited、原生4K及RGB范围 GPU 基准最大误差<=1/255，显示误差0。YUY2八帧NR含7次NVOF/7帧motion；实际Engine文件回放live worker的DLSS2X/4X/暂停恢复/设置/退出10项PASS，FRUC已知15fps平移素材同样10项PASS。没有占实卡。单项均外部timeout290秒。
+
+delivery最终 logs/delivery/37bd4fedc5604642a2a2afeeca46c99e/result.json，23项PASS、42.569秒；NR/NVOF/GBV零错误、4K播放、4K图像、NVENC H264/HEVC音频和2X CFR、取消检查通过。第一次delivery所有功能检查通过但最后Get-FileHash模块未加载而exit1，保留2d62b4ad日志，仅包装导入平台Utility模块后重跑，未改原gate。早期编译头文件遗漏、temporal测试未开启NVOF配置的失败与修正也保留。
+
+独立review_native_capture最终限定复核：所提动态格式/RGB范围/异步统计问题均关闭，审查范围无其他未修P0/P1/P2；它核对源码和真实日志，没有自行执行GPU或实卡，不记整体Phase7 PASS。
+
+另发现旧路径迁移导致本机FRUC运行目录缺NvOFFRUC.dll及其直接依赖cudart64_110.dll。由已有本地SDK复制固定SHA/有效NVIDIA签名的两项到gitignored runtime_local，不修改文件内容。打包allowlist添加固定cudart依赖；仅语法检查，未执行打包或发布。实际FRUC平移回放通过；通用test_av素材返回repeated=true的失败保留，不当有效生成。已发布旧包未更新。
+
+EXE SHA256: 61618AF18F7B985BD4C1FECA06EBE7A07C30EAA01B2CC0682A217E89EAD3C372。原版NR固定SHA一致。已有控制面漂移保留，不改AGENTS/README/CONTROL_HASHES、不声称preflight通过。整体Phase7仍in_progress；下一条任务是用户实测本机新YUY2路径，再按同尺寸同配置证据继续性能优化。FRUC互通/重建等待、GPU临界区、自然运动效果和长期稳定性仍有边界。未push、未重新发布Release。

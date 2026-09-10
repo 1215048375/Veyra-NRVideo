@@ -22,7 +22,7 @@ public:
         const int requested=mode==ContentRate::Fps30?30:mode==ContentRate::Fps50?50:mode==ContentRate::Fps60?60:0;
         return mode==ContentRate::Transport?0:requested?(rate_==requested?rate_:0):rate_;
     }
-    bool conflicts(ContentRate mode)const{return rate_!=0&&mode>=ContentRate::Fps30&&confirmedRate(mode)==0;}
+    bool conflicts(ContentRate mode)const{return rate_!=0&&mode>=ContentRate::Fps30&&mode<=ContentRate::Fps60&&confirmedRate(mode)==0;}
 private:std::deque<int> changes_;std::deque<double>deltas_;double last_=-1;int rate_=0;
 };
 }

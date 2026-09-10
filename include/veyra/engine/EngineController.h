@@ -9,10 +9,12 @@
 #include "veyra/engine/EnhancementSettings.h"
 #include "veyra/diagnostics/FrameMetrics.h"
 #include "veyra/engine/PreviewView.h"
+#include "veyra/engine/FrameRateWindow.h"
 namespace veyra::sink { struct RgbaImage; }
 namespace veyra::gfx { class D3D12DeviceContext; class CommandSlotRing; }
 namespace veyra::engine {
 struct PlayerOptions { bool nr=true,sr=false,fg=false,realtime=true; uint32_t fgMultiplier=2; EnhancementSettings settings;
+    bool captureReplayForTest=false; // file-backed live scheduler test; never enabled by UI
     EnhancementSettings snapshot()const{auto s=settings;s.nr=nr;s.sr=sr;s.multiplier=fg?fgMultiplier:1;s.nrPolicy=realtime?pipeline::NrSizePolicy::Realtime:pipeline::NrSizePolicy::Native;return s;}
     static PlayerOptions from(EnhancementSettings s){PlayerOptions o;o.nr=s.nr;o.sr=s.sr;o.fg=s.multiplier>1;o.fgMultiplier=std::max(2u,s.multiplier);o.realtime=s.nrPolicy==pipeline::NrSizePolicy::Realtime;o.settings=s;return o;}
 };
@@ -28,6 +30,8 @@ struct PlayerSnapshot {
     uint32_t flowPerf=0;int contentFps=0;
     uint64_t frames=0,generated=0;
     uint64_t captureReceived=0,captureDropped=0,nrEvaluated=0,nvofExecuted=0;
+    uint64_t captureRateSkipped=0,processedCompleted=0;
+    bool captureHalfRate=false;
     double captureFps=0,captureReadAgeMs=0,captureAgeMs=0,captureAgeP95Ms=0;
     double schedulingWaitP95Ms=0,processCpuP95Ms=0,presentCpuP95Ms=0;
     bool running=false,failed=false,image=false,capture=false;
@@ -57,6 +61,7 @@ private:
     void status(const std::wstring&,bool failed=false);
     mutable std::mutex mutex_;
     PlayerSnapshot snapshot_;
+    FrameRateWindow processingRate_;
     PreviewView previewView_;
     std::wstring savePath_;
     std::thread worker_;

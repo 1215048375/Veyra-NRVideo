@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <cmath>
+#include <string_view>
 extern "C" {
 #include <libavutil/frame.h>
 #include <libavutil/pixfmt.h>
@@ -33,6 +34,29 @@ int main(int argc,char** argv){using namespace veyra;if(argc<3)return 2;const un
         ok=graph.process(f,epoch*2000.0,true,out)&&ring.waitIdle()&&graph.resolveGeneration(out)&&out.batch.count==1;
         // A second frame after reseeding must run successfully, even for static input.
         if(ok)ok=graph.process(f,epoch*2000.0+1000.0/15,false,out)&&ring.waitIdle()&&graph.resolveGeneration(out);
+    }
+    // Opt-in reproducer for the unresolved post-reset pixel error. The standard
+    // smoke above never claimed pixel correctness after its static reseeds.
+    if(argc>3&&std::string_view(argv[3])=="--reset-pixels"){
+        bool pixelsOk=true;
+        for(unsigned epoch=1;ok&&epoch<=6;++epoch){const double start=10000+epoch*1000;const bool invert=epoch%2!=0;
+            for(unsigned i=0;ok&&i<3;++i){const int shift=int(epoch)*16+int(i)*8;
+                for(unsigned y=0;y<H;++y)for(unsigned x=0;x<W;++x){auto* p=f->data[0]+y*f->linesize[0]+x*4;for(unsigned c=0;c<3;++c){const auto v=color(int(x)-shift,y,c);p[c]=static_cast<unsigned char>(invert?255-v:v);}p[3]=255;}
+                pipeline::EnhanceGraph::FrameOutputs out;ok=graph.process(f,start+i*1000.0/15,i==0,out)&&ring.waitIdle()&&graph.resolveGeneration(out);
+                if(i==0){ok=ok&&out.batch.count==1;continue;}
+                ok=ok&&out.batch.count==mult;
+                for(unsigned j=0;ok&&j<out.batch.count;++j){const auto& item=out.batch.frames[j];if(item.kind!=pipeline::FrameKind::Generated)continue;
+                    sink::RgbaImage image;ok=sink::readRgba8(ctx,ring,item.lease->texture.Get(),image);if(!ok)break;
+                    double error=0,repeatError=0;size_t samples=0;const double target=shift-8+8.0*item.subframe/mult;
+                    for(unsigned y=32;y<H-32;++y)for(unsigned x=96;x<W-96;++x)for(unsigned c=0;c<3;++c){const double pos=x-target;const int left=int(std::floor(pos));const double t=pos-left;
+                        double expected=color(left,y,c)*(1-t)+color(left+1,y,c)*t;double repeated=color(int(x)-shift+8,y,c);if(invert){expected=255-expected;repeated=255-repeated;}
+                        error+=std::abs(image.pixels[(size_t(y)*W+x)*4+c]-expected);repeatError+=std::abs(repeated-expected);++samples;}
+                    const bool pass=item.validity==pipeline::GenerationValidity::Valid&&error<repeatError;
+                    pixelsOk=pixelsOk&&pass;std::cout<<"FRUC_RESET_GT epoch="<<epoch<<" frame="<<i<<" sub="<<item.subframe<<" mae="<<error/samples<<" repeatMae="<<repeatError/samples<<" pass="<<pass<<std::endl;
+                }
+            }
+        }
+        ok=ok&&pixelsOk;
     }
     ok=ok&&generated==5*(mult-1);std::cout<<"FRUC_RESULT multiplier="<<mult<<" generated="<<generated<<" worstMae="<<worst<<" pass="<<ok<<std::endl;
     ring.drainQueue();graph.shutdown();av_frame_free(&f);ring.shutdown();ctx.shutdown();CoUninitialize();return ok?0:1;

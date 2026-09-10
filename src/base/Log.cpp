@@ -72,6 +72,8 @@ bool Logger::openFile(const std::wstring& path)
     if (file_ == nullptr) {
         return false;
     }
+    std::setvbuf(file_,nullptr,_IOFBF,64*1024);
+    bufferedLogBytes_=0;lastFileFlushTick_=GetTickCount64();
     return true;
 }
 
@@ -110,7 +112,11 @@ void Logger::write(LogLevel level, const char* component, const std::string& mes
     }
     if (file_ != nullptr) {
         std::fprintf(file_, "%s\n", line.c_str());
-        std::fflush(file_);
+        bufferedLogBytes_+=line.size()+1;
+        const auto tick=GetTickCount64();
+        // Keep every event, but avoid a write/flush syscall for every pass.
+        // Errors and explicit crash/teardown flush() calls remain immediate.
+        if(level==LogLevel::Warn||level==LogLevel::Error||bufferedLogBytes_>=64*1024||tick-lastFileFlushTick_>=250){std::fflush(file_);bufferedLogBytes_=0;lastFileFlushTick_=tick;}
     }
 }
 
@@ -136,6 +142,15 @@ void error(const char* component, const std::string& message)
     Logger::instance().write(LogLevel::Error, component, message);
 }
 
+bool verboseFrameLogs()
+{
+    static const bool enabled = [] {
+        wchar_t value[2]{};
+        return GetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS", value, 2) == 1 && value[0] == L'1';
+    }();
+    return enabled;
+}
+
 } // namespace log
 
 
@@ -153,6 +168,7 @@ void Logger::flush()
     std::lock_guard<std::mutex> lock(mutex_);
     if (file_ != nullptr) {
         std::fflush(file_);
+        bufferedLogBytes_=0;lastFileFlushTick_=GetTickCount64();
     }
 }
 } // namespace veyra

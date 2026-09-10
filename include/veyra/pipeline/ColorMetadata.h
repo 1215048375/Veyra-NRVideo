@@ -36,9 +36,11 @@ inline ColorDescription resolveFrameColor(const AVFrame& frame,ColorDescription 
     case AVCOL_TRC_BT2020_10:case AVCOL_TRC_BT2020_12:c.transfer=TransferFunction::BT2020_10;c.transferAssumed=false;break;
     default:break;
     }
-    if(c.range==ColorRange::Unknown||c.rangeAssumed){c.range=(rgb||frame.format==AV_PIX_FMT_YUVJ420P||frame.format==AV_PIX_FMT_YUVJ422P||frame.format==AV_PIX_FMT_YUVJ444P)?ColorRange::Full:ColorRange::Limited;c.rangeAssumed=true;}
-    if(c.matrix==YuvMatrix::Unknown||c.matrixAssumed){c.matrix=rgb||frame.height>=700?YuvMatrix::BT709:YuvMatrix::BT601;c.matrixAssumed=true;}
-    if(c.transfer==TransferFunction::Unknown||c.transferAssumed){c.transfer=rgb?TransferFunction::SRGB:TransferFunction::BT709;c.transferAssumed=true;}
+    // A source's documented fallback is still a resolved contract. Preserve
+    // it (and its provenance) unless the frame supplies explicit metadata.
+    if(c.range==ColorRange::Unknown){c.range=(rgb||frame.format==AV_PIX_FMT_YUVJ420P||frame.format==AV_PIX_FMT_YUVJ422P||frame.format==AV_PIX_FMT_YUVJ444P)?ColorRange::Full:ColorRange::Limited;c.rangeAssumed=true;}
+    if(c.matrix==YuvMatrix::Unknown){c.matrix=rgb||frame.height>=700?YuvMatrix::BT709:YuvMatrix::BT601;c.matrixAssumed=true;}
+    if(c.transfer==TransferFunction::Unknown){c.transfer=rgb?TransferFunction::SRGB:TransferFunction::BT709;c.transferAssumed=true;}
     return c;
 }
 inline uint32_t transferCode(TransferFunction t){return t==TransferFunction::Linear?0u:t==TransferFunction::BT709?2u:1u;}

@@ -11,12 +11,12 @@ namespace veyra::engine {
 class VideoPresenter {
 public:
     bool open(gfx::D3D12DeviceContext&, HWND, pipeline::EnhanceGraph&);
-    bool present(gfx::D3D12DeviceContext&,gfx::CommandSlotRing&,pipeline::EnhanceGraph&,unsigned slot,bool generated,int comparison=0,bool baseReference=false,float split=.5f,pipeline::FrameIdentity identity={},PreviewView view={});
+    bool present(gfx::D3D12DeviceContext&,gfx::CommandSlotRing&,pipeline::EnhanceGraph&,unsigned slot,bool generated,bool referencesValid=true,int comparison=0,bool baseReference=false,float split=.5f,pipeline::FrameIdentity identity={},PreviewView view={});
     void close();
     // Explicit integration-test capture only; never called by playback/export.
     bool readPresentedFrameForTest(gfx::D3D12DeviceContext&,gfx::CommandSlotRing&,sink::RgbaImage&);
     uint64_t submittedCount() const {return sink_.presentCount();}
-diagnostics::GpuSample blitTiming(ID3D12Fence* f){gpuTimer_.collect(f);return gpuTimer_.last().gpu[size_t(diagnostics::GpuStage::Blit)];}
+diagnostics::GpuSample blitTiming(ID3D12Fence* f,uint64_t revision=0){gpuTimer_.collect(f);if(revision&&gpuTimer_.last().identity.settingsRevision!=revision){diagnostics::GpuSample pending;pending.state=diagnostics::SampleState::Pending;return pending;}return gpuTimer_.last().gpu[size_t(diagnostics::GpuStage::Blit)];}
 private:
     diagnostics::GpuTimer gpuTimer_;
     gfx::PresentSink sink_;

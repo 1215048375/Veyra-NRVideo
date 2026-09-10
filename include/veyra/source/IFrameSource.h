@@ -20,6 +20,7 @@ struct SourceOpenDesc {
     bool preferHardwareDecode = true; // D3D12VA first, software fallback explicit
     void* d3d12Device = nullptr;      // ID3D12Device* when hardware decode is wanted
     void* d3d12Queue = nullptr;       // ID3D12CommandQueue*
+    bool legacyCaptureRgbForDiagnostic = false; // explicit A/B only; never set by the player
 };
 
 struct SourceInfo {

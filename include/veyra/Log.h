@@ -47,6 +47,8 @@ private:
     std::mutex mutex_;
     std::FILE* file_ = nullptr;
     bool consoleEnabled_ = true;
+    uint64_t lastFileFlushTick_=0;
+    size_t bufferedLogBytes_=0;
     diagnostics::DiagnosticHistory diagnostics_;std::string latestProblem_;
 };
 
@@ -58,6 +60,7 @@ void trace(const char* component, const std::string& message);
 void info(const char* component, const std::string& message);
 void warn(const char* component, const std::string& message);
 void error(const char* component, const std::string& message);
+bool verboseFrameLogs();
 
 // Key=value helper used by call sites that need structured fields.
 inline std::string kv(const char* key, uint64_t value)

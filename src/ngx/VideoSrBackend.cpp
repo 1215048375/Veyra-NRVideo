@@ -13,8 +13,10 @@ NVSDK_NGX_Result invoke(int op,ID3D12GraphicsCommandList* list,NVSDK_NGX_Paramet
     } __except(EXCEPTION_EXECUTE_HANDLER){seh=GetExceptionCode();return NVSDK_NGX_Result_FAIL_PlatformError;}
 }
 bool result(int op,NVSDK_NGX_Result r,unsigned seh){
-    (NVSDK_NGX_SUCCEED(r)&&!seh?log::info:log::error)("video-sr",std::format("op={} result=0x{:X} seh=0x{:X}",op,unsigned(r),seh));
-    return NVSDK_NGX_SUCCEED(r)&&!seh;
+    const bool ok=NVSDK_NGX_SUCCEED(r)&&!seh;
+    if(!ok)log::error("video-sr",std::format("op={} result=0x{:X} seh=0x{:X}",op,unsigned(r),seh));
+    else if(op!=1||log::verboseFrameLogs())log::info("video-sr",std::format("op={} result=0x{:X} seh=0x{:X}",op,unsigned(r),seh));
+    return ok;
 }
 }
 bool VideoSrBackend::create(NgxCoreHost& core,ID3D12GraphicsCommandList* list){

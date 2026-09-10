@@ -1,5 +1,6 @@
 #include "veyra/gfx/CommandSlotRing.h"
 
+#include <chrono>
 #include <format>
 
 #include "veyra/Log.h"
@@ -28,6 +29,7 @@ bool CommandSlotRing::initialize(ID3D12Device* device,
     fenceEvent_ = fenceEvent;
     slotCount_ = slotCount;
     nextSlot_ = 0;
+    cpuWaitCount_=0;cpuWaitMilliseconds_=0;submitCount_=0;
 
     if (device_ == nullptr || queue_ == nullptr || fence_ == nullptr || fenceEvent_ == nullptr || slotCount_ == 0) {
         status = Status::InvalidArgument;
@@ -94,6 +96,7 @@ void CommandSlotRing::shutdown()
     slots_.clear();
     timestampHeap_.Reset();
     timingReadback_.Reset();
+    cpuWaitCount_=0;cpuWaitMilliseconds_=0;submitCount_=0;
     initialized_ = false;
     veyra::log::info("gfx", "slot-ring: shutdown complete");
 }
@@ -117,7 +120,9 @@ ID3D12GraphicsCommandList* CommandSlotRing::acquire(uint32_t slot, Status& statu
                 return nullptr;
             }
             ++cpuWaitCount_;
+            const auto waitStart=std::chrono::steady_clock::now();
             const DWORD wait = WaitForSingleObject(fenceEvent_, 10000);
+            cpuWaitMilliseconds_+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-waitStart).count();
             if (wait != WAIT_OBJECT_0) {
                 status = Status::DeviceFailure;
                 veyra::log::error("gfx", std::format("slot-ring: fence wait slot={} waitResult={} fenceValue={}", slot, wait, target.fenceValue));
@@ -130,7 +135,7 @@ ID3D12GraphicsCommandList* CommandSlotRing::acquire(uint32_t slot, Status& statu
         uint64_t* data=nullptr;D3D12_RANGE range{slot*2*sizeof(uint64_t),(slot*2+2)*sizeof(uint64_t)};
         if(SUCCEEDED(timingReadback_->Map(0,&range,reinterpret_cast<void**>(&data)))) {
             const uint64_t begin=data[slot*2],end=data[slot*2+1];
-            if(end>=begin&&gpuCommandTimesMs_.size()<16384){const double ms=double(end-begin)*1000.0/timestampFrequency_;gpuCommandTimesMs_.push_back(ms);if(!target.label.empty())veyra::log::info("gpu-profile",std::format("{} {:.4f} ms",target.label,ms));}
+            if(end>=begin&&gpuCommandTimesMs_.size()<16384){const double ms=double(end-begin)*1000.0/timestampFrequency_;gpuCommandTimesMs_.push_back(ms);if(!target.label.empty()&&veyra::log::verboseFrameLogs())veyra::log::info("gpu-profile",std::format("{} {:.4f} ms",target.label,ms));}
             D3D12_RANGE empty{0,0};timingReadback_->Unmap(0,&empty);
         }target.timed=false;target.label.clear();
     }
@@ -176,6 +181,7 @@ bool CommandSlotRing::submitAndSignal(uint32_t slot)
         return false;
     }
     target.fenceValue = value;
+    ++submitCount_;
     return true;
 }
 

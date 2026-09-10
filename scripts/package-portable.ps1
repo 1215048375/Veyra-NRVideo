@@ -24,7 +24,10 @@ $runtimeFiles = @(
   @{ Name = 'nvngx_dlssg.dll'; Source = (Join-Path $resolvedRoot 'runtime_local/nvidia/nvngx_dlssg.dll'); Sha256 = '135EAF0733C1E37381A8C28ABCF7A862404A54132B81787C04E35D09EFC5E36F'; Classification = 'community-experimental-runtime'; Experimental = $true },
   @{ Name = 'nvngx_dlssnr.dll'; Source = (Join-Path $resolvedRoot 'runtime_local/nvidia/nvngx_dlssnr.dll'); Sha256 = 'E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E'; Classification = 'community-experimental-runtime'; Experimental = $true },
   @{ Name = 'nvngx_vsr.dll'; Source = (Join-Path $resolvedRoot 'runtime_local/nvidia/nvngx_vsr.dll'); Sha256 = 'C3D88EEA5FF7A548EDEFA66414CF6E77464D0947277C904F324DD23ABF58A1ED'; Classification = 'official-rtx-video-sdk-runtime'; Experimental = $false },
-  @{ Name = 'NvOFFRUC.dll'; Source = (Join-Path $resolvedRoot 'third_party_local/nvidia/Optical_Flow_SDK_5.0.7/NvOFFRUC/NvOFFRUCSample/bin/win64/NvOFFRUC.dll'); Sha256 = '5A0B6701D30709E25E7E5B92CA46B18AAB1459160CECD4F629872369D85C8B0A'; Classification = 'community-experimental-runtime'; Experimental = $true }
+  @{ Name = 'NvOFFRUC.dll'; Source = (Join-Path $resolvedRoot 'third_party_local/nvidia/Optical_Flow_SDK_5.0.7/NvOFFRUC/NvOFFRUCSample/bin/win64/NvOFFRUC.dll'); Sha256 = '5A0B6701D30709E25E7E5B92CA46B18AAB1459160CECD4F629872369D85C8B0A'; Classification = 'community-experimental-runtime'; Experimental = $true },
+  # Direct PE import of NvOFFRUC.dll. Keep the pinned dependency beside it;
+  # do not assume a CUDA Toolkit or a globally installed cudart on user PCs.
+  @{ Name = 'cudart64_110.dll'; Source = (Join-Path $resolvedRoot 'third_party_local/nvidia/Optical_Flow_SDK_5.0.7/NvOFFRUC/NvOFFRUCSample/bin/win64/cudart64_110.dll'); Sha256 = 'EDC35E7D0FA3F257BBEDFA7888911080C5696ACDD40B6187B6DD0173F20759AD'; Classification = 'cuda-runtime-dependency'; Experimental = $false }
 )
 foreach ($item in $runtimeFiles) {
   if (-not (Test-Path -LiteralPath $item.Source)) { throw "Missing approved runtime: $($item.Name)" }

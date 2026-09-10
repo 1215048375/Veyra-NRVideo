@@ -23,7 +23,13 @@ struct ResolutionPlan {
             const double scale=std::min({1.0,1920.0/p.base.width,1080.0/p.base.height});
             if(scale<1.0)p.nr={std::max(1u,std::min(p.base.width,uint32_t(p.base.width*scale)&~1u)),std::max(1u,std::min(p.base.height,uint32_t(p.base.height*scale)&~1u))};
         }
-        p.flow=source;p.fg=p.output=p.base;p.settingsRevision=revision;return p;
+        p.flow=source;
+        // NVOF reads source-space color. In the explicitly labelled realtime
+        // path it must not silently remain at native 4K after NR was reduced.
+        // Inputs smaller than the realtime NR extent stay at their native size.
+        if(!exporting&&policy==NrSizePolicy::Realtime&&
+           (p.nr.width<p.source.width||p.nr.height<p.source.height))p.flow=p.nr;
+        p.fg=p.output=p.base;p.settingsRevision=revision;return p;
     }
 };
 }

@@ -29,6 +29,8 @@ int wmain(int argc,wchar_t** argv){try{
     require(ResolutionPlan::make({1080,1920},true,NrSizePolicy::Native,true).output==Extent{1214,2160},"portrait SR even dimensions");
     require(!ResolutionPlan::make({2880,2160},true,NrSizePolicy::Native,true).srApplied,"already maximum edge skips SR");
     require(ResolutionPlan::make({1920,1080},true,NrSizePolicy::Realtime,false).output==Extent{3840,2160},"16:9 SR unchanged");
+    require(ResolutionPlan::make({3840,2160},false,NrSizePolicy::Realtime,false).flow==Extent{1920,1080},"realtime 4K uses bounded flow extent");
+    require(ResolutionPlan::make({3840,2160},false,NrSizePolicy::Native,false).flow==Extent{3840,2160},"native 4K retains native flow extent");
     for(int dpi:{96,120,144,192})for(int width:{720,900,960,1180,1280,1920})for(int height:{540,720,800,1080})for(bool pro:{false,true})for(bool drawer:{false,true}){
         ui::ChromeLayout l(width,height,pro,drawer);require(l.left>=0&&l.top>=0&&l.viewWidth>0&&l.viewHeight>0,"nonnegative viewport");require(l.left+l.viewWidth<=width&&l.top+l.viewHeight<=height,"viewport contained");if(pro&&(width>=960||drawer))require(l.left+l.viewWidth<l.right&&l.right+l.panelWidth<=width,"disjoint inspector");
         require(MulDiv(l.viewWidth,dpi,96)>0,"DPI physical extent");

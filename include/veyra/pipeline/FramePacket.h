@@ -155,6 +155,7 @@ struct FramePacket {
     FrameFlags flags = 0;
     ColorDescription colorInfo;
     uint64_t sourceEpoch = 1;     // ResetCoordinator epoch at frame boundary
+    int64_t arrivalHost100ns = 0; // capture callback steady_clock; 0 when unavailable
 
     GpuTextureHandle color;       // canonical linear RGBA16F working texture
 

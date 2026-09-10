@@ -1,3 +1,9 @@
+# 2026-09-10 当前修复与本地存档
+
+新增一秒GPU完成FPS和采集60→30；同步此前颜色/异步呈现/Drop reset/实时光流/日志改动。文件、命令与边界见 `docs/HANDOFF_2026-09-10.md`。Release exit0；CPU41/worker11/预设PASS；真实engine half-rate19 PASS；UI日常/专业/窄窗口PASS；delivery23 PASS45.317秒，run `910fe667d2574babaa3b02a7aa9bb3e2`。未打开实卡，不是整体Phase7通过。
+
+初次Windows min宏编译失败和UI辅助根窗口误认已修正，失败日志保留。用户纠正自然FPS变化发生在调画质期间，撤回对该段的确定异常归因。NR固定SHA与Valid签名核对。FRUC重置像素、临界负载节奏仍开放；不改控制面、不push。用户授权本地Git存档当前源码/文档，不含SDK/runtime/媒体/日志。
+
 # 2026-09-08 优化 Goal 启动与 preflight 停点
 
 用户明确开启目标模式，新增解除不合理媒体尺寸限制、专业预览悬停滚轮缩放，并实施现有优化方案；导出完整性检查保持现状。Goal 和 BACKLOG 已建立。
@@ -1322,3 +1328,35 @@ User requested1000fps support andFRUC2/3/4. Source timing admission120→1000, e
 用户选择完整开箱即用的实验 Runtime Pack，并明确接受该 Pack 可能被 GitHub 下架或被权利方要求移除的风险。`AGENTS.md` 已锁定源码/Release 物理隔离：NVIDIA 二进制、SDK、头文件、库、样例和压缩包不得进入 Git、LFS、源码或资源；仅经 manifest 白名单、固定 SHA-256、有效 NVIDIA Authenticode 签名和适用许可证检查的用户包 Release 资产可携带运行时。不得篡改/重签名/隐藏、不得从游戏或驱动缓存提取，且不得宣称 NVIDIA 官方支持。
 
 `FrucWorker` 改为从 EXE 相对的 `runtime_local/nvidia/NvOFFRUC.dll` 加载，移除开发机绝对路径。`scripts/package-portable.ps1` 以显式 allowlist 打包 `nvngx_dlss.dll`、`nvngx_dlssg.dll`、`nvngx_dlssnr.dll`、`nvngx_vsr.dll`、`NvOFFRUC.dll`，生成 `release-runtime-manifest.json`，附带 RTX / Optical Flow 许可证并排除 SDK 开发文件。Release 构建通过；最新 ZIP SHA256 `C3BA5C6E138557D3F4A208737CCC2542CE5687DA1BA7F0AD534F009DA4AE1E6F`。独立解压后五个 DLL 的 SHA-256 均匹配 manifest、Authenticode 均为 Valid，包内未发现 PDB/LIB/头文件/样例/SDK 目录；`veyra.exe --smoke-empty --smoke-seconds 3 --no-nr --no-sr --no-fg` 退出码 0。尚未 commit、push、tag 或创建 GitHub Release；README 控制面 hash 漂移仍未自行重基线。
+
+## 2026-09-09 OBS/Magpie 实卡反馈：基础画质审计与修复交接
+
+交付 docs/BASELINE_QUALITY_PERFORMANCE_REPAIR_2026-09-09.md，优先级改为先找色带首次失真节点，再比较同尺寸性能。确认 DirectShow 强制 RGB32 与原生颜色元数据缺失、固定 SR 4K 目标、处理/呈现串行、逐帧复制/日志等设计成本；不宣称已证明具体转换器用了错误矩阵。保存用户 OBS/Magpie 日志、精确源码与身份于 gitignored 的 logs/obs-magpie-rootcause-20260909/。Magpie 现有日志多为 1440p，不能冒充与 Veyra 同等 4K 实测。
+
+实际命令：python logs/obs-magpie-rootcause-20260909/build_probe.py。复用当前编译的产品库/Shader，构建仅诊断入口；build/run 均 exit 0，IMAGE_DIMENSION 256x64 nr=0 maxError8=0，CAPTURE_RGB nr=0 maxError8=0 cuts=1 nvof=0。首次包装脚本匹配编译参数失败，修正后约 5.4 秒完成。此结果仅覆盖合成 RGB/BGR0 到 GPU 无增强输出，不覆盖实卡转换或最终窗口；未新执行 SR/NR/FG、完整 delivery 或独立审查。证据 baseline-result.json、baseline-probe.log、audit-manifest.json。
+
+gh release view v0.0.1 -R Likely7/Veyra-NRVideo --json url,isDraft,isPrerelease,publishedAt 确认已公开发布，时间 2026-09-09T11:00:36Z。纠正旧“尚未发布”记录，不修改远端。保留开工前文档改动，生产代码和运行时未修改，AGENTS/CONTROL_HASHES 未修改，不自我放行历史 hash 漂移。用户授权兼容 OSS 模块复用记录在新方案 R6，保留版权/源码义务与 NVIDIA 二进制边界。
+
+Phase 7 仍 in_progress，产品修复待执行；下一条任务 R1：对原生采集、转换后、GPU 输出和最终显示做同帧定位，再按坏样本修 R2/R3。单次测试 <=300 秒，导出完整性检查保持现状。
+
+## 2026-09-09 原生 YUY2 与实时呈现修复交付
+
+用户撤回实卡 A/B（“不用测试这个，可以确定就是YUY2的转换”），本轮未打开采集设备。实际实现见 docs/BASELINE_REPAIR_IMPLEMENTATION_2026-09-09.md：原生 YUY2/NV12 DirectShow 接收、一次 GPU YUY2→linearFP16、颜色元数据/stride/方向校正，同尺寸 blit/copy 消减、两个批次的异步采集呈现、revision 隔离统计与批量文件日志。保存/暂停/重配置/退出仍按 lease/fence 排空。不能说已同帧实测证明全部色带只有一个根因。
+
+Release 构建 final-build4.log exit0；CPU契约26项、worker11项；YUY2 601/709×full/limited、原生4K及RGB范围 GPU 基准最大误差<=1/255，显示误差0。YUY2八帧NR含7次NVOF/7帧motion；实际Engine文件回放live worker的DLSS2X/4X/暂停恢复/设置/退出10项PASS，FRUC已知15fps平移素材同样10项PASS。没有占实卡。单项均外部timeout290秒。
+
+delivery最终 logs/delivery/37bd4fedc5604642a2a2afeeca46c99e/result.json，23项PASS、42.569秒；NR/NVOF/GBV零错误、4K播放、4K图像、NVENC H264/HEVC音频和2X CFR、取消检查通过。第一次delivery所有功能检查通过但最后Get-FileHash模块未加载而exit1，保留2d62b4ad日志，仅包装导入平台Utility模块后重跑，未改原gate。早期编译头文件遗漏、temporal测试未开启NVOF配置的失败与修正也保留。
+
+独立review_native_capture最终限定复核：所提动态格式/RGB范围/异步统计问题均关闭，审查范围无其他未修P0/P1/P2；它核对源码和真实日志，没有自行执行GPU或实卡，不记整体Phase7 PASS。
+
+另发现旧路径迁移导致本机FRUC运行目录缺NvOFFRUC.dll及其直接依赖cudart64_110.dll。由已有本地SDK复制固定SHA/有效NVIDIA签名的两项到gitignored runtime_local，不修改文件内容。打包allowlist添加固定cudart依赖；仅语法检查，未执行打包或发布。实际FRUC平移回放通过；通用test_av素材返回repeated=true的失败保留，不当有效生成。已发布旧包未更新。
+
+EXE SHA256: 61618AF18F7B985BD4C1FECA06EBE7A07C30EAA01B2CC0682A217E89EAD3C372。原版NR固定SHA一致。已有控制面漂移保留，不改AGENTS/README/CONTROL_HASHES、不声称preflight通过。整体Phase7仍in_progress；下一条任务是用户实测本机新YUY2路径，再按同尺寸同配置证据继续性能优化。FRUC互通/重建等待、GPU临界区、自然运动效果和长期稳定性仍有边界。未push、未重新发布Release。
+
+## 2026-09-09 原生 NR 性能再反馈
+
+完整记录、文件清单、实际命令见 `docs/NATIVE_NR_PERFORMANCE_2026-09-09.md`。完成采集设置fresh帧/arrival锚点、暂停等待、driver断点跨mailbox保留与DeadlineWait复用。最终构建`nrperf-final-build.log` exit0；CPU22、live DLSS12/FRUC12通过；delivery `d3b2dd62224a4df986941a8a4a1cb8a6` 23项45.671秒通过。EXE `8E1A694229257A66DA5F36DE439423632631B310E81258EA032C92CB5FFA159D`。
+
+FRUC候选bSkipWarp/延后重建/时间归零/首对预热均未通过新增reset后像素检查，生产改动撤回，失败证据和候选diff保留。原FRUC新增`--reset-pixels`同样exit1：API成功而部分重复/偏移，不能称原实现通过更严格验收；重建循环未解决。既有短测通过不覆盖这一失败。
+
+本机原生1440p NR额外执行90帧/89NVOF，88条完成GPU timestamp：中位9.74784ms、P95 10.11734ms；Magpie既有同尺寸窗口平均9.718–10.095ms。素材/全链路不完全匹配，只说明纯NR同尺寸未显示倍数差距。用户补充顺序可拖动且实测差异不大，已撤回“顺序是主因”的推断；不变更产品路线。下一任务是同尺寸、同倍率完整链路CPU等待/GPU/呈现节奏诊断。未占实卡、未修改runtime/控制面、未push发布。Phase7仍in_progress。

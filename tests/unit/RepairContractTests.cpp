@@ -13,7 +13,11 @@ int main(){
     using namespace veyra;int failures=0,checks=0;
     auto check=[&](bool ok,const char* name){++checks;if(!ok)++failures;std::cout<<(ok?"PASS ":"FAIL ")<<name<<'\n';};
     auto p=pipeline::ResolutionPlan::make({1920,1080},true,pipeline::NrSizePolicy::Realtime,false);
-    check(p.base==pipeline::Extent{3840,2160}&&p.nr==pipeline::Extent{1920,1080}&&p.output==p.base,"SR4K preserves base; NR1080");
+    check(p.base==pipeline::Extent{3840,2160}&&p.nr==pipeline::Extent{1920,1080}&&p.flow==pipeline::Extent{1920,1080}&&p.output==p.base,"SR4K preserves base; NR and flow remain source1080");
+    p=pipeline::ResolutionPlan::make({3840,2160},false,pipeline::NrSizePolicy::Realtime,false);
+    check(p.nr==pipeline::Extent{1920,1080}&&p.flow==p.nr,"realtime native4K bounds NR and source-space flow to 1080");
+    p=pipeline::ResolutionPlan::make({3840,2160},false,pipeline::NrSizePolicy::Native,false);
+    check(p.nr==p.source&&p.flow==p.source,"native mode retains native4K NR and flow");
     p=pipeline::ResolutionPlan::make({3840,2160},true,pipeline::NrSizePolicy::Realtime,true);
     check(!p.srApplied&&p.nr==p.base,"native export and 1:1 SR bypass");
     engine::EnhancementSettings s;check(s.validate().empty(),"default settings valid");

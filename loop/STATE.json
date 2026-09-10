@@ -1,5 +1,41 @@
 {
   "schemaVersion": 1,
+  "captureFpsCheckpoint": {
+    "report": "docs/HANDOFF_2026-09-10.md",
+    "status": "implemented_software_verified_user_capture_pending",
+    "changes": "One-second GPU-completed real FPS; explicit capture60to30 before graph; original PTS; no file/export decimation; prior native capture/performance changes documented.",
+    "validation": "CPU41 worker11 preset PASS; RTX live half-rate19 PASS; UI3 layouts PASS; delivery23 PASS45.317s",
+    "evidence": "logs/delivery/910fe667d2574babaa3b02a7aa9bb3e2/result.json",
+    "next": "User PS5 fixed30 content over capture60 test, then matched-config pacing analysis. Prior natural FPS changes involved user quality adjustments, not proof of fixed-config FG fault.",
+    "publication": "Local source/docs checkpoint only; no push, Runtime Pack or Release update. FRUC reset failure remains open."
+  },
+  "nativeNrPerformanceAudit": {
+    "report": "docs/NATIVE_NR_PERFORMANCE_2026-09-09.md",
+    "status": "capture_anchor_fixed_performance_and_fruc_unresolved",
+    "userSteering": "Magpie supports arbitrary effect order; user sees little difference between orders. Do not infer order is the primary cause or silently change route.",
+    "validation": "CPU22; DLSS/FRUC live replay12 each; delivery23 PASS45.671s; native1440 NR90/NVOF89 GPU median9.74784ms. No physical capture.",
+    "failedEvidence": "logs/baseline-repair-20260909/nrperf-baseline-fruc-reset.log: original FRUC --reset-pixels exit1; candidate recovery changes withdrawn after failed pixels.",
+    "exeHash": "8E1A694229257A66DA5F36DE439423632631B310E81258EA032C92CB5FFA159D"
+  },
+  "baselineQualityRepair": {
+    "report": "docs/BASELINE_QUALITY_PERFORMANCE_REPAIR_2026-09-09.md",
+    "status": "implemented_software_short_gate_passed_physical_comparison_not_run",
+    "userSteering": "Skip physical YUY2 A/B per latest instruction; repair native conversion directly and retain offline validation.",
+    "nextImplementation": "User verifies native YUY2 image; next performance changes require matched input/output and configuration timing evidence.",
+    "evidence": "logs/delivery/37bd4fedc5604642a2a2afeeca46c99e/result.json",
+    "validationScope": "CPU native sink26/worker11; RTX YUY2/RGB maxError<=1 with presentation0; native4K; NR8/NVOF7; DLSS and FRUC live replay10 each; delivery23 pass42.569s. Independent code/log review only; no physical capture.",
+    "unresolved": "Physical driver connection/visual acceptance not run at user request; no matched Magpie performance proof; GPU critical section and FRUC reset/interop remain. Prior control hash drift retained.",
+    "publicRelease": "Veyra-NRVideo v0.0.1 already public at 2026-09-09T11:00:36Z; no remote mutation this turn.",
+    "implementationReport": "docs/BASELINE_REPAIR_IMPLEMENTATION_2026-09-09.md"
+  },
+  "competitorImprovementPlan": {
+    "supersededBy": "baselineQualityRepair: baseline color diagnosis precedes metrics optimization",
+    "report": "docs/COMPETITOR_IMPROVEMENT_PLAN_2026-09-09.md",
+    "status": "document_delivered_implementation_not_started",
+    "userSteering": "Pause intermittent-stutter investigation; first write competitor-based improvement plan.",
+    "nextImplementation": "P0-A: isolate metrics by applied settings revision; separate NR stage, valid generation and submission cadence.",
+    "validationScope": "Documentation and existing evidence review only; no new build/GPU/capture execution."
+  },
   "engineVersion": "veyra-loop-v1",
   "objective": "User-started optimization Goal: remove arbitrary input dimension limits, professional preview wheel zoom, implement current verified quality repairs; retain export integrity checks; each test <=300 seconds.",
   "status": "running",
@@ -83,12 +119,13 @@
     "noProgressCycles": 0,
     "maximumNoProgressCycles": 5
   },
-  "currentTask": "Cycle86 live settings independently passed; local checkpoint and handoff ready",
+  "currentTask": "Capture settings timeline repaired; native NR full-pipeline performance and FRUC reset pixel failure remain",
   "lastGate": {
-    "name": "phase7",
-    "status": "passed",
+    "name": "delivery",
+    "status": "software_short_gate_passed",
     "exitCode": 0,
-    "evidence": "logs/delivery/9f7468b334bc457db4b8bf125d4f5ddb/result.json; preflight69/phase773 PASS; Cycle86 independent scoped PASS"
+    "evidence": "logs/delivery/d3b2dd62224a4df986941a8a4a1cb8a6/result.json",
+    "note": "Unmodified software gate, system Utility import wrapper; not preflight or physical acceptance"
   },
   "lastFailureFingerprint": "",
   "failureLedger": [
@@ -102,16 +139,19 @@
   ],
   "baselineCommit": "2086282478ae5d1e07e8162d47148633b59882fe",
   "lastGoodCommit": "d681541a8fca77e3bfd5f496c8ee2dfe2d6a9031",
-  "openP0P1Findings": [],
+  "openP0P1Findings": [
+    "FRUC drop triggers repeated worker reconstruction ~335ms; candidate recovery withdrawn because reset pixel validation failed.",
+    "Original FRUC returns some repeated/incorrect post-reset pixels with repeated=false; reproducible via --reset-pixels, not covered by existing delivery."
+  ],
   "blockers": [
     "User real-card perceived latency/audio/FG display cadence and long stability acceptance pending; USB3Video1080p60 and4K18 short throughput measured.",
-    "Historical intermittent player-sync timing and mixed-configuration timing windows remain unresolved.",
-    "Public proprietary runtime distribution rights unresolved; local delivery only."
+    "Public proprietary runtime distribution rights unresolved; local delivery only.",
+    "Native capture physical connection/visual acceptance not run per user; mixed-revision statistics repaired but cadence/hardware performance not declared resolved."
   ],
-  "nextAction": "Handoff: prioritize configuration-specific metric windows; user real-card acceptance; see docs/HANDOFF_2026-09-09.md. Do not restore intentionally removed GOAL_PROMPT.",
-  "updatedAt": "2026-09-09T01:52:39.336203+00:00",
+  "nextAction": "Match actual stage extents/rates and instrument full pipeline waits/presentation; do not assume order is the main cause. FRUC reset pixels must pass before recovery changes ship. Do not resume cancelled physical color A/B.",
+  "updatedAt": "2026-09-09T14:31:00+00:00",
   "deliveryPlan": "docs/ACTIVE_DELIVERY_PLAN.md",
-  "captureAcceptance": "throughput_short_test_passed_user_latency_audio_pending",
+  "captureAcceptance": "new_native_path_not_physically_tested_per_user_instruction",
   "testInvocationLimitSeconds": 300,
   "currentEvidence": [
     "logs/f6-diag.json: diagnostic native1080 12frames exit0 (prior to statistics stride correction rebuild)",
@@ -137,7 +177,8 @@
     "Cycle76 independent scopedPASS: docs/REVIEW_SR_FG_DEPTH_RESPONSE_2026-09-08.md; SR8bit negative depth response, FG tiny constructed benefit, no defaultmodel",
     "Cycle77 independent scopedPASS: docs/REVIEW_SR_RECONSTRUCTION_2026-09-08.md; real4K SR spatialMAE lower, temporalerror/max higher; no natural/steady-state claim",
     "Cycle85 scoped independent PASS: docs/SETTINGS_PAGE_SCOPE_REPAIR_2026-09-09.md; preflight71/phase775 and actual GPU double-direction settings regression passed",
-    "Cycle86 independent live-settings/master-off/focus/rollback/wheel/default PASS; delivery9f7468b334bc457db4b8bf125d4f5ddb; docs/HANDOFF_2026-09-09.md"
+    "Cycle86 independent live-settings/master-off/focus/rollback/wheel/default PASS; delivery9f7468b334bc457db4b8bf125d4f5ddb; docs/HANDOFF_2026-09-09.md",
+    "docs/BASELINE_REPAIR_IMPLEMENTATION_2026-09-09.md; logs/delivery/37bd4fedc5604642a2a2afeeca46c99e/result.json; final-live-fruc-pan10 PASS; native_capture independent scoped code/log review"
   ],
   "reviewBaseCommit": "6f0ebaa687e3966d989bf138c86b6882380f20fb",
   "localDelivery": "cycle86_live_settings_scoped_pass_handoff_ready",
@@ -276,7 +317,7 @@
     "productModified": true,
     "consecutiveBlockedGoalTurns": 0,
     "previousGoalTurnClassification": "progress: SR/FG depth response and exact half-frame GT measured; incomplete-sample P2 fixed, independent18cases andgate PASS; default model not justified",
-    "currentGoalTurnClassification": "progress: optional shared RTX Video SR, actual playback/export and independent hot-switch/draft/legacy preset checks PASS; physical capture unavailable",
+    "currentGoalTurnClassification": "progress: user FRUC short test accepted; GitHub source audit distinguishes GPU workload from scheduling/reset/metrics costs; no new code changes",
     "controlSynchronizationAuthorization": "2026-09-08 user: 确认，给你全部权限; applies to previously proposed exact two-hash synchronization",
     "diagnosticFindings": [
       "Q7 read-only dependency check: RTXVideoSDK not present in third_party_local; official1.1download redirects NVIDIA login. Localdepthfile vitl is Large, not permitted Small; no verified Small ONNX/provider. No dependency integrated or performance claimed."
@@ -293,5 +334,15 @@
     "report": "docs/HANDOFF_2026-09-09.md",
     "exeSha256": "3BD470D51AD43F7C461F23AB6F9F9B7234DC6F33D84C9DDEB35A463663264E2C",
     "controlChangeAuthorization": "User explicitly deleted GOAL_PROMPT and requested removal of associated preflight checks; remaining10 hashes unchanged."
+  },
+  "frucIntegration": {
+    "status": "independent_checks_passed_final_verdict_unavailable",
+    "report": "docs/FRUC_INTEGRATION_2026-09-09.md",
+    "highFpsActual": "256x144 2000frames 999.34processedfps enhancement-off",
+    "backend": "optional FRUC 2/3/4X isolated GPU-sharing worker",
+    "knownRisk": "capture-drop reset restarts worker; real-card quality/latency not yet accepted",
+    "userFeedback": "User reports tested with no problems; unspecified configuration",
+    "gate": "logs/delivery/1c195ef6d3684879b220fc8c13439e83/result.json",
+    "reviewLimitation": "Reviewer hit usage limit after independent test reports; no final verdict"
   }
 }

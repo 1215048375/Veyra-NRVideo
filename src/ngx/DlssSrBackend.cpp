@@ -167,8 +167,9 @@ bool DlssSrBackend::evaluate(ID3D12GraphicsCommandList* cmdList,
 
     uint32_t sehCode = 0;
     const NVSDK_NGX_Result result = CallEvaluateDlss(cmdList, handle_, params, &evalParams, sehCode);
-    log::info("ngx", std::format("sr-backend: Evaluate #{} result={} seh={}",
-        evaluateCount_ + 1, ngxResultString(static_cast<uint64_t>(result)), sehCode));
+    if(result != NVSDK_NGX_Result_Success || log::verboseFrameLogs())
+        log::info("ngx", std::format("sr-backend: Evaluate #{} result={} seh={}",
+            evaluateCount_ + 1, ngxResultString(static_cast<uint64_t>(result)), sehCode));
 
     if (result != NVSDK_NGX_Result_Success) {
         log::error("ngx", std::format("sr-backend failed result=0x{:X} seh=0x{:X}", static_cast<unsigned>(result), sehCode));

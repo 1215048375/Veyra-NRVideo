@@ -111,7 +111,7 @@ case WM_CREATE:{window=h;font=makeFont(h);items.clear();
     add(L"STATIC",L"补帧与运动估算",1103,0,1,12,12,-1,30);
     combo(202,1,52,{L"关闭补帧",L"2X · 一张中间帧",L"3X · 两张中间帧",L"4X · 三张中间帧"});
     combo(204,1,104,{L"NR / DLSS光流 · 性能",L"NR / DLSS光流 · 平衡",L"NR / DLSS光流 · 质量"});
-    combo(205,1,156,{L"采用源时间戳",L"自动识别内容节奏",L"识别30fps内容节奏",L"识别50fps内容节奏",L"识别60fps内容节奏"});
+    combo(205,1,156,{L"采用源时间戳",L"自动识别内容节奏",L"识别30fps内容节奏",L"识别50fps内容节奏",L"识别60fps内容节奏",L"采集60→30fps处理（PS5 30帧）"});
     add(L"STATIC",L"FRUC倍率越高，耗时越多。光流档位用于NR/DLSS；FRUC内部自动控制。补帧需等待下一张源帧，倍率不等于实测显示帧率。",1104,0,1,12,210,-1,100);
 
     add(L"STATIC",L"用户预设",1105,0,2,12,12,-1,30);combo(300,2,56,{});add(L"EDIT",L"新预设",301,ES_AUTOHSCROLL|WS_TABSTOP,2,12,108,-1,36);send(301,EM_SETLIMITTEXT,48,0);

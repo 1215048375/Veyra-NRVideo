@@ -18,6 +18,7 @@ struct FrameLease {
     Microsoft::WRL::ComPtr<ID3D12Resource> texture,sourceReference,baseReference;
     uint64_t readyFence=0,consumerFence=0;
     uint32_t slot=0;
+    bool referencesValid=false;
 };
 struct BatchFrame {
     FrameIdentity identity;

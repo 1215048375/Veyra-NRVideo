@@ -66,8 +66,10 @@ struct EnhanceGraphDesc {
     bool noFeatures = false;     // VEYRA_NO_FEATURES: NVOF/NGX objects skipped
     bool noNgx = false;          // VEYRA_NO_NGX: core/features skipped, NVOF only
     bool rgbInput = false;       // allocate direct RGBA ingestion before NGX creation
+    bool yuy2Input = false;      // packed Y0 U Y1 V -> linear FP16; never subsample to NV12
     bool stillImage = false;     // no temporal motion/FG history for a single image
     uint32_t nrWidth=0,nrHeight=0; // zero preserves legacy native working extent
+    uint32_t flowWidth=0,flowHeight=0; // zero preserves legacy source-space NVOF extent
     uint32_t fgMultiplier=2;
     engine::FrameGenerationBackend frameGenerationBackend=engine::FrameGenerationBackend::Dlss;
     uint64_t settingsRevision=1;
@@ -121,7 +123,7 @@ public:
     // does not own the demuxer). `reset` marks the first frame of a new
     // temporal epoch (open/seek/...): NVOF/FG history is not consumed.
     // Returns false on hard failure (run verdict must FAIL).
-    bool process(const AVFrame* frame, double ptsMs, bool reset, FrameOutputs& out, uint64_t sourceFrameId = 0, const ColorDescription* color = nullptr);
+    bool process(const AVFrame* frame, double ptsMs, bool reset, FrameOutputs& out, uint64_t sourceFrameId = 0, const ColorDescription* color = nullptr, bool retainReferences = true);
     // Nonblocking. The scheduler polls at a GPU-ready/deadline boundary; no
     // full image readback and no waits inside the graph's individual passes.
     bool resolveGeneration(FrameOutputs& out);
@@ -152,6 +154,8 @@ public:
     uint32_t workHeight() const { return workH_; }
     uint32_t nrWidth() const {return nrW_;}
     uint32_t nrHeight() const {return nrH_;}
+    uint32_t flowWidth() const {return nvofW_;}
+    uint32_t flowHeight() const {return nvofH_;}
     uint32_t actualFlowPerf() const;
     diagnostics::FrameMetrics gpuMetrics(){gpuTimer_.collect(contextFence());return gpuTimer_.last();}
     ID3D12Fence* contextFence() const;

@@ -285,9 +285,10 @@ bool DlssFgBackend::evaluate(ID3D12GraphicsCommandList* cmdList,
     uint32_t sehCode = 0;
     const NVSDK_NGX_Result result = CallEvaluateDlssg(cmdList, handle_, params,
         &evalParams, &optParams, sehCode);
-    log::info("ngx", std::format("fg-backend: Evaluate #{} frameId={} reset={} generatedCount={} subframe={} result={} seh={}",
-        evaluateCount_ + 1, desc.frameId, desc.reset ? 1 : 0,desc.multiFrameCount,desc.multiFrameIndex,
-        ngxResultString(static_cast<uint64_t>(result)), sehCode));
+    if(result != NVSDK_NGX_Result_Success || log::verboseFrameLogs())
+        log::info("ngx", std::format("fg-backend: Evaluate #{} frameId={} reset={} generatedCount={} subframe={} result={} seh={}",
+            evaluateCount_ + 1, desc.frameId, desc.reset ? 1 : 0,desc.multiFrameCount,desc.multiFrameIndex,
+            ngxResultString(static_cast<uint64_t>(result)), sehCode));
 
     if (result != NVSDK_NGX_Result_Success) {
         log::error("ngx", std::format("fg-backend failed result=0x{:X} seh=0x{:X}", static_cast<unsigned>(result), sehCode));

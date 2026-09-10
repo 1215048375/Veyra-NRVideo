@@ -11,7 +11,7 @@ class GpuTimer {
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> heap_;
     Microsoft::WRL::ComPtr<ID3D12Resource> readback_;
     std::array<Pending,slots> pending_{};uint64_t frequency_=0;int active_=-1;
-    FrameMetrics last_;
+    FrameMetrics last_;uint64_t lastCollectedFence_=0;
 public:
     bool initialize(ID3D12Device* device,ID3D12CommandQueue* queue){
         close();HRESULT hr=queue->GetTimestampFrequency(&frequency_);if(FAILED(hr)||!frequency_)return false;
@@ -23,9 +23,9 @@ public:
         for(unsigned slot=0;slot<slots;++slot){auto& p=pending_[slot];if(!p.fence||p.fence>completed)continue;void* data=nullptr;D3D12_RANGE range{slot*stride*8,(slot+1)*stride*8};auto hr=readback_->Map(0,&range,&data);if(FAILED(hr)){log::error("gpu-timestamp",std::format("Map hr=0x{:X}",unsigned(hr)));p.fence=0;continue;}
             FrameMetrics m;m.identity=p.id;auto values=static_cast<const uint64_t*>(data)+slot*stride;
             for(unsigned stage=0;stage<stages;++stage)if(p.mask&(1u<<stage)){auto& v=m.gpu[stage];v.begin=values[stage*2];v.end=values[stage*2+1];v.frequency=frequency_;if(v.end>=v.begin){v.state=SampleState::Measured;v.milliseconds=double(v.end-v.begin)*1000/frequency_;}else v.state=SampleState::Unavailable;
-                log::info("gpu-timestamp",std::format("frame={} epoch={} revision={} stage={} begin={} end={} frequency={} ms={} (GPU queue timestamps)",p.id.sourceFrameId,p.id.epoch,p.id.settingsRevision,stage,v.begin,v.end,frequency_,v.milliseconds.value_or(-1)));
+                if(log::verboseFrameLogs())log::info("gpu-timestamp",std::format("frame={} epoch={} revision={} stage={} begin={} end={} frequency={} ms={} (GPU queue timestamps)",p.id.sourceFrameId,p.id.epoch,p.id.settingsRevision,stage,v.begin,v.end,frequency_,v.milliseconds.value_or(-1)));
             }
-            D3D12_RANGE written{0,0};readback_->Unmap(0,&written);if(m.identity.sourceFrameId>=last_.identity.sourceFrameId)last_=m;p.fence=0;
+            D3D12_RANGE written{0,0};readback_->Unmap(0,&written);if(p.fence>=lastCollectedFence_){last_=m;lastCollectedFence_=p.fence;}p.fence=0;
         }
     }
     void frame(pipeline::FrameIdentity id,ID3D12Fence* fence){collect(fence);active_=-1;if(!heap_||!readback_)return;auto i=unsigned(id.sourceFrameId%slots);if(pending_[i].fence)return;active_=int(i);pending_[i]={id,0,0};}
@@ -34,6 +34,6 @@ public:
     void resolve(ID3D12GraphicsCommandList* list){if(active_<0)return;auto mask=pending_[active_].mask;for(unsigned i=0;i<stages;++i)if(mask&(1u<<i)){unsigned index=active_*stride+i*2;list->ResolveQueryData(heap_.Get(),D3D12_QUERY_TYPE_TIMESTAMP,index,2,readback_.Get(),index*8);}}
     void submitted(uint64_t fence){if(active_>=0)pending_[active_].fence=fence;active_=-1;}
     const FrameMetrics& last()const{return last_;}
-    void close(){heap_.Reset();readback_.Reset();pending_={};last_={};active_=-1;frequency_=0;}
+    void close(){heap_.Reset();readback_.Reset();pending_={};last_={};lastCollectedFence_=0;active_=-1;frequency_=0;}
 };
 }

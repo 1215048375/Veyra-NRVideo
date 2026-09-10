@@ -85,7 +85,7 @@ void EngineController::runLargeImage(HWND window,const sink::RgbaImage& original
             out={};if(!preview.process(frame.get(),0,true,out,++previewRevision)){status(L"大图预览上传失败",true);break;}
             havePreview=true;lastComparison=comparison;lastSplit=split;lastView=view;lastClient=client;
         }
-        if(havePreview&&!presenter.present(ctx,ring,preview,out.videoSlot,false,0,false,.5f,{},PreviewView{0,.5f,.5f})){status(L"大图呈现失败",true);break;}
+        if(havePreview&&!presenter.present(ctx,ring,preview,out.videoSlot,false,false,0,false,.5f,{},PreviewView{0,.5f,.5f})){status(L"大图呈现失败",true);break;}
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
     out={}; // Cleanup drains before either presenter or graph releases GPU objects.

@@ -82,6 +82,8 @@ public:
     // Query heap for D3D12_QUERY_TYPE_TIMESTAMP entries (two per slot).
     ID3D12QueryHeap* timestampHeap() const { return timestampHeap_.Get(); }
     uint64_t cpuWaitCount() const { return cpuWaitCount_; }
+    double cpuWaitMilliseconds() const { return cpuWaitMilliseconds_; }
+    uint64_t submitCount() const { return submitCount_; }
     const std::vector<double>& gpuCommandTimesMs() const { return gpuCommandTimesMs_; }
 
 private:
@@ -104,7 +106,8 @@ private:
     ComPtr<ID3D12QueryHeap> timestampHeap_;
     std::vector<Slot> slots_;
     ComPtr<ID3D12Resource> timingReadback_;
-    uint64_t timestampFrequency_ = 0, cpuWaitCount_ = 0;
+    uint64_t timestampFrequency_ = 0, cpuWaitCount_ = 0, submitCount_ = 0;
+    double cpuWaitMilliseconds_ = 0;
     std::vector<double> gpuCommandTimesMs_;
 };
 
