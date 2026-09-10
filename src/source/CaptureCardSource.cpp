@@ -202,11 +202,13 @@ CaptureMetrics CaptureCardSource::metrics()const{
     if(p.received>1){const double elapsed=std::chrono::duration<double>(p.latestArrival-p.firstArrival).count();if(elapsed>0)m.callbackFps=(p.received-1)/elapsed;}
     if(p.sequence)m.frameAgeMs=std::chrono::duration<double,std::milli>(Impl::Clock::now()-p.readArrival).count();return m;
 }
-SourceReadStatus CaptureCardSource::read(pipeline::FramePacket& packet,const AVFrame** frame){auto& p=*p_;*frame=nullptr;if(!p.info.opened)return SourceReadStatus::Error;
+SourceReadStatus CaptureCardSource::read(pipeline::FramePacket& packet,const AVFrame** frame){return readWithWait(packet,frame,30);}
+SourceReadStatus CaptureCardSource::tryRead(pipeline::FramePacket& packet,const AVFrame** frame){return readWithWait(packet,frame,0);}
+SourceReadStatus CaptureCardSource::readWithWait(pipeline::FramePacket& packet,const AVFrame** frame,unsigned milliseconds){auto& p=*p_;*frame=nullptr;if(!p.info.opened)return SourceReadStatus::Error;
     long code=0;LONG_PTR a=0,b=0;while(p.events&&p.events->GetEvent(&code,&a,&b,0)==S_OK){p.events->FreeEventParams(code,a,b);if(code==EC_DEVICE_LOST||code==EC_ERRORABORT)return SourceReadStatus::Error;}
     double time=0;uint32_t flags=0;uint64_t sequence=0;pipeline::Rational duration;
     {
-        std::unique_lock lock(p.mutex);p.wake.wait_for(lock,std::chrono::milliseconds(30),[&]{return p.pending||p.callbackError;});
+        std::unique_lock lock(p.mutex);if(milliseconds)p.wake.wait_for(lock,std::chrono::milliseconds(milliseconds),[&]{return p.pending||p.callbackError;});
         if(p.callbackError)return SourceReadStatus::Error;
         if(!p.pending)return Impl::Clock::now()-p.lastFrame>std::chrono::seconds(3)?SourceReadStatus::Error:SourceReadStatus::Waiting;
         std::swap(p.frame,p.pendingFrame);p.pending=false;time=p.pendingTime;p.readArrival=p.pendingArrival;

@@ -26,8 +26,11 @@ public:
     sink::CaptureAudioState audioState()const;
     const SourceInfo& info()const override;
     SourceReadStatus read(pipeline::FramePacket&,const AVFrame**)override;
+    SourceReadStatus tryRead(pipeline::FramePacket&,const AVFrame**);
     bool seek(const pipeline::Rational&)override{return false;}
     void close()noexcept override;
-private:struct Impl;std::unique_ptr<Impl> p_;
+private:
+    SourceReadStatus readWithWait(pipeline::FramePacket&,const AVFrame**,unsigned milliseconds);
+    struct Impl;std::unique_ptr<Impl> p_;
 };
 }

@@ -4,15 +4,18 @@
 #include <iostream>
 #include <filesystem>
 #include <fstream>
+#include <regex>
 using namespace veyra;
 using namespace std::chrono_literals;
 int wmain(int argc,wchar_t**argv){
     SetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS",L"1");
-    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--fruc")==0||wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--fruc-overload")==0||wcscmp(argv[3],L"--fruc-overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--fruc")==0||wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--fruc-overload")==0||wcscmp(argv[3],L"--fruc-overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0||wcscmp(argv[3],L"--source-gap")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     std::filesystem::create_directories(argv[2]);Logger::instance().openFile((std::filesystem::path(argv[2])/"engine.log").wstring());Logger::instance().setConsoleEnabled(false);
     HWND window=CreateWindowExW(0,L"STATIC",L"Live scheduler replay",WS_POPUP,0,0,960,540,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     if(!window)return 3;engine::EngineController engine;engine::PlayerOptions options;options.nr=false;options.fg=false;options.captureReplayForTest=true;
     const bool halfRate=argc==4&&wcscmp(argv[3],L"--half-rate")==0;
+    const bool sourceGap=argc==4&&wcscmp(argv[3],L"--source-gap")==0;
+    if(sourceGap){SetEnvironmentVariableW(L"VEYRA_TEST_REPLAY_SOURCE_GAP",L"1");options.nr=options.fg=true;options.fgMultiplier=2;}
     const bool frucOverload=argc==4&&std::wstring(argv[3]).find(L"--fruc-overload")==0;
     const bool overload=frucOverload||(argc==4&&std::wstring(argv[3]).find(L"--overload")==0);
     const bool fileOverload=argc==4&&wcscmp(argv[3],L"--file-overload")==0;
@@ -24,6 +27,20 @@ int wmain(int argc,wchar_t**argv){
     int failures=0;auto check=[&](bool pass,const char* s){std::cout<<(pass?"PASS ":"FAIL ")<<s<<std::endl;if(!pass)++failures;};
     auto until=[&](auto predicate,int seconds=8){auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(seconds);while(std::chrono::steady_clock::now()<deadline){MSG msg;while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}auto s=engine.snapshot();if(s.failed){std::wcerr<<s.status<<'\n';return false;}if(predicate(s))return true;std::this_thread::sleep_for(5ms);}return false;};
     engine.open(window,argv[1],options);
+    if(sourceGap){
+        check(until([](const auto& s){return s.frames==12&&s.metrics.flow.counters.realPresented==12&&s.processedCompleted==12;}),"source Waiting still completes and presents all outstanding real frames");
+        check(until([](const auto& s){return s.frames>=20;}),"source resumes after gap without deadlock");
+        check(until([](const auto& s){return s.transport==engine::TransportState::Ended;},20),"EOF drains final live batch before marking ended");
+        const auto s=engine.snapshot();const auto& c=s.metrics.flow.counters;
+        std::cout<<"EOS frames="<<s.frames<<" ready="<<s.processedCompleted<<" presented="<<c.realPresented<<" cancelled="<<c.cancelledBeforePresent<<'\n';
+        check(s.frames>20&&s.processedCompleted==s.frames&&c.realPresented==c.realSubmitted,"last real source frame is completed and current epoch fully presented");
+        engine.stop();check(until([&](const auto&){return engine.idle();},5),"source-gap session stops cleanly");
+        Logger::instance().flush();std::ifstream log(std::filesystem::path(argv[2])/"engine.log");std::string line;uint64_t totalPresented=0,totalSubmitted=0;
+        const std::regex submittedPattern("realSubmitted=([0-9]+)"),presentedPattern("realPresented=([0-9]+)");
+        while(std::getline(log,line))if(line.find("[frame-flow] state=closed ")!=std::string::npos){std::smatch match;if(std::regex_search(line,match,submittedPattern))totalSubmitted+=std::stoull(match[1]);if(std::regex_search(line,match,presentedPattern))totalPresented+=std::stoull(match[1]);}
+        check(totalPresented==s.frames&&totalSubmitted==s.frames,"all source frames across EOF discontinuity epochs present exactly once");
+        DestroyWindow(window);CoUninitialize();return failures?1:0;
+    }
     if(fileOverload){
         engine.setVolume(0,true);bool held=false,resumed=false;double maxLead=0;
         check(until([&](const auto& s){held|=s.audioRebuffering;resumed|=held&&!s.audioRebuffering&&s.frames>10;maxLead=std::max(maxLead,s.lateMs);return s.frames>=100;},35),"overloaded file keeps advancing without dropping source frames or deadlocking");

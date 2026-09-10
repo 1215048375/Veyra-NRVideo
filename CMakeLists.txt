@@ -128,10 +128,10 @@ target_compile_definitions(veyra_runtime_probe PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(veyra_runtime_probe PRIVATE veyra_gfx)
 
+veyra_add_compute_shader(veyra_shader_parity_encode ParityEncode)
+veyra_add_compute_shader(veyra_shader_parity_decode ParityDecode)
 if(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR)
   veyra_add_compute_shader(veyra_shader_test_pattern GenerateTestPattern)
-  veyra_add_compute_shader(veyra_shader_parity_encode ParityEncode)
-  veyra_add_compute_shader(veyra_shader_parity_decode ParityDecode)
   add_executable(veyra_nr_harness
     tools/nr_harness/main.cpp
     tools/nr_harness/frame_loop.cpp
@@ -283,9 +283,8 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_compile_definitions(veyra_scene_analyzer PRIVATE
     UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
   target_include_directories(veyra_scene_analyzer PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include ${FFMPEG_INCLUDE_DIRS})
-  target_link_directories(veyra_scene_analyzer PRIVATE ${FFMPEG_LIBRARY_DIRS})
-  target_link_libraries(veyra_scene_analyzer PRIVATE ${FFMPEG_LIBRARIES} veyra_base)
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(veyra_scene_analyzer PRIVATE veyra_media veyra_base)
 endif()
 
 # NVOF probe tool (phase5 gate expects veyra_nvof_probe.exe).
@@ -446,7 +445,7 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   add_executable(veyra_image_dimension_tests tests/integration/ImageDimensionTests.cpp)
   add_executable(veyra_capture_color_probe tools/capture_color_probe/main.cpp)
   add_executable(veyra_capture_color_tests tests/unit/CaptureColorContractTests.cpp)
-  add_executable(veyra_presentation_worker_tests tests/unit/PresentationWorkerTests.cpp)
+  add_executable(veyra_presentation_worker_tests tests/unit/LiveGpuSchedulerTests.cpp)
   target_compile_features(veyra_presentation_worker_tests PRIVATE cxx_std_20)
   target_include_directories(veyra_presentation_worker_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_executable(veyra_live_presentation_tests tests/integration/LivePresentationTests.cpp)

@@ -4,6 +4,24 @@
 
 ## 2026-09-11 续接实证（优先于下面历史进度）
 
+### 最新续接：单GPU所有者调度、断流与末帧
+
+基线`e25585e`工作树干净；上一目标轮是有效进展（音频与逐帧GPU计时两个已验证本地提交）。本轮按原计划推进S3，没有开启旧Loop或发布。
+
+- `LiveGpuScheduler`取代旧`PresentationWorker`线程。增强提交、完成检查、deadline和Present在现有引擎线程推进；任务返回Pending/Complete/Failed，未来播放时间只作为截止时间返回，不在任务内等待。最多两批包含当前租约。跨线程调用拒绝、失败/取消逐项finalize、先释放旧租约再接下一批。删除旧worker实现与旧线程测试，保留测试target名称以兼容现有命令。
+- 移除EngineController的`gpuMutex/liveStatsMutex`。UI仍只提交设置/控制请求，采集回调仍只更新容量1 mailbox；`CaptureCardSource::tryRead`立即检查输入，原`read`保留30ms等待供其它调用者。主循环遇到Waiting或两批占满时继续推进完成、呈现和GPU时间戳，使用局部高精度timer等待，未加入正常像素回读/逐pass CPU fence等待。
+- GPU-ready时长改用完成观测时刻，不能把前一批的呈现排队时间计入GPU-ready。EOF先完成剩余呈现再报Ended；失败不能被Ended覆盖，批处理中发现暂停/停止就取消剩余工作。状态统计仍区分完成与Present，不声称scanout。
+- `continuation-single-owner-state`15项0.074秒PASS：同一owner、Pending立即返回、提交可推进、两批上限、lease释放、取消一次、错误传播和外部线程拒绝。最终`continuation-single-owner-cancel-live`30项8.723秒PASS，30/60、NR/2X/4X、设置/音频隔离、暂停/恢复/停止；source30fps对应Color30样本。最终live EXE SHA `6B0D1EDF5D3FF1750E1E06088D3A372149CE7C98B22489E01E49D7ADE4AA1BE1`。
+- 输入空档与EOF：在仅测试回放模式下注入400ms Waiting，未读取新输入时12帧全部完成/呈现；恢复后处理完62帧。最终`continuation-single-owner-cancel-eof`6项3.325秒PASS，所有epoch累计真实提交/呈现均62。初版`continuation-single-owner-gap`用长素材等20秒没有到EOF，不能当产品EOF失败；`continuation-single-owner-short-eof`错误用当前epoch计数与整段总数比较（末尾epoch1帧、前epoch61帧），修正为累计closed窗口，失败日志保留。
+- 短素材由`ffmpeg -hide_banner -loglevel error -i loop/local/fixed_clips/test_av_1080p.mp4 -t 1 -c copy logs/continuation-repair-20260910/owner-eof-1s.mp4`生成，SHA `9CF8AEE99AB10E1B476616A9677A329687E4E7D4AE235A18BF119AB5544EBE25`。流复制尾部含62帧，测试按实际输出，不假设恰60。原素材SHA `7952AD2904C8FED78402BC299EA2A04D1D869663EBCE17BBAC0C297F84FA2A91`。
+- FRUC回放`continuation-single-owner-fruc`24项6.644秒PASS，known-pan15 SHA `EB05452E25325D9882DDD9E975051A010459FDD2432305F61E3820D85689D05B`；worker固定`EC8150FF88C7C84FACDF92B920DED2D6CEC5F682990C375A92550AFD5E818695`。UI `python scripts/acceptance/ui-fg-backends.py`正常与`--reject-xess`分别`ui-fg-1789064098272439200`/`ui-fg-1789064215917318600`通过，FRUC->XeSS->DLSS->关闭及XeSS失败保留FRUC。它们早于最终退出边界补丁，非全DPI验收。
+- **性能对照无显著提升**：在`out/owner-baseline`单独checkout`e25585e`并构建，源码干净；仅在ignored输出目录补同版FFmpeg5个DLL及与当前相同FRUC worker。`continuation-owner-ab-old-runtime`7.708秒与`continuation-owner-ab-new`7.646秒，同素材、原生4K NR+VSR4+FRUC4+admission，均150源帧、33源fps、148真实呈现、0有效生成呈现、skip450/evaluate0，帧年龄P95 59.659/59.645ms。旧EXE `AAF6EF3DA6D331B40AB3B44DEDA589BA8B9F301D6BB53099A487B21C6C041510`，新对照EXE `2F425BE7F77B704397A58526B0C797E8C70F3E5DED4F0769AA0556297B9E0F97`。本轮解决所有权/等待推进，不声称NR内核提速或4X实时。基线第一次启动缺FFmpeg返回0xC0000135，记录`continuation-owner-ab-old`，未把启动失败拿来比较性能。
+- 干净构建发现旧CMake先读FFmpeg变量、后find_package导致scene_analyzer首次缺头文件；改用`veyra_media`传递依赖。无实验NR配置还缺自有parity shader target，现将两个通用着色器target移到功能开关外。基线首构建失败`build-owner-baseline.log`，第二次配置成功`build-owner-baseline-configured.log`。最终全新VS生成目录`out/scene-no-nr-first-config`首次configure与scene_analyzer Release构建通过，日志`configure-scene-no-nr-final.log`/`build-scene-no-nr-final.log`；也验证带实验runtime的全新目录。先前无NR失败保留在`configure-scene-fresh.log`，不能说那次configure成功。
+
+命令统一`scripts/build.ps1 -Root <root> -Preset x64-release`，最新`build-single-owner-cancel.log`exit0；短测`scripts/acceptance/scheduler-short-test.ps1 -Name <名称> -Exe <test> -TestArgs <result.args>`，result/stdout/stderr在`logs/scheduler-repair-20260910/`。最终`scripts/gates/delivery.ps1 -Root <root>`23项42.380秒PASS，`logs/delivery/3462b28549ed4982a99799adc5a3071e/result.json`，EXE SHA `1B0DF186574B552E349EBB9502AF89A001430B89407B3D15635862E668279CE6`。前置退出边界补丁前gate `7ce879edc9094d70b9febd31cd2cba1b`23项42.279秒也通过，不能与最终EXE混用。实际RTX NR/NVOF和NVENC已运行；NR CreateFeature18返回0x1、handle非空，例证`owner-fruc/engine.log`。没有改变导出检查、SDK/runtime没有入Git。
+
+以上单次<300秒，未打开实体采集卡、未执行AMD NR。单所有者主循环和对应短测已落地；下一任务为专业页全DPI/最小窗口/展开滚动验收与修复，再推进AMD NR依赖/provider。GPU driver/NGX/FRUC调用仍可能阻塞当前线程，此状态机不是可抢占GPU内核，也不是所有成本消除。整体目标仍active。
+
 ### 最新续接：逐帧GPU时间戳交付
 
 音频修复已本地存档`1821120`，随后修复阶段时间戳漏样，不改NR/SR/FG处理顺序。
