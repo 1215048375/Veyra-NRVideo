@@ -134,7 +134,7 @@ void switchMode(){
 }
 void layout(){
     if(!mainWindow||!video)return;const auto layoutBegin=std::chrono::steady_clock::now();using namespace veyra::ui;
-    RECT r{};GetClientRect(mainWindow,&r);int w=MulDiv(r.right,96,GetDpiForWindow(mainWindow)),h=MulDiv(r.bottom,96,GetDpiForWindow(mainWindow));
+    RECT r{};GetClientRect(mainWindow,&r);int w=MulDiv(r.right,96,veyra::ui::layoutDpi(mainWindow)),h=MulDiv(r.bottom,96,veyra::ui::layoutDpi(mainWindow));
     const bool pro=uiState.mode==Mode::Professional;auto g=chromeLayout(w,h);auto target=engine.snapshot();
     auto pane=[&](int x,int y,int width,int height,int radius,BYTE tint){return GlassPane{{dip(mainWindow,x),dip(mainWindow,y),dip(mainWindow,x+width),dip(mainWindow,y+height)},dip(mainWindow,radius),tint};};
     std::vector<GlassPane> panes;
@@ -250,10 +250,10 @@ case WM_NCACTIVATE:return DefWindowProcW(hwnd,msg,wp,-1);
 case WM_NCPAINT:return 0;
 case WM_ERASEBKGND:return 1;
 case WM_NCHITTEST:{LRESULT hit=DefWindowProcW(hwnd,msg,wp,lp);if(hit==HTCLIENT&&!full){POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};ScreenToClient(hwnd,&p);RECT r{};GetClientRect(hwnd,&r);int edge=veyra::ui::dip(hwnd,7);bool left=p.x<edge,right=p.x>=r.right-edge,top=p.y<edge,bottom=p.y>=r.bottom-edge;if(top&&left)return HTTOPLEFT;if(top&&right)return HTTOPRIGHT;if(bottom&&left)return HTBOTTOMLEFT;if(bottom&&right)return HTBOTTOMRIGHT;if(left)return HTLEFT;if(right)return HTRIGHT;if(top)return HTTOP;if(bottom)return HTBOTTOM;if((uiState.mode==veyra::ui::Mode::Professional&&p.y<veyra::ui::dip(hwnd,54))||(uiState.mode==veyra::ui::Mode::Daily&&p.y>r.bottom-veyra::ui::dip(hwnd,88)))return HTCAPTION;}return hit;}
-case WM_PAINT:{veyra::ui::PaintBuffer paint(hwnd);auto g=chromeLayout(MulDiv(paint.rect.right,96,GetDpiForWindow(hwnd)),MulDiv(paint.rect.bottom,96,GetDpiForWindow(hwnd)));veyra::ui::paintChrome(hwnd,paint.dc,g,engine.snapshot(),full);return 0;}
+case WM_PAINT:{veyra::ui::PaintBuffer paint(hwnd);auto g=chromeLayout(MulDiv(paint.rect.right,96,veyra::ui::layoutDpi(hwnd)),MulDiv(paint.rect.bottom,96,veyra::ui::layoutDpi(hwnd)));veyra::ui::paintChrome(hwnd,paint.dc,g,engine.snapshot(),full);return 0;}
 
-case WM_LBUTTONDOWN:{if(uiState.mode==veyra::ui::Mode::Professional&&!full){RECT r{};GetClientRect(hwnd,&r);int w=MulDiv(r.right,96,GetDpiForWindow(hwnd)),x=MulDiv(GET_X_LPARAM(lp),96,GetDpiForWindow(hwnd));if(w>=1180&&abs(x-(w-uiPreferences.inspectorWidth-27))<8){inspectorResizing=true;proposedInspectorWidth=uiPreferences.inspectorWidth;SetCapture(hwnd);return 0;}}break;}
-case WM_MOUSEMOVE:if(inspectorResizing){RECT r{};GetClientRect(hwnd,&r);proposedInspectorWidth=std::clamp(MulDiv(r.right-GET_X_LPARAM(lp),96,GetDpiForWindow(hwnd))-27,296,420);InvalidateRect(hwnd,nullptr,FALSE);return 0;}break;
+case WM_LBUTTONDOWN:{if(uiState.mode==veyra::ui::Mode::Professional&&!full){RECT r{};GetClientRect(hwnd,&r);int w=MulDiv(r.right,96,veyra::ui::layoutDpi(hwnd)),x=MulDiv(GET_X_LPARAM(lp),96,veyra::ui::layoutDpi(hwnd));if(w>=1180&&abs(x-(w-uiPreferences.inspectorWidth-27))<8){inspectorResizing=true;proposedInspectorWidth=uiPreferences.inspectorWidth;SetCapture(hwnd);return 0;}}break;}
+case WM_MOUSEMOVE:if(inspectorResizing){RECT r{};GetClientRect(hwnd,&r);proposedInspectorWidth=std::clamp(MulDiv(r.right-GET_X_LPARAM(lp),96,veyra::ui::layoutDpi(hwnd))-27,296,420);InvalidateRect(hwnd,nullptr,FALSE);return 0;}break;
 case WM_LBUTTONUP:if(inspectorResizing){inspectorResizing=false;ReleaseCapture();uiPreferences.inspectorWidth=proposedInspectorWidth;layout();return 0;}break;
 case WM_CAPTURECHANGED:if(inspectorResizing){inspectorResizing=false;InvalidateRect(hwnd,nullptr,FALSE);}break;
 case WM_NOTIFY:{auto header=reinterpret_cast<NMHDR*>(lp);if(header->code==TTN_GETDISPINFOW){auto info=reinterpret_cast<NMTTDISPINFOW*>(lp);HWND child=reinterpret_cast<HWND>(header->idFrom);if(auto tip=GetPropW(child,L"veyra.tip"))info->lpszText=reinterpret_cast<wchar_t*>(tip);else{static wchar_t value[512];GetWindowTextW(child,value,512);info->lpszText=value;}return 0;}break;}
@@ -315,7 +315,19 @@ case WM_SYSKEYDOWN:if(wp==VK_RETURN&&(lp&(1LL<<29))){toggleFullscreen();return 0
 case WM_THEMECHANGED:veyra::ui::glassTextTheme().reset();[[fallthrough]];
 case WM_DWMCOMPOSITIONCHANGED:backdrop.configure();RedrawWindow(hwnd,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN);return 0;
 case WM_ACTIVATEAPP:if(!wp){holdOriginal=false;updateComparison();}break;
-case WM_DPICHANGED:{auto rect=reinterpret_cast<RECT*>(lp);if(!full)SetWindowPos(hwnd,nullptr,rect->left,rect->top,rect->right-rect->left,rect->bottom-rect->top,SWP_NOZORDER|SWP_NOACTIVATE);auto oldFont=font;font=CreateFontW(-MulDiv(15,HIWORD(wp),96),0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Microsoft YaHei UI");EnumChildWindows(hwnd,[](HWND c,LPARAM f)->BOOL{SendMessageW(c,WM_SETFONT,WPARAM(f),TRUE);return TRUE;},LPARAM(font));DeleteObject(oldFont);DeleteObject(emptyFont);emptyFont=veyra::ui::makeFont(hwnd,26);SendDlgItemMessageW(hwnd,EmptyTitle,WM_SETFONT,WPARAM(emptyFont),TRUE);veyra::ui::settingsDpi();veyra::ui::telemetryDpi();layout();return 0;}
+case WM_APP+90:
+    if(smokeSeconds<=0||!(wp==0||wp==96||wp==144||wp==192))return 0;
+    veyra::ui::smokeLayoutDpi=UINT(wp);
+    veyra::log::info("ui-dpi-test",std::format("syntheticLayoutDpi={} windowsDpi={}",wp,GetDpiForWindow(hwnd)));
+    [[fallthrough]];
+case WM_DPICHANGED:{
+    endTransition();veyra::ui::cancelPopupSelector();
+    if(msg==WM_DPICHANGED&&!full){auto rect=reinterpret_cast<RECT*>(lp);SetWindowPos(hwnd,nullptr,rect->left,rect->top,rect->right-rect->left,rect->bottom-rect->top,SWP_NOZORDER|SWP_NOACTIVATE);}
+    auto oldFont=font;font=veyra::ui::makeFont(hwnd);
+    EnumChildWindows(hwnd,[](HWND c,LPARAM f)->BOOL{SendMessageW(c,WM_SETFONT,WPARAM(f),FALSE);return TRUE;},LPARAM(font));
+    DeleteObject(oldFont);DeleteObject(emptyFont);emptyFont=veyra::ui::makeFont(hwnd,26);
+    SendDlgItemMessageW(hwnd,EmptyTitle,WM_SETFONT,WPARAM(emptyFont),FALSE);
+    veyra::ui::settingsDpi();veyra::ui::telemetryDpi();layout();return 0;}
 
 case WM_TIMER:{if(wp==2){transition.sample(GetTickCount64());if(!transition.running){endTransition();veyra::log::info("ui-transition","completed; final layout and swapchain resize released");}layout();return 0;}
 if(full&&fullControls&&!menuOpen&&!veyra::ui::popupSelectorOpen()&&!GetCapture()&&GetTickCount64()-pointerTick>1600){POINT p{};GetCursorPos(&p);ScreenToClient(hwnd,&p);RECT r{};GetClientRect(hwnd,&r);if(p.y<r.bottom-veyra::ui::dip(hwnd,88)||p.x<0||p.x>=r.right||p.y>=r.bottom){fullControls=false;layout();if(GetForegroundWindow()==hwnd)SetCursor(nullptr);veyra::log::info("ui-fullscreen","controls hidden; video and subtitles only");}}
@@ -402,7 +414,7 @@ if(smokeProtection&&startTick&&GetTickCount64()-startTick>1500){
 
 }
 if(smokeSeconds>0&&startTick&&GetTickCount64()-startTick>ULONGLONG(smokeSeconds)*1000){veyra::log::info("app",std::format("smoke frames={} generated={} failed={} latenessMs={:.2f} absLatenessP95Ms={:.2f} controlsStep={} capture={} processedFps={:.2f} callbackFps={:.2f} captureDropped={} callbackToPresentReturnP95Ms={:.3f} schedulingWaitP95Ms={:.3f} processCpuP95Ms={:.3f} presentCpuP95Ms={:.3f} nrEvaluated={} nvofExecuted={}",s.frames,s.generated,s.failed,s.lateMs,s.lateP95Ms,smokeStep,s.capture,s.fps,s.captureFps,s.captureDropped,s.captureAgeP95Ms,s.schedulingWaitP95Ms,s.processCpuP95Ms,s.presentCpuP95Ms,s.nrEvaluated,s.nvofExecuted));resultCode=(s.frames>0||smokeEmpty)&&!s.failed&&(!smokeZoom||zoomStep==3)&&(!smokeProtection||protectionStep==4)&&(!smokeRepair||repairStep==10)&&(!smokeSettings||settingsStep==3)&&(!smokeRollback||settingsStep==3)&&(!smokeUi||uiStep==8)&&(!smokeDual||dualStep==40)&&(!smokeMaster||masterStep==3)&&(!smokeAudio||audioStep==4)&&(!(smokeJob||smokeJobCancel)||jobStep==4)?0:1;PostMessageW(hwnd,WM_CLOSE,0,0);}return 0;}
-case WM_CLOSE:endTransition();if(!closing&&smokeSeconds<=0&&exportJob.poll().active()&&MessageBoxW(hwnd,L"导出尚未完成。取消导出并退出？\n选择“否”返回播放器继续导出。",L"退出 Veyra",MB_YESNO|MB_DEFBUTTON2|MB_ICONQUESTION)!=IDYES)return 0;if(!closing&&smokeSeconds<=0){auto snapshot=engine.snapshot();WINDOWPLACEMENT placement{sizeof(placement)};if(full)placement=windowPlacement;else GetWindowPlacement(hwnd,&placement);auto r=placement.rcNormalPosition;uiPreferences.width=MulDiv(r.right-r.left,96,GetDpiForWindow(hwnd));uiPreferences.height=MulDiv(r.bottom-r.top,96,GetDpiForWindow(hwnd));uiPreferences.x=r.left;uiPreferences.y=r.top;uiPreferences.positioned=true;uiPreferences.volume=snapshot.volume;uiPreferences.muted=snapshot.muted;uiPreferences.subtitles=uiState.subtitles;uiPreferences.subtitleSize=subtitlePixels;uiPreferences.inspector=uiState.inspector;const bool confirmed=snapshot.frames>0&&!snapshot.applying&&!snapshot.failed;if(!preferences.save(uiPreferences,haveSuccessful?&lastSuccessful:nullptr))veyra::log::warn("ui-preferences","preferences not saved; corrupt original preserved");}exportJob.cancel();closing=true;engine.stop();SetWindowTextW(statusBar,L"正在释放当前任务资源…");return 0;
+case WM_CLOSE:endTransition();if(!closing&&smokeSeconds<=0&&exportJob.poll().active()&&MessageBoxW(hwnd,L"导出尚未完成。取消导出并退出？\n选择“否”返回播放器继续导出。",L"退出 Veyra",MB_YESNO|MB_DEFBUTTON2|MB_ICONQUESTION)!=IDYES)return 0;if(!closing&&smokeSeconds<=0){auto snapshot=engine.snapshot();WINDOWPLACEMENT placement{sizeof(placement)};if(full)placement=windowPlacement;else GetWindowPlacement(hwnd,&placement);auto r=placement.rcNormalPosition;uiPreferences.width=MulDiv(r.right-r.left,96,veyra::ui::layoutDpi(hwnd));uiPreferences.height=MulDiv(r.bottom-r.top,96,veyra::ui::layoutDpi(hwnd));uiPreferences.x=r.left;uiPreferences.y=r.top;uiPreferences.positioned=true;uiPreferences.volume=snapshot.volume;uiPreferences.muted=snapshot.muted;uiPreferences.subtitles=uiState.subtitles;uiPreferences.subtitleSize=subtitlePixels;uiPreferences.inspector=uiState.inspector;const bool confirmed=snapshot.frames>0&&!snapshot.applying&&!snapshot.failed;if(!preferences.save(uiPreferences,haveSuccessful?&lastSuccessful:nullptr))veyra::log::warn("ui-preferences","preferences not saved; corrupt original preserved");}exportJob.cancel();closing=true;engine.stop();SetWindowTextW(statusBar,L"正在释放当前任务资源…");return 0;
 case WM_DESTROY:backdrop.detach();DeleteObject(font);DeleteObject(emptyFont);PostQuitMessage(resultCode);return 0;
 }return DefWindowProcW(hwnd,msg,wp,lp);}
 }

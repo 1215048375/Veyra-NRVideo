@@ -4,6 +4,22 @@
 
 ## 2026-09-11 续接实证（优先于下面历史进度）
 
+### 最新续接：最小窗口、缩放与选择器回归
+
+基线 `db98af7`，工作树干净。本轮只修改 UI 布局、DPI 与针对性测试，没有改变 SR -> NR -> FG、GPU 调度、音频或导出检查。
+
+- 最小 540 逻辑像素高度时，原状态区只有 116 高，固定标题/主值/页脚后没有可显示的明细。现在预留至少 166 高，仍给设置正文 90 高；状态明细以完整 25 像素行滚动，避免半行裁切后永远不可见。删除已经失效的“Present调用与锁等待”名称，当前计量为 Present 调用。
+- 首次实际最小窗口测试 `ui-layout-1789065061472173300` 失败：设置正文 90 高，滚轮也跳 90，FG 选择器从下缘被裁直接跳到上缘被裁。步长改为 36，用户可完整滚出选择器；控件滚轮仍不修改参数。
+- 真实 `WM_DPICHANGED` 不再把普通字体从初始 14 改成 15；使用统一 `layoutDpi` 转换字体和逻辑坐标，并取消旧模式动画与弹窗。窄窗标题也限制在增强按钮前，避免绘制矩形重叠。
+- 仅 `--smoke-seconds` 测试进程接受 `WM_APP+90` 的 0/96/144/192 缩放注入，普通启动不接受。所有相关窗口与自绘 popup 使用相同缩放；测试没有假造 `WM_DPICHANGED`，没有改变 Windows 缩放。真实当前显示器 DPI=96；150%/200% 是应用缩放/字体测试，**不等于真实跨显示器 DPI 验收**。
+- 新 `python scripts/acceptance/ui-layout-dpi.py` 有 120 秒外部 watchdog，只控制自己启动的 PID。最终 `logs/continuation-repair-20260910/ui-layout-1789065295999940200/result.json` PASS：三档字体 14/21/28，720x540 最小布局、状态首尾截图、选择器可达/三项/Esc关闭、滚轮不改滑条、专业展开至少两个中间矩形、连续 resize、最大化、原生全屏覆盖与自动隐藏/退出恢复、空视频中心纯黑。最终截图限制在屏幕范围，旧候选超出屏幕底部的捕获白边不是 UI 白底通过证据。
+- `continuation-ui-dpi-paint` 21项、0.140秒 PASS，自绘控件模型变更不触发原生立即绘制，WM_PRINTCLIENT无整块原生白底；`continuation-ui-dpi-popup` 14种交互、1.021秒 PASS，键盘/滚动/取消/焦点/异步刷新/销毁；`continuation-ui-dpi-contract` 0.070秒 PASS。均使用 `scripts/acceptance/scheduler-short-test.ps1 -Name <上述名称> -Exe out/build/x64-release/<对应测试>.exe`，结果在 `logs/scheduler-repair-20260910/`。
+- 实际 RTX 后端 UI 回归 `python scripts/acceptance/ui-fg-backends.py`，`ui-fg-1789065217190095800` PASS，FRUC -> XeSS -> DLSS -> 关闭均实际 applied。app.log 的 DLSSG Create 为 `0x1`、handle非空，warm-up Evaluate `0x1`，后续20次Evaluate/19有效生成与呈现。它不是 NR/AMD 或实体采集测试，也不是扫描时刻测量。
+
+构建命令 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Root <root> -Preset x64-release`，最终日志 `logs/continuation-repair-20260910/ui-dpi-build2.log` exit0。应用 SHA256 `27910DEDB2855334C45A0B92F4694542AB8631FB9AA17FED819E65585CC35C55`，FRUC worker仍 `EC8150FF88C7C84FACDF92B920DED2D6CEC5F682990C375A92550AFD5E818695`。本轮没有重跑与 UI 改动无关的联合 delivery，下面的23项记录仅代表当时版本。源码/runtime隔离不变，本地存档，不push/发布。
+
+当前全计划仍未完成：R0的FG选择与R1状态布局已具应用侧证据，但AMD独立NR/provider仍缺；R2单GPU所有者和FRUC正确性已有前序证据，原生4K重载不代表4X实时；R3合成音频/漂移已通过，文件设备自动恢复与突变淡出还有缺口；R4真实150%/200%系统DPI、实卡验收尚未覆盖。下一条唯一任务：继续 AMD NR 的预览运行时/完整网络依赖诊断与 provider 接入，硬件不足不得用可选按钮或光流替代功能。
+
 ### 最新续接：单GPU所有者调度、断流与末帧
 
 基线`e25585e`工作树干净；上一目标轮是有效进展（音频与逐帧GPU计时两个已验证本地提交）。本轮按原计划推进S3，没有开启旧Loop或发布。

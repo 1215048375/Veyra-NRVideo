@@ -12,7 +12,7 @@ struct ChromeLayout {
         right=w-panelWidth-20;viewWidth=pro?((w>=960||showDrawer)?right-left-14:w-left-20):w-left*2;
         viewHeight=pro?std::max(160,h-306):h-88;
         bottom=top+viewHeight+(pro?14:0);
-        statusTop=std::min(h-136,std::max(top+336,h-330));
+        statusTop=std::min(h-186,std::max(top+336,h-330));
     }
 };
 inline void chromeText(HDC dc,HWND window,std::wstring value,int x,int y,int w,int h,int size,COLORREF c,int weight=FW_NORMAL,UINT flags=DT_LEFT|DT_SINGLELINE|DT_VCENTER){auto font=makeFont(window,size,weight);auto old=SelectObject(dc,font);SetTextColor(dc,c);SetBkMode(dc,TRANSPARENT);RECT r{dip(window,x),dip(window,y),dip(window,x+w),dip(window,y+h)};glassText(dc,value.c_str(),-1,&r,flags|DT_END_ELLIPSIS);SelectObject(dc,old);DeleteObject(font);}
@@ -20,7 +20,7 @@ inline void paintChrome(HWND window,HDC dc,const ChromeLayout& l,const engine::P
     RECT client{};GetClientRect(window,&client);if(!copyGlass(dc,client,window))FillRect(dc,&client,bgBrush());if(full)return;
     using namespace Gdiplus;AlphaGraphics drawing(dc);auto& g=drawing.get();g.SetSmoothingMode(SmoothingModeAntiAlias);
     if(l.pro){
-        chromeText(dc,window,L"专业工作台",l.left,18,180,24,13,secondary);
+        chromeText(dc,window,L"专业工作台",l.left,18,l.w<960?112:180,24,13,secondary);
         const auto& resolution=s.metrics.resolution;
         auto extent=[](uint32_t w,uint32_t h){return w&&h?std::format(L"{} × {}",w,h):std::wstring(L"—");};
         const int column=std::min(154,(l.viewWidth-40)/3),size=l.viewWidth<600?13:17;

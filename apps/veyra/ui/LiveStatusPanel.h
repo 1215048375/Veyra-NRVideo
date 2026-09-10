@@ -12,11 +12,11 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     case WM_CREATE:SetTimer(h,1,250,nullptr);return 0;
     case WM_TIMER:if(IsWindowVisible(h))InvalidateRect(h,nullptr,FALSE);return 0;
     case WM_SIZE:InvalidateRect(h,nullptr,FALSE);return 0;
-    case WM_MOUSEWHEEL:state->scroll=std::clamp(state->scroll-GET_WHEEL_DELTA_WPARAM(wp)/WHEEL_DELTA*54,0,state->maxScroll);InvalidateRect(h,nullptr,FALSE);return 0;
+    case WM_MOUSEWHEEL:state->scroll=std::clamp(state->scroll-GET_WHEEL_DELTA_WPARAM(wp)/WHEEL_DELTA*50,0,state->maxScroll);InvalidateRect(h,nullptr,FALSE);return 0;
     case WM_ERASEBKGND:return 1;
     case WM_PAINT:{
         PaintBuffer paint(h);fillSurface(paint.dc,paint.rect,h);
-        const int width=MulDiv(paint.rect.right,96,GetDpiForWindow(h)),height=MulDiv(paint.rect.bottom,96,GetDpiForWindow(h));
+        const int width=MulDiv(paint.rect.right,96,veyra::ui::layoutDpi(h)),height=MulDiv(paint.rect.bottom,96,veyra::ui::layoutDpi(h));
         const auto s=state->engine->snapshot();const auto& f=s.metrics.flow;
         const bool playing=s.running&&!s.image&&s.transport==engine::TransportState::Playing;
         const bool xess=s.applied.frameGenerationBackend==engine::FrameGenerationBackend::XeSS&&s.applied.multiplier>1;
@@ -49,7 +49,7 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         }
         rows.emplace_back(L"GPU就绪等待",timing(f.cpuTiming[size_t(diagnostics::CpuStage::ReadyWait)]));
         rows.emplace_back(L"呈现等待",timing(f.cpuTiming[size_t(diagnostics::CpuStage::DeadlineWait)]));
-        rows.emplace_back(L"Present调用与锁等待",timing(f.cpuTiming[size_t(diagnostics::CpuStage::Present)]));
+        rows.emplace_back(L"Present调用",timing(f.cpuTiming[size_t(diagnostics::CpuStage::Present)]));
         rows.emplace_back(f.pairCaptureCallbacks?L"A/B采集到达间隔":L"A/B软件取帧间隔",xess?L"SDK内部不可测":timing(f.pairTiming[size_t(diagnostics::PairTiming::ArrivalInterval)]));
         rows.emplace_back(L"生成呈现距A到达",xess?L"SDK内部不可测":timing(f.pairTiming[size_t(diagnostics::PairTiming::GeneratedFromA)]));
         rows.emplace_back(L"生成呈现距B到达",xess?L"SDK内部不可测":timing(f.pairTiming[size_t(diagnostics::PairTiming::GeneratedFromB)]));
@@ -84,8 +84,8 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
             for(size_t line=0;line<std::max(labels.size(),values.size());++line)wrapped.emplace_back(line<labels.size()?labels[line]:L"",line<values.size()?values[line]:L"");
         }
         SelectObject(paint.dc,oldFont);DeleteObject(rowFont);rows=std::move(wrapped);
-        const int top=96,rowHeight=25,available=std::max(0,height-top-30);
-        state->maxScroll=std::max(0,int(rows.size())*rowHeight-available);state->scroll=std::clamp(state->scroll,0,state->maxScroll);
+        const int top=96,rowHeight=25,available=std::max(0,height-top-30)/rowHeight*rowHeight;
+        state->maxScroll=std::max(0,int(rows.size())*rowHeight-available);state->scroll=std::clamp(state->scroll/rowHeight*rowHeight,0,state->maxScroll);
         const int saved=SaveDC(paint.dc);IntersectClipRect(paint.dc,0,dip(h,top),paint.rect.right,dip(h,top+available));
         for(size_t i=0;i<rows.size();++i){const int y=top+int(i)*rowHeight-state->scroll;
             // glassText renders through its own DIB; a parent DC clip does not

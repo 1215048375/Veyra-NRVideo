@@ -20,7 +20,10 @@ inline constexpr COLORREF background=RGB(9,10,11),panel=RGB(27,28,30),raised=RGB
 inline HBRUSH bgBrush(){static auto b=CreateSolidBrush(background);return b;}
 inline HBRUSH panelBrush(){static auto b=CreateSolidBrush(panel);return b;}
 inline HBRUSH raisedBrush(){static auto b=CreateSolidBrush(raised);return b;}
-inline int dip(HWND h,int v){return MulDiv(v,GetDpiForWindow(h),96);}
+// Only the bounded smoke harness can set this; normal windows use Windows DPI.
+inline UINT smokeLayoutDpi=0;
+inline UINT layoutDpi(HWND h){return smokeLayoutDpi?smokeLayoutDpi:std::max(96u,GetDpiForWindow(h));}
+inline int dip(HWND h,int v){return MulDiv(v,layoutDpi(h),96);}
 inline HFONT makeFont(HWND h,int size=14,int weight=FW_NORMAL){return CreateFontW(-dip(h,size),0,0,0,weight,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Microsoft YaHei UI");}
 inline void titleTheme(HWND h){BOOL enabled=TRUE;DwmSetWindowAttribute(h,20,&enabled,sizeof(enabled));DWORD corner=2;DwmSetWindowAttribute(h,33,&corner,sizeof(corner));COLORREF border=0xfffffffe;DwmSetWindowAttribute(h,34,&border,sizeof(border));}
 // Compose controls and dashboard in memory; never expose the erase/fill pass.
