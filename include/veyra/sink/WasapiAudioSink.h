@@ -21,6 +21,7 @@
 
 #include "veyra/Log.h"
 #include "veyra/sink/AudioPcmSource.h"
+#include "veyra/sink/AudioFrameTimeline.h"
 
 struct AVFormatContext;
 struct AVCodecContext;
@@ -137,7 +138,8 @@ public:
     // Event-driven pump for ONE event cycle. Writes real data when the ring
     // has it, silence otherwise (underrun counted). Returns false on hard
     // failure.
-    bool pumpOnce(AudioPcmSource& pipeline, double* firstWrittenPtsMs);
+    bool waitForEvent();
+    bool pumpOnce(AudioPcmSource& pipeline, double* firstWrittenPtsMs, bool wait = true);
 
     // Master clock, or NaN when unstarted/reset or the device clock failed.
     double mediaTimeMs() const;
@@ -151,6 +153,7 @@ public:
     uint64_t framesWritten() const;
     HRESULT lastError()const{return lastError_.load();}
     double bufferedMs()const{return bufferedMs_.load();}
+    double capacityMs()const{return 1000.0*bufferFrames_/sampleRate_;}
 
     void shutdown();
 
@@ -158,6 +161,10 @@ private:
     bool checked(HRESULT hr,const char* operation){if(SUCCEEDED(hr))return true;lastError_=hr;log::error("audio",std::format("{} hr=0x{:08X}",operation,unsigned(hr)));return false;}
     std::atomic<HRESULT> lastError_{S_OK};
     std::atomic<double> bufferedMs_{0};
+    mutable std::mutex timelineMutex_;
+    AudioFrameTimeline outputTimeline_;
+    bool timedPcm_=false;
+    std::atomic<uint64_t> timelineWriteFrame_{0};
     std::atomic<float> gain_{1};float smoothedGain_=1,loggedGain_=-1;
     IMMDeviceEnumerator* enum_ = nullptr;
     IMMDevice* device_ = nullptr;

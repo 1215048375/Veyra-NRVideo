@@ -68,5 +68,34 @@ int wmain(int argc, wchar_t** argv) {
     check(std::abs(seek-250)<0.05 && std::abs(renderer.mediaTimeMs()-250)<20,"paused seek reanchors actual PCM");
     pipe.stopThread(); renderer.stopAndReset();
     check(!std::isfinite(renderer.mediaTimeMs()),"reset invalidates clock");
+    renderer.shutdown();
+    struct StretchedPcm final:AudioPcmSource {
+        size_t frames=0;
+        size_t pull(float* samples,size_t count,double* pts)override{*pts=100+frames*500.0/kAudioRate;std::fill_n(samples,count*2,0.0f);frames+=count;return count;}
+        std::optional<double> lastPullEndPtsMs()const override{return 100+frames*500.0/kAudioRate;}
+    } stretched;
+    check(renderer.start()&&renderer.startAnchored(stretched),"start mapped resampled PCM");
+    const auto wall=std::chrono::steady_clock::now();
+    while(std::chrono::steady_clock::now()-wall<300ms){double pts=0;if(!renderer.pumpOnce(stretched,&pts))break;}
+    const double elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-wall).count();
+    check(std::abs(renderer.mediaTimeMs()-(100+elapsed*.5))<12,"device clock follows media span at half speed, not output sample duration");
+    renderer.stopAndReset();check(!std::isfinite(renderer.mediaTimeMs()),"reset clears mapped resampler timeline");
+    renderer.shutdown();
+    struct LivePcm final:AudioPcmSource {
+        bool dry=false;double pts=100;
+        size_t pull(float* samples,size_t count,double* first)override{*first=pts;if(dry)return 0;std::fill_n(samples,count*2,0.0f);pts+=count*1000.0/kAudioRate;return count;}
+        std::optional<double> lastPullEndPtsMs()const override{return dry?std::nullopt:std::optional<double>(pts);}
+        bool padUnderruns()const override{return false;}
+    } live;
+    check(renderer.start()&&renderer.startAnchored(live),"start live PCM timeline");
+    live.dry=true;
+    const auto stall=std::chrono::steady_clock::now();
+    while(std::chrono::steady_clock::now()-stall<100ms){double pts=0;if(!renderer.pumpOnce(live,&pts))break;}
+    check(!std::isfinite(renderer.mediaTimeMs()),"starved live endpoint has no invented media timestamp");
+    live.dry=false;live.pts=500;
+    const auto recovery=std::chrono::steady_clock::now();
+    while(std::chrono::steady_clock::now()-recovery<100ms){double pts=0;if(!renderer.pumpOnce(live,&pts))break;}
+    const double recovered=renderer.mediaTimeMs();
+    check(std::isfinite(recovered)&&recovered>=500&&recovered<=live.pts,"recovered live clock references new PCM after device silence");
     renderer.shutdown(); return failures ? 1 : 0;
 }

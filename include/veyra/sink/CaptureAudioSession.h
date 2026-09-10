@@ -9,6 +9,7 @@ namespace veyra::sink {
 struct CaptureAudioState {
     bool available=false,running=false,clockEstimated=true,limited=false;
     double compensationMs=0,bufferedMs=0,bufferHighWaterMs=0,endpointBufferedMs=0;
+    double driftCorrectionPpm=0;
     std::optional<double> skewMs;
     uint64_t resets=0,overflows=0,underruns=0,endpointRetries=0;
     std::wstring error;

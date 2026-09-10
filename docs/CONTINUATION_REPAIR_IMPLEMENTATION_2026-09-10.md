@@ -4,6 +4,23 @@
 
 ## 2026-09-11 续接实证（优先于下面历史进度）
 
+### 最新续接：采集时钟漂移与真实PCM播放位置
+
+基线本地提交`ed5aed3`。本轮仅合成PCM/PTS与静音WASAPI测试，没有打开实体采集卡、修改系统默认音频设备或发布。
+
+- 增加有界`AudioFrameTimeline`，分别记录重采样输出样本对应的源媒体起止PTS，以及写入WASAPI的位置。播放时钟从实际IAudioClock位置查找媒体时间，不能继续把每个48k输出样本当作固定长度源媒体样本。未写入区域、设备断粮后及reset后没有虚构的有效媒体时钟；恢复时越过设备实际消耗的静音区间。
+- 自动模式每250ms低通观测音画误差，`swr_set_compensation`最多正负5000ppm、每次变化最多250ppm；突变大于60ms保留重锚。模式/端点重置清除补偿。PCM持续转换保留swr前后delay并建立分段媒体映射，软件总队列预算仍500ms。
+- 候选回归确实失败：`continuation-audio-drift-prefill-normal`关闭/零补偿误差约53.8ms。事件等待在PCM转换后，等待期间到达的PCM不能参与此次填充；采集路径又把所有剩余设备空位补成静音，插入额外延迟。修正为先等事件再收集PCM、避免启动后立即重复填充、采集仅提交已有真实PCM，文件路径保留原欠载策略。初始只改预填和等待并未解决，相关失败日志完整保留。
+- 测试端普通`std::this_thread::sleep_until`的10ms回调受Windows定时粒度影响；改为独立高精度waitable timer，不改系统定时器或验收阈值。设备时钟QPC采样年龄诊断约0.001ms以内，排除读取旧时钟假设，临时逐次诊断已移除。
+- `continuation-audio-drift-final-normal`11.112秒PASS：自动80/160、手动100、关闭、负值钳制、350ms断流与重开；最终关闭/零补偿误差23.36/23.41ms，自动/手动误差18.10至22.67ms。突发high-water500ms、overflow11，普通模式0overflow。关闭同步不代表消除声卡/系统固有延迟。
+- `continuation-audio-drift-final-loss`3.573秒PASS：释放测试自有端点后恢复，retries2、平均软件偏差12.22ms、0overflow。`continuation-audio-drift-final-timeline`1.082秒PASS：44.1/48k文件各36000输出样本、seek/pause、真实WASAPI半速媒体映射、断粮clock失效与恢复新PCM。`continuation-audio-drift-final-contract`70项PASS、0.069秒。
+- 最终同一EXE `continuation-audio-drift-final-fast`119.757秒、`continuation-audio-drift-final-slow`119.998秒均PASS：源时钟正负1000ppm，P95偏差分别4.242/4.302ms，两项missing0、仅首次reset1、overflow0、high-water89.65ms。中间候选`continuation-audio-gap-slow`120.002秒P95为4.297ms（EXE `3D334D7A9BC81726676B25BA8ED58A46608018B2886259238C9A4ECF741C5DE2`），仅保留追溯，以最终同EXE结果为准。
+- 最新构建`build-audio-drift-final.log`exit0。采集测试EXE `7D9FEF157E2EE871544A6B312CDC4CBBD9EF9A340322B4B6B44FC7C7DF8DA1AB`，worker仍`EC8150FF88C7C84FACDF92B920DED2D6CEC5F682990C375A92550AFD5E818695`。所有短测由`scripts/acceptance/scheduler-short-test.ps1 -Name <以上名称> -Exe out/build/x64-release/<test>.exe -TestArgs <参数>`执行；普通无参数，设备恢复`--endpoint-loss`，漂移`--drift-slow`/`--drift-fast`。完整result/stdout/stderr在`logs/scheduler-repair-20260910/`，构建在`logs/continuation-repair-20260910/`。
+
+最终联合命令`powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/gates/delivery.ps1 -Root <root>`23项PASS、42.484秒，`logs/delivery/c41ad55982e6448190d1bc4ed239a415/result.json`；应用EXE SHA `FDA98B226562C55B44A8139E1A4D7F3F35A7458109AC8ED4F72FD6ACE755D6BE`。实际执行RTX NR/NVOF、原生4K正确性、播放器、图片、NVENC H264/HEVC及取消；未改导出检查。NR runtime固定SHA再次核对一致、签名Valid。`git diff --check`通过，SDK/runtime/日志没有加入源码。
+
+本轮音频软件回归通过，整体目标仍active。下一条任务为逐帧GPU时间戳交付：已确认`GpuTimer::collect`可能一次收回多帧而上层`last()`只消费最新一帧，需逐帧交付完成样本并保持revision/epoch隔离；随后继续单GPU所有者调度。AMD NR依赖/provider、UI完整DPI、实体采集验收仍未完成。旧Loop不启用、无push/发布。音频只证明本机合成输入的软件估算同步，不是实卡听觉/屏幕扫描验收；手动/关闭模式未启用漂移补偿、突变短淡出和文件设备自动恢复仍有限制。
+
 ### 最新续接：采集音频总预算与输出设备恢复
 
 基线`8b36b4c`，工作树原先干净。本轮仍未打开实体采集设备，不修改默认系统音频设备、不发布。

@@ -11,9 +11,16 @@
 #include <vector>
 #include "veyra/engine/CfrTimeline.h"
 #include "veyra/Log.h"
+#include "veyra/sink/AudioFrameTimeline.h"
 int main(){
     using namespace veyra;int failures=0,checks=0;
     auto check=[&](bool ok,const char* name){++checks;if(!ok)++failures;std::cout<<(ok?"PASS ":"FAIL ")<<name<<'\n';};
+    sink::AudioFrameTimeline pcmTime;
+    pcmTime.append(0,480,100,105);pcmTime.append(480,480,105,120);
+    check(pcmTime.at(240)==102.5&&pcmTime.at(720)==112.5,"resampled PCM maps each span at its actual media rate");
+    check(!pcmTime.at(1000),"unwritten or silent output has no invented media clock");
+    pcmTime.discardBefore(481);check(!pcmTime.at(100)&&pcmTime.at(720)==112.5,"consumed PCM mapping prunes without losing queued audio");
+    pcmTime.clear();check(!pcmTime.at(720),"audio reset clears old media anchors");
     auto p=pipeline::ResolutionPlan::make({1920,1080},true,pipeline::NrSizePolicy::Realtime,false);
     check(p.base==pipeline::Extent{3840,2160}&&p.nr==pipeline::Extent{1920,1080}&&p.flow==pipeline::Extent{1920,1080}&&p.output==p.base,"SR4K preserves base; NR and flow remain source1080");
     p=pipeline::ResolutionPlan::make({3840,2160},false,pipeline::NrSizePolicy::Realtime,false);

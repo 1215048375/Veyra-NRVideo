@@ -20,6 +20,9 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
     size_t inputBytes=0,convertingBytes=0;
     std::deque<float> pcm;
     double headPts=0;
+    AudioFrameTimeline pcmTimeline;
+    uint64_t pcmHead=0,pcmTail=0;
+    std::optional<double> pullEnd;
     bool haveHead=false,pendingReset=false;
     std::atomic<bool> stop{false};
     std::atomic<float> gain{1};
@@ -32,17 +35,24 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
     static constexpr double maxQueuedMs=500;
     double queuedMs()const{return 1000.0*(pcm.size()/2)/kAudioRate+1000.0*(inputBytes+convertingBytes)/format.nAvgBytesPerSec;}
     void queueChanged(){state.bufferedMs=queuedMs();state.bufferHighWaterMs=std::max(state.bufferHighWaterMs,state.bufferedMs);}
-    void clearPcm(){std::lock_guard lock(mutex);pcm.clear();haveHead=false;queueChanged();}
+    void clearPcmLocked(){pcm.clear();haveHead=false;pcmTimeline.clear();pcmHead=pcmTail=0;pullEnd.reset();}
+    void clearPcm(){std::lock_guard lock(mutex);clearPcmLocked();queueChanged();}
+    void discardPcm(size_t frames){
+        for(size_t i=0;i<frames*2;++i)pcm.pop_front();pcmHead+=frames;
+        headPts=pcmTimeline.at(double(pcmHead)).value_or(headPts);
+        pcmTimeline.discardBefore(pcmHead);queueChanged();
+    }
     void fail(const wchar_t* reason){std::lock_guard lock(mutex);state.available=false;state.running=false;state.skewMs.reset();state.error=reason;}
     size_t pull(float* dst,size_t frames,double* pts)override{
         std::lock_guard lock(mutex);
         const size_t take=std::min(frames,pcm.size()/2);
         *pts=haveHead?headPts:-1;
-        for(size_t i=0;i<take*2;++i){dst[i]=pcm.front();pcm.pop_front();}
-        headPts+=1000.0*take/kAudioRate;
-        queueChanged();
+        for(size_t i=0;i<take*2;++i)dst[i]=pcm[i];
+        discardPcm(take);pullEnd=take?std::optional<double>(headPts):std::nullopt;
         return take;
     }
+    std::optional<double> lastPullEndPtsMs()const override{return pullEnd;}
+    bool padUnderruns()const override{return false;}
     void run(){
         AudioRenderer renderer;
         bool endpointReady=false;int64_t retryAt=0;
@@ -56,13 +66,23 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
         if(configured<0||!swr||swr_init(swr)<0){log::error("capture-audio","resampler initialization failed");swr_free(&swr);renderer.shutdown();fail(L"音频重采样初始化失败");return;}
         const auto releaseSwr=[](SwrContext* value){swr_free(&value);};
         std::unique_ptr<SwrContext,decltype(releaseSwr)> resampler(swr,releaseSwr);
-        double anchorHostMinusPts=0;
+        double filteredError=0,correctionPpm=0;
+        int64_t nextCorrection=0;
         int64_t lastReset=0;
         unsigned appliedMode=mode.load();int appliedOffset=offset.load();
         uint64_t lastUnderruns=0;
+        bool endpointEventReady=false;
+        auto clearCorrection=[&]{
+            filteredError=correctionPpm=0;nextCorrection=hostTime()+2500000;
+            const int result=swr_set_compensation(swr,0,0);
+            if(result<0){log::error("capture-audio",std::format("clear drift compensation failed code={}",result));return false;}
+            std::lock_guard lock(mutex);state.driftCorrectionPpm=0;return true;
+        };
         auto recoverEndpoint=[&]{
             const auto error=renderer.lastError();renderer.shutdown();endpointReady=false;retryAt=hostTime()+5000000;
             clearPcm();swr_close(swr);if(swr_init(swr)<0){fail(L"音频重采样重置失败");return false;}
+            if(!clearCorrection())return false;
+            endpointEventReady=false;
             std::lock_guard lock(mutex);input.clear();inputBytes=convertingBytes=0;pendingReset=false;haveVideo=false;
             state.available=false;state.running=false;state.skewMs.reset();state.endpointBufferedMs=0;
             state.error=L"音频输出断开，正在重连（"+std::to_wstring(unsigned(error))+L"）";queueChanged();return true;
@@ -77,6 +97,9 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
                 {std::lock_guard lock(mutex);state.error.clear();pendingReset=true;}
             }
             renderer.setGain(gain);
+            // Wait before collecting callbacks, so PCM arriving during the
+            // endpoint wait is available for this fill instead of padded silence.
+            if(renderer.started()&&!endpointEventReady){if(!renderer.waitForEvent()){if(!recoverEndpoint())break;continue;}endpointEventReady=true;}
             Chunk chunk;bool reset=false;double vPts=0,vHost=0,ingress=0;bool video=false;int64_t arrival=0;
             {
                 std::unique_lock lock(mutex);
@@ -90,6 +113,7 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
             if(reset||chunk.discontinuity){
                 renderer.stopAndReset();clearPcm();swr_close(swr);
                 if(swr_init(swr)<0){fail(L"音频重采样重置失败");break;}
+                if(!clearCorrection()){fail(L"音频漂移校正重置失败");break;}
                 std::lock_guard lock(mutex);++state.resets;
             }
             if(!chunk.bytes.empty()){
@@ -102,7 +126,9 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
                 const int count=swr_convert(swr,dst,capacity,src,inputFrames);
                 if(count<0){log::error("capture-audio",std::format("convert failed code={}",count));fail(L"音频转换失败");break;}
                 const double start=chunk.pts-1000.0*delay/format.nSamplesPerSec;
-                if(haveHead&&std::abs(start-(headPts+1000.0*(pcm.size()/2)/kAudioRate))>50){
+                const double end=chunk.pts+1000.0*(inputFrames-swr_get_delay(swr,format.nSamplesPerSec))/format.nSamplesPerSec;
+                if(reset||chunk.discontinuity)log::info("capture-audio-reset",std::format("mode={} pts={} delayBefore={} delayAfter={} input={} output={}",appliedMode,chunk.pts,delay,swr_get_delay(swr,format.nSamplesPerSec),inputFrames,count));
+                if(haveHead&&std::abs(start-pcmTimeline.at(double(pcmTail)).value_or(start))>50){
                     renderer.stopAndReset();clearPcm();
                     std::lock_guard lock(mutex);++state.resets;
                 }
@@ -110,13 +136,20 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
                     std::lock_guard lock(mutex);convertingBytes=0;
                     if(pendingReset){queueChanged();continue;}
                     if(queuedMs()+1000.0*count/kAudioRate>maxQueuedMs){
-                        input.clear();inputBytes=0;pcm.clear();haveHead=false;pendingReset=true;++state.overflows;
+                        input.clear();inputBytes=0;clearPcmLocked();pendingReset=true;++state.overflows;
                     }else{
                         if(!haveHead){headPts=start;haveHead=true;}
+                        pcmTimeline.append(pcmTail,count,start,end);pcmTail+=count;
                         pcm.insert(pcm.end(),converted.begin(),converted.begin()+size_t(count)*2);
                     }
                     queueChanged();
                 }
+            }
+            {
+                std::lock_guard lock(mutex);
+                // Drain callback blocks already available before waiting for
+                // another endpoint event; otherwise silence can build a backlog.
+                if(!input.empty()&&1000.0*(pcm.size()/2)/kAudioRate<renderer.capacityMs()+10)continue;
             }
             // Both streams use graph PTS. Relate the latest displayed video PTS
             // to host time; the endpoint's own queued frames are not added again.
@@ -126,22 +159,27 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
             const double target=std::clamp(requested,0.0,250.0);
             const double mapping=ingress+target;
             const bool limited=requested<0||requested>250;
-            if(!renderer.started()&&haveHead&&!pcm.empty()&&(appliedMode!=0||fresh)){
+            bool justStarted=false;
+            const double startupPrefillMs=std::min(renderer.capacityMs(),10.0);
+            if(!renderer.started()&&haveHead&&1000.0*(pcm.size()/2)/kAudioRate>=startupPrefillMs&&(appliedMode!=0||fresh)){
                 // Live recovery discards expired sound rather than replaying
                 // an obsolete half-second after a GPU stall or graph reset.
-                const size_t expired=std::min(pcm.size()/2,size_t(std::max(0.0,(now-mapping-headPts-5)*kAudioRate/1000)));
-                {std::lock_guard lock(mutex);for(size_t i=0;i<expired*2;++i)pcm.pop_front();headPts+=1000.0*expired/kAudioRate;queueChanged();}
+                const size_t prefill=size_t(std::ceil(startupPrefillMs*kAudioRate/1000));
+                const size_t expired=std::min(pcm.size()/2-prefill,size_t(std::max(0.0,(now-mapping-headPts-5)*kAudioRate/1000)));
+                {std::lock_guard lock(mutex);discardPcm(expired);}
                 const bool due=now>=mapping+headPts;
                 if(due&&!pcm.empty()){
                     if(!renderer.startAnchored(*this)){if(!recoverEndpoint())break;continue;}
-                    anchorHostMinusPts=now-renderer.mediaTimeMs();lastReset=hostTime();
+                    justStarted=true;endpointEventReady=false;
+                    lastReset=hostTime();filteredError=correctionPpm=0;nextCorrection=lastReset+2500000;
                 }
             }
-            if(renderer.started()){
+            if(renderer.started()&&!justStarted){
                 // Test only: release this session's endpoint, never change a
                 // system device or interfere with another application's audio.
                 if(injectEndpointLoss&&!injected&&++endpointPumps==60){injected=true;log::warn("capture-audio-test","inject owned endpoint loss");if(!recoverEndpoint())break;continue;}
-                double pts=-1;if(!renderer.pumpOnce(*this,&pts)){if(!recoverEndpoint())break;continue;}
+                double pts=-1;if(!renderer.pumpOnce(*this,&pts,false)){if(!recoverEndpoint())break;continue;}
+                endpointEventReady=false;
                 const auto underruns=renderer.underruns();
                 if(underruns>lastUnderruns&&hostTime()-arrival>1000000){
                     // Silence advances IAudioClock without consuming media.
@@ -152,9 +190,21 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
                 lastUnderruns=underruns;
                 // Large video-delay changes need a bounded re-anchor. Never
                 // chase every jitter sample by stopping the audio endpoint.
-                if(appliedMode==0&&fresh&&hostTime()-lastReset>10000000&&std::abs(mapping-anchorHostMinusPts)>40){
-                    renderer.stopAndReset();lastReset=hostTime();
-                    std::lock_guard lock(mutex);++state.resets;
+                const auto observed=hostTime();const double audioPts=renderer.mediaTimeMs();
+                if(appliedMode==0&&fresh&&std::isfinite(audioPts)&&observed>=nextCorrection){
+                    const double error=audioPts-(double(observed)/10000-mapping);
+                    filteredError=.75*filteredError+.25*error;nextCorrection=observed+2500000;
+                    if(observed-lastReset>10000000&&std::abs(error)>60){
+                        renderer.stopAndReset();lastReset=observed;filteredError=correctionPpm=0;
+                        std::lock_guard lock(mutex);++state.resets;
+                    }else{
+                        const double targetPpm=std::clamp(filteredError*250.0,-5000.0,5000.0);
+                        correctionPpm+=std::clamp(targetPpm-correctionPpm,-250.0,250.0);
+                        const int delta=int(std::llround(correctionPpm*kAudioRate/1000000));
+                        const int result=swr_set_compensation(swr,delta,kAudioRate);
+                        if(result<0){log::error("capture-audio",std::format("drift compensation failed code={}",result));fail(L"音频漂移校正失败");break;}
+                        std::lock_guard lock(mutex);state.driftCorrectionPpm=correctionPpm;
+                    }
                 }
             }
             {
@@ -163,7 +213,8 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
                 state.compensationMs=target;state.underruns=renderer.underruns();
                 state.endpointBufferedMs=renderer.bufferedMs();
                 const auto audioPts=renderer.mediaTimeMs();
-                state.skewMs=fresh&&std::isfinite(audioPts)?std::optional<double>(audioPts-(vPts+now-vHost)):std::nullopt;
+                const double observedNow=double(hostTime())/10000;
+                state.skewMs=fresh&&std::isfinite(audioPts)?std::optional<double>(audioPts-(vPts+observedNow-vHost)):std::nullopt;
             }
         }
         renderer.shutdown();std::lock_guard lock(mutex);state.available=false;state.running=false;state.skewMs.reset();state.endpointBufferedMs=0;
@@ -180,13 +231,13 @@ bool CaptureAudioSession::configure(const WAVEFORMATEX& f){
 }
 bool CaptureAudioSession::start(){
     if(!p_->format.nBlockAlign||p_->thread.joinable())return false;
-    {std::lock_guard lock(p_->mutex);p_->input.clear();p_->inputBytes=p_->convertingBytes=0;p_->pcm.clear();p_->haveHead=p_->haveVideo=p_->haveIngress=p_->pendingReset=false;p_->state={};}
+    {std::lock_guard lock(p_->mutex);p_->input.clear();p_->inputBytes=p_->convertingBytes=0;p_->clearPcmLocked();p_->haveHead=p_->haveVideo=p_->haveIngress=p_->pendingReset=false;p_->state={};}
     p_->stop=false;
     try{p_->thread=std::thread([this]{try{p_->run();}catch(const std::exception& e){log::error("capture-audio",std::format("audio thread failed: {}",e.what()));p_->fail(L"音频线程异常，请重新打开采集");}});}
     catch(const std::exception& e){log::error("capture-audio",std::format("audio thread start failed: {}",e.what()));p_->fail(L"无法创建音频线程");return false;}
     return true;
 }
-void CaptureAudioSession::stop(){p_->stop=true;p_->wake.notify_all();if(p_->thread.joinable())p_->thread.join();std::lock_guard lock(p_->mutex);p_->input.clear();p_->inputBytes=p_->convertingBytes=0;p_->pcm.clear();p_->state.bufferedMs=0;}
+void CaptureAudioSession::stop(){p_->stop=true;p_->wake.notify_all();if(p_->thread.joinable())p_->thread.join();std::lock_guard lock(p_->mutex);p_->input.clear();p_->inputBytes=p_->convertingBytes=0;p_->clearPcmLocked();p_->state.bufferedMs=0;p_->state.driftCorrectionPpm=0;}
 bool CaptureAudioSession::push(const void* data,size_t bytes,double pts,bool discontinuity){
     auto& p=*p_;if(!data||!p.format.nBlockAlign||bytes%p.format.nBlockAlign||bytes>p.format.nAvgBytesPerSec/2||!std::isfinite(pts))return false;if(!bytes)return true;
     std::lock_guard lock(p.mutex);
