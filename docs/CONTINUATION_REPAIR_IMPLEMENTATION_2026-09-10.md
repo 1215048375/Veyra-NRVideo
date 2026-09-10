@@ -4,6 +4,22 @@
 
 ## 2026-09-11 续接实证（优先于下面历史进度）
 
+### 最新续接：设置隔离、生成帧关系和FRUC admission
+
+前序源码/文档本地存档 `6316376`，无push/发布。本段新增内容优先于下方同日旧快照，目标仍active。
+
+- 设置：`EnhancementSettings::sameVideoConfiguration`将revision仅用于GPU配置隔离；纯音频请求保留revision，主循环与大图路径直接更新音频/配置状态，不排空视频、不重新处理缓存画面。重复通知无操作。视频事务排空后重读最新desired，减少过时重建；失败回滚保留随后独立提交的音频修改。设置页按完整desired比较，避免同revision音频变动不刷新。没有宣称完整单GPU所有者或所有设置均无等待。
+- 生成帧：`FrameLineageTracker`记录相邻已接受源帧identity/PTS/真实到达时刻，仅同epoch/revision且A的PTS匹配时建立关系；reset、缺少对应A、缓存预览不给推算值。`FrameFlowWindow`与状态区加入A/B到达间隔、生成帧Present返回距A和B的时间，分别有一秒均值/P95/样本数；不混入真实帧总延迟。文件模式标软件取帧，实卡才使用callback锚点；不是光子延迟或免费lookahead。verbose日志`frame-lineage`保留A/B源id与端点。
+- FRUC admission首次新回归失败 `continuation-fruc-admission-pixels4`：跳过i=1后，i=2复用同source parity，CUDA数组覆盖SDK仍引用的前帧，之后亚帧GT错位（4X前两张误差约2.5/2.0，重复基准约0.85/1.36）。`FrucWorker`改为按成功SDK调用轮转独立`inputSlot`，源共享纹理仍按source parity读取。候选`continuation-fruc-call-parity2/3/4`均通过六epoch、每epoch两次skip/reseed/像素恢复，3.06/3.93/4.54秒；不销毁worker、不增加CPU fence等待或像素回读。
+- 实时采集FRUC重新启用与DLSS相同的整对提交前admission；XeSS仍由SDK呈现内部控制。正常`continuation-fruc-admission-live`24项PASS6.52秒，known-pan15素材SHA `EB05452E25325D9882DDD9E975051A010459FDD2432305F61E3820D85689D05B`，含有效补帧/生成帧关系/音频设置/暂停/2X4X/关闭。
+- 同源过载A/B：`continuation-fruc-admission-baseline`16.74秒与`continuation-fruc-admission-overload`7.70秒，均150源帧观察点、原生4K NR+VSR4+FRUC4，测试EXE `8FB7B4566A4E7C86336375952A12DE904E31C396FA0C5D07A2E097C5F5C5797B`，worker `EC8150FF88C7C84FACDF92B920DED2D6CEC5F682990C375A92550AFD5E818695`。基线Evaluate450/skip0/源处理12fps；筛选Evaluate0/skip450/源处理33fps。有效生成呈现两边0，基线expired也0，不能说450张有效生成帧都过期；只证明这组无收益计算被省掉。软件源帧年龄P95 90.68→60.13ms，非实卡、无GPU占用百分比证明、非FRUC内核加速。此前原生4K FRUC本体耗时边界仍存在。
+- 验证：`continuation-lineage-contract`66项PASS0.082秒；`continuation-lineage-half`29项PASS8.84秒；`continuation-lineage-fruc`24项PASS6.57秒；设置隔离前置CPU58/half28/FRUC23也通过，后续用上述新版本覆盖。UI正常 `ui-fg-1789059745509958500` 与故障回滚 `ui-fg-1789059468450574400`均PASS，自有窗口状态截图已查看，没有完整DPI/动画验收。所有名称对应`logs/scheduler-repair-20260910/`下result/stdout/stderr，controller日志路径见各result.args。
+- 实际构建命令：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Root <root> -Preset x64-release`，最新`logs/continuation-repair-20260910/build-fruc-call-parity.log` exit0。短测统一`scripts/acceptance/scheduler-short-test.ps1 -Name <以上名称> -Exe out/build/x64-release/<test>.exe -TestArgs <result.args>`；FRUC skip为`@('2|3|4','logs/video-sdk-trial-20260909/pan.nv12','--skip-pixels')`；overload为live test的`--fruc-overload[-baseline]`。
+- 最终联合命令：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/gates/delivery.ps1 -Root <root>`，`logs/delivery/f024e12327b5429593e762943abb2eca/result.json` 23项PASS；EXE `D3E8736F9D0ADD088B0CEA5FE8C979B99820745467CA7743654A93687EF24823`。日志`delivery-fruc-admission.log`。此前lineage版本delivery `2e071ef905724217bf652d135552607a`23项42.49秒PASS为前序版本。实际RTX runtime已执行，NR固定SHA/签名Valid未变；没有打开实体采集卡。
+- AMD隔离探针新证据：显式绝对路径LoadLibraryEx成功、导出coreVersion721，ID3D12SDKConfiguration1获取成功，但CreateDeviceFactory721仍`0x887E0003`；`continuation-amd-factory-capability` exit1，不是能力失败结论，更不是成功执行网络。初次链接缺CLSID定义失败，包含initguid后构建成功。微软官方getting-started列举该码可由SDK版本/SDKLayers不匹配触发；尚未拿到debug输出定根因。Windows未改开发者模式，未换主程序Agility。缺权重/RDNA4/preview编译链和provider问题仍在。
+
+下一条任务：音频缓慢漂移、全局PCM容量与端点恢复；然后继续完整GPU所有者调度/逐帧GPU计时覆盖及AMD依赖。现有GPU图和呈现仍双线程互斥；没有以这批通过声称全目标完成。所有测试单次<300秒，源码/runtime隔离，未push/发布。
+
 整合检查补充：`build-fruc-ui-integrated.log`构建通过；`continuation-fruc-batch-final2/3`最新CUDA候选2X/3X通过（2.84/3.33秒），`continuation-fruc-batch-live`真实controller19项通过6.20秒，正常UI `ui-fg-1789058417812768300`通过。最新联合delivery `ad0a4e4680d748d0b97de6fe0e665c53` 23项PASS、42.35秒，EXE `24216560E25D6C84D0BF3656E3AC70BFCD8917F2BED52AE82AB9B4BF2B168778`，worker `DE38EFBE302FB3664EEC167A7FC3105154B877A4BBDFC8980DCC7C168B0C1678`。UI长错误行换行已编译，完整DPI尚未验收。
 
 AMD新增依赖证据：官方NuGet `Microsoft.Direct3D.D3D12/1.721.3-preview`，包SHA `0131BCE1E4BACE3FC08C03018C29A09EDE2570B263721C6449B0EC75762AB22D`；D3D12Core签名Valid/Microsoft，LICENSE.txt和LICENSE-CODE.txt原样保留。仅置`third_party_local/microsoft`与ignored隔离探针，未进主程序/Release/Git。`continuation-amd-linalg-capability`实际返回0x887E0003（SDK加载失败），没有成功创建设备或查询linalg；探针进程exit0只是完成错误记录，**不是能力PASS**。未改系统开发者模式。另核实上游`NativeActualNetwork70::RecordUnsubmitted`是曾触发device hung的诊断路径，接入必须保留分段提交；当前计划中单列表假设不可直接落地。

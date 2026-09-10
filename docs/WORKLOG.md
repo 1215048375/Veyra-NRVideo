@@ -1,5 +1,13 @@
 # 2026-09-11 继续修复目标模式执行中
 
+## 最新续接：设置隔离、生成帧关系与FRUC过载筛选
+
+已把前序45个源码/文档文件提交为本地checkpoint `6316376`，未push。此后新增修复：纯音频设置不推进GPU revision、不重置视频历史；重复设置通知不提交；排空后读取最新配置，视频失败保留随后独立音频修改。A/B真实到达关系与生成呈现距A/B时间进入集中状态和有界一秒统计。FRUC按实际SDK调用轮转CUDA输入，修复跳过源帧后覆盖仍被SDK引用的前帧；恢复后像素2X/3X/4X通过，并重新启用实时采集提交前筛选。
+
+同素材/同EXE/同worker原生4K NR+最高VSR+FRUC4X过载对照：基线150源帧、450次FG Evaluate、处理12fps；筛选后450次提交前跳过、处理33fps。两组有效生成呈现均0，基线未记录过期有效帧，不能说450张有效插帧全被丢掉，也不能当FRUC内核加速。源帧到Present返回P95约90.68→60.13ms，仅文件模拟采集，非HDMI/扫描延迟。正常known-pan15回放继续有效生成。
+
+Release构建 `build-fruc-call-parity.log` exit0；合同66项PASS；真实RTX live含音频隔离/生成关系/30↔60/NR/FG2X4X通过；FRUC skip像素2/3/4、正常controller24项通过。最终delivery `logs/delivery/f024e12327b5429593e762943abb2eca/result.json` 23项PASS，详细命令/失败/哈希在实施记录本次续接段。未打开实卡，未跑AMD NR。源码checkpoint后继续目标，完整单GPU所有者、逐帧GPU计时覆盖、音频漂移/队列和AMD仍未完成。下方“未commit/待测”等为前序历史，不覆盖本条。
+
 最新状态以 [实施记录的2026-09-11部分](CONTINUATION_REPAIR_IMPLEMENTATION_2026-09-10.md) 为准。已推进非阻塞完成观察（deadline/反压期间计数）、53项统计合同、真实RTX23项回放，以及文件过载/暂停seek和受控采集音频恢复。采集音频首版欠载重置过于激进的失败已保留，改为持续断流后重锚；11.05秒恢复测试通过，非实卡验收。
 
 FRUC取得新实证：应用自有CUDA arrays+D3D11纹理桥接、graphics map/unmap、同CUDAcontext/批量互操作，替代旧FRUC内部DX11同步路径。六次重置/向后PTS/颜色反转的2X3X4X像素GT通过；reset现在只重种首帧，不常规重启worker或CPU排空队列。最新批量版本4X正确性通过，2X3X/集成复测待做。未加入cuCtxSynchronize或产品像素回读。原生4K4X吞吐测试仍慢（初版FG区间70.58ms），1080p批量版本约26.05ms，不能声称整体性能已经解决；SDK map/unmap自身可能阻塞。

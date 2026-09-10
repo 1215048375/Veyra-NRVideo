@@ -7,6 +7,7 @@ namespace veyra::diagnostics {
 enum class GpuStage { Color, Sr, Flow, Nr, Residual, Fg1, Fg2, Fg3, FgBatch, Blit, Count };
 enum class SampleState { NotExecuted, Pending, Measured, Unavailable };
 enum class CpuStage { Decode, Submit, SlotWait, ReadyWait, DeadlineWait, Present, Count };
+enum class PairTiming { ArrivalInterval, GeneratedFromA, GeneratedFromB, Count };
 struct TimingAggregate {std::optional<double> mean,p95;uint64_t samples=0;};
 struct GpuSample {SampleState state=SampleState::NotExecuted;std::optional<double> milliseconds;uint64_t begin=0,end=0,frequency=0;};
 // Live presentation is asynchronous. Keep the identity of the window that
@@ -40,6 +41,9 @@ struct FrameFlowMetrics {
     uint64_t latencySamples=0;
     std::array<TimingAggregate,size_t(GpuStage::Count)> gpuTiming;
     std::array<TimingAggregate,size_t(CpuStage::Count)> cpuTiming;
+    std::array<TimingAggregate,size_t(PairTiming::Count)> pairTiming;
+    uint64_t pairSourceA=0,pairSourceB=0;
+    bool pairCaptureCallbacks=false;
     uint64_t timingOverflow=0;
 };
 struct FrameMetrics {

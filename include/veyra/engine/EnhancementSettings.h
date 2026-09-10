@@ -70,6 +70,21 @@ struct EnhancementSettings {
     AudioSyncMode audioSync=AudioSyncMode::Automatic;
     int32_t audioOffsetMs=0;
     bool operator==(const EnhancementSettings&) const = default;
+    bool sameVideoConfiguration(const EnhancementSettings& other) const {
+        auto video=*this;
+        video.revision=other.revision;
+        video.audioSync=other.audioSync;
+        video.audioOffsetMs=other.audioOffsetMs;
+        return video==other;
+    }
+    void rejectVideoRequest(const EnhancementSettings& attempted,const EnhancementSettings& previous) {
+        if(revision!=attempted.revision)return;
+        auto restored=previous;
+        if(audioSync!=attempted.audioSync||audioOffsetMs!=attempted.audioOffsetMs){
+            restored.audioSync=audioSync;restored.audioOffsetMs=audioOffsetMs;
+        }
+        *this=restored;
+    }
     std::string validate() const {
         auto range=[](float v,float hi){return std::isfinite(v)&&v>=0&&v<=hi;};
         if(auto error=protection.validate();!error.empty())return error;

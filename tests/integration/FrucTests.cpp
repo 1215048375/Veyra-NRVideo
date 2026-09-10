@@ -66,15 +66,17 @@ int main(int argc,char** argv){using namespace veyra;if(argc<3)return 2;const un
         // A second frame after reseeding must run successfully, even for static input.
         if(ok)ok=graph.process(f,epoch*2000.0+1000.0/15,false,out)&&ring.waitIdle()&&graph.resolveGeneration(out);
     }
-    // Opt-in reproducer for the unresolved post-reset pixel error. The standard
-    // smoke above never claimed pixel correctness after its static reseeds.
-    if(argc>3&&std::string_view(argv[3])=="--reset-pixels"){
+    const bool skipPixels=argc>3&&std::string_view(argv[3])=="--skip-pixels";
+    if(skipPixels||(argc>3&&std::string_view(argv[3])=="--reset-pixels")){
         bool pixelsOk=true;
         for(unsigned epoch=1;ok&&epoch<=6;++epoch){const double start=epoch%2?10000+epoch*1000:500;const bool invert=epoch%2!=0;
-            for(unsigned i=0;ok&&i<3;++i){const int shift=int(epoch)*16+int(i)*8;
+            for(unsigned i=0;ok&&i<(skipPixels?7u:3u);++i){const int shift=int(epoch)*16+int(i)*8;
                 for(unsigned y=0;y<H;++y)for(unsigned x=0;x<W;++x){auto* p=f->data[0]+y*f->linesize[0]+x*4;for(unsigned c=0;c<3;++c){const auto v=color(int(x)-shift,y,c);p[c]=static_cast<unsigned char>(invert?255-v:v);}p[3]=255;}
-                pipeline::EnhanceGraph::FrameOutputs out;ok=graph.process(f,start+i*1000.0/15,i==0,out)&&ring.waitIdle()&&graph.resolveGeneration(out);
+                const bool skip=skipPixels&&(i==1||i==4);
+                pipeline::EnhanceGraph::FrameOutputs out;ok=graph.process(f,start+i*1000.0/15,i==0,out,i,nullptr,false,[skip](const pipeline::FrameBatch&){return !skip;})&&ring.waitIdle()&&graph.resolveGeneration(out);
                 if(i==0){ok=ok&&out.batch.count==1;continue;}
+                if(skip){ok=ok&&out.fgSkippedBeforeEval==mult-1&&out.fgEvaluated==0&&out.batch.count==1;continue;}
+                if(skipPixels&&(i==2||i==5)){ok=ok&&out.fgRecovery&&out.batch.count==1;continue;}
                 ok=ok&&out.batch.count==mult;
                 for(unsigned j=0;ok&&j<out.batch.count;++j){const auto& item=out.batch.frames[j];if(item.kind!=pipeline::FrameKind::Generated)continue;
                     sink::RgbaImage image;ok=sink::readRgba8(ctx,ring,item.lease->texture.Get(),image);if(!ok)break;

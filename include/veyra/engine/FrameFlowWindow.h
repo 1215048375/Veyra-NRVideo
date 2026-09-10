@@ -1,6 +1,7 @@
 #pragma once
 #include "veyra/diagnostics/FrameMetrics.h"
 #include "veyra/engine/FrameRateWindow.h"
+#include "veyra/engine/FrameLineage.h"
 #include <mutex>
 #include <memory>
 #include <cmath>
@@ -42,7 +43,7 @@ class FrameFlowWindow {
     mutable std::optional<double> latencyMean_,latencyP95_;
     mutable uint64_t latencyCount_=0;
     struct StageTiming {int64_t time;double ms;unsigned stage;};
-    static constexpr unsigned gpuCount=unsigned(diagnostics::GpuStage::Count),stageCount=gpuCount+unsigned(diagnostics::CpuStage::Count);
+    static constexpr unsigned gpuCount=unsigned(diagnostics::GpuStage::Count),pairBegin=gpuCount+unsigned(diagnostics::CpuStage::Count),stageCount=pairBegin+unsigned(diagnostics::PairTiming::Count);
     std::vector<StageTiming> timing_=std::vector<StageTiming>(8192);size_t timingHead_=0,timingSize_=0;
     std::array<uint64_t,gpuCount> lastGpuEnd_{};
     mutable int64_t timingRefresh_=0;
@@ -59,6 +60,22 @@ public:
     }
     template<class F> void update(F action){std::lock_guard lock(mutex_);action(metrics_);}
     void cpu(diagnostics::CpuStage index,double ms,int64_t now){std::lock_guard lock(mutex_);stage(gpuCount+unsigned(index),ms,now);}
+    void pairArrived(const FrameLineage& pair){
+        std::lock_guard lock(mutex_);
+        if(!metrics_.latest.sameWindow(metrics_.latest.sessionId,pair.a.identity)||
+           !metrics_.latest.sameWindow(metrics_.latest.sessionId,pair.b.identity))return;
+        metrics_.pairSourceA=pair.a.identity.sourceFrameId;metrics_.pairSourceB=pair.b.identity.sourceFrameId;
+        metrics_.pairCaptureCallbacks=pair.a.captureCallback&&pair.b.captureCallback;
+        stage(pairBegin+unsigned(diagnostics::PairTiming::ArrivalInterval),double(pair.b.host100ns-pair.a.host100ns)/10000,pair.b.host100ns);
+    }
+    void generatedLatency(const FrameLineage& pair,int64_t end){
+        if(end<pair.b.host100ns||pair.b.host100ns<pair.a.host100ns||pair.a.host100ns<=0)return;
+        std::lock_guard lock(mutex_);
+        if(!metrics_.latest.sameWindow(metrics_.latest.sessionId,pair.a.identity)||
+           !metrics_.latest.sameWindow(metrics_.latest.sessionId,pair.b.identity))return;
+        stage(pairBegin+unsigned(diagnostics::PairTiming::GeneratedFromA),double(end-pair.a.host100ns)/10000,end);
+        stage(pairBegin+unsigned(diagnostics::PairTiming::GeneratedFromB),double(end-pair.b.host100ns)/10000,end);
+    }
     void gpu(const std::array<diagnostics::GpuSample,gpuCount>& samples,int64_t now){
         std::lock_guard lock(mutex_);
         for(unsigned i=0;i<gpuCount;++i){const auto& s=samples[i];if(s.state==diagnostics::SampleState::Measured&&s.milliseconds&&s.end&&s.end!=lastGpuEnd_[i]){lastGpuEnd_[i]=s.end;stage(i,*s.milliseconds,now);}}
@@ -102,6 +119,7 @@ public:
         }
         for(unsigned i=0;i<gpuCount;++i)m.gpuTiming[i]=aggregates_[i];
         for(unsigned i=0;i<unsigned(diagnostics::CpuStage::Count);++i)m.cpuTiming[i]=aggregates_[gpuCount+i];
+        for(unsigned i=0;i<unsigned(diagnostics::PairTiming::Count);++i)m.pairTiming[i]=aggregates_[pairBegin+i];
         m.softwareLatencyMs=latencyMean_;m.softwareLatencyP95Ms=latencyP95_;m.latencySamples=latencyCount_;return m;
     }
 };

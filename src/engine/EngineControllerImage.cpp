@@ -43,6 +43,10 @@ void EngineController::runLargeImage(HWND window,const sink::RgbaImage& original
             else {status(L"图片已保存，完整结果仍可继续预览");veyra::log::info("image-save",std::format("tiled full-resolution saved extent={}x{} revision={}",enhanced.width,enhanced.height,applied.revision));}
             }catch(const std::exception& e){veyra::log::warn("image-save",std::format("save exception; retaining full result/session: {}",e.what()));status(L"保存异常，增强结果已保留；可再次保存",false);}
         }
+        if(requested.revision==applied.revision&&requested!=applied){
+            applied=requested;
+            std::lock_guard lock(mutex_);snapshot_.applied=applied;snapshot_.applying=desired_!=applied;
+        }
         if(requested.revision!=applied.revision){
             pipeline::EnhanceGraphDesc desc;desc.enableNr=requested.nr;desc.noFeatures=!requested.nr;
             desc.model=requested.model;desc.residual=requested.residual;desc.protection=requested.protection;desc.settingsRevision=requested.revision;
@@ -55,12 +59,12 @@ void EngineController::runLargeImage(HWND window,const sink::RgbaImage& original
             if(!processed){
                 if(stop_)break;
                 if(enhanced.pixels.empty()){status(L"大图分块增强失败，请查看诊断",true);break;}
-                std::lock_guard lock(mutex_);if(desired_.revision==requested.revision)desired_=applied;
-                snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.applying=false;
+                std::lock_guard lock(mutex_);desired_.rejectVideoRequest(requested,applied);
+                snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.applying=desired_!=applied;
                 snapshot_.status=L"大图参数应用失败，已保留上一结果";continue;
             }
             enhanced=std::move(candidate);applied=requested;lastComparison=-1;
-            {std::lock_guard lock(mutex_);snapshot_.applied=applied;snapshot_.desired=desired_;snapshot_.applying=desired_.revision!=applied.revision;
+            {std::lock_guard lock(mutex_);snapshot_.applied=applied;snapshot_.desired=desired_;snapshot_.applying=desired_!=applied;
                 snapshot_.nrEvaluated=stats.nrEvaluations;snapshot_.frames=1;snapshot_.transport=TransportState::Playing;
                 auto& plan=snapshot_.metrics.resolution;plan.source=plan.base=plan.output={original.width,original.height};plan.nr={std::min(1280u,original.width)+256,std::min(1280u,original.height)+256};plan.flow=plan.fg={};plan.srApplied=false;plan.settingsRevision=applied.revision;
                 snapshot_.status=std::format(L"{}×{} · 分块NR（非整图上下文）· 保存保留完整尺寸",original.width,original.height);}

@@ -8,15 +8,17 @@ using namespace veyra;
 using namespace std::chrono_literals;
 int wmain(int argc,wchar_t**argv){
     SetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS",L"1");
-    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--fruc")==0||wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--fruc")==0||wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--fruc-overload")==0||wcscmp(argv[3],L"--fruc-overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     std::filesystem::create_directories(argv[2]);Logger::instance().openFile((std::filesystem::path(argv[2])/"engine.log").wstring());Logger::instance().setConsoleEnabled(false);
     HWND window=CreateWindowExW(0,L"STATIC",L"Live scheduler replay",WS_POPUP,0,0,960,540,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     if(!window)return 3;engine::EngineController engine;engine::PlayerOptions options;options.nr=false;options.fg=false;options.captureReplayForTest=true;
     const bool halfRate=argc==4&&wcscmp(argv[3],L"--half-rate")==0;
-    const bool overload=argc==4&&std::wstring(argv[3]).find(L"--overload")==0;
+    const bool frucOverload=argc==4&&std::wstring(argv[3]).find(L"--fruc-overload")==0;
+    const bool overload=frucOverload||(argc==4&&std::wstring(argv[3]).find(L"--overload")==0);
     const bool fileOverload=argc==4&&wcscmp(argv[3],L"--file-overload")==0;
     if(argc==4&&wcscmp(argv[3],L"--fruc")==0)options.settings.frameGenerationBackend=engine::FrameGenerationBackend::Fruc;
-    if(overload){options.nr=options.sr=options.fg=true;options.realtime=false;options.fgMultiplier=4;options.settings.videoSrQuality=4;options.captureReplayDisableFgAdmissionForTest=wcscmp(argv[3],L"--overload-baseline")==0;SetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS",nullptr);}
+    if(overload){options.nr=options.sr=options.fg=true;options.realtime=false;options.fgMultiplier=4;options.settings.videoSrQuality=4;options.captureReplayDisableFgAdmissionForTest=std::wstring(argv[3]).ends_with(L"-baseline");SetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS",nullptr);}
+    if(frucOverload)options.settings.frameGenerationBackend=engine::FrameGenerationBackend::Fruc;
     if(halfRate)options.settings.content=engine::ContentRate::Capture60To30;
     if(fileOverload){options.captureReplayForTest=false;options.nr=options.sr=options.fg=true;options.realtime=false;options.fgMultiplier=4;options.settings.videoSrQuality=4;}
     int failures=0;auto check=[&](bool pass,const char* s){std::cout<<(pass?"PASS ":"FAIL ")<<s<<std::endl;if(!pass)++failures;};
@@ -50,13 +52,23 @@ int wmain(int argc,wchar_t**argv){
     }
     auto state=engine.snapshot();auto settings=state.desired;settings.nr=true;settings.multiplier=2;engine.requestSettings(settings);
     check(until([](const auto& s){return s.applied.nr&&s.applied.multiplier==2&&!s.applying&&s.nrEvaluated>2&&s.generated>0;}),"NR and 2x transaction while two batches are in flight");
+    check(until([](const auto& s){const auto& m=s.metrics.flow;return m.pairTiming[size_t(diagnostics::PairTiming::GeneratedFromA)].samples>0&&m.pairTiming[size_t(diagnostics::PairTiming::GeneratedFromB)].samples>0;}),"presented generated frames have actual A/B latency samples");
     state=engine.snapshot();const auto liveRevision=state.applied.revision;check(state.metrics.identity.settingsRevision==state.applied.revision,"GPU metrics belong to applied revision");
     const auto& flow=state.metrics.flow;
     check(flow.latest.sameWindow(state.sessionId,state.metrics.identity)&&flow.counters.fgEvaluated>0,"flow counters carry actual session, epoch and revision");
     check(flow.counters.commandSlotHighWater<=6&&flow.counters.presentationBatchHighWater<=2,"command and presentation queues remain bounded");
     check(flow.counters.fgCandidate==flow.counters.fgSkippedBeforeEval+flow.counters.fgEvaluated,"each candidate is accounted before evaluate");
+    const auto audioEpoch=state.metrics.identity.epoch;const auto audioFrames=state.frames;
+    settings=state.desired;settings.audioSync=engine::AudioSyncMode::Manual;settings.audioOffsetMs=75;
+    check(engine.requestSettings(settings),"audio-only change accepted while NR/FG are active");
+    check(until([&](const auto& s){return !s.applying&&s.applied.audioOffsetMs==75&&s.frames>=audioFrames+4;}),"audio-only transaction completes while video advances");
+    state=engine.snapshot();
+    check(state.applied.revision==liveRevision&&state.metrics.identity.epoch==audioEpoch,"audio-only edit retains GPU revision and temporal history");
+    settings=state.desired;check(engine.requestSettings(settings)&&engine.snapshot().desired.revision==liveRevision&&!engine.snapshot().applying,"identical settings notification does not enqueue a GPU transaction");
     engine.pause(true);check(until([](const auto& s){return s.transport==engine::TransportState::Paused;}),"pause returns without queue deadlock");
     check(engine.snapshot().fps==0,"paused FPS is zero rather than a retained session average");
+    settings=engine.snapshot().desired;settings.audioOffsetMs=90;engine.requestSettings(settings);
+    check(until([&](const auto& s){return !s.applying&&s.applied.audioOffsetMs==90&&s.applied.revision==liveRevision;}),"audio edit applies while paused without rerunning video");
     settings=engine.snapshot().desired;settings.model.style=1;engine.requestSettings(settings);
     check(until([](const auto& s){return s.applied.model.style==1&&!s.applying;}),"settings apply while paused");
     const auto pausedRevision=engine.snapshot().applied.revision;

@@ -50,6 +50,9 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         rows.emplace_back(L"GPU就绪等待",timing(f.cpuTiming[size_t(diagnostics::CpuStage::ReadyWait)]));
         rows.emplace_back(L"呈现等待",timing(f.cpuTiming[size_t(diagnostics::CpuStage::DeadlineWait)]));
         rows.emplace_back(L"Present调用与锁等待",timing(f.cpuTiming[size_t(diagnostics::CpuStage::Present)]));
+        rows.emplace_back(f.pairCaptureCallbacks?L"A/B采集到达间隔":L"A/B软件取帧间隔",xess?L"SDK内部不可测":timing(f.pairTiming[size_t(diagnostics::PairTiming::ArrivalInterval)]));
+        rows.emplace_back(L"生成呈现距A到达",xess?L"SDK内部不可测":timing(f.pairTiming[size_t(diagnostics::PairTiming::GeneratedFromA)]));
+        rows.emplace_back(L"生成呈现距B到达",xess?L"SDK内部不可测":timing(f.pairTiming[size_t(diagnostics::PairTiming::GeneratedFromB)]));
         rows.emplace_back(L"延迟样本 / 统计溢出",std::format(L"{} / {}",f.latencySamples,f.timingOverflow));
         rows.emplace_back(L"补帧方式",s.applied.multiplier<=1?L"关闭":std::format(L"{} {}X",xess?L"XeSS":s.applied.frameGenerationBackend==engine::FrameGenerationBackend::Fruc?L"FRUC":L"DLSS",s.applied.multiplier));
         rows.emplace_back(L"NR内部尺寸",s.applied.nr?std::format(L"{} x {}",s.metrics.resolution.nr.width,s.metrics.resolution.nr.height):L"关闭");

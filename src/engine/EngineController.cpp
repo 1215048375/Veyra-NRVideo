@@ -62,7 +62,12 @@ void EngineController::pause(bool p){paused_=p;std::lock_guard lock(mutex_);if(s
 void EngineController::setVolume(float gain,bool mute){if(!std::isfinite(gain))return;volume_=std::clamp(gain,0.0f,1.0f);muted_=mute;}
 bool EngineController::requestSettings(EnhancementSettings s){
     if(!s.validate().empty()){veyra::log::warn("settings","invalid whole settings transaction rejected");status(L"整套设置无效，未应用任何字段",false);return false;}
-    std::lock_guard lock(mutex_);if(snapshot_.image)s.multiplier=1;s.revision=++nextRevision_;desired_=s;snapshot_.desired=s;snapshot_.applying=true;return true;
+    std::lock_guard lock(mutex_);if(snapshot_.image)s.multiplier=1;
+    // Revision partitions GPU history and measurements. Audio-only edits must
+    // not invalidate in-flight video, and identical notifications are no-ops.
+    s.revision=desired_.revision;if(s==desired_)return true;
+    if(!s.sameVideoConfiguration(desired_))s.revision=++nextRevision_;
+    desired_=s;snapshot_.desired=s;snapshot_.applying=snapshot_.applied!=desired_;return true;
 }
 void EngineController::saveFrame(const std::wstring& path){std::lock_guard lock(mutex_);savePath_=path;}
 void EngineController::startExport(const std::wstring& input,const std::wstring& output,PlayerOptions opts,bool hevc){
@@ -149,6 +154,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             PresentationScheduler liveTimeline;uint64_t submitted=0,expired=0;std::deque<int64_t> submissionTimes;
             DeadlineWait deadlineWait;
             CaptureHalfRate captureSampler;
+            FrameLineageTracker lineageTracker;
             auto completedProcessing=[&](pipeline::FrameIdentity id){std::lock_guard lock(mutex_);if(snapshot_.applied.revision==id.settingsRevision)++snapshot_.processedCompleted;};
             auto host100ns=[](){return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count()/100;};
             // Only the live source may discard stale input. File playback keeps
@@ -214,9 +220,19 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     if(!sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),result)||!sink::saveImage(save,result,e==L".jpg"||e==L".jpeg"))status(L"保存失败（目标文件可能已存在），播放已保留",false);else{status(L"图片已保存："+save);veyra::log::info("image-save",std::format("saved extent={}x{} revision={}",gd.workWidth,gd.workHeight,options.settings.revision));}}
                     catch(const std::exception& e){veyra::log::warn("image-save",std::format("save exception; retaining session: {}",e.what()));status(L"保存异常，播放已保留；可再次保存",false);}}
                 if(isImage)requested.multiplier=1;
+                if(requested.revision==options.settings.revision&&requested!=options.settings){
+                    options.settings.audioSync=requested.audioSync;options.settings.audioOffsetMs=requested.audioOffsetMs;
+                    captureSource.setAudioSync(unsigned(requested.audioSync),requested.audioOffsetMs);
+                    std::lock_guard lock(mutex_);snapshot_.applied=options.snapshot();snapshot_.applying=desired_!=snapshot_.applied;
+                    veyra::log::info("settings",std::format("Audio applied videoRevision={} mode={} offsetMs={} (video history retained)",requested.revision,unsigned(requested.audioSync),requested.audioOffsetMs));
+                }
                 const auto previous=options.snapshot();const auto previousDesc=gd;bool transaction=false;
                 if(requested.revision!=previous.revision){
                     drainLivePresentation();
+                    // A drain may outlive several slider notifications. Build
+                    // only the latest pending configuration at this boundary.
+                    {std::lock_guard lock(mutex_);requested=desired_;}
+                    if(requested.revision==previous.revision)continue;
                     auto next=PlayerOptions::from(requested);auto nextDesc=gd;
                     const auto plan=pipeline::ResolutionPlan::make({width,height},next.sr,requested.nrPolicy,isImage,requested.revision,requested.srTarget);
                     nextDesc.workWidth=plan.base.width;nextDesc.workHeight=plan.base.height;nextDesc.nrWidth=plan.nr.width;nextDesc.nrHeight=plan.nr.height;nextDesc.flowWidth=plan.flow.width;nextDesc.flowHeight=plan.flow.height;
@@ -238,7 +254,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                         options=next;gd=nextDesc;transaction=true;reset=true;
                         if(!nvidiaAdapter&&(next.nr||next.sr||(next.fg&&!xessFg)))veyra::log::warn("capability",std::format("non-NVIDIA adapter disabled requested settings revision={} nr={} sr={} fgBackend={} flowBackend={}",requested.revision,next.nr,next.sr,frameGenerationBackendName(requested.frameGenerationBackend),opticalFlowBackendName(requested.opticalFlowBackend)));
                     }
-                    else {std::lock_guard lock(mutex_);if(desired_.revision==requested.revision)desired_=previous;snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.applying=desired_.revision!=previous.revision;snapshot_.status=L"设置应用失败，已恢复上一套参数";snapshot_.backendWarning=requested.frameGenerationBackend==FrameGenerationBackend::XeSS?L"XeSS 未能启用，已恢复上一套参数":L"后端切换失败，已恢复上一套参数";}
+                    else {std::lock_guard lock(mutex_);desired_.rejectVideoRequest(requested,previous);snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.applying=desired_!=previous;snapshot_.status=L"设置应用失败，已恢复上一套参数";snapshot_.backendWarning=requested.frameGenerationBackend==FrameGenerationBackend::XeSS?L"XeSS 未能启用，已恢复上一套参数":L"后端切换失败，已恢复上一套参数";}
                 }
                 const double seek=seekSeconds_.exchange(-1);
                 if(seek>=0&&!isImage&&!isCapture){
@@ -293,6 +309,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 if(frame!=cachedFrame){av_frame_free(&cachedFrame);cachedFrame=av_frame_clone(frame);cachedPacket=pkt;}
                 const auto processStart=Clock::now();
                 const auto captureArrival=pkt.arrivalHost100ns?pkt.arrivalHost100ns:host100ns();
+                const auto sourceArrival=pkt.arrivalHost100ns?pkt.arrivalHost100ns:std::chrono::duration_cast<std::chrono::nanoseconds>(decodeStart.time_since_epoch()).count()/100;
                 const bool historyReset=reset||pipeline::breaksHistory(pkt.flags);
                 if(historyReset){++historyResets;++presentationGeneration;}
                 // A mailbox Drop must reset SR/NR/flow/FG history, but draining
@@ -301,10 +318,9 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 const bool injectedReject=transaction&&!options.nr&&GetEnvironmentVariableW(L"VEYRA_TEST_REJECT_NR_DISABLE",nullptr,0)>0;
                 if(injectedReject)veyra::log::error("settings-test","test-only reject NR-disable transaction before graph process; no driver failure");
                 pipeline::EnhanceGraph::FgAdmission admitFg;
-                // FRUC's current recovery restarts its worker. A deadline skip
-                // would repeatedly trigger that expensive restart and starve FG.
-                // Keep its existing path until lightweight reseeding is verified.
-                if(isCapture&&!rereadCached&&useLiveFgAdmission&&options.settings.frameGenerationBackend==FrameGenerationBackend::Dlss){
+                // Both graph FG backends can reseed after a skipped pair. XeSS
+                // owns generation inside its presenter and has no graph admission.
+                if(isCapture&&!rereadCached&&useLiveFgAdmission&&options.settings.frameGenerationBackend!=FrameGenerationBackend::XeSS){
                     std::optional<double> completionP95;double presentP95=0;uint64_t predictionEpoch=0;
                     {std::lock_guard statsLock(liveStatsMutex);if(host100ns()-lastFgCompletion>5000000)liveCompletion.clear();if(!historyReset&&liveStats.identity.settingsRevision==options.settings.revision&&liveCompletion.size()>=8){completionP95=liveCompletion.p95();presentP95=livePresent.p95();predictionEpoch=liveStats.identity.epoch;}}
                     admitFg=[&,completionP95,presentP95,predictionEpoch](const pipeline::FrameBatch& batch){
@@ -322,11 +338,11 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                         ring.drainQueue();out={};presenter.close();graph.shutdown();options=PlayerOptions::from(previous);
                         gd=previousDesc;
                         if(graph.initialize(gd)&&presenter.open(ctx,window,graph)&&graph.createViews()&&graph.process(frame,pts,true,out,pkt.sequence,&pkt.colorInfo,comparisonMode_!=0)){
-                            std::lock_guard lock(mutex_);if(desired_.revision==requested.revision)desired_=previous;snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.applying=desired_.revision!=previous.revision;snapshot_.status=L"参数执行失败，已整套回滚";transaction=false;
+                            std::lock_guard lock(mutex_);desired_.rejectVideoRequest(requested,previous);snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.applying=desired_!=previous;snapshot_.status=L"参数执行失败，已整套回滚";transaction=false;
                         }else{status(L"参数回滚失败，已停止",true);break;}
                     }else{status(L"增强执行失败；请查看日志",true);break;}
                 }
-                if(transaction){std::lock_guard lock(mutex_);snapshot_.applied=options.snapshot();snapshot_.applying=desired_.revision!=options.settings.revision;snapshot_.status=std::format(L"输入 {}×{} / 底图 {}×{} / NR {}×{} / 光流 {}×{} / FG与输出 {}×{} | {}",width,height,gd.workWidth,gd.workHeight,gd.nrWidth,gd.nrHeight,gd.flowWidth,gd.flowHeight,gd.workWidth,gd.workHeight,gd.nrWidth<gd.workWidth?L"实时内部处理并回填":L"原生NR（性能成本较高）");veyra::log::info("settings",std::format("Applied revision={} sourcePtsMs={} fgBackend={} flowBackend={} multiplier={} (source kept open)",options.settings.revision,pts,frameGenerationBackendName(options.settings.frameGenerationBackend),opticalFlowBackendName(options.settings.opticalFlowBackend),options.snapshot().multiplier));}
+                if(transaction){std::lock_guard lock(mutex_);snapshot_.applied=options.snapshot();snapshot_.applying=desired_!=snapshot_.applied;snapshot_.status=std::format(L"输入 {}×{} / 底图 {}×{} / NR {}×{} / 光流 {}×{} / FG与输出 {}×{} | {}",width,height,gd.workWidth,gd.workHeight,gd.nrWidth,gd.nrHeight,gd.flowWidth,gd.flowHeight,gd.workWidth,gd.workHeight,gd.nrWidth<gd.workWidth?L"实时内部处理并回填":L"原生NR（性能成本较高）");veyra::log::info("settings",std::format("Applied revision={} sourcePtsMs={} fgBackend={} flowBackend={} multiplier={} (source kept open)",options.settings.revision,pts,frameGenerationBackendName(options.settings.frameGenerationBackend),opticalFlowBackendName(options.settings.opticalFlowBackend),options.snapshot().multiplier));}
                 if(veyra::log::verboseFrameLogs())veyra::log::info("source-identity",std::format("source={} totalRead={} graphProcessed={} cached={} revision={} nvofStandalone={}",pkt.sequence,sourceFrames,frames+1,rereadCached,options.settings.revision,gd.enableNvofStandalone));
                 reset=false;hasOutput=true;
                 const auto processDone=Clock::now();
@@ -344,6 +360,11 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     veyra::log::info("metrics",std::format("reset session={} appliedRevision={} epoch={} sourceBase={}",runSessionId,metricsRevision,metricsEpoch,statsSourceBase));
                 }
                 const double processMs=std::chrono::duration<double,std::milli>(processDone-processStart).count();
+                const auto lineage=lineageTracker.observe(out.batch,sourceArrival,pkt.arrivalHost100ns>0,rereadCached||isImage);
+                if(lineage&&out.hasGenerated){
+                    frameFlow->pairArrived(*lineage);
+                    if(veyra::log::verboseFrameLogs())veyra::log::info("frame-lineage",std::format("batch={} epoch={} revision={} sourceA={} sourceB={} ptsA={} ptsB={} arrivalA={} arrivalB={} captureCallbacks={}",out.batch.batchId,out.batch.identity.epoch,out.batch.identity.settingsRevision,lineage->a.identity.sourceFrameId,lineage->b.identity.sourceFrameId,lineage->a.pts100ns,lineage->b.pts100ns,lineage->a.host100ns,lineage->b.host100ns,lineage->a.captureCallback&&lineage->b.captureCallback));
+                }
                 processTimes.add(processMs);
                 frameFlow->cpu(diagnostics::CpuStage::Decode,decodeMs,host100ns());
                 frameFlow->cpu(diagnostics::CpuStage::Submit,processMs,host100ns());
@@ -367,7 +388,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     const uint64_t jobGeneration=presentationGeneration.load();
                     auto watch=std::make_shared<CompletionWatch>();watch->output=out;watch->flow=frameFlow;watch->processStart=processStart;watch->real=!rereadCached;
                     {std::lock_guard gpuLock(gpuMutex);pendingCompletions.push_back(watch);}
-                    if(!liveWorker->push([&,watch,timeline,captureArrival,jobGeneration,rereadCached,flow=frameFlow](const PresentationWorker::Cancelled& cancelled){
+                    if(!liveWorker->push([&,watch,timeline,captureArrival,lineage,jobGeneration,rereadCached,flow=frameFlow](const PresentationWorker::Cancelled& cancelled){
                         auto& batch=watch->output;
                         unsigned handled=0;
                         OnExit accountCancelled{[&]{flow->update([&](auto& m){m.counters.cancelledBeforePresent+=batch.batch.count-handled;});}};
@@ -402,6 +423,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                             if(xessPresented)flow->xessSubmitted(xessPresented,xessGenerated,host100ns());
                             if(didPresent&&physicalCapture)captureSource.videoPresented(double(item.pts100ns)/10000,host100ns());
                             if(didPresent&&!generated&&!rereadCached)flow->latency(captureArrival,host100ns());
+                            if(didPresent&&generated&&lineage)flow->generatedLatency(*lineage,host100ns());
                             if(didPresent){++handled;++count;flow->presented(generated,item.lease->consumerFence,host100ns());if(!generated)++presentationCompletedReal;ageMs=double(host100ns()-captureArrival)/10000;std::lock_guard statsLock(liveStatsMutex);if(liveStats.identity.epoch==batch.batch.identity.epoch&&liveStats.identity.settingsRevision==batch.batch.identity.settingsRevision){const auto time=host100ns();liveSubmissions.push_back(time);while(liveSubmissions.size()>1&&time-liveSubmissions.front()>10000000)liveSubmissions.pop_front();}}
                         }
                         return true;
@@ -451,6 +473,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     item.lease->consumerFence=ring.lastSignaledValue();
                     if(presenter.submittedCount()>before){++handled;frameFlow->presented(generated,item.lease->consumerFence,host100ns());}
                     if(presenter.submittedCount()>before&&!generated&&!rereadCached)frameFlow->latency(std::chrono::duration_cast<std::chrono::nanoseconds>(decodeStart.time_since_epoch()).count()/100,host100ns());
+                    if(presenter.submittedCount()>before&&generated&&lineage)frameFlow->generatedLatency(*lineage,host100ns());
                     if(presenter.submittedCount()>before){++submitted;const auto time=host100ns();submissionTimes.push_back(time);while(submissionTimes.size()>1&&time-submissionTimes.front()>10000000)submissionTimes.pop_front();if(veyra::log::verboseFrameLogs())veyra::log::info("submit",std::format("batch={} epoch={} revision={} subframe={} pts100ns={} host100ns={} fence={} (submission, display unmeasured)",out.batch.batchId,item.identity.epoch,item.identity.settingsRevision,item.subframe,item.pts100ns,host100ns(),item.lease->consumerFence));}
                 }
                 if(presentFailed){status(L"画面提交失败",true);break;}

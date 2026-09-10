@@ -40,6 +40,7 @@ struct WorkerKernel {
     using SetContext = CUresult (CUDAAPI*)(CUcontext);
     HMODULE cuda=nullptr; GetContext getContext=nullptr; SetContext setContext=nullptr;
     bool reseed=false;
+    unsigned inputSlot=0;
     using DxDevice=CUresult(CUDAAPI*)(CUdevice*,IDXGIAdapter*);
     using DxRegister=CUresult(CUDAAPI*)(CUgraphicsResource*,ID3D11Resource*,unsigned);
     DxRegister dxRegister=nullptr;
@@ -194,7 +195,9 @@ bool WorkerKernel::execute(FrucWorkerMessage& info) {
     mapping.active=true;
     for(unsigned j=0;j<count;++j) {
         NvOFFRUC_PROCESS_IN_PARAMS in{};NvOFFRUC_PROCESS_OUT_PARAMS out{};
-        in.stFrameDataInput.pFrame=arrays[j][info.parity];in.stFrameDataInput.nTimeStamp=info.currentMs;
+        // FRUC retains the previous CUDA array. Source parity can repeat after
+        // admission skips; rotate owned inputs by actual SDK calls instead.
+        in.stFrameDataInput.pFrame=arrays[j][inputSlot];in.stFrameDataInput.nTimeStamp=info.currentMs;
         in.bSkipWarp=reseed;
         out.stFrameDataOutput.pFrame=arrays[j][2];
         out.stFrameDataOutput.nTimeStamp=info.previousMs+(info.currentMs-info.previousMs)*double(j+1)/(count+1);
@@ -202,7 +205,7 @@ bool WorkerKernel::execute(FrucWorkerMessage& info) {
         ++wait;
         {
             CUarray input=nullptr;if(!cudaOk(mappedArray(&input,mapped[j*2],0,0),"InteropInputArray"))return false;
-            CUDA_MEMCPY2D copy{};copy.srcMemoryType=CU_MEMORYTYPE_ARRAY;copy.srcArray=input;copy.dstMemoryType=CU_MEMORYTYPE_ARRAY;copy.dstArray=arrays[j][info.parity];copy.WidthInBytes=size_t(width)*4;copy.Height=height;
+            CUDA_MEMCPY2D copy{};copy.srcMemoryType=CU_MEMORYTYPE_ARRAY;copy.srcArray=input;copy.dstMemoryType=CU_MEMORYTYPE_ARRAY;copy.dstArray=arrays[j][inputSlot];copy.WidthInBytes=size_t(width)*4;copy.Height=height;
             if(!cudaOk(copyAsync(&copy,nullptr),"InteropInputCopy"))return false;
         }
         unsigned seh=0;auto result=callSafe(seh,process,handles[j],&in,&out);
@@ -219,7 +222,7 @@ bool WorkerKernel::execute(FrucWorkerMessage& info) {
     mapping.active=false;
     for(unsigned j=0;j<count;++j)context->CopyResource(tex[j+2].Get(),bridge[j][2].Get());
     if(!hrOk(context4->Signal(fence11.Get(),wait),"InteropOutputSignal",true))return false;context->Flush();
-    reseed=false;info.outputFence=wait;return true;
+    inputSlot^=1;reseed=false;info.outputFence=wait;return true;
 }
 } // namespace veyra::ngx
 int wmain(int argc,wchar_t** argv) {
