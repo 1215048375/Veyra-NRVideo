@@ -38,6 +38,7 @@ constexpr double kAudioHighWatermarkMs = 1000.0;
 constexpr uint32_t kAudioRate = 48000;
 
 class AudioRenderer; // forward: pipeline thread needs the renderer
+enum class AudioFadeResult { NotPlaying, Drained, Cancelled, TimedOut, Failed };
 
 class AudioPipeline : public AudioPcmSource {
 public:
@@ -156,6 +157,8 @@ public:
     // Atomic seek support: stop + reset the endpoint; the clock is invalid
     // until the next startAnchored.
     void stopAndReset();
+    // Audio-owner only; drains a 5ms fade before a controlled reset, bounded to 80ms.
+    AudioFadeResult fadeAndReset(AudioPcmSource& source,const std::atomic<bool>& cancel);
 
     bool started() const;
     uint64_t underruns() const;
@@ -190,6 +193,8 @@ private:
     std::atomic<double> anchorPtsMs_{0.0};
     std::atomic<bool> started_{false};
     std::atomic<bool> running_{false};
+    std::atomic<bool> fading_{false};bool pausedEndpoint_=false;
+    float lastRawLeft_=0,lastRawRight_=0;
     bool comInited_ = false;
     std::atomic<uint64_t> underruns_{0};
     std::atomic<uint64_t> framesWritten_{0};

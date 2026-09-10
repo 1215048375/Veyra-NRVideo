@@ -111,7 +111,7 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
             }
             if(mode!=appliedMode||offset!=appliedOffset){reset=true;appliedMode=mode;appliedOffset=offset;}
             if(reset||chunk.discontinuity){
-                renderer.stopAndReset();clearPcm();swr_close(swr);
+                renderer.fadeAndReset(*this,stop);clearPcm();swr_close(swr);
                 if(swr_init(swr)<0){fail(L"音频重采样重置失败");break;}
                 if(!clearCorrection()){fail(L"音频漂移校正重置失败");break;}
                 std::lock_guard lock(mutex);++state.resets;
@@ -129,7 +129,7 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
                 const double end=chunk.pts+1000.0*(inputFrames-swr_get_delay(swr,format.nSamplesPerSec))/format.nSamplesPerSec;
                 if(reset||chunk.discontinuity)log::info("capture-audio-reset",std::format("mode={} pts={} delayBefore={} delayAfter={} input={} output={}",appliedMode,chunk.pts,delay,swr_get_delay(swr,format.nSamplesPerSec),inputFrames,count));
                 if(haveHead&&std::abs(start-pcmTimeline.at(double(pcmTail)).value_or(start))>50){
-                    renderer.stopAndReset();clearPcm();
+                    renderer.fadeAndReset(*this,stop);clearPcm();
                     std::lock_guard lock(mutex);++state.resets;
                 }
                 {
@@ -195,7 +195,7 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
                     const double error=audioPts-(double(observed)/10000-mapping);
                     filteredError=.75*filteredError+.25*error;nextCorrection=observed+2500000;
                     if(observed-lastReset>10000000&&std::abs(error)>60){
-                        renderer.stopAndReset();lastReset=observed;filteredError=correctionPpm=0;
+                        renderer.fadeAndReset(*this,stop);lastReset=hostTime();filteredError=correctionPpm=0;
                         std::lock_guard lock(mutex);++state.resets;
                     }else{
                         const double targetPpm=std::clamp(filteredError*250.0,-5000.0,5000.0);

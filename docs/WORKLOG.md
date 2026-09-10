@@ -1,5 +1,7 @@
 # 2026-09-11 继续修复目标模式执行中
 
+最新可控淡出：基线`78675f2`，为采集设置/PTS/大偏差重锚和文件播放中seek加入真实240帧PCM淡出，WASAPI padding消耗后Reset再淡入；边界最长80ms，取消/错误退出，正常pump不加等待。55项timeline、7项真实player、11.105秒合成采集通过；重锚额外等待约16至40ms，普通偏差10.6至21.3ms。最终delivery `6304c4518f864f34a4bb91392cd16ab1`23项PASS，应用SHA `A86DB75E321677C2B9EDC0380D3BC4DCC13FAD3DE5BA05D59DA5C1C30C6BB97A`；命令、测试身份与边界见实施记录最新段。真实RTX执行，未实卡/外部听觉验收，无发布。下一任务补reset排空/销毁/创建/预热恢复计时及逐帧轨迹；AMD完整网络/provider仍缺，目标active。
+
 最新文件音频恢复：基线`bba7283`。修复pump失败退出音频线程和clock失效后视频转墙钟继续播放；文件端点改由音频owner创建/500ms重连/释放，clock读取与COM生命周期互斥，最后有效PTS重锚、断开期间seek更新目标、暂停预填不Start，状态区显示恢复/HRESULT/次数。最终音频47项2.628秒、真实player7项2.297秒PASS；原生4K过载5项及合成采集回归通过。首轮任意并发读取次数门槛失败已保留并改成验证实际并发生命周期，详见实施记录最上方。最终build `audio-file-recovery-final-build.log`exit0，delivery `5c80d299087b4f2482706bf2a24df9c9`23项42.420秒PASS，应用SHA `E2EA9CB93CB290E6B13683647835B3E7F54EA21810FC358D69DB803AA9168866`。RTX NR/NVOF/NVENC已实跑，未实卡/AMD/真实系统设备拔插。下一任务可控音频重锚短淡出与原方案剩余计时覆盖审计；AMD依赖/provider、高DPI实机和实卡未完成。整体目标active，本地存档，不发布。
 
 最新AMD诊断（UI已经提交`ee46c5f`）：隔离探针调试输出明确`Preview releases of D3D12Core require Developer Mode.`，随后CLSID_D3D12CoreModule获取失败；已解释先前0x887E0003，尚未到GPU能力查询。`continuation-amd-debug-loader`0.088秒exit1，完整stdout/result在`logs/scheduler-repair-20260910/`，只调试自有进程。未开开发者模式、未改主程序runtime、未提取权重。AMD完整网络/provider仍未实现。下一条独立任务转文件音频端点失败恢复，避免共享renderer shutdown与引擎clock读取竞态；详见实施记录最新段。整体目标active，不发布。

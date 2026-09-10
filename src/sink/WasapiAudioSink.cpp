@@ -2,6 +2,7 @@
 #include "veyra/sink/WasapiAudioSink.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <format>
@@ -319,6 +320,7 @@ bool AudioRenderer::startAnchored(AudioPcmSource& pipeline, bool paused)
     anchorPos_ = pos;
     anchorPtsMs_.store(firstBufferPtsMs);
     if (!paused && !checked(client_->Start(),"Start")) return false;
+    pausedEndpoint_=paused;
     started_ = true;
     veyra::log::info("audio", std::format("renderer ANCHORED ptsMs={:.1f} devicePos={} freq={} paused={}",
         firstBufferPtsMs, pos, clockFrequency_,paused));
@@ -360,6 +362,7 @@ bool AudioRenderer::pumpOnce(AudioPcmSource& pipeline, double* firstWrittenPtsMs
     if (!started_ && !got) return checked(render_->ReleaseBuffer(0, 0),"Release empty prefill");
     const UINT32 written=started_&&pipeline.padUnderruns()?avail:static_cast<UINT32>(got);
     if (got > 0) {
+        lastRawLeft_=chunk_[(got-1)*2];lastRawRight_=chunk_[(got-1)*2+1];
         const float target=std::clamp(gain_.load(),0.0f,1.0f);
         applyStereoGain(chunk_.data(),got,target,smoothedGain_);
         if(target!=loggedGain_&&std::abs(smoothedGain_-target)<.00001f){loggedGain_=target;log::info("audio-gain",std::format("target={} reached={} framesWritten={} clockPreserved=true applicationPCM=true",target,smoothedGain_,framesWritten_.load()));}
@@ -373,6 +376,7 @@ bool AudioRenderer::pumpOnce(AudioPcmSource& pipeline, double* firstWrittenPtsMs
         underruns_.fetch_add(1);
     }
     if (!checked(render_->ReleaseBuffer(written, 0),"ReleaseBuffer")) return false;
+    if(written>got)lastRawLeft_=lastRawRight_=0;
     {
         std::lock_guard lock(timelineMutex_);
         if(got&&endPts){timedPcm_=true;outputTimeline_.append(timelineWriteFrame_,got,firstPts,*endPts);}
@@ -387,7 +391,7 @@ bool AudioRenderer::pumpOnce(AudioPcmSource& pipeline, double* firstWrittenPtsMs
 double AudioRenderer::mediaTimeMs() const
 {
     std::lock_guard endpointLock(endpointMutex_);
-    if (!running_ || !started_) return std::numeric_limits<double>::quiet_NaN();
+    if (!running_ || !started_ || fading_) return std::numeric_limits<double>::quiet_NaN();
     UINT64 pos = 0, qpc = 0;
     if (!checked(clock_->GetPosition(&pos, &qpc),"Clock GetPosition") || clockFrequency_ == 0) {
         return std::numeric_limits<double>::quiet_NaN();
@@ -411,6 +415,41 @@ void AudioRenderer::stopAndReset()
     timelineWriteFrame_=0;
     bufferedMs_=0;smoothedGain_=0;
     {std::lock_guard lock(timelineMutex_);outputTimeline_.clear();timedPcm_=false;}
+    fading_=false;pausedEndpoint_=false;lastRawLeft_=lastRawRight_=0;
+}
+
+AudioFadeResult AudioRenderer::fadeAndReset(AudioPcmSource& source,const std::atomic<bool>& cancel)
+{
+    if(!running_||!started_||pausedEndpoint_||FAILED(lastError_)){
+        stopAndReset();return AudioFadeResult::NotPlaying;
+    }
+    fading_=true;
+    const auto begin=std::chrono::steady_clock::now();
+    constexpr UINT32 frames=kAudioRate/200;
+    std::array<float,frames*2> tail{};
+    bool submitted=false;AudioFadeResult result=AudioFadeResult::TimedOut;
+    while(std::chrono::steady_clock::now()-begin<std::chrono::milliseconds(80)){
+        if(cancel){result=AudioFadeResult::Cancelled;break;}
+        UINT32 padding=0;
+        if(!checked(client_->GetCurrentPadding(&padding),"Fade GetCurrentPadding")){result=AudioFadeResult::Failed;break;}
+        if(padding>bufferFrames_){checked(E_UNEXPECTED,"Fade invalid padding");result=AudioFadeResult::Failed;break;}
+        if(submitted&&!padding){result=AudioFadeResult::Drained;break;}
+        if(!submitted&&bufferFrames_-padding>=frames){
+            BYTE* dest=nullptr;
+            if(!checked(render_->GetBuffer(frames,&dest),"Fade GetBuffer")){result=AudioFadeResult::Failed;break;}
+            double pts=-1;const size_t got=source.pull(tail.data(),frames,&pts);
+            const float left=got?tail[(got-1)*2]:(padding?lastRawLeft_:0),right=got?tail[(got-1)*2+1]:(padding?lastRawRight_:0);
+            for(size_t i=got;i<frames;++i){tail[i*2]=left;tail[i*2+1]=right;}
+            fadeStereoTail(tail.data(),frames,smoothedGain_);
+            std::memcpy(dest,tail.data(),sizeof(tail));
+            if(!checked(render_->ReleaseBuffer(frames,0),"Fade ReleaseBuffer")){result=AudioFadeResult::Failed;break;}
+            submitted=true;framesWritten_+=frames;
+            log::info("audio-fade",std::format("submitted frames={} realPcm={} finalLeft={} finalRight={}",frames,got,tail[frames*2-2],tail[frames*2-1]));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    log::info("audio-fade",std::format("result={} submitted={} durationMs={:.3f} endpoint-consumption-not-speaker-measurement",int(result),submitted,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-begin).count()));
+    stopAndReset();return result;
 }
 
 bool AudioRenderer::started() const { return started_; }
@@ -427,6 +466,7 @@ void AudioRenderer::shutdown()
     if (event_ != nullptr) { CloseHandle(event_); event_ = nullptr; }
     running_ = false;
     started_ = false;
+    fading_=false;pausedEndpoint_=false;
     bufferedMs_=0;framesWritten_=0;clockFrequency_=0;
     timelineWriteFrame_=0;
     {std::lock_guard lock(timelineMutex_);outputTimeline_.clear();timedPcm_=false;}
@@ -437,7 +477,7 @@ void AudioRenderer::setPaused(bool value)
 {
     std::lock_guard endpointLock(endpointMutex_);
     if (!client_ || !started_) return;
-    checked(value ? client_->Stop() : client_->Start(),"Pause/resume");
+    if(checked(value ? client_->Stop() : client_->Start(),"Pause/resume"))pausedEndpoint_=value;
 }
 
 void AudioPipeline::runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint)
@@ -519,7 +559,7 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint)
                 const double target = seekTargetMs_;
                 seekCount_.fetch_add(1);
                 lock.unlock();
-                if (endpointReady) renderer->stopAndReset();
+                if (endpointReady) renderer->fadeAndReset(*this,stopFlag_);
                 lastClockMs=recoveryTargetMs=target;
                 const bool seekOk=rewind(target);
                 double startPts = seekOk?headPtsMs():std::numeric_limits<double>::quiet_NaN();

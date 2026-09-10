@@ -1,9 +1,11 @@
 #include "veyra/sink/WasapiAudioSink.h"
+#include "veyra/sink/AudioGain.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <cmath>
 #include <functional>
+#include <array>
 
 using namespace veyra::sink;
 using namespace std::chrono_literals;
@@ -97,6 +99,19 @@ int wmain(int argc, wchar_t** argv) {
     while(std::chrono::steady_clock::now()-recovery<100ms){double pts=0;if(!renderer.pumpOnce(live,&pts))break;}
     const double recovered=renderer.mediaTimeMs();
     check(std::isfinite(recovered)&&recovered>=500&&recovered<=live.pts,"recovered live clock references new PCM after device silence");
+    std::array<float,480> fadeSamples;fadeSamples.fill(1);
+    fadeStereoTail(fadeSamples.data(),240,.25f);
+    bool monotonic=true;for(size_t i=1;i<240;++i)monotonic&=fadeSamples[i*2]<=fadeSamples[(i-1)*2]&&fadeSamples[i*2]==fadeSamples[i*2+1];
+    check(fadeSamples.front()==.25f&&fadeSamples.back()==0&&monotonic,"five millisecond PCM fade reaches zero monotonically on both channels");
+    std::atomic<bool> cancelFade=false;
+    const auto faded=renderer.fadeAndReset(live,cancelFade);
+    check(faded==AudioFadeResult::Drained,"real WASAPI consumes submitted fade before reset");
+    check(!renderer.started()&&!std::isfinite(renderer.mediaTimeMs()),"fade reset invalidates old media clock");
+    check(renderer.startAnchored(live,true),"prefill paused endpoint after fade");
+    check(renderer.fadeAndReset(live,cancelFade)==AudioFadeResult::NotPlaying,"already paused endpoint resets without starting a fade");
+    check(renderer.startAnchored(live),"resume fresh PCM after controlled reset");
+    cancelFade=true;const auto cancelBegin=std::chrono::steady_clock::now();
+    check(renderer.fadeAndReset(live,cancelFade)==AudioFadeResult::Cancelled&&std::chrono::steady_clock::now()-cancelBegin<50ms,"cancellation does not wait for fade deadline");
     renderer.shutdown();
     const auto longFile=dir/"recovery.wav";fixture(longFile,48000,4000);
     AudioPipeline recoveryPipe;AudioRenderer recoveryRenderer;recoveryRenderer.setGain(0);
@@ -115,6 +130,8 @@ int wmain(int argc, wchar_t** argv) {
     const double restored=recoveryRenderer.mediaTimeMs();
     std::cout<<"recovery before="<<beforeLoss<<" restored="<<restored<<'\n';
     check(restored>=beforeLoss-30&&restored<=beforeLoss+50,"recovery replays from last clock, not decoded-ahead head");
+    const double liveSeek=recoveryPipe.requestSeek(600);
+    check(std::abs(liveSeek-600)<.05&&until([&]{return recoveryRenderer.mediaTimeMs()>=600;}),"playing file seek drains fade and anchors requested PCM");
     recoveryPipe.setPaused(true);std::this_thread::sleep_for(70ms);
     recoveryPipe.requestEndpointLossForTest();
     check(until([&]{return recoveryPipe.endpointRecovering();}),"paused endpoint loss is detected");

@@ -4,6 +4,22 @@
 
 ## 2026-09-11 续接实证（优先于下面历史进度）
 
+### 最新续接：可控音频重锚淡出
+
+基线 `78675f2` 干净。可控采集设置/PTS突变、大幅A/V重锚和文件播放中seek在Reset前提交240帧（48k、5ms）立体声淡出，优先使用旧PCM，不足时由最后已提交样本收尾；旧队列已经空或之前补静音时不复活陈旧样本。读取实际WASAPI padding确认尾段消耗后重置，再沿用既有淡入。不是只改音量变量，也没有改用户音量或源PTS。
+
+正常pump未增加等待。淡出仅在重锚边界、音频owner上执行，80ms超时/停止取消/端点错误均退出；暂停、不在播放或已失效端点直接Reset。淡出期间clock为未知，不能把人工收尾样本计为有效媒体进度。日志分清提交、端点消耗、超时和取消；端点padding清空不是扬声器发声测量。物理设备突然消失、已发生的欠载断音无法事后淡出。
+
+构建 `scripts/build.ps1 -Root <root> -Preset x64-release`，`logs/continuation-repair-20260910/audio-fade-final-build.log` exit0。短测通过 `scripts/acceptance/scheduler-short-test.ps1 -Name <名称> -Exe out/build/x64-release/<test>.exe -TestArgs <result.args>`：
+
+- `continuation-audio-fade-final-timeline` 55项2.652秒PASS：PCM两声道单调到零、真实WASAPI尾段消耗/重置、暂停不Start、取消立即返回、播放中seek到600ms及前序设备恢复/媒体映射。EXE `354FDD6C4D94F5B95D625819E3839B0E2E2004B78F575A6A31C443EE06485CD6`。
+- `continuation-audio-fade-final-player` 7项2.348秒PASS，真实引擎端点恢复/共同时间线/暂停seek，EXE `9B6B24751D2A40521409D03D35BDBFC81F3D0C4E588FDE36250C57923166727B`。素材同前序 `test_av_1080p.mp4`、SHA `7952AD2904C8FED78402BC299EA2A04D1D869663EBCE17BBAC0C297F84FA2A91`。
+- `continuation-audio-fade-final-capture` 11.105秒PASS，合成采集PCM+真实WASAPI：自动80/160、手动/关闭/负偏移、断流/重开、500ms突发队列。偏差约10.6至21.3ms；淡出实际边界等待约16至40ms（包括旧端点排队），不是正常每帧增加此延迟。EXE `3924491A3819367B1859D4DF30458C19FC31171C02C20D72D5CD3D071B220AFD`。无物理采集、无外部听觉验证。
+
+最终联合 `scripts/gates/delivery.ps1 -Root <root>` 23项PASS，`logs/delivery/6304c4518f864f34a4bb91392cd16ab1/result.json`；当前应用SHA `A86DB75E321677C2B9EDC0380D3BC4DCC13FAD3DE5BA05D59DA5C1C30C6BB97A`，worker仍 `EC8150FF88C7C84FACDF92B920DED2D6CEC5F682990C375A92550AFD5E818695`。实际RTX NR/NVOF/NVENC等原合同执行，未加重导出检查，未修改SDK/runtime或发布。所有单测少于300秒。
+
+下一条唯一任务：补全原方案reset/重建耗时。当前`FrameFlowMetrics`有阶段计时但没有reset排空/销毁/创建/预热到首有效输出的测量；`DiagnosticHistory`仅64条去重错误，不能当8192逐帧性能轨迹。需先按实际时间边界建立当前事务证据，区分轻量reset和资源重建、请求与实际applied、回滚与恢复，不能把图process整段叫NR reset耗时。AMD provider/权重/预览环境、系统高DPI与实卡仍未完成，整体目标active。
+
 ### 最新续接：文件音频端点恢复与共同时间线
 
 基线 `bba7283` 工作树干净，上一轮UI修复/AMD loader定因属于有效进展。本轮完成文件WASAPI端点错误后的自动恢复，不改SR -> NR -> FG、导出检查或实体采集设置。
