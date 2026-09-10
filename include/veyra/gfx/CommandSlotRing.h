@@ -84,6 +84,7 @@ public:
     uint64_t cpuWaitCount() const { return cpuWaitCount_; }
     double cpuWaitMilliseconds() const { return cpuWaitMilliseconds_; }
     uint64_t submitCount() const { return submitCount_; }
+    uint32_t inFlightCount() const;
     const std::vector<double>& gpuCommandTimesMs() const { return gpuCommandTimesMs_; }
 
 private:

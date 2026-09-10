@@ -185,6 +185,21 @@ bool CommandSlotRing::submitAndSignal(uint32_t slot)
     return true;
 }
 
+uint32_t CommandSlotRing::inFlightCount() const
+{
+    if (!initialized_ || fence_ == nullptr) {
+        return 0;
+    }
+    const uint64_t completed = fence_->GetCompletedValue();
+    uint32_t count = 0;
+    for (const Slot& slot : slots_) {
+        if (slot.fenceValue != 0 && slot.fenceValue > completed) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 bool CommandSlotRing::discardRecording(){
     bool ok=true;for(uint32_t i=0;i<slots_.size();++i){auto& s=slots_[i];if(s.recording){const HRESULT hr=s.list->Close();s.recording=false;s.timed=false;s.label.clear();veyra::log::info("gfx",std::format("discard unsubmitted command list slot={} hr=0x{:X}",i,unsigned(hr)));if(FAILED(hr)){s.list.Reset();const HRESULT created=device_->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,s.allocator.Get(),nullptr,IID_PPV_ARGS(&s.list));if(FAILED(created)||FAILED(s.list->Close()))ok=false;}}}return ok;
 }

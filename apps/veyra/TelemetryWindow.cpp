@@ -16,6 +16,15 @@ void refresh(){auto s=engine->snapshot();const wchar_t* names[]={L"上传/颜色
     for(size_t i=0;i<s.metrics.gpu.size();++i){const auto& g=s.metrics.gpu[i];o<<names[i]<<L"："<<(g.state==diagnostics::SampleState::NotExecuted?L"未执行":g.state==diagnostics::SampleState::Pending?L"待GPU完成":value(g.milliseconds))<<L"\r\n";}
     o<<L"\r\nCPU与调度（毫秒，独立于GPU）：取帧 "<<value(s.metrics.decodeCpuMs)<<L" / 图提交 "<<value(s.metrics.submitCpuMs)<<L" / GPU就绪等待 "<<value(s.metrics.gpuWaitCpuMs)<<L"\r\n截止时间等待 "<<value(s.metrics.deadlineWaitCpuMs)<<L" / Present调用 "<<value(s.metrics.presentCpuMs)<<L"\r\n源帧 "<<s.metrics.sourceFrames<<L" / 有效生成 "<<s.metrics.validGenerated<<L" / 实际提交 "<<s.metrics.submitted<<L" / 过期补帧 "<<s.metrics.expired<<L"\r\n当前批次容量 "<<s.metrics.queueWatermark<<L"（上限4）；采集入口容量1；采集丢弃 "<<s.captureDropped<<L"\r\n实际提交频率（最近1秒观察）："<<value(s.submissionFps)<<L"fps；实际显示扫描率/光子延迟：未测\r\n";
     const auto flowName=s.applied.flow==engine::FlowQuality::Performance?L"性能":s.applied.flow==engine::FlowQuality::Balanced?L"平衡":L"质量";
+    const auto& f=s.metrics.flow;const auto& c=f.counters;
+    o<<L"\r\n当前统计窗口：会话 "<<f.latest.sessionId<<L" / 设置 "<<f.latest.frame.settingsRevision<<L" / epoch "<<f.latest.frame.epoch
+     <<L"\r\nDLSS/FRUC 有效生成 "<<value(f.validGeneratedFps)<<L" fps / Present 提交 "<<value(f.presentSubmitFps)<<L" fps"
+     <<L"\r\nXeSS SDK 生成提交 "<<c.xessSdkGenerated<<L"（不等于屏幕扫描帧数）"
+     <<L"\r\n补帧候选 "<<c.fgCandidate<<L" / 提交前跳过 "<<c.fgSkippedBeforeEval<<L" / 已执行 "<<c.fgEvaluated<<L" / 预热 "<<c.fgWarmup
+     <<L"\r\n有效生成 "<<c.fgReadyValid<<L" / 无效 "<<c.fgInvalid<<L" / 已呈现 "<<c.generatedPresented<<L" / 过期 "<<c.generatedExpiredAfterEval
+     <<L"\r\n真实帧呈现 "<<c.realPresented<<L" / 取消呈现 "<<c.cancelledBeforePresent<<L" / 采样跳过 "<<c.sourceSkippedBeforeGraph
+     <<L"\r\n命令槽占用 "<<c.commandSlotsInFlight<<L" / 6；观察峰值 "<<c.commandSlotHighWater<<L"；呈现批次峰值 "<<c.presentationBatchHighWater<<L" / 2"
+     <<L"\r\n槽复用等待 "<<f.slotReuseWaitCount<<L" 次 / "<<value(f.slotReuseWaitMs)<<L" ms\r\n";
     o<<L"光流请求："<<flowName<<L"；实际SDK perf="<<s.flowPerf<<L"；grid=4（已验证SDK能力）\r\n内容节奏："<<(s.contentFps?std::to_wstring(s.contentFps)+L"fps":L"未确认（静态或证据不足）")<<L"；保留源时间戳，重复内容不计有效生成\r\n"<<s.status;
     setText(GetDlgItem(window,1),o.str());
 }

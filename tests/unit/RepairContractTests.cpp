@@ -2,6 +2,8 @@
 #include "veyra/diagnostics/DiagnosticEvent.h"
 #include "veyra/diagnostics/FrameMetrics.h"
 #include "veyra/engine/PresentationScheduler.h"
+#include "veyra/engine/LiveFgAdmission.h"
+#include "veyra/engine/FrameFlowWindow.h"
 #include <iostream>
 #include "veyra/engine/ContentCadence.h"
 #include "veyra/diagnostics/Redaction.h"
@@ -41,6 +43,16 @@ int main(){
     engine::PresentationScheduler timeline;timeline.reset(3,0,1000000,200000);
     check(timeline.deadline(200000)==1400000&&timeline.deadline(400000)==1600000,"live deadlines do not drift with CPU completion");
     check(timeline.expired(0,1400000,100000)&&!timeline.anchored(4),"expire generated debt and reject epoch change");
+    check(!engine::admitLiveFg(1200000,1000000,0,std::nullopt,0),"warmup rejects already-expired FG before evaluate");
+    check(engine::admitLiveFg(900000,1000000,0,std::nullopt,0),"warmup does not invent a measured completion estimate");
+    check(!engine::admitLiveFg(900000,1000000,2,30.0,1),"predicted completion beyond deadline skips optional pair");
+    check(engine::admitLiveFg(900000,1000000,10,15.0,1),"remaining predicted work fits deadline");
+    engine::FrameFlowWindow oldWindow(1,{3,4,5},0),newWindow(1,{4,5,6},0);
+    oldWindow.ready(3,0,10000000);oldWindow.presented(true,9,10000000);
+    auto oldStats=oldWindow.snapshot(10000000),newStats=newWindow.snapshot(10000000);
+    check(oldStats.counters.generatedPresented==1&&newStats.counters.generatedPresented==0&&newStats.counters.fgReadyValid==0,"old asynchronous completion cannot contaminate new epoch/revision");
+    check(oldStats.validGeneratedFps==3&&oldWindow.snapshot(21000000).validGeneratedFps==0,"effective generation rate expires without new frames");
+    check(!oldStats.latest.sameWindow(2,{3,4,5})&&!oldStats.latest.sameWindow(1,{4,4,5})&&!oldStats.latest.sameWindow(1,{3,5,5}),"session, epoch and revision all partition flow counters");
     for(int i=0;i<100;++i){e.fingerprint=std::to_string(i);h.add(e);}check(h.size()==64,"bounded diagnostic queue");
     engine::ContentCadence cadence;for(int i=0;i<120;++i)cadence.observe(i*1000.0/60,i%2?.01:0,true);check(cadence.measuredRate()==30,"moving 30 in 60 cadence");
     cadence.reset();for(int i=0;i<120;++i)cadence.observe(i*1000.0/60,0,true);check(cadence.measuredRate()==0,"static scene cannot establish lower FPS");

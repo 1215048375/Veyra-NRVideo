@@ -9,9 +9,11 @@ int main(){
     veyra::engine::PresentationWorker worker([]{return false;});
     check(worker.push([&](const auto& cancelled){entered.set_value();while(!cancelled())std::this_thread::sleep_for(1ms);released=true;return true;}),"queue active presentation");
     check(enteredFuture.wait_for(1s)==std::future_status::ready,"worker starts independently of producer");
-    check(worker.push([&](const auto&){++ran;return true;}),"next batch can queue while active job sleeps");
+    std::atomic<unsigned> discarded=0;
+    check(worker.push([&](const auto&){++ran;return true;},[&]{++discarded;}),"next batch can queue while active job sleeps");
     check(!worker.push([](const auto&){return true;}),"two-batch capacity includes active lease");
     worker.cancelAndDrain();check(released&&ran==0,"cancel waits for active callback and drops queued job");
+    check(discarded==1&&worker.occupancy()==0,"queued cancellation counted exactly once and occupancy drains");
     std::promise<void> next;auto nextFuture=next.get_future();check(worker.waitForSlot()&&worker.push([&](const auto&){next.set_value();return true;}),"producer resumes after cancellation");
     check(nextFuture.wait_for(1s)==std::future_status::ready,"new epoch job executes");worker.cancelAndDrain();
     check(worker.push([](const auto&){return false;}),"inject presentation failure");

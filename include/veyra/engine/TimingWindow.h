@@ -12,6 +12,7 @@ class TimingWindow {
 public:
     void add(double v){if(!std::isfinite(v)||v<0)return;values_.push_back(v);if(values_.size()>1200)values_.pop_front();}
     void clear(){values_.clear();cached_=0;refresh_={};}
+    size_t size()const{return values_.size();}
     double p95()const{
         if(values_.empty())return 0;const auto now=std::chrono::steady_clock::now();
         if(now<refresh_)return cached_;

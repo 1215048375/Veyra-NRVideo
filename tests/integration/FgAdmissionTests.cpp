@@ -1,0 +1,67 @@
+#include "veyra/pipeline/EnhanceGraph.h"
+#include "veyra/engine/DeadlineWait.h"
+#include "veyra/engine/LiveFgAdmission.h"
+#include "veyra/source/MediaFileSource.h"
+#include "veyra/gfx/D3D12DeviceContext.h"
+#include "veyra/gfx/CommandSlotRing.h"
+#include "veyra/sink/ImageExportSink.h"
+#include "veyra/RuntimePaths.h"
+#include <d3d12sdklayers.h>
+#include <filesystem>
+#include <iostream>
+
+int wmain(int argc,wchar_t** argv){
+    using namespace veyra;
+    if(argc!=5)return 2;
+    const bool fruc=std::wstring(argv[1])==L"fruc";const unsigned multiplier=unsigned(std::stoi(argv[2]));
+    if(multiplier<2||multiplier>4)return 2;
+    std::filesystem::create_directories(argv[4]);Logger::instance().openFile((std::filesystem::path(argv[4])/"engine.log").wstring());Logger::instance().setConsoleEnabled(false);
+    CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+    gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;Status status;
+    gfx::DeviceContextDesc device;device.enableDebugLayer=true;
+    bool ok=ctx.initialize(device,status)&&ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),6,status);
+    Microsoft::WRL::ComPtr<ID3D12InfoQueue> info;if(ok)ctx.device()->QueryInterface(IID_PPV_ARGS(&info));
+    source::MediaFileSource source;source::SourceOpenDesc input;input.path=argv[3];input.preferHardwareDecode=false;
+    ok=ok&&source.open(input);
+    pipeline::EnhanceGraph graph(ctx,ring);pipeline::EnhanceGraphDesc desc;
+    desc.sourceWidth=desc.workWidth=source.info().width;desc.sourceHeight=desc.workHeight=source.info().height;
+    desc.enableNr=true;desc.enableFg=true;desc.fgMultiplier=multiplier;
+    desc.frameGenerationBackend=fruc?engine::FrameGenerationBackend::Fruc:engine::FrameGenerationBackend::Dlss;
+    desc.runtimeAbsPath=runtime::localRuntimeDirectory().wstring();
+    ok=ok&&graph.initialize(desc)&&graph.createViews();
+    unsigned skipped=0,evaluated=0,recoveries=0,generated=0,real=0;
+    engine::DeadlineWait wait;
+    for(unsigned i=0;ok&&i<40;++i){
+        pipeline::FramePacket packet;const AVFrame* frame=nullptr;
+        ok=source.read(packet,&frame)==source::SourceReadStatus::Frame;if(!ok)break;
+        pipeline::EnhanceGraph::FrameOutputs out;
+        const bool reject=(i>=8&&i<12)||(i>=24&&i<28);
+        auto admission=[&](const auto&){return engine::admitLiveFg(reject?2000000:900000,1000000,0,std::nullopt,0);};
+        ok=graph.process(frame,packet.pts.toDouble()*1000,i==0,out,packet.sequence,&packet.colorInfo,false,admission);
+        const auto start=std::chrono::steady_clock::now();
+        while(ok&&!graph.resolveGeneration(out)){
+            if(std::chrono::steady_clock::now()-start>std::chrono::seconds(2)){ok=false;break;}wait.slice(.2);
+        }
+        if(!ok)break;
+        skipped+=out.fgSkippedBeforeEval;evaluated+=out.fgEvaluated;recoveries+=out.fgRecovery;
+        ok=out.fgCandidates==multiplier-1&&out.fgCandidates==out.fgSkippedBeforeEval+out.fgEvaluated;
+        if(reject)ok=ok&&out.fgEvaluated==0&&out.batch.count==1&&!out.hasGenerated;
+        if(i==12||i==28)ok=ok&&out.fgRecovery&&out.batch.count==1;
+        for(unsigned j=0;j<out.batch.count;++j){const auto& f=out.batch.frames[j];
+            if(f.kind==pipeline::FrameKind::Real){++real;ok=ok&&f.pts100ns==packet.pts.to100ns();}
+            else if(f.validity==pipeline::GenerationValidity::Valid){++generated;ok=ok&&f.pts100ns>out.batch.a100ns&&f.pts100ns<out.batch.b100ns;}
+        }
+        if(i==10||i==30){sink::RgbaImage image;ok=ok&&sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),image);
+            unsigned nonblack=0;for(size_t p=0;p+3<image.pixels.size();p+=4)nonblack+=image.pixels[p]>8||image.pixels[p+1]>8||image.pixels[p+2]>8;
+            ok=ok&&nonblack>image.width*image.height/20;
+        }
+        std::cout<<"frame="<<i<<" skip="<<out.fgSkippedBeforeEval<<" evaluate="<<out.fgEvaluated<<" recovery="<<out.fgRecovery<<" batch="<<out.batch.count<<" pass="<<ok<<std::endl;
+    }
+    const auto nr=graph.metrics().nrEvaluateCount;
+    ok=ok&&real==40&&nr==40&&skipped==8*(multiplier-1)&&evaluated==32*(multiplier-1)&&recoveries==2&&generated>0;
+    ring.drainQueue();graph.shutdown();source.close();
+    unsigned errors=0;if(info)for(UINT64 i=0;i<info->GetNumStoredMessagesAllowedByRetrievalFilter();++i){SIZE_T size=0;info->GetMessage(i,nullptr,&size);std::vector<uint8_t> data(size);auto* m=reinterpret_cast<D3D12_MESSAGE*>(data.data());if(SUCCEEDED(info->GetMessage(i,m,&size))&&m->Severity<=D3D12_MESSAGE_SEVERITY_ERROR){++errors;log::error("debug",m->pDescription);}}
+    ok=ok&&errors==0;
+    std::cout<<"FG_ADMISSION backend="<<(fruc?"FRUC":"DLSS")<<" multiplier="<<multiplier<<" real="<<real<<" NR="<<nr<<" skipped="<<skipped<<" evaluated="<<evaluated<<" recoveries="<<recoveries<<" valid="<<generated<<" debugErrors="<<errors<<" pass="<<ok<<std::endl;
+    info.Reset();ring.shutdown();ctx.shutdown();CoUninitialize();return ok?0:1;
+}

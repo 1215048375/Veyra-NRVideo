@@ -70,7 +70,7 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
         }
         veyra::log::info("graph","diagnostic SR motion override active; no product entry point enables this");
     }
-    desc_ = desc;tracker_={};prevValid_=false;cadence_.reset();scene_.reset();previousLuma_.clear();
+    desc_ = desc;tracker_={};prevValid_=false;fgHistorySkipped_=false;cadence_.reset();scene_.reset();previousLuma_.clear();
     if(desc.videoSrQuality>4)return false;
     srcW_ = desc.sourceWidth;
     srcH_ = desc.sourceHeight;
@@ -656,7 +656,7 @@ bool EnhanceGraph::createViews()
 // ---------------------------------------------------------------------------
 // process: the per-frame chain (verbatim from the probe lambda).
 // ---------------------------------------------------------------------------
-bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, FrameOutputs& out, uint64_t sourceFrameId, const ColorDescription* color, bool retainReferences)
+bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, FrameOutputs& out, uint64_t sourceFrameId, const ColorDescription* color, bool retainReferences, const FgAdmission& admitFg)
 {
     out = FrameOutputs{};
     out.ptsMs = ptsMs;
@@ -945,6 +945,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         adapt(nrFlow_.Get(),nrW_,nrH_,1);adapt(baseFlow_.Get(),workW_,workH_,2);
     }
     if(reset){++metrics_.resetCount;++epoch_;}
+    out.historyReset=reset;
     out.batch.batchId=realFrameIndex_+1;out.batch.identity={epoch_,desc_.settingsRevision,sourceFrameId};
     out.batch.a100ns=static_cast<int64_t>(std::llround(prevPtsMs_*10000));
     out.batch.b100ns=static_cast<int64_t>(std::llround(ptsMs*10000));gpuTimer_.identity(out.batch.identity);
@@ -1115,31 +1116,38 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         motionPreviousSource_[parity]=previousSource_;
     }
     previousSource_=sourceFrameId;
-    if(!fgEnabled_)gpuTimer_.resolve(list);
+    const bool fgBackendAvailable=fgEnabled_&&(frucBackend_||(fgBackend_&&fgBackend_->created()));
+    out.fgCandidates=fgBackendAvailable?desc_.fgMultiplier-1:0;
+    const bool runFg=fgBackendAvailable&&(!admitFg||admitFg(out.batch));
+    const bool resetFg=reset||!prevValid_||fgHistorySkipped_;
+    out.fgRecovery=runFg&&fgHistorySkipped_;
+    if(fgBackendAvailable&&!runFg){out.fgSkippedBeforeEval=out.fgCandidates;fgHistorySkipped_=true;}
+    if(!runFg)gpuTimer_.resolve(list);
     if (!ring_.submitAndSignal(slot)) return false;
-    if(!fgEnabled_)gpuTimer_.submitted(ring_.lastSignaledValue());
+    if(!runFg)gpuTimer_.submitted(ring_.lastSignaledValue());
     out.videoFenceValue = ring_.lastSignaledValue();
 
-    if(fgEnabled_&&frucBackend_){
-        if(reset&&realFrameIndex_>0&&(!ring_.drainQueue()||!frucBackend_->reset()))return false;
+    if(runFg&&frucBackend_){
+        if(resetFg&&realFrameIndex_>0&&(!ring_.drainQueue()||!frucBackend_->reset()))return false;
         auto* flist=ring_.acquireNext(slot,st);if(!flist)return false;
         gpuTimer_.mark(flist,GpuStage::FgBatch);
         frucBackend_->recordInput(flist,videoFrame_[parity].Get(),parity);
         if(!ring_.submitAndSignal(slot))return false;
         std::array<bool,3> repeats{};
-        if(!frucBackend_->execute(parity,prevValid_&&!reset?prevPtsMs_:ptsMs,ptsMs,repeats))return false;
+        if(!frucBackend_->execute(parity,!resetFg?prevPtsMs_:ptsMs,ptsMs,repeats))return false;
+        out.fgEvaluated=desc_.fgMultiplier-1;
         flist=ring_.acquireNext(slot,st);if(!flist)return false;
         for(uint32_t sub=1;sub<desc_.fgMultiplier;++sub){const unsigned generatedSlot=parity+(sub-1)*2;frucBackend_->recordOutput(flist,genFrame_[generatedSlot].Get(),sub);frucRepeated_[generatedSlot]=repeats[sub-1];}
         gpuTimer_.mark(flist,GpuStage::FgBatch,true);gpuTimer_.resolve(flist);
         if(!ring_.submitAndSignal(slot))return false;gpuTimer_.submitted(ring_.lastSignaledValue());
-        out.genFenceValue=ring_.lastSignaledValue();out.genSlot=parity;out.hasGenerated=prevValid_&&!reset;
+        out.genFenceValue=ring_.lastSignaledValue();out.genSlot=parity;out.hasGenerated=!resetFg;
         if(out.hasGenerated)for(uint32_t sub=1;sub<desc_.fgMultiplier;++sub){const unsigned generatedSlot=parity+(sub-1)*2;++metrics_.fgSubmittedCandidates;
             BatchFrame f;f.identity=out.batch.identity;f.kind=FrameKind::Generated;f.validity=GenerationValidity::Pending;f.subframe=sub;f.pts100ns=FrameBatch::interpolate(out.batch.a100ns,out.batch.b100ns,sub,desc_.fgMultiplier);
             f.lease=std::make_shared<FrameLease>();f.lease->texture=genFrame_[generatedSlot];f.lease->slot=generatedSlot;f.lease->readyFence=out.genFenceValue;generatedLeases_[generatedSlot]=f.lease;out.batch.append(std::move(f));}
     }
 
     // FG reads enhanced SDR color, not the pre-NR guidance input.
-    if (fgEnabled_ && fgBackend_ && fgBackend_->created()) {
+    if (runFg && fgBackend_ && fgBackend_->created()) {
       for(uint32_t sub=1;sub<desc_.fgMultiplier;++sub){
         const uint32_t generatedSlot=parity+(sub-1)*2;
         auto* flist=ring_.acquireNext(slot,st); if(!flist)return false;
@@ -1157,7 +1165,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         tracker_.transition(flist,fgDisable_[parity].Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         ngx::DlssFgBackend::EvalDesc fe{};
         fe.backbuffer=videoFrame_[parity].Get(); fe.depth=depthTex_.Get(); fe.mvecs=motion;
-        fe.outputInterpolated=genFrame_[generatedSlot].Get(); fe.reset=reset||!prevValid_;
+        fe.outputInterpolated=genFrame_[generatedSlot].Get(); fe.reset=resetFg;
         fe.outputDisableInterpolation=fgDisable_[parity].Get();
         fe.multiFrameCount=desc_.fgMultiplier-1;fe.multiFrameIndex=sub;
         fe.frameId=realFrameIndex_+1;
@@ -1167,6 +1175,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         if(sub==1)gpuTimer_.mark(flist,GpuStage::FgBatch);
         const auto timingStage=static_cast<GpuStage>(unsigned(GpuStage::Fg1)+sub-1);gpuTimer_.mark(flist,timingStage);
         if(!fgBackend_->evaluate(flist,ngxParams_,fe,st))return false;
+        ++out.fgEvaluated;
         gpuTimer_.mark(flist,timingStage,true);if(sub==desc_.fgMultiplier-1)gpuTimer_.mark(flist,GpuStage::FgBatch,true);
         tracker_.uavBarrier(flist,genFrame_[generatedSlot].Get());
         tracker_.uavBarrier(flist,fgDisable_[parity].Get());
@@ -1178,7 +1187,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         if(sub==desc_.fgMultiplier-1)gpuTimer_.resolve(flist);
         if(!ring_.submitAndSignal(slot))return false;
         if(sub==desc_.fgMultiplier-1)gpuTimer_.submitted(ring_.lastSignaledValue());
-        out.hasGenerated=prevValid_&&!reset;
+        out.hasGenerated=!resetFg;
         out.genSlot=parity; out.genFenceValue=ring_.lastSignaledValue();
         out.generatedPtsMs=(prevPtsMs_+ptsMs)*0.5;
         if(out.hasGenerated){
@@ -1189,6 +1198,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         }
       }
     }
+    if(runFg)fgHistorySkipped_=false;
     uploadFences_[parity]=ring_.lastSignaledValue();
 
     prevPtsMs_ = ptsMs;
@@ -1239,7 +1249,7 @@ bool EnhanceGraph::applySettings(const engine::EnhancementSettings& s){
     // DLSS and FRUC allocate multiplier-specific feature/output resources;
     // XeSS has a fixed 2X proxy swapchain contract. Settings callers must
     // rebuild instead of accepting a change that cannot take effect in place.
-    if(s.multiplier!=desc_.fgMultiplier||(s.frameGenerationBackend==engine::FrameGenerationBackend::Fruc&&s.multiplier>1&&!frucBackend_)||s.frameGenerationBackend!=desc_.frameGenerationBackend||s.videoSrQuality!=desc_.videoSrQuality||!s.validate().empty()||(s.multiplier>1&&s.frameGenerationBackend!=engine::FrameGenerationBackend::XeSS&&(!fgCapsAvailable_||s.multiplier-1>uint32_t(fgMultiFrameMax_))))return false;
+    if(std::max(2u,s.multiplier)!=desc_.fgMultiplier||(s.frameGenerationBackend==engine::FrameGenerationBackend::Fruc&&s.multiplier>1&&!frucBackend_)||s.frameGenerationBackend!=desc_.frameGenerationBackend||s.videoSrQuality!=desc_.videoSrQuality||!s.validate().empty()||(s.multiplier>1&&s.frameGenerationBackend!=engine::FrameGenerationBackend::XeSS&&(!fgCapsAvailable_||s.multiplier-1>uint32_t(fgMultiFrameMax_))))return false;
     desc_.contentRate=s.content;desc_.model=s.model;desc_.residual=s.residual;desc_.protection=s.protection;desc_.settingsRevision=s.revision;
     desc_.fgMultiplier=std::max(2u,s.multiplier);desc_.enableNvofStandalone=s.nr&&!desc_.stillImage;nvofStandalone_=desc_.enableNvofStandalone;
     setNrEnabled(s.nr);setFgEnabled(s.multiplier>1&&s.frameGenerationBackend!=engine::FrameGenerationBackend::XeSS);

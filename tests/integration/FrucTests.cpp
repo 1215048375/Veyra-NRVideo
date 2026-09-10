@@ -53,6 +53,14 @@ int main(int argc,char** argv){using namespace veyra;if(argc<3)return 2;const un
                         error+=std::abs(image.pixels[(size_t(y)*W+x)*4+c]-expected);repeatError+=std::abs(repeated-expected);++samples;}
                     const bool pass=item.validity==pipeline::GenerationValidity::Valid&&error<repeatError;
                     pixelsOk=pixelsOk&&pass;std::cout<<"FRUC_RESET_GT epoch="<<epoch<<" frame="<<i<<" sub="<<item.subframe<<" mae="<<error/samples<<" repeatMae="<<repeatError/samples<<" pass="<<pass<<std::endl;
+                    if(!pass){
+                        double best=1e9;int bestOffset=0;
+                        for(int offset=-24;offset<=24;++offset){double candidate=0;unsigned count=0;
+                            for(unsigned y=32;y<H-32;y+=8)for(unsigned x=96;x<W-96;x+=8)for(unsigned c=0;c<3;++c){double expected=color(int(x)-shift-offset,y,c);if(invert)expected=255-expected;candidate+=std::abs(image.pixels[(size_t(y)*W+x)*4+c]-expected);++count;}
+                            candidate/=count;if(candidate<best){best=candidate;bestOffset=offset;}
+                        }
+                        std::cout<<"FRUC_RESET_NEAREST epoch="<<epoch<<" frame="<<i<<" offsetFromCurrent="<<bestOffset<<" mae="<<best<<std::endl;
+                    }
                 }
             }
         }

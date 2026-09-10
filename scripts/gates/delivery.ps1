@@ -4,6 +4,9 @@ param([Parameter(Mandatory=$true)][string]$Root,[switch]$VisiblePlayer)
 # Native-4K realtime60 is NOT asserted: user selected an explicit 1080 working realtime profile.
 # Real capture acceptance and proprietary distribution are separate, never synthetic PASS.
 $ErrorActionPreference='Stop'
+# A PowerShell 7 parent can pass module paths that exclude Windows PowerShell's
+# own Utility module. Resolve hashing/JSON cmdlets from the executing host.
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1') -Force
 $Root=(Resolve-Path -LiteralPath $Root).Path
 Set-Location -LiteralPath $Root
 $timer=[Diagnostics.Stopwatch]::StartNew()
@@ -25,7 +28,6 @@ function Run([string]$Name,[string]$Exe,[string[]]$Argv,[int]$Limit=30,[int]$Exp
     $exitCode=$p.ExitCode;Check "$Name-exit" ($null -ne $exitCode -and $exitCode -eq $ExpectedExit) "exit=$exitCode expected=$ExpectedExit"
 }
 try{
-    if(Test-Path -LiteralPath 'loop/STOP'){throw 'User STOP exists'}
     $ffprobe=(Get-Command ffprobe -ErrorAction Stop).Source
     $clip1080=(Resolve-Path 'loop/local/fixed_clips/test_av_1080p.mp4').Path
     $clip4k=(Resolve-Path 'loop/local/fixed_clips/test_av_4k.mp4').Path

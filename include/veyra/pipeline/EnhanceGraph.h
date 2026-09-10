@@ -109,6 +109,8 @@ public:
 
     struct FrameOutputs {
         FrameBatch batch;
+        uint32_t fgCandidates=0,fgEvaluated=0,fgSkippedBeforeEval=0;
+        bool historyReset=false,fgRecovery=false;
         bool contentDuplicate=false;int measuredContentRate=0;
         double ptsMs = 0.0;
         uint32_t videoSlot = 0;            // videoFrame[videoSlot] holds this real frame
@@ -126,7 +128,8 @@ public:
     // does not own the demuxer). `reset` marks the first frame of a new
     // temporal epoch (open/seek/...): NVOF/FG history is not consumed.
     // Returns false on hard failure (run verdict must FAIL).
-    bool process(const AVFrame* frame, double ptsMs, bool reset, FrameOutputs& out, uint64_t sourceFrameId = 0, const ColorDescription* color = nullptr, bool retainReferences = true);
+    using FgAdmission=std::function<bool(const FrameBatch&)>;
+    bool process(const AVFrame* frame, double ptsMs, bool reset, FrameOutputs& out, uint64_t sourceFrameId = 0, const ColorDescription* color = nullptr, bool retainReferences = true, const FgAdmission& admitFg = {});
     // Nonblocking. The scheduler polls at a GPU-ready/deadline boundary; no
     // full image readback and no waits inside the graph's individual passes.
     bool resolveGeneration(FrameOutputs& out);
@@ -297,6 +300,7 @@ private:
     std::vector<uint8_t> previousLuma_;
     double prevPtsMs_ = -1.0;
     bool prevValid_ = false;
+    bool fgHistorySkipped_ = false;
     Metrics metrics_{};
     std::string mvecSource_ = "nvof";
 };

@@ -1,5 +1,7 @@
 # Phase gate contract
 
+> 2026-09-10：旧 Loop/控制哈希/Phase 队列已由用户废弃，下文是历史合同。当前直接执行构建、相关回归和必要的 `delivery.ps1`，不经 `loop-gate.ps1`，不受旧 STOP 或 CONTROL_HASHES 约束。单次测试最多 300 秒；运行时身份和源码隔离校验继续生效。
+
 > 2026-09-06 用户授权接管修订：当前推进、五分钟短测与用户实卡验收以 `../docs/ACTIVE_DELIVERY_PLAN.md` 为准，取代下文旧的严格串行施工/30分钟测试/未接设备阻塞全部交付规则。历史记录不是当前通过证明。
 
 每个 scripts/gates/phaseN.ps1 都必须：

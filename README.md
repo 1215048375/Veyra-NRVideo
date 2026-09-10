@@ -99,6 +99,8 @@ Video / image / capture card
 
 ## 项目结构 / Project layout
 
+当前修复以最新用户要求、`AGENTS.md`、对应 `docs` 修复方案和 `docs/WORKLOG.md` 为准。早期 `loop/` 状态、控制哈希与 Phase 队列已归档，不再作为开发前置门禁。Current work follows the latest task, `AGENTS.md`, its repair plan and `docs/WORKLOG.md`; the legacy Loop state and control-hash gates are historical only.
+
 | Path | Purpose |
 | --- | --- |
 | `apps/veyra` | Win32 application and the two-mode interface |

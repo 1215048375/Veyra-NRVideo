@@ -1,5 +1,7 @@
 # Veyra 项目 Agent 执行规则
 
+> 2026-09-10 用户废弃旧 Loop：`loop/`、`scripts/loop-gate.ps1`、`CONTROL_HASHES.json` 及早期 Phase 排队/控制哈希停工规则全部退出当前执行流程，仅保留作历史记录。不得因旧 Loop 状态、STOP、控制哈希或旧文档顺序阻塞用户明确要求的修复，也不得更新旧清单来制造通过。当前任务以最新用户指令、对应修复计划和 `docs/WORKLOG.md` 为准。构建、针对性回归及必要的 `scripts/gates/delivery.ps1` 直接执行；单次测试最多 300 秒，并非全部测试累计 300 秒。运行时身份、源码/二进制隔离、真实验证与发布授权规则继续生效。
+
 > 2026-09-07 新用户决定：默认明确标注的实时档（4K输入可用1080内部处理），保留原生4K可选；视频导出仍原生4K。不得要求以本机原生4K NR达到60fps作为本次默认档门槛，也不得把实时档冒充native4K。最终统一软件短测为 `scripts/gates/delivery.ps1`（phase5–7本次合同的合并检查），实卡仍由用户验收。其他安全/许可规则不变。
 
 > 2026-09-06 用户授权接管修订：当前推进、五分钟短测与用户实卡验收以 `docs/ACTIVE_DELIVERY_PLAN.md` 为准，取代下文旧的严格串行施工/30分钟测试/未接设备阻塞全部交付规则。历史记录不是当前通过证明。
@@ -8,23 +10,12 @@
 本文件对在本目录工作的所有 Agent 生效。不要只扫标题；开工前必须完整阅读：
 
 1. `README.md`——当前状态和唯一入口；
-2. `VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md`——唯一施工手册；
+2. 当前任务对应的 `docs/*PLAN*.md`——当前施工方案；旧 `VEYRA_AGENT_EXECUTION_PLAYBOOK_V1.md` 仅作技术契约与历史参考；
 3. `VEYRA_PRODUCT_SPEC_V1.md`——产品与技术边界；
 4. `docs/COMPETITOR_AUDIT_2026-09-03.md`——竞品事实、许可证和可迁移启发；
 5. 当前阶段的 `docs/WORKLOG.md`——已完成、失败记录和下一步。
 
-如果任务以 Goal/无人值守模式运行，还必须先完整阅读：
-
-6. `loop/LOOP_ENGINE.md`——循环、恢复、审查和停机协议；
-7. `loop/STATE.json`——当前真实阶段和下一动作；
-8. `loop/BACKLOG.md` 与 `loop/INBOX.md`——唯一任务队列和人工阻塞；
-9. `loop/REVIEW_PROMPT.md`——阶段独立复核的固定只读任务。
-
-Goal 启动后，`.gitignore`、上述规则/方案、`loop/CONTROL_HASHES.json`、
-基础 `scripts/loop-gate.ps1` 和 `scripts/gates/README.md` 都是只读控制面。
-preflight 报控制面 hash 漂移时必须停下，不得改 manifest 或 gate 自我放行。
-
-若施工手册与 Product Spec 冲突，以施工手册中更具体、更新的实现指令为准；若本文件与施工手册冲突，以本文件的安全、许可证和阶段门禁为准。
+旧 Loop 不再要求阅读、同步或运行。最新用户指令优先于历史方案；仍适用的技术、运行时身份和许可证约束以本文件为准。
 
 ## 不可擅自改变的决定
 
@@ -73,28 +64,21 @@ renodx-dlss5-1.addon64
 - **范围最小化。** 用户包只包含运行所需 DLL/模型与适用许可证、notice、manifest；绝不包含 SDK 开发文件、样例、私有测试媒体、日志、PDB、LIB 或游戏文件。官方 SDK 中明确可集成分发的组件仍须逐项保留其许可证与来源记录。
 - **人工发布。** 任何 push、GitHub Release、Runtime Pack 上传、替换或删除都必须由用户在当前对话明确授权；无人值守 Goal 仍禁止发布。若平台或权利方要求移除，先移除/下架 Runtime Pack，再保留不含该 Pack 的 Veyra 基础包。
 
-## 阶段门禁
+## 当前修复验收
 
-严格按 Playbook 的 Phase 0→7 完成 V1；Phase 7 通过后停止，不再自动扩展。每个阶段必须同时满足：
+当前修复按用户请求和当前方案推进，不再按旧 Phase 0→7 排队。每次交付必须同时满足：
 
 1. 代码可构建；
-2. 本阶段列出的自动或手工检查通过；
+2. 本次改动相关的自动或手工检查通过，未执行项明确报告；
 3. `docs/WORKLOG.md` 写明命令、结果、日志路径、失败与修复；
 4. 没有把 proprietary runtime 或本地 SDK 提交进版本控制；
-5. 下一阶段没有建立在未验证假设上。
+5. 后续改动没有建立在未验证假设上。
 
-Phase 0–4 的历史 checkpoint 只能证明各基础 harness 当时通过，不能冒充三种产品模式完成。2026-09-06 审查已撤销历史 Phase 5 的产品级通过状态：旧 gate 接受 manifest-only depth、假 4K endurance，且共享 EnhanceGraph 只是计数壳；组件日志保留，Phase 5 必须重验。Phase 7 的三条端到端 gate 全过前只能是开发中；功能 gate 通过但公开分发权未解决时只能写 `release_candidate / distribution_blocked`，不得写已公开首发或 complete。
+历史 Phase/checkpoint 只证明当时的测试结果，不代表当前产品已经验收。当前状态按本次构建、回归、实卡和发布证据分别报告；不得拿早期通过或失败标签替代当前事实。
 
-## 无人值守 Goal Loop
+## 历史 Loop
 
-- 用户以 `loop/GOAL_PROMPT.md` 启动 Goal 时，允许在阶段硬门禁和独立 Reviewer 均通过后自动进入下一 Phase；安全、许可证和验收规则没有自动豁免。
-- 主 Agent 是唯一写入者。禁止多个 Agent 同时修改同一 checkout；阶段 Reviewer 必须是新上下文、只读，不能替 Maker 改代码。
-- 每个 cycle 只处理 `loop/BACKLOG.md` 当前 Phase 的第一个可执行原子任务。改动前写 `loop/JOURNAL.md`，改动后运行当前 gate。
-- 统一 gate 入口：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\loop-gate.ps1 -Gate phaseN`。
-- 同一 failure fingerprint 最多尝试 3 个真正不同、能增加证据的方案；连续 5 轮无新证据或总计 120 轮后必须留档停机，不得空转。
-- `loop/STOP` 是用户停机开关。看到它就更新状态并退出，Agent 不得删除。
-- 未实际获得独立 Reviewer 结论时只能标 `needs_review`；不能降级成“自己再看一遍”后自动放行。
-- 只准本地 checkpoint commit。禁止无人值守 push、PR、发布、上传 artifact 或制作安装包。
+旧循环状态与 Phase 记录只代表当时证据，不是当前任务队列或通过证明。保留历史文件供追溯，不再据其自动推进、阻塞或发布。工作记录统一更新到 `docs/WORKLOG.md` 和本次修复文档；未经实际独立复核不得声称有 Reviewer 验收。
 
 ## 实现纪律
 
@@ -127,13 +111,13 @@ Phase 0–4 的历史 checkpoint 只能证明各基础 harness 当时通过，�
 
 ## 每次交付必须报告
 
-- 当前 Phase 与完成门槛；
+- 当前修复任务与完成门槛；
 - 修改的文件；
 - 实际运行过的构建/测试命令；
 - Create/Evaluate 或失败码的真实日志，不得用“应该可以”代替；
 - 已知风险和下一条唯一任务；
 - 若没实际在 RTX/NVIDIA runtime 上执行，明确写“未执行”，绝不能声称成功。
-- Goal 模式还必须同步更新 `loop/STATE.json`、`loop/EVIDENCE.md` 和 `loop/JOURNAL.md`，保证上下文压缩或进程中断后可从磁盘恢复。
+- 长任务必须在当前修复文档保留可续接的状态、证据与下一步；不再同步旧 Loop 状态。
 
 ## 禁止用假完成糊弄
 

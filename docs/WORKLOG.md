@@ -1,3 +1,19 @@
+# 2026-09-10 旧 Loop 退役与调度修复
+
+用户明确废弃初期 Loop；AGENTS/README/旧 Playbook/ACTIVE_DELIVERY_PLAN/gates README 已标明旧控制哈希、STOP、Phase 队列不再阻塞当前修复，未改 CONTROL_HASHES 自我放行。delivery 删旧 STOP 依赖并显式加载当前 PowerShell 自带 Utility 模块；导出完整性代码和断言未改。
+
+实施 session/revision/epoch 独立帧流账本、异步取消计数、真实/有效生成/Present 分离、GPU/blit epoch 过滤、采集 callback sequence 和 DLSS 采集 FG 提交前整对 deadline admission。跳过后的 FG 先 reset/reseed，不跨缺帧输出。另修关闭 FG（UI 值1）与内部倍率容量（至少2）误比较导致内容节奏设置被拒绝。详细文件、命令、失败及未完成项见 `docs/SCHEDULER_REPAIR_IMPLEMENTATION_2026-09-10.md`。
+
+RTX5070 实际短测：Release exit0；CPU43/worker12 PASS；60->30->60 live23、FRUC保留路径18 PASS；DLSS2/3/4X 每项40真实帧和40 NR、skip8/16/24、Evaluate32/64/96、有效生成29/58/87、debug0；XeSS SDK generated43/debug0；专业UI24移动/24缩放/4弹出选择器 PASS；delivery23 PASS47.64秒（`13a7fe7290f643d29c64f6acc8fe8a32`）。均单次<300秒，没有打开实体采集卡。
+
+同源原生4K NR+VSR最高+DLSS4X过载回放：150源帧观察点，旧策略450次FG计算/444过期/0生成呈现；新策略450提交前跳过/0过期/0生成呈现，处理约27->33fps。只证明该配置无效工作减少，不是NR自身加速或实卡/光子延迟测量。
+
+FRUC试接admission造成重复worker重建、有效生成不增长，已从产品入口撤下该策略并复测通过。FRUC reset-pixels旧失败、完整S3/S4和实卡仍开放。首轮EXE占用链接失败、half-rate设置拒绝、FRUC反例日志均保留。本轮未发布或上传，源码与SDK/runtime隔离；下一任务为FRUC恢复像素/同步/时间戳定位。
+
+续接审查补齐首批命令槽等待与文件播放取消账本，短测新增 worker hash 与独立日志目录。`scheduler-reviewed-build.log` 构建成功；`cpu-reviewed`43、`worker-reviewed`12、`live-half-reviewed`23、`live-fruc-reviewed`18项通过。FRUC reset 错图匹配上一真实帧或上一对插值，诊断性 cuCtxSynchronize+D3D11通知通过6个epoch像素检查，但相对时间、GPU事件、独立fence、参数生命周期和D3D11桥接候选仍失败，全部撤下；生产FRUC未变，不引入逐帧CPU等待。详见实施文档与 `logs/scheduler-repair-20260910/fruc-reset-*`。联合短测第一次23项功能全过但落盘找不到Get-FileHash整体失败，已修模块加载并重跑。下一条任务为FRUC CUDA/D3D11资源交接与完成可见性。
+
+最终 `delivery-reviewed-fixed` 23项全部通过，外部42.78秒；`logs/delivery/ac24ad4a2e1e4169a171fda66e4b7e84/result.json`。当前EXE `429C5600E2A4ABF8D72B83B0F658B3190FE5397FE9A11256946B924CABA560F4`。diff检查通过，Git范围不含SDK/runtime/二进制。仅本地checkpoint，不push或发布；FRUC重置像素、完整S3/S4及实卡仍未完成。
+
 # 2026-09-10 XeSS、AMD 光流与 SR 目标接入
 
 用户要求把 AMD DLSS5 作为实验功能接入，并同时完成 XeSS FG、AMD 光流和 2K/4K/8K SR 目标。当前实现新增统一 SR 目标设置、专业模式 2K/4K/8K 选择、Intel XeSS 实验显示补帧 2X，以及 AMD FidelityFX 光流 provider 与半分辨率性能档。XeSS 只作用于预览，不能导出；AMD 光流只替换运动估算，不提供 AMD NR、DLSS SR、NVIDIA FRUC/DLSS 补帧、NVENC 或 AMD AMF。
@@ -1388,3 +1404,9 @@ EXE SHA256: 61618AF18F7B985BD4C1FECA06EBE7A07C30EAA01B2CC0682A217E89EAD3C372。�
 FRUC候选bSkipWarp/延后重建/时间归零/首对预热均未通过新增reset后像素检查，生产改动撤回，失败证据和候选diff保留。原FRUC新增`--reset-pixels`同样exit1：API成功而部分重复/偏移，不能称原实现通过更严格验收；重建循环未解决。既有短测通过不覆盖这一失败。
 
 本机原生1440p NR额外执行90帧/89NVOF，88条完成GPU timestamp：中位9.74784ms、P95 10.11734ms；Magpie既有同尺寸窗口平均9.718–10.095ms。素材/全链路不完全匹配，只说明纯NR同尺寸未显示倍数差距。用户补充顺序可拖动且实测差异不大，已撤回“顺序是主因”的推断；不变更产品路线。下一任务是同尺寸、同倍率完整链路CPU等待/GPU/呈现节奏诊断。未占实卡、未修改runtime/控制面、未push发布。Phase7仍in_progress。
+
+## 2026-09-10 实时调度修复计划（仅文档）
+
+用户询问截图所述“前沿同步/有限队列与 Depth Anything FP16”是否是当前问题。源码核对确认：采集邮箱为1、presentation active+queued batch上限为2、command ring固定6，因此不存在无界GPU堆帧；但当前缺少完整deadline-aware提交，生成帧可能已经完成GPU计算后才因过期跳过呈现。Depth Anything/TensorRT/ONNX/DirectML目前均未接入；NR使用`nrZeroDepth_`，所以深度推理不是本机高负载根因。
+
+新增 `docs/SCHEDULER_REPAIR_PLAN_2026-09-10.md`：先按revision/epoch建立帧流账本和批量诊断，再仅为实时采集FG加入pre-evaluate deadline skip，随后以有界状态机处理source/graph/fence/present，最后只合入有同源A/B收益的提交、日志或FRUC改动。明确保留mailbox=1、资源lease/fence和文件播放完整性；不把扩大队列、降低质量或原生4K伪装成实时优化。此轮未改产品代码，未运行新的构建/GPU/实卡测试，未更改runtime、控制面、远端或发布；整体Phase7仍in_progress。
