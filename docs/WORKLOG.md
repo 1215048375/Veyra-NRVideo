@@ -1,5 +1,7 @@
 # 2026-09-11 继续修复目标模式执行中
 
+最新AMD诊断（UI已经提交`ee46c5f`）：隔离探针调试输出明确`Preview releases of D3D12Core require Developer Mode.`，随后CLSID_D3D12CoreModule获取失败；已解释先前0x887E0003，尚未到GPU能力查询。`continuation-amd-debug-loader`0.088秒exit1，完整stdout/result在`logs/scheduler-repair-20260910/`，只调试自有进程。未开开发者模式、未改主程序runtime、未提取权重。AMD完整网络/provider仍未实现。下一条独立任务转文件音频端点失败恢复，避免共享renderer shutdown与引擎clock读取竞态；详见实施记录最新段。整体目标active，不发布。
+
 最新UI续接（优先于下方历史）：基线`db98af7`。修复最小高度状态区无明细空间、90像素滚动跳过选择器、DPI切换字体14变15、窄标题绘制区域重叠；统一应用DPI，并只给smoke进程提供96/144/192注入。最终`ui-layout-1789065295999940200`三档布局/字体、最小窗口滚动、popup、滑条滚轮不变值、展开中间帧、resize、最大化/全屏进出/自动隐藏、黑色视频区PASS；实机系统DPI96，150%/200%仅应用注入，真实跨屏未测。首轮因FG选择器被滚动步长越过失败，证据保留。绘制21项、popup14种、UI合同通过；实际RTX后端UI`ui-fg-1789065217190095800`完成FRUC/XeSS/DLSS/关闭，DLSSG Create/Evaluate0x1。构建`ui-dpi-build2.log`exit0，EXE SHA `27910DEDB2855334C45A0B92F4694542AB8631FB9AA17FED819E65585CC35C55`。详见实施记录最新段的命令/日志/限制。本轮未跑NR、实卡、AMD或新的联合delivery；未改导出检查。下一任务AMD NR依赖/provider，整体目标active，本地存档不发布。
 
 最新单GPU所有者续接：以`e25585e`为基线，用`LiveGpuScheduler`取代呈现线程并删除旧worker；提交/完成检查/deadline/Present由引擎线程推进，容量仍2，实卡tryRead立即返回。空档仍完成已有帧，EOF先呈现尾批，退出边界不覆盖失败；时间戳在源Waiting时也采集。状态机15项、最终live30项、400ms输入空档/62帧EOF6项、FRUC24项及正常/拒绝XeSS界面通过。独立旧Git构建同源原生4K NR+VSR4+FRUC4对照，新旧均33源fps、P95约59.66ms、0有效生成，不声称性能加速。首次CMake依赖顺序/无NR缺shader目标一起修复并全新配置验证。最终delivery `3462b28549ed4982a99799adc5a3071e`23项42.380秒PASS，EXE `1B0DF186574B552E349EBB9502AF89A001430B89407B3D15635862E668279CE6`。细节、失败与完整命令见实施记录最新段。下一条全DPI/窗口交互验收，AMD NR/实卡仍未完成；本地存档，不push/发布。

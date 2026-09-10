@@ -4,6 +4,16 @@
 
 ## 2026-09-11 续接实证（优先于下面历史进度）
 
+### 最新续接：AMD预览运行时失败已定因
+
+UI批次已本地存档 `ee46c5f`。继续AMD诊断：原隔离探针源码/EXE在 `logs/amd-nr-research-20260910/capability.*`，不是continuation日志目录。新增ignored `debug-capability.cpp` 只以 `DEBUG_ONLY_THIS_PROCESS` 启动该探针，读取其调试字符串，最长20秒；不附加其它进程、不装驱动、不改系统设置。编译命令 `cmd.exe /c logs\amd-nr-research-20260910\build-debug-capability.cmd` exit0。
+
+`scripts/acceptance/scheduler-short-test.ps1 -Name continuation-amd-debug-loader -Exe logs/amd-nr-research-20260910/debug-capability.exe` 在0.088秒结束，exit1；EXE SHA `ABB4CACA9D79A4AB5BC507D3984B89CD65DBD0B265907B7B0972F44406E37802`。真实调试输出为 **`Preview releases of D3D12Core require Developer Mode.`**，随后 `D3D12GetInterface failed retrieving CLSID_D3D12CoreModule`。这解释之前0x887E0003发生在factory创建阶段；不是设备SM6.10/linalg能力查询结果，更不是网络测试通过。
+
+本机没有开启Windows Developer Mode。本轮已读取固定上游README：权重不在仓库，完整网络需SM6.10/FP8，既有实证仅RX9070XT/1920x1080。没有替换主程序Agility、提取权重或加载ReShade；当前AMD provider仍未实现。开启开发者模式只能解除这一加载条件，不能证明硬件、PSO、权重和网络闭环全部可用。
+
+下一条唯一独立任务转到文件音频设备恢复：`AudioPipeline::runOnAudioThread`遇到`pumpOnce`失败直接break，暂停/恢复失败也仅log；需要共同PTS恢复与明确状态，不能直接在音频线程shutdown/restart共享renderer，因为引擎线程同时读取它的clock和状态。先梳理renderer所有权与文件媒体时钟，再做窄修和自有端点故障测试。AMD依赖、真实系统高DPI和实卡保持未完成，整体目标active。
+
 ### 最新续接：最小窗口、缩放与选择器回归
 
 基线 `db98af7`，工作树干净。本轮只修改 UI 布局、DPI 与针对性测试，没有改变 SR -> NR -> FG、GPU 调度、音频或导出检查。
