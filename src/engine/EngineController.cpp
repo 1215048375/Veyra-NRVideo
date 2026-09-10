@@ -151,6 +151,17 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             std::array<uint64_t,size_t(diagnostics::GpuStage::Count)> lastGpuSampleEnd{};
             auto nextTimingLog=Clock::now()+std::chrono::seconds(1);
             auto anchor=Clock::now(),statsStart=anchor;double anchorMs=0;uint64_t frames=0,sourceFrames=0;bool wasPaused=false;double discardBefore=0;
+            double lastAudioClockMs=0;bool audioClockExhausted=false;auto audioTailAnchor=anchor;
+            bool publishedAudioRecovery=false;HRESULT publishedAudioError=S_OK;uint64_t publishedAudioRecoveries=0;
+            const bool injectFileEndpointLoss=GetEnvironmentVariableW(L"VEYRA_TEST_FILE_ENDPOINT_LOSS",nullptr,0)>0;
+            bool fileEndpointLossInjected=false;
+            auto publishAudioStatus=[&]{
+                const bool recovering=audioPipe.endpointRecovering();const auto error=audioPipe.endpointError();const auto count=audioPipe.endpointRecoveries();
+                if(recovering!=publishedAudioRecovery||error!=publishedAudioError||count!=publishedAudioRecoveries){
+                    publishedAudioRecovery=recovering;publishedAudioError=error;publishedAudioRecoveries=count;
+                    std::lock_guard lock(mutex_);snapshot_.audioEndpointRecovering=recovering;snapshot_.audioEndpointError=error;snapshot_.audioEndpointRecoveries=count;
+                }
+            };
             PresentationScheduler liveTimeline;uint64_t submitted=0,expired=0;std::deque<int64_t> submissionTimes;
             DeadlineWait deadlineWait;
             CaptureHalfRate captureSampler;
@@ -216,6 +227,8 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             const bool injectSourceGap=options.captureReplayForTest&&GetEnvironmentVariableW(L"VEYRA_TEST_REPLAY_SOURCE_GAP",nullptr,0)>0;
             std::optional<Clock::time_point> sourceGapUntil;
             while(!stop_){
+                if(audioStarted)publishAudioStatus();
+                if(audioStarted&&injectFileEndpointLoss&&!fileEndpointLossInjected&&frames>=20){audioPipe.requestEndpointLossForTest();fileEndpointLossInjected=true;}
                 advanceLive();
                 if(liveScheduler&&liveScheduler->failed()){status(L"采集画面呈现失败，请查看诊断",true);break;}
                 const float gain=muted_?0.0f:volume_.load();audio.setGain(gain);
@@ -268,7 +281,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 const double seek=seekSeconds_.exchange(-1);
                 if(seek>=0&&!isImage&&!isCapture){
                     if(!ring.drainQueue()||!activeSource->seek({static_cast<int64_t>(seek*1000000),1000000})){status(L"跳转失败",true);break;}
-                    discardBefore=seek*1000;seekPreviewPending=true;reset=true;anchorMs=discardBefore;anchor=Clock::now();audioRebuffering=false;if(audioStarted){audioPipe.setPaused(paused_);audioPipe.requestSeek(discardBefore);}
+                    discardBefore=seek*1000;seekPreviewPending=true;reset=true;anchorMs=discardBefore;anchor=Clock::now();lastAudioClockMs=discardBefore;audioClockExhausted=false;audioRebuffering=false;if(audioStarted){audioPipe.setPaused(paused_);audioPipe.requestSeek(discardBefore);}
                 }
                 if(!transaction&&((paused_&&!seekPreviewPending)||(isImage&&hasOutput))){
                     drainLivePresentation();
@@ -404,8 +417,19 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     veyra::log::info("capture-timeline",std::format("interval100ns={} packetDurationKnown={} packetDurationPositive={} nominalFps={} FG={}",duration100ns,!pkt.duration.isUnknown(),pkt.duration.num>0,activeSource->info().averageFps,options.fg));
                     liveTimeline.reset(out.batch.identity.epoch,out.batch.b100ns,captureArrival,options.fg?duration100ns:0);
                 }
-                if(!audioStarted&&!isImage&&!isCapture&&frames==0){if(audioPipe.open(path)&&audio.start()){audioPipe.startThread(&audio);audioStarted=true;{std::lock_guard lock(mutex_);snapshot_.audioAvailable=true;}}anchor=Clock::now();anchorMs=pts;}
-                auto nowMs=[&](){const double a=audioStarted?audio.mediaTimeMs():-1;return a>=0?a:anchorMs+std::chrono::duration<double,std::milli>(Clock::now()-anchor).count();};
+                if(!audioStarted&&!isImage&&!isCapture&&frames==0){if(audioPipe.open(path)){audioPipe.startThread(&audio,true);audioStarted=true;{std::lock_guard lock(mutex_);snapshot_.audioAvailable=true;}}anchor=Clock::now();anchorMs=lastAudioClockMs=pts;}
+                auto nowMs=[&](){
+                    if(!audioStarted)return anchorMs+std::chrono::duration<double,std::milli>(Clock::now()-anchor).count();
+                    publishAudioStatus();const double a=audio.mediaTimeMs();
+                    if(std::isfinite(a)){lastAudioClockMs=a;audioClockExhausted=false;return a;}
+                    // A disconnected endpoint freezes the shared media clock. Only a
+                    // fully exhausted audio stream may hand its tail to the wall clock.
+                    if(audioPipe.clockExhausted()){
+                        if(!audioClockExhausted){audioClockExhausted=true;audioTailAnchor=Clock::now();}
+                        return lastAudioClockMs+std::chrono::duration<double,std::milli>(Clock::now()-audioTailAnchor).count();
+                    }
+                    return lastAudioClockMs;
+                };
                 double frameWaitMs=0,framePresentMs=0;
                 double gpuWaitMs=0;
                 if(liveScheduler){
@@ -561,7 +585,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
     }catch(const std::exception& e){veyra::log::error("engine",e.what());status(L"引擎异常，请查看诊断",true);failed=true;}
     (void)failed;
     audioPipe.stopThread();audio.shutdown();ring.drainQueue();presenter.close();graph.shutdown();captureSource.close();source.close();av_frame_free(&cachedFrame);av_frame_free(&imageFrame);ring.shutdown();ctx.shutdown();
-    {std::lock_guard lock(mutex_);snapshot_.running=false;}
+    {std::lock_guard lock(mutex_);snapshot_.running=false;snapshot_.audioEndpointRecovering=false;snapshot_.audioRebuffering=false;}
     CoUninitialize();
 }
 }

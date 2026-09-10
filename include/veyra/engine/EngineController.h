@@ -30,6 +30,7 @@ struct PlayerSnapshot {
     std::wstring backendWarning;
     sink::CaptureAudioState captureAudio;
     bool audioRebuffering=false;
+    bool audioEndpointRecovering=false;HRESULT audioEndpointError=S_OK;uint64_t audioEndpointRecoveries=0;
     double position=0,duration=0,fps=0,lateMs=0,lateP95Ms=0;
     diagnostics::FrameMetrics metrics;
     std::optional<double> submissionFps;

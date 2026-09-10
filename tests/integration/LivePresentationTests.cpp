@@ -9,7 +9,7 @@ using namespace veyra;
 using namespace std::chrono_literals;
 int wmain(int argc,wchar_t**argv){
     SetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS",L"1");
-    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--fruc")==0||wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--fruc-overload")==0||wcscmp(argv[3],L"--fruc-overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0||wcscmp(argv[3],L"--source-gap")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--fruc")==0||wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--fruc-overload")==0||wcscmp(argv[3],L"--fruc-overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0||wcscmp(argv[3],L"--source-gap")==0||wcscmp(argv[3],L"--file-endpoint")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     std::filesystem::create_directories(argv[2]);Logger::instance().openFile((std::filesystem::path(argv[2])/"engine.log").wstring());Logger::instance().setConsoleEnabled(false);
     HWND window=CreateWindowExW(0,L"STATIC",L"Live scheduler replay",WS_POPUP,0,0,960,540,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     if(!window)return 3;engine::EngineController engine;engine::PlayerOptions options;options.nr=false;options.fg=false;options.captureReplayForTest=true;
@@ -19,6 +19,8 @@ int wmain(int argc,wchar_t**argv){
     const bool frucOverload=argc==4&&std::wstring(argv[3]).find(L"--fruc-overload")==0;
     const bool overload=frucOverload||(argc==4&&std::wstring(argv[3]).find(L"--overload")==0);
     const bool fileOverload=argc==4&&wcscmp(argv[3],L"--file-overload")==0;
+    const bool fileEndpoint=argc==4&&wcscmp(argv[3],L"--file-endpoint")==0;
+    if(fileEndpoint){options.captureReplayForTest=false;SetEnvironmentVariableW(L"VEYRA_TEST_FILE_ENDPOINT_LOSS",L"1");engine.setVolume(0,true);}
     if(argc==4&&wcscmp(argv[3],L"--fruc")==0)options.settings.frameGenerationBackend=engine::FrameGenerationBackend::Fruc;
     if(overload){options.nr=options.sr=options.fg=true;options.realtime=false;options.fgMultiplier=4;options.settings.videoSrQuality=4;options.captureReplayDisableFgAdmissionForTest=std::wstring(argv[3]).ends_with(L"-baseline");SetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS",nullptr);}
     if(frucOverload)options.settings.frameGenerationBackend=engine::FrameGenerationBackend::Fruc;
@@ -27,6 +29,20 @@ int wmain(int argc,wchar_t**argv){
     int failures=0;auto check=[&](bool pass,const char* s){std::cout<<(pass?"PASS ":"FAIL ")<<s<<std::endl;if(!pass)++failures;};
     auto until=[&](auto predicate,int seconds=8){auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(seconds);while(std::chrono::steady_clock::now()<deadline){MSG msg;while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}auto s=engine.snapshot();if(s.failed){std::wcerr<<s.status<<'\n';return false;}if(predicate(s))return true;std::this_thread::sleep_for(5ms);}return false;};
     engine.open(window,argv[1],options);
+    if(fileEndpoint){
+        check(until([](const auto& s){return s.frames>=20&&s.audioEndpointRecovering;}),"actual player exposes endpoint recovery");
+        const auto held=engine.snapshot();
+        std::this_thread::sleep_for(300ms);const auto stillHeld=engine.snapshot();
+        check(stillHeld.frames<=held.frames+2&&stillHeld.position<=held.position+.04,"video timeline stays held during audio endpoint outage");
+        check(until([](const auto& s){return s.audioEndpointRecoveries==1&&!s.audioEndpointRecovering&&s.frames>=50;}),"player resumes after endpoint reanchor");
+        check(std::abs(engine.snapshot().lateMs)<30,"restored software A/V skew under 30ms");
+        engine.pause(true);engine.seek(.5);
+        check(until([](const auto& s){return s.transport==engine::TransportState::Paused&&s.position>=.49&&s.position<.6;}),"paused seek after endpoint recovery");
+        const auto pausedFrames=engine.snapshot().frames;engine.pause(false);
+        check(until([&](const auto& s){return s.frames>=pausedFrames+10;}),"resume after recovered paused seek");
+        engine.stop();check(until([&](const auto&){return engine.idle();},5),"recovered file closes without audio thread deadlock");
+        DestroyWindow(window);CoUninitialize();return failures?1:0;
+    }
     if(sourceGap){
         check(until([](const auto& s){return s.frames==12&&s.metrics.flow.counters.realPresented==12&&s.processedCompleted==12;}),"source Waiting still completes and presents all outstanding real frames");
         check(until([](const auto& s){return s.frames>=20;}),"source resumes after gap without deadlock");

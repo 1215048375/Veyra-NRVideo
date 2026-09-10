@@ -56,7 +56,11 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         rows.emplace_back(L"延迟样本 / 统计溢出",std::format(L"{} / {}",f.latencySamples,f.timingOverflow));
         rows.emplace_back(L"补帧方式",s.applied.multiplier<=1?L"关闭":std::format(L"{} {}X",xess?L"XeSS":s.applied.frameGenerationBackend==engine::FrameGenerationBackend::Fruc?L"FRUC":L"DLSS",s.applied.multiplier));
         rows.emplace_back(L"NR内部尺寸",s.applied.nr?std::format(L"{} x {}",s.metrics.resolution.nr.width,s.metrics.resolution.nr.height):L"关闭");
-        rows.emplace_back(L"音频同步",s.audioAvailable?(s.capture?(s.captureAudio.running?L"软件估算同步":L"等待视频锚点"):(s.audioRebuffering?L"视频过载 · 同步缓冲":L"音频主时钟")):L"无音频");
+        rows.emplace_back(L"音频同步",s.audioAvailable?(s.capture?(s.captureAudio.running?L"软件估算同步":L"等待视频锚点"):(s.audioEndpointRecovering?L"音频设备恢复中 · 时间线保持":s.audioRebuffering?L"视频过载 · 同步缓冲":L"音频主时钟")):L"无音频");
+        if(!s.capture&&s.audioAvailable){
+            rows.emplace_back(L"音频设备恢复次数",std::to_wstring(s.audioEndpointRecoveries));
+            if(FAILED(s.audioEndpointError))rows.emplace_back(L"最近音频设备错误",std::format(L"0x{:08X}",unsigned(s.audioEndpointError)));
+        }
         if(!s.capture&&s.audioAvailable)rows.emplace_back(L"声音领先 · 软件估算",std::format(L"{:.1f} ms",s.lateMs));
         if(s.capture&&s.audioAvailable){
             rows.emplace_back(L"音画偏差 · 声音领先",ms(s.captureAudio.skewMs));

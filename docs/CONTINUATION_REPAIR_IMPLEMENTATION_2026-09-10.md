@@ -4,6 +4,23 @@
 
 ## 2026-09-11 续接实证（优先于下面历史进度）
 
+### 最新续接：文件音频端点恢复与共同时间线
+
+基线 `bba7283` 工作树干净，上一轮UI修复/AMD loader定因属于有效进展。本轮完成文件WASAPI端点错误后的自动恢复，不改SR -> NR -> FG、导出检查或实体采集设置。
+
+- 原因：`AudioPipeline::runOnAudioThread`在pump失败直接退出；引擎在音频clock变NaN时切换到墙钟，设备断开后视频继续走。现在文件路径由音频线程创建/释放/重建端点和COM，500ms重试；旧诊断调用可保留外部初始化。端点释放与anchor更新受短生命周期互斥保护，引擎clock读取不会访问已释放的COM；正常pump仍由单音频owner执行。
+- 设备失效、clock失败、暂停/恢复失败都进入恢复；保留HRESULT及恢复次数。视频在音频失效期间保持最后有效媒体时间，不用墙钟冒充仍在播音；只有已确认音频尾部耗尽才允许无音频尾段继续。恢复清理旧PCM/重采样，seek到最后有效播放PTS后预填，不能从已经预解码约一秒的队首直接跳过去。用户在断开期间seek会更新恢复目标。seek失败返回NaN并保留恢复状态，不能记录成功。
+- 暂停时重建只预填/锚定，不调用IAudioClient::Start，恢复后仍暂停；音量/静音保留。状态面板新增设备恢复状态、次数和最近错误，停止清除恢复中标记。测试注入只在音频owner上释放自己的端点，不操作系统默认设备、不关闭其它软件。
+- 最终 `continuation-file-endpoint-final2-timeline` 47项、2.628秒PASS：既有44.1/48k PCM、sample精度seek、真实WASAPI、半速映射、断粮及恢复，加播放中设备丢失/重开、暂停丢失、断开中seek到1234.25ms、暂停重建不播放、恢复后resume、重试期间stop、并发clock读取。恢复前111.979ms，重新锚定127.438ms，差来自故障命令被音频线程接收前已播放部分；未跳到预解码队首。97/98次并发读取有实证。首轮 `continuation-file-endpoint-recovery` 只因测试要求读取次数>100失败（Windows线程sleep调度），修正为实际多次跨恢复读取/最终clock失效检查，失败日志保留；功能门槛未放宽。
+- 最终 `continuation-file-endpoint-final2-player` 7项、2.297秒PASS，真实EngineController文件路径：端点断开300ms期间最多两帧边界变化，时间线不前进；恢复后继续50帧、软件A/V偏差<30ms、暂停seek/resume/关闭均通过。测试EXE `3075E01896ED72899C675FE40A89C69BADDA01F97F378B57BBF707E232FB0204`；音频测试EXE `5060691745A1DC6F15891179EA28DC501855AFCD42541C5C1B872829B9A5FAC2`。
+- `continuation-file-endpoint-overload` 5项、7.067秒PASS：实际原生4K NR+VSR4+FG4过载仍保持音频并在视频追上后恢复、暂停seek/关闭通过；最大观测lead123.333ms是过载捕获瞬间，不是稳态同步达标值。最终异常边界补丁前执行，EXE `BB6E1BBC49FA77F7D76BB38B7F71F294A7C7A050360E06C444ACB4014243F3FF`。`continuation-file-endpoint-capture` 11.118秒PASS，合成PCM/真实WASAPI自动80/160、手动/关闭/负值钳制/断流/重开，普通偏差13.2至18.3ms、突发预算500ms，非实体采集验收。
+
+实际构建 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Root <root> -Preset x64-release`，最终 `logs/continuation-repair-20260910/audio-file-recovery-final-build.log` exit0。全部针对性测试经 `scripts/acceptance/scheduler-short-test.ps1 -Name <上述名称> -Exe out/build/x64-release/<test>.exe -TestArgs <result.args>`，stdout/stderr/result在 `logs/scheduler-repair-20260910/`。文件输入 `loop/local/fixed_clips/test_av_1080p.mp4` SHA `7952AD2904C8FED78402BC299EA2A04D1D869663EBCE17BBAC0C297F84FA2A91`；这只是历史目录内素材，不启用旧Loop。
+
+最终 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/gates/delivery.ps1 -Root <root>` 23项42.420秒PASS，`logs/delivery/5c80d299087b4f2482706bf2a24df9c9/result.json`。当前应用SHA `E2EA9CB93CB290E6B13683647835B3E7F54EA21810FC358D69DB803AA9168866`，worker不变 `EC8150FF88C7C84FACDF92B920DED2D6CEC5F682990C375A92550AFD5E818695`。实际RTX NR/NVOF、原生4K正确性、播放器、图片、NVENC H264/HEVC及取消已执行；例如overload日志CreateFeature18 `0x1`、handle非空，DLSSG Create `0x1`。不是AMD或实卡验证。未添加SDK/runtime/日志到Git，未push/发布。
+
+剩余边界：未在真实拔插/系统默认设备切换上测试，当前自动恢复针对已打开端点报告失效；仍可用的旧设备不会因默认设备变化主动切换。声卡突然消失时无法为已丢失设备播放淡出；可控设置/PTS突变前的短淡出仍需补齐。下一条唯一任务：处理可控音频重锚的短淡出与恢复边界，并对原方案逐项核对计时/重建覆盖。AMD完整网络/provider仍未实现，缺Developer Mode预览加载、权重与目标硬件实证；真实系统150%/200%DPI、实卡验收未完成。整体目标active。
+
 ### 最新续接：AMD预览运行时失败已定因
 
 UI批次已本地存档 `ee46c5f`。继续AMD诊断：原隔离探针源码/EXE在 `logs/amd-nr-research-20260910/capability.*`，不是continuation日志目录。新增ignored `debug-capability.cpp` 只以 `DEBUG_ONLY_THIS_PROCESS` 启动该探针，读取其调试字符串，最长20秒；不附加其它进程、不装驱动、不改系统设置。编译命令 `cmd.exe /c logs\amd-nr-research-20260910\build-debug-capability.cmd` exit0。

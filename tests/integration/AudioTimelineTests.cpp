@@ -18,10 +18,10 @@ bool until(const std::function<bool()>& ready) {
     while (!ready() && std::chrono::steady_clock::now() < limit) std::this_thread::sleep_for(2ms);
     return ready();
 }
-void fixture(const std::filesystem::path& file, uint32_t rate) {
+void fixture(const std::filesystem::path& file, uint32_t rate, unsigned durationMs=750) {
     std::ofstream out(file, std::ios::binary);
     auto word = [&](uint32_t v, unsigned bytes) { for (unsigned i=0;i<bytes;++i) out.put(char(v >> (8*i))); };
-    const uint32_t frames = rate * 3 / 4;
+    const uint32_t frames = rate * durationMs / 1000;
     out.write("RIFF",4); word(36+frames*2,4); out.write("WAVEfmt ",8); word(16,4);
     word(1,2); word(1,2); word(rate,4); word(rate*2,4); word(2,2); word(16,2);
     out.write("data",4); word(frames*2,4);
@@ -97,5 +97,42 @@ int wmain(int argc, wchar_t** argv) {
     while(std::chrono::steady_clock::now()-recovery<100ms){double pts=0;if(!renderer.pumpOnce(live,&pts))break;}
     const double recovered=renderer.mediaTimeMs();
     check(std::isfinite(recovered)&&recovered>=500&&recovered<=live.pts,"recovered live clock references new PCM after device silence");
-    renderer.shutdown(); return failures ? 1 : 0;
+    renderer.shutdown();
+    const auto longFile=dir/"recovery.wav";fixture(longFile,48000,4000);
+    AudioPipeline recoveryPipe;AudioRenderer recoveryRenderer;recoveryRenderer.setGain(0);
+    check(recoveryPipe.open(longFile.wstring()),"open recovery PCM fixture");
+    recoveryPipe.startThread(&recoveryRenderer,true);
+    check(until([&]{return recoveryRenderer.started()&&!recoveryPipe.endpointRecovering();}),"audio thread owns endpoint initialization");
+    std::atomic<bool> reading=true;std::atomic<uint64_t> reads=0;
+    std::thread reader([&]{while(reading){(void)recoveryRenderer.mediaTimeMs();++reads;std::this_thread::sleep_for(1ms);}});
+    std::this_thread::sleep_for(100ms);
+    const double beforeLoss=recoveryRenderer.mediaTimeMs();
+    recoveryPipe.requestEndpointLossForTest();
+    check(until([&]{return recoveryPipe.endpointRecovering();}),"endpoint loss publishes recovery state");
+    check(!std::isfinite(recoveryRenderer.mediaTimeMs()),"released endpoint clock is invalid during retry");
+    check(recoveryPipe.endpointError()==AUDCLNT_E_DEVICE_INVALIDATED,"endpoint HRESULT remains available");
+    check(until([&]{return recoveryPipe.endpointRecoveries()==1&&!recoveryPipe.endpointRecovering();}),"endpoint reopens without exiting audio thread");
+    const double restored=recoveryRenderer.mediaTimeMs();
+    std::cout<<"recovery before="<<beforeLoss<<" restored="<<restored<<'\n';
+    check(restored>=beforeLoss-30&&restored<=beforeLoss+50,"recovery replays from last clock, not decoded-ahead head");
+    recoveryPipe.setPaused(true);std::this_thread::sleep_for(70ms);
+    recoveryPipe.requestEndpointLossForTest();
+    check(until([&]{return recoveryPipe.endpointRecovering();}),"paused endpoint loss is detected");
+    const double seekRecovered=recoveryPipe.requestSeek(1234.25);
+    check(std::abs(seekRecovered-1234.25)<.05,"seek while disconnected updates recovery PTS");
+    check(until([&]{return recoveryPipe.endpointRecoveries()==2&&!recoveryPipe.endpointRecovering();}),"paused endpoint reconnects");
+    const double pausedRecovered=recoveryRenderer.mediaTimeMs();std::this_thread::sleep_for(100ms);
+    check(std::abs(pausedRecovered-1234.25)<.1&&std::abs(recoveryRenderer.mediaTimeMs()-pausedRecovered)<.1,"reconnect does not start paused PCM");
+    recoveryPipe.setPaused(false);
+    check(until([&]{return recoveryRenderer.mediaTimeMs()>pausedRecovered+50;}),"resume after reconnect advances real endpoint clock");
+    recoveryPipe.requestEndpointLossForTest();
+    check(until([&]{return recoveryPipe.endpointRecovering();}),"third loss enters retry");
+    const auto stopping=std::chrono::steady_clock::now();recoveryPipe.stopThread();
+    check(std::chrono::steady_clock::now()-stopping<300ms,"stop interrupts endpoint retry promptly");
+    reading=false;reader.join();
+    std::cout<<"concurrentClockReads="<<reads.load()<<'\n';
+    check(reads>10&&!std::isfinite(recoveryRenderer.mediaTimeMs()),"concurrent clock readers survive endpoint releases and shutdown");
+    check(recoveryPipe.overruns()==0,"endpoint outages preserve bounded file PCM queue");
+    recoveryRenderer.shutdown();
+    return failures ? 1 : 0;
 }

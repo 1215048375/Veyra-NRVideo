@@ -72,8 +72,14 @@ public:
     // Returns the PTS of the first buffered sample after seek.
     double requestSeek(double targetMs);
 
-    void runOnAudioThread(AudioRenderer* renderer);
-    void startThread(AudioRenderer* renderer);
+    void runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint = false);
+    void startThread(AudioRenderer* renderer, bool ownEndpoint = false);
+    bool endpointRecovering()const{return endpointRecovering_.load();}
+    HRESULT endpointError()const{return endpointError_.load();}
+    uint64_t endpointRecoveries()const{return endpointRecoveries_.load();}
+    bool clockExhausted()const{return clockExhausted_.load();}
+    // Fault injection is consumed by the audio owner; never release COM on a caller thread.
+    void requestEndpointLossForTest(){endpointLossForTest_=true;}
 
 private:
     struct Segment {
@@ -123,6 +129,9 @@ private:
     std::vector<float> converted_{std::vector<float>(kAudioRate)};
 
     std::thread thread_;
+    std::atomic<bool> endpointRecovering_{false},clockExhausted_{false},endpointLossForTest_{false};
+    std::atomic<HRESULT> endpointError_{S_OK};
+    std::atomic<uint64_t> endpointRecoveries_{0};
 };
 
 class AudioRenderer {
@@ -132,7 +141,7 @@ public:
     void setGain(float value){gain_.store(value);}
 
     // Write actual PCM before starting the endpoint and its media clock.
-    bool startAnchored(AudioPcmSource& pipeline);
+    bool startAnchored(AudioPcmSource& pipeline, bool paused = false);
     void setPaused(bool value);
 
     // Event-driven pump for ONE event cycle. Writes real data when the ring
@@ -153,13 +162,15 @@ public:
     uint64_t framesWritten() const;
     HRESULT lastError()const{return lastError_.load();}
     double bufferedMs()const{return bufferedMs_.load();}
-    double capacityMs()const{return 1000.0*bufferFrames_/sampleRate_;}
+    double capacityMs()const{std::lock_guard lock(endpointMutex_);return 1000.0*bufferFrames_/sampleRate_;}
 
     void shutdown();
 
 private:
-    bool checked(HRESULT hr,const char* operation){if(SUCCEEDED(hr))return true;lastError_=hr;log::error("audio",std::format("{} hr=0x{:08X}",operation,unsigned(hr)));return false;}
-    std::atomic<HRESULT> lastError_{S_OK};
+    bool checked(HRESULT hr,const char* operation)const{if(SUCCEEDED(hr))return true;if(lastError_.exchange(hr)!=hr)log::error("audio",std::format("{} hr=0x{:08X}",operation,unsigned(hr)));return false;}
+    mutable std::atomic<HRESULT> lastError_{S_OK};
+    // Protect endpoint lifetime/anchor from readers; pump remains audio-owner only.
+    mutable std::mutex endpointMutex_;
     std::atomic<double> bufferedMs_{0};
     mutable std::mutex timelineMutex_;
     AudioFrameTimeline outputTimeline_;
