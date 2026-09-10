@@ -4,7 +4,7 @@
 #include <format>
 namespace veyra::ui {
 struct ChromeLayout {
-    int w,h,left,top,viewWidth,viewHeight,right,panelWidth,bottom;
+    int w,h,left,top,viewWidth,viewHeight,right,panelWidth,bottom,statusTop;
     bool pro,drawer;
     ChromeLayout(int width,int height,bool professional,bool showDrawer,int inspectorWidth=320):w(width),h(height),pro(professional),drawer(showDrawer){
         panelWidth=pro?(w>=1180?std::clamp(inspectorWidth,296,420):w>=960?296:showDrawer?296:0):0;
@@ -12,6 +12,7 @@ struct ChromeLayout {
         right=w-panelWidth-20;viewWidth=pro?((w>=960||showDrawer)?right-left-14:w-left-20):w-left*2;
         viewHeight=pro?std::max(160,h-306):h-88;
         bottom=top+viewHeight+(pro?14:0);
+        statusTop=std::min(h-136,std::max(top+336,h-330));
     }
 };
 inline void chromeText(HDC dc,HWND window,std::wstring value,int x,int y,int w,int h,int size,COLORREF c,int weight=FW_NORMAL,UINT flags=DT_LEFT|DT_SINGLELINE|DT_VCENTER){auto font=makeFont(window,size,weight);auto old=SelectObject(dc,font);SetTextColor(dc,c);SetBkMode(dc,TRANSPARENT);RECT r{dip(window,x),dip(window,y),dip(window,x+w),dip(window,y+h)};glassText(dc,value.c_str(),-1,&r,flags|DT_END_ELLIPSIS);SelectObject(dc,old);DeleteObject(font);}
@@ -26,17 +27,6 @@ inline void paintChrome(HWND window,HDC dc,const ChromeLayout& l,const engine::P
         const std::wstring dimensions[]={extent(resolution.source.width,resolution.source.height),extent(resolution.base.width,resolution.base.height),!s.applied.nr?L"关闭":extent(resolution.nr.width,resolution.nr.height)};
         const wchar_t* headings[]={L"SOURCE",L"OUTPUT",L"NR PROCESS"};
         for(int i=0;i<3;++i){chromeText(dc,window,headings[i],l.left+20+i*column,l.bottom+94,column-4,20,10,secondary);chromeText(dc,window,dimensions[i],l.left+20+i*column,l.bottom+118,column-4,30,size,textColor);}
-        if(l.panelWidth){
-            chromeText(dc,window,s.transport==engine::TransportState::Playing?L"实时处理状态":L"最近处理样本",l.right+22,l.bottom+16,l.panelWidth-44,24,13,textColor,FW_MEDIUM);
-            chromeText(dc,window,L"NR单阶段 · 16.7 ms 参考刻度",l.right+22,l.bottom+42,l.panelWidth-44,16,10,secondary);
-            const auto sample=s.metrics.gpu[size_t(diagnostics::GpuStage::Nr)];
-            float cx=float(dip(window,l.right+86)),cy=float(dip(window,l.bottom+105)),radius=float(dip(window,45));Pen track(color(line),float(dip(window,3)));Pen arc(color(accent),float(dip(window,3)));g.DrawArc(&track,cx-radius,cy-radius,radius*2,radius*2,140,260);if(sample.milliseconds)g.DrawArc(&arc,cx-radius,cy-radius,radius*2,radius*2,140,float(std::clamp(*sample.milliseconds/16.667,0.0,1.0)*260));
-            chromeText(dc,window,sample.milliseconds?std::format(L"{:.1f}",*sample.milliseconds):L"—",l.right+41,l.bottom+78,90,38,27,textColor,FW_NORMAL,DT_CENTER|DT_SINGLELINE|DT_VCENTER);
-            chromeText(dc,window,L"NR · ms",l.right+43,l.bottom+112,86,20,10,secondary,FW_NORMAL,DT_CENTER|DT_SINGLELINE|DT_VCENTER);
-            chromeText(dc,window,L"源帧处理",l.right+158,l.bottom+65,130,20,11,secondary);
-            chromeText(dc,window,s.frames?std::format(L"{:.1f} fps",s.fps):L"未测",l.right+158,l.bottom+88,130,30,19,textColor);
-            chromeText(dc,window,s.applied.nrPolicy==pipeline::NrSizePolicy::Realtime?L"实时档 · 非原生4K NR":L"原生 NR",l.right+22,l.bottom+170,l.panelWidth-44,22,11,secondary);
-        }
     }
 }
 }

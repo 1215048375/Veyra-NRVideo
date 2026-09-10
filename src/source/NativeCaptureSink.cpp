@@ -2,6 +2,7 @@
 #include "veyra/source/CaptureMediaType.h"
 #include "veyra/Log.h"
 #include <format>
+#include <mmreg.h>
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -14,6 +15,19 @@ HRESULT copyType(AM_MEDIA_TYPE& dst,const AM_MEDIA_TYPE& src){
     dst=src;dst.pbFormat=nullptr;dst.pUnk=nullptr;
     if(src.cbFormat){if(!src.pbFormat)return E_INVALIDARG;dst.pbFormat=static_cast<BYTE*>(CoTaskMemAlloc(src.cbFormat));if(!dst.pbFormat)return E_OUTOFMEMORY;memcpy(dst.pbFormat,src.pbFormat,src.cbFormat);}
     dst.pUnk=src.pUnk;if(dst.pUnk)dst.pUnk->AddRef();return S_OK;
+}
+bool audioType(const AM_MEDIA_TYPE& t){
+    if(t.majortype!=MEDIATYPE_Audio||t.formattype!=FORMAT_WaveFormatEx||!t.pbFormat||t.cbFormat<sizeof(WAVEFORMATEX))return false;
+    const auto& f=*reinterpret_cast<const WAVEFORMATEX*>(t.pbFormat);
+    return (f.wFormatTag==WAVE_FORMAT_PCM||f.wFormatTag==WAVE_FORMAT_IEEE_FLOAT)&&
+        f.nChannels>=1&&f.nChannels<=2&&f.nSamplesPerSec>=8000&&f.nSamplesPerSec<=192000&&
+        (f.wBitsPerSample==16||f.wBitsPerSample==32)&&
+        (f.wFormatTag!=WAVE_FORMAT_IEEE_FLOAT||f.wBitsPerSample==32)&&
+        f.nBlockAlign==f.nChannels*f.wBitsPerSample/8&&f.nAvgBytesPerSec==f.nSamplesPerSec*f.nBlockAlign;
+}
+bool sameAudio(const AM_MEDIA_TYPE& a,const AM_MEDIA_TYPE& b){
+    return audioType(a)&&audioType(b)&&a.subtype==b.subtype&&
+        std::memcmp(a.pbFormat,b.pbFormat,sizeof(WAVEFORMATEX))==0;
 }
 class PinEnum final:public IEnumPins {
     std::atomic<ULONG> refs_{1};ComPtr<IPin> pin_;bool used_=false;
@@ -45,9 +59,12 @@ class NativeSink final:public IBaseFilter,public IPin,public IMemInputPin {
     ComPtr<IPin> peer_;ComPtr<IMemAllocator> allocator_;ComPtr<IReferenceClock> clock_;
     IFilterGraph* graph_=nullptr;std::wstring name_=L"Native capture mailbox";
     std::function<HRESULT(IMediaSample*)> callback_;
+    bool audio_=false;
 public:
     NativeSink(const AM_MEDIA_TYPE& type,std::function<HRESULT(IMediaSample*)> cb):callback_(std::move(cb)){
-        if(!captureMediaLayout(type,layout_)||FAILED(copyType(desired_,type)))throw std::bad_alloc();
+        audio_=audioType(type);
+        if((!audio_&&!captureMediaLayout(type,layout_))||FAILED(copyType(desired_,type)))throw std::bad_alloc();
+        if(audio_)layout_.sampleBytes=reinterpret_cast<const WAVEFORMATEX*>(type.pbFormat)->nBlockAlign;
     }
     ~NativeSink(){clearType(desired_);clearType(connected_);}
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** p)override{
@@ -74,7 +91,7 @@ public:
         if(!peer||!type)return E_POINTER;std::lock_guard lock(mutex_);if(state_!=State_Stopped)return VFW_E_NOT_STOPPED;if(peer_)return VFW_E_ALREADY_CONNECTED;
         PIN_DIRECTION direction;if(FAILED(peer->QueryDirection(&direction))||direction!=PINDIR_OUTPUT)return VFW_E_INVALID_DIRECTION;
         if(QueryAccept(type)!=S_OK)return VFW_E_TYPE_NOT_ACCEPTED;
-        const auto hr=copyType(connected_,*type);if(FAILED(hr))return hr;peer_=peer;captureMediaLayout(*type,layout_);return S_OK;
+        const auto hr=copyType(connected_,*type);if(FAILED(hr))return hr;peer_=peer;if(!audio_)captureMediaLayout(*type,layout_);return S_OK;
     }
     HRESULT STDMETHODCALLTYPE Disconnect()override{std::lock_guard lock(mutex_);if(state_!=State_Stopped)return VFW_E_NOT_STOPPED;const bool connected=bool(peer_);peer_.Reset();allocator_.Reset();clearType(connected_);return connected?S_OK:S_FALSE;}
     HRESULT STDMETHODCALLTYPE ConnectedTo(IPin** p)override{if(!p)return E_POINTER;std::lock_guard lock(mutex_);*p=nullptr;return peer_?peer_.CopyTo(p):VFW_E_NOT_CONNECTED;}
@@ -83,7 +100,7 @@ public:
     HRESULT STDMETHODCALLTYPE QueryDirection(PIN_DIRECTION* p)override{if(!p)return E_POINTER;*p=PINDIR_INPUT;return S_OK;}
     HRESULT STDMETHODCALLTYPE QueryId(LPWSTR* p)override{if(!p)return E_POINTER;*p=static_cast<LPWSTR>(CoTaskMemAlloc(sizeof(L"Input")));if(!*p)return E_OUTOFMEMORY;memcpy(*p,L"Input",sizeof(L"Input"));return S_OK;}
     HRESULT STDMETHODCALLTYPE QueryAccept(const AM_MEDIA_TYPE* p)override{
-        if(!p)return E_POINTER;std::lock_guard lock(mutex_);if(peer_)return equivalentCaptureTypes(*p,connected_)?S_OK:S_FALSE;CaptureMediaLayout candidate;
+        if(!p)return E_POINTER;std::lock_guard lock(mutex_);if(audio_)return sameAudio(*p,peer_?connected_:desired_)?S_OK:S_FALSE;if(peer_)return equivalentCaptureTypes(*p,connected_)?S_OK:S_FALSE;CaptureMediaLayout candidate;
         return captureMediaLayout(*p,candidate)&&p->subtype==desired_.subtype&&candidate.width==layout_.width&&candidate.height==layout_.height?S_OK:S_FALSE;
     }
     HRESULT STDMETHODCALLTYPE EnumMediaTypes(IEnumMediaTypes** p)override{if(!p)return E_POINTER;try{*p=new TypeEnum(desired_);return S_OK;}catch(...){*p=nullptr;return E_OUTOFMEMORY;}}
@@ -102,10 +119,11 @@ public:
         AM_MEDIA_TYPE* changed=nullptr;const auto typeHr=sample->GetMediaType(&changed);
         if(FAILED(typeHr)){if(changed){clearType(*changed);CoTaskMemFree(changed);}log::error("capture",std::format("sample GetMediaType hr=0x{:08X}",uint32_t(typeHr)));return typeHr;}
         if(typeHr==S_OK&&changed){
-            const bool same=equivalentCaptureTypes(*changed,connected_);
+            const bool same=audio_?sameAudio(*changed,connected_):equivalentCaptureTypes(*changed,connected_);
             clearType(*changed);CoTaskMemFree(changed);if(!same){log::error("capture",std::format("dynamic capture contract changed; reopen required hr=0x{:08X}",uint32_t(VFW_E_INVALIDMEDIATYPE)));return VFW_E_INVALIDMEDIATYPE;}
         }
-        if(sample->GetActualDataLength()<LONG(layout_.sampleBytes))return VFW_E_BUFFER_UNDERFLOW;
+        if(audio_){const auto block=reinterpret_cast<const WAVEFORMATEX*>(connected_.pbFormat)->nBlockAlign;if(sample->GetActualDataLength()<0||sample->GetActualDataLength()%block)return VFW_E_BUFFER_UNDERFLOW;}
+        else if(sample->GetActualDataLength()<LONG(layout_.sampleBytes))return VFW_E_BUFFER_UNDERFLOW;
         try{return callback_(sample);}catch(...){return E_FAIL;}
     }
     HRESULT STDMETHODCALLTYPE ReceiveMultiple(IMediaSample** p,long n,long* done)override{if(!p||!done||n<0)return E_INVALIDARG;*done=0;while(*done<n){const auto hr=Receive(p[*done]);if(hr!=S_OK)return hr;++*done;}return S_OK;}
@@ -114,6 +132,10 @@ public:
 }
 HRESULT createNativeCaptureSink(const AM_MEDIA_TYPE& type,std::function<HRESULT(IMediaSample*)> callback,ComPtr<IBaseFilter>& filter,ComPtr<IPin>& pin){
     filter.Reset();pin.Reset();CaptureMediaLayout layout;if(!captureMediaLayout(type,layout))return VFW_E_INVALIDMEDIATYPE;
+    try{filter.Attach(new NativeSink(type,std::move(callback)));return filter.As(&pin);}catch(...){return E_OUTOFMEMORY;}
+}
+HRESULT createNativeAudioSink(const AM_MEDIA_TYPE& type,std::function<HRESULT(IMediaSample*)> callback,ComPtr<IBaseFilter>& filter,ComPtr<IPin>& pin){
+    filter.Reset();pin.Reset();if(!audioType(type))return VFW_E_INVALIDMEDIATYPE;
     try{filter.Attach(new NativeSink(type,std::move(callback)));return filter.As(&pin);}catch(...){return E_OUTOFMEMORY;}
 }
 }

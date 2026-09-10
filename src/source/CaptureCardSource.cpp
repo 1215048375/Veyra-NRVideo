@@ -44,6 +44,9 @@ struct CaptureCardSource::Impl:ISampleGrabberCB {
     Clock::time_point pendingArrival{},readArrival{},firstArrival{},latestArrival{};
     ComPtr<IGraphBuilder> graph;ComPtr<ICaptureGraphBuilder2> builder;ComPtr<IBaseFilter> device,grabFilter,nullFilter,audioFilter;ComPtr<IAMStreamConfig> config;ComPtr<ISampleGrabber> grab;ComPtr<IMediaControl> control;ComPtr<IMediaEvent> events;
     float lastAudioGain=-1;bool audioGainSupported=false;
+    ComPtr<IBaseFilter> audioSink;ComPtr<IReferenceClock> referenceClock;
+    std::unique_ptr<sink::CaptureAudioSession> audioSession;
+    std::wstring audioError;
     SourceInfo info;CaptureMediaLayout layout;Clock::time_point lastFrame;
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** pp)override{if(!pp)return E_POINTER;*pp=nullptr;if(id==IID_IUnknown||id==__uuidof(ISampleGrabberCB)){*pp=static_cast<ISampleGrabberCB*>(this);AddRef();return S_OK;}return E_NOINTERFACE;}
     ULONG STDMETHODCALLTYPE AddRef()override{return ++refs;}ULONG STDMETHODCALLTYPE Release()override{return --refs;}
@@ -86,12 +89,15 @@ std::vector<CaptureFormat> CaptureCardSource::formats(unsigned device){ComPtr<IG
             out.push_back({i,w,h,fps,std::format(L"{} x {} @ {:.2f} fps · {} [format {}]",w,h,fps,pixel,i)});}freeType(t);}return out;}
 const SourceInfo& CaptureCardSource::info()const{return p_->info;}
 bool CaptureCardSource::setAudioGain(float gain){
-    auto& p=*p_;if(!p.graph||!p.audioFilter)return false;
+    auto& p=*p_;if(p.audioSession){p.audioSession->setGain(gain);return p.audioSession->snapshot().available;}if(!p.graph||!p.audioFilter)return false;
     if(gain==p.lastAudioGain)return p.audioGainSupported;
     ComPtr<IBasicAudio> audio;HRESULT hr=p.graph.As(&audio);
     if(SUCCEEDED(hr)){long attenuation=gain<=0?-10000:long(std::clamp(2000.0*std::log10(double(gain)),-10000.0,0.0));hr=audio->put_Volume(attenuation);}
     p.lastAudioGain=gain;p.audioGainSupported=SUCCEEDED(hr);log::info("capture-audio",std::format("application gain={} hr=0x{:X}",gain,unsigned(hr)));return p.audioGainSupported;
 }
+void CaptureCardSource::videoPresented(double pts,int64_t time){if(p_->audioSession)p_->audioSession->videoPresented(pts,time);}
+void CaptureCardSource::setAudioSync(unsigned mode,int offset){if(p_->audioSession)p_->audioSession->setSync(mode,offset);}
+sink::CaptureAudioState CaptureCardSource::audioState()const{auto state=p_->audioSession?p_->audioSession->snapshot():sink::CaptureAudioState{};if(!p_->audioError.empty())state.error=p_->audioError;return state;}
 bool CaptureCardSource::open(const SourceOpenDesc& desc){return configure(desc)&&start();}
 bool CaptureCardSource::configure(const SourceOpenDesc& desc){close();p_->lastAudioGain=-1;auto& p=*p_;unsigned index=0;int format=0,audio=-1;if(swscanf_s(desc.path.c_str(),L"capture:%u:%d:%d",&index,&format,&audio)!=3)return false;
     if(!configuration(index,p.graph,p.builder,p.device,p.config))return false;
@@ -130,7 +136,45 @@ bool CaptureCardSource::configure(const SourceOpenDesc& desc){close();p_->lastAu
     p.info={};p.info.kind=pipeline::SourceKind::CaptureCard;p.info.width=p.layout.width;p.info.height=p.layout.height;p.info.averageFps=p.layout.duration>0?1e7/p.layout.duration:0;p.info.duration=pipeline::Rational::unknown();p.info.color=p.layout.color;
     p.nominalDuration100ns=p.layout.duration;
     log::info("capture-color",std::format("format={} stride={} rowBytes={} bytes={} bottomUp={} matrix={} assumed={} range={} assumed={} workingTransfer={} assumed={} (SDR display-referred)",int(p.layout.format),p.layout.stride,p.layout.rowBytes,p.layout.sampleBytes,p.layout.bottomUp,int(p.info.color.matrix),p.info.color.matrixAssumed,int(p.info.color.range),p.info.color.rangeAssumed,int(p.info.color.transfer),p.info.color.transferAssumed));
-    if(audio>=0){if(!bind(unsigned(audio),true,p.audioFilter)||FAILED(p.graph->AddFilter(p.audioFilter.Get(),L"Capture audio"))||FAILED(p.builder->RenderStream(&PIN_CATEGORY_CAPTURE,&MEDIATYPE_Audio,p.audioFilter.Get(),nullptr,nullptr)))return false;}
+    if(audio>=0){
+        const bool connected=[&]{
+        if(!bind(unsigned(audio),true,p.audioFilter)||FAILED(p.graph->AddFilter(p.audioFilter.Get(),L"Capture audio")))return false;
+        ComPtr<IPin> audioPin;
+        if(FAILED(p.builder->FindPin(p.audioFilter.Get(),PINDIR_OUTPUT,&PIN_CATEGORY_CAPTURE,&MEDIATYPE_Audio,FALSE,0,&audioPin)))return false;
+        ComPtr<IEnumMediaTypes> types;if(FAILED(audioPin->EnumMediaTypes(&types)))return false;
+        bool connectedAudio=false;
+        for(;;){
+            AM_MEDIA_TYPE* type=nullptr;if(types->Next(1,&type,nullptr)!=S_OK)break;
+            auto session=std::make_unique<sink::CaptureAudioSession>();ComPtr<IBaseFilter> candidate;ComPtr<IPin> terminal;
+            if(type->formattype==FORMAT_WaveFormatEx&&type->pbFormat&&type->cbFormat>=sizeof(WAVEFORMATEX)&&session->configure(*reinterpret_cast<WAVEFORMATEX*>(type->pbFormat))){
+                auto* target=session.get();
+                hr=createNativeAudioSink(*type,[target](IMediaSample* sample){
+                    BYTE* bytes=nullptr;REFERENCE_TIME begin=0,end=0;
+                    if(FAILED(sample->GetPointer(&bytes))||FAILED(sample->GetTime(&begin,&end)))return VFW_E_SAMPLE_TIME_NOT_SET;
+                    return target->push(bytes,size_t(sample->GetActualDataLength()),double(begin)/10000,sample->IsDiscontinuity()==S_OK)?S_OK:E_FAIL;
+                },candidate,terminal);
+                if(SUCCEEDED(hr))hr=p.graph->AddFilter(candidate.Get(),L"Veyra audio PCM");
+                if(SUCCEEDED(hr))hr=p.graph->ConnectDirect(audioPin.Get(),terminal.Get(),type);
+                if(SUCCEEDED(hr)){p.audioSink=candidate;p.audioSession=std::move(session);connectedAudio=true;}
+                else if(candidate)p.graph->RemoveFilter(candidate.Get());
+                log::info("capture-audio",std::format("PCM ConnectDirect hr=0x{:X}",unsigned(hr)));
+            }
+            freeType(type);if(connectedAudio)break;
+        }
+        return connectedAudio;
+        }();
+        if(!connected){
+            p.audioError=L"采集音频设备或 PCM 格式不可用；视频继续运行";
+            log::warn("capture-audio","audio connection unavailable; retaining video capture");
+            if(p.audioFilter)p.graph->RemoveFilter(p.audioFilter.Get());
+            p.audioFilter.Reset();
+        }
+        // Pin the common graph clock before Run; removing DirectShow's audio
+        // renderer must not silently change the capture graph's reference.
+        ComPtr<IMediaFilter> mediaFilter;
+        if(FAILED(CoCreateInstance(CLSID_SystemClock,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&p.referenceClock)))||
+            FAILED(p.graph.As(&mediaFilter))||FAILED(mediaFilter->SetSyncSource(p.referenceClock.Get())))return false;
+    }
     if(FAILED(p.graph.As(&p.control))||FAILED(p.graph.As(&p.events)))return false;
     if(p.grab&&(FAILED(p.grab->SetBufferSamples(FALSE))||FAILED(p.grab->SetCallback(&p,0))))return false;
     for(auto** f:{&p.frame,&p.pendingFrame}){
@@ -148,6 +192,7 @@ bool CaptureCardSource::configure(const SourceOpenDesc& desc){close();p_->lastAu
 }
 bool CaptureCardSource::start(){
     auto& p=*p_;if(p.info.opened)return true;if(!p.configured||!p.control)return false;
+    if(p.audioSession&&!p.audioSession->start())log::warn("capture-audio","audio start failed; retaining video capture");
     p.lastFrame=Impl::Clock::now();const auto hr=p.control->Run();p.info.opened=SUCCEEDED(hr);
     veyra::log::info("capture",std::format("Run hr=0x{:X} actual={}x{} nominalFps={:.3f} mailbox=1 ownedBuffers=2",unsigned(hr),p.info.width,p.info.height,p.info.averageFps));return p.info.opened;
 }
@@ -178,7 +223,8 @@ SourceReadStatus CaptureCardSource::read(pipeline::FramePacket& packet,const AVF
 }
 void CaptureCardSource::close()noexcept{
     auto& p=*p_;if(p.control)p.control->Stop();if(p.grab)p.grab->SetCallback(nullptr,0);
-    p.events.Reset();p.control.Reset();p.grab.Reset();p.nullFilter.Reset();p.grabFilter.Reset();p.audioFilter.Reset();p.config.Reset();p.device.Reset();p.builder.Reset();p.graph.Reset();
+    if(p.audioSession)p.audioSession->stop();p.audioError.clear();
+    p.events.Reset();p.control.Reset();p.grab.Reset();p.nullFilter.Reset();p.grabFilter.Reset();p.audioSink.Reset();p.audioFilter.Reset();p.config.Reset();p.device.Reset();p.builder.Reset();p.graph.Reset();p.referenceClock.Reset();p.audioSession.reset();
     av_frame_free(&p.frame);av_frame_free(&p.pendingFrame);p.info={};
     p.sequence=p.received=p.dropped=p.lastDrop=0;p.pending=p.callbackError=p.configured=false;p.lastPts=p.readAgeMs=0;
 }

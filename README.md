@@ -101,6 +101,10 @@ Video / image / capture card
 
 当前修复以最新用户要求、`AGENTS.md`、对应 `docs` 修复方案和 `docs/WORKLOG.md` 为准。早期 `loop/` 状态、控制哈希与 Phase 队列已归档，不再作为开发前置门禁。Current work follows the latest task, `AGENTS.md`, its repair plan and `docs/WORKLOG.md`; the legacy Loop state and control-hash gates are historical only.
 
+当前修复进度：[后端、帧率、链路延迟与音画同步实施记录](docs/CONTINUATION_REPAIR_IMPLEMENTATION_2026-09-10.md)。开发版已加入集中实时产出统计、XeSS切换修正、受控采集音频同步及FRUC重置后错图修复；高倍率FRUC的性能、AMD NR本体和实体采集验收仍未完成。这里的开发改动尚未更新已发布的0.0.1用户包。
+
+Current development progress is recorded in the linked implementation log. Changes include completed-output telemetry, corrected XeSS switching, controlled capture-audio synchronization, and FRUC reset correctness. High-multiplier FRUC performance, AMD NR integration, and physical capture acceptance remain unfinished. These changes have not been published as an update to the 0.0.1 package.
+
 | Path | Purpose |
 | --- | --- |
 | `apps/veyra` | Win32 application and the two-mode interface |

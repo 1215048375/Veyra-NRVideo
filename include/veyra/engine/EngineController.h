@@ -9,7 +9,7 @@
 #include "veyra/engine/EnhancementSettings.h"
 #include "veyra/diagnostics/FrameMetrics.h"
 #include "veyra/engine/PreviewView.h"
-#include "veyra/engine/FrameRateWindow.h"
+#include "veyra/sink/CaptureAudioSession.h"
 namespace veyra::sink { struct RgbaImage; }
 namespace veyra::gfx { class D3D12DeviceContext; class CommandSlotRing; }
 namespace veyra::engine {
@@ -26,6 +26,10 @@ struct PlayerSnapshot {
     uint64_t sessionId=0,rejectedRevision=0;float volume=1;bool muted=false,audioAvailable=false;
     std::wstring status=L"请打开视频或图片";
     EnhancementSettings desired,applied;bool applying=false;
+    bool nrActive=false,srActive=false,fgActive=false;
+    std::wstring backendWarning;
+    sink::CaptureAudioState captureAudio;
+    bool audioRebuffering=false;
     double position=0,duration=0,fps=0,lateMs=0,lateP95Ms=0;
     diagnostics::FrameMetrics metrics;
     std::optional<double> submissionFps;
@@ -64,7 +68,6 @@ private:
     mutable std::mutex mutex_;
     PlayerSnapshot snapshot_;
     std::shared_ptr<FrameFlowWindow> activeFlow_;
-    FrameRateWindow processingRate_;
     PreviewView previewView_;
     std::wstring savePath_;
     std::thread worker_;

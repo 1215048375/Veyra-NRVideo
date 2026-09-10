@@ -16,6 +16,7 @@ public:
     bool beforePresent();
     bool afterPresent();
     uint64_t generatedCount() const;
+    uint64_t presentedCount() const;
 private:
     struct Impl;
     std::unique_ptr<Impl> p_;

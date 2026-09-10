@@ -2,6 +2,7 @@
 #include "veyra/source/IFrameSource.h"
 #include <memory>
 #include <vector>
+#include "veyra/sink/CaptureAudioSession.h"
 namespace veyra::source {
 struct CaptureFormat {int index=0;unsigned width=0,height=0;double fps=0;std::wstring label;};
 struct CaptureMetrics {
@@ -20,6 +21,9 @@ public:
     bool start();
     bool setAudioGain(float); // call on the graph owner thread; never system volume
     CaptureMetrics metrics()const;
+    void videoPresented(double ptsMs,int64_t host100ns);
+    void setAudioSync(unsigned mode,int offsetMs);
+    sink::CaptureAudioState audioState()const;
     const SourceInfo& info()const override;
     SourceReadStatus read(pipeline::FramePacket&,const AVFrame**)override;
     bool seek(const pipeline::Rational&)override{return false;}

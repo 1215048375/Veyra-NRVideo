@@ -1,5 +1,7 @@
 # XeSS 补帧与 AMD 光流接入方案
 
+> 当前续接：[后端切换、真实帧率与音画同步修复方案](CONTINUATION_REPAIR_PLAN_2026-09-10.md)。XeSS预览2X与AMD光流已有代码和RTX5070短测；XeSS实际UI可见性/切换、真实输出口径仍待修复，AMD NR本体未接入。本文早期“仅研究”与Phase顺序只代表当时状态，不代替当前验收。
+
 日期：2026-09-10。状态：研究完成；已有窄范围产品接入，仍处于 Phase 7 `in_progress`。本文不改变阶段门槛或默认处理路线。
 
 当前实现包含统一的 2K / 4K / 8K SR 目标、AMD FidelityFX 光流 provider 和 Intel XeSS-FG 代理交换链显示后端。RTX 5070 窄测记录了 AMD OF Create/Dispatch/Destroy 成功（48 次 dispatch），并以非周期纹理验证 canonical `current -> previous` 方向：源图右移 2 像素得到 `(-2, 0)`，左移 2 像素得到 `(2, 0)`；XeSS 初始化、资源标记和 Present 成功（43 次 SDK generated 计数，debugErrors=0）；SR 2K/8K 输出非黑。它们只证明该机器上的所测 SDK 调用链与 AMD OF 的已知平移方向，**不证明** AMD GPU 兼容性、实际扫描输出帧率、画质、8K 实时性或长时稳定性。

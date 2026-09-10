@@ -72,5 +72,22 @@ int main(){
     frame=av_frame_alloc();frame->format=AV_PIX_FMT_NV12;frame->width=4;frame->height=4;av_frame_get_buffer(frame,32);raw.assign(36,0xee);for(int y=0;y<6;++y)for(int x=0;x<4;++x)raw[y*6+x]=uint8_t(y*10+x);
     check(source::copyCaptureSample(layout,raw.data(),raw.size(),*frame)&&frame->data[1][0]==40&&frame->data[1][frame->linesize[1]]==50,"NV12 UV offset respects input stride");av_frame_free(&frame);
     type.subtype=MEDIASUBTYPE_RGB32;vi.bmiHeader.biHeight=2;vi.bmiHeader.biSizeImage=32;check(source::captureMediaLayout(type,layout)&&layout.bottomUp&&layout.rowBytes==16,"RGB DIB keeps bottom-up compatibility");
+    WAVEFORMATEX wave{};wave.wFormatTag=WAVE_FORMAT_PCM;wave.nChannels=2;wave.nSamplesPerSec=48000;wave.wBitsPerSample=16;wave.nBlockAlign=4;wave.nAvgBytesPerSec=192000;
+    AM_MEDIA_TYPE audio{};audio.majortype=MEDIATYPE_Audio;audio.subtype=MEDIASUBTYPE_PCM;audio.formattype=FORMAT_WaveFormatEx;audio.cbFormat=sizeof(wave);audio.pbFormat=reinterpret_cast<BYTE*>(&wave);
+    output.Attach(new OutputPin);unsigned audioReceived=0;
+    check(SUCCEEDED(source::createNativeAudioSink(audio,[&](IMediaSample*){++audioReceived;return S_OK;},filter,input)),"create shared native PCM terminal");
+    check(filter&&SUCCEEDED(filter.As(&memory))&&input->ReceiveConnection(output.Get(),&audio)==S_OK,"PCM format is accepted explicitly");
+    wave.nSamplesPerSec=44100;wave.nAvgBytesPerSec=176400;check(input->QueryAccept(&audio)==S_FALSE,"audio rate change requires reconnect");wave.nSamplesPerSec=48000;wave.nAvgBytesPerSec=192000;
+    ALLOCATOR_PROPERTIES audioWanted{},audioActual{};
+    check(memory->GetAllocatorRequirements(&audioWanted)==S_OK&&audioWanted.cbBuffer==4,"audio allocator retains frame alignment after connection");
+    audioWanted.cbBuffer=1920;
+    bool audioReady=memory->GetAllocator(&allocator)==S_OK&&allocator->SetProperties(&audioWanted,&audioActual)==S_OK&&allocator->Commit()==S_OK;
+    check(audioReady,"PCM allocator initialized");
+    if(audioReady){ComPtr<IMediaSample> sample;allocator->GetBuffer(&sample,nullptr,nullptr,0);sample->SetActualDataLength(1920);filter->Run(0);
+        check(memory->Receive(sample.Get())==S_OK&&audioReceived==1,"variable length aligned PCM delivered");
+        sample->SetActualDataLength(1919);check(FAILED(memory->Receive(sample.Get()))&&audioReceived==1,"partial PCM sample is rejected");
+        filter->Stop();sample.Reset();allocator->Decommit();input->Disconnect();
+    }
+    memory.Reset();input.Reset();filter.Reset();output.Reset();allocator.Reset();
     CoUninitialize();std::cout<<"failures="<<failures<<'\n';return failures?1:0;
 }

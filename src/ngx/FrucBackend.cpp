@@ -118,8 +118,11 @@ bool FrucBackend::initialize(gfx::D3D12DeviceContext& ctx,unsigned width,unsigne
     return p.start();
 }
 bool FrucBackend::reset() {
-    // Fresh process avoids the pinned FRUC runtime's invalid-handle/SEH after
-    // destruction/recreation. Resources stay on GPU; caller drains consumers.
+    // The next source frame updates FRUC history without warping across the
+    // discontinuity. Keep CUDA allocations and worker alive during normal reset.
+    p_->message->command=3;p_->message->result=1;p_->message->seh=0;
+    if(SetEvent(p_->request.value)&&p_->acknowledge(10000))return true;
+    log::warn("fruc-ipc","CUDA reseed failed; restarting owned worker");
     p_->stop();return p_->start();
 }
 void FrucBackend::recordInput(ID3D12GraphicsCommandList* list,ID3D12Resource* input,unsigned parity) {

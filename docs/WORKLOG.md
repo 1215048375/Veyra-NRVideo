@@ -1,3 +1,31 @@
+# 2026-09-11 继续修复目标模式执行中
+
+最新状态以 [实施记录的2026-09-11部分](CONTINUATION_REPAIR_IMPLEMENTATION_2026-09-10.md) 为准。已推进非阻塞完成观察（deadline/反压期间计数）、53项统计合同、真实RTX23项回放，以及文件过载/暂停seek和受控采集音频恢复。采集音频首版欠载重置过于激进的失败已保留，改为持续断流后重锚；11.05秒恢复测试通过，非实卡验收。
+
+FRUC取得新实证：应用自有CUDA arrays+D3D11纹理桥接、graphics map/unmap、同CUDAcontext/批量互操作，替代旧FRUC内部DX11同步路径。六次重置/向后PTS/颜色反转的2X3X4X像素GT通过；reset现在只重种首帧，不常规重启worker或CPU排空队列。最新批量版本4X正确性通过，2X3X/集成复测待做。未加入cuCtxSynchronize或产品像素回读。原生4K4X吞吐测试仍慢（初版FG区间70.58ms），1080p批量版本约26.05ms，不能声称整体性能已经解决；SDK map/unmap自身可能阻塞。
+
+实际命令均为 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Root <root> -Preset x64-release` 和 `scripts/acceptance/scheduler-short-test.ps1 -Name <unique> -Exe <test> -TestArgs <args>`；完整名称、SHA、失败/通过与路径见实施记录，单次<300秒。AMD NR缺依赖/目标硬件且provider仍未接入，整体目标active。未commit/push/发布；下面2026-09-10内容为前序进度，不覆盖本条。
+
+## 2026-09-10 前序进度
+
+续接已修文件PCM时间戳/首缓冲/seek/解码尾包，并通过真实WASAPI与44.1/48k样本数回归；新增采集受控PCM/WASAPI与自动/手动/关闭同步设置，合成80ms视频延迟回归通过（平均软件偏差12.8ms、0溢出/欠载），实体采集未测试。帧率窗口不再因Drop连续清空，51项合同通过。FRUC双向D3D11桥接候选失败已撤回；AMD固定源码取得，但网络权重/preview工具链及目标硬件未就绪，provider未完成。详情及失败日志见实施记录。文件过载共同缓冲刚写待测，目标仍执行中；未commit/push/发布。
+
+用户明确开启目标模式，已建立目标并开始改代码。当前证据和未完成列表见 [继续修复实施记录](CONTINUATION_REPAIR_IMPLEMENTATION_2026-09-10.md)。R0补帧选择器布局及XeSS失败回滚已通过真实GUI正常/故障注入测试；R1统计与状态区首版已构建，49项合同与23项采集回放回归通过。AMD NR、完整FRUC/调度、音画同步仍待实施，未宣称全目标完成。单次测试<300秒，未测试实体采集卡，未发布。
+
+# 2026-09-10 后端切换、真实产出与音画同步继续修复方案
+
+用户要求先写新方案、汇报准备修复。本轮交付 [CONTINUATION_REPAIR_PLAN_2026-09-10.md](CONTINUATION_REPAIR_PLAN_2026-09-10.md)，包含XeSS可见切换、独立AMD/NVIDIA NR、真实处理产出FPS、集中链路/总延迟、采集和文件音画同步，以及上轮未完成的FRUC reset与S3/S4。没有修改产品代码或把方案当已实现。
+
+本地基线 `be00e27`，进入本轮时Git干净。源码确认：SettingsWindow后端选择器208的y=8与标题1103的y=12重叠，尚未进行本轮UI复现；AMD当前只有光流、没有NR provider；`s.fps`统计GPU完成的真实源帧而非直接输入FPS，但不含有效生成；状态区只展示NR圆环和源帧速率。采集音频通过DirectShow自动renderer直通，未与GPU视频对齐；文件已有WASAPI音频主时钟，需保留并修复必要边界。
+
+核对本地Intel XeSS3.0.2官方header：`framesPresented`是上次调用送往呈现的帧数，不是逐帧GPU完成或屏幕扫描计数。新方案要求明确标为SDK提交；主处理产出与呈现提交分开，不能乘倍率或用旧计数伪造高FPS。延迟按同帧首尾时间直接测量，各阶段不能重复相加；音频采用共同PTS和有界补偿，不承诺消除计算延迟。
+
+同步HANDOFF与README当前入口，给既有研究/调度计划加入续接链接。旧Loop与Phase规则继续归档。只执行Git状态/日志、rg/Get-Content源码和文档读取、本地SDK接口核对、用户截图查看与文档编辑；本轮未构建、未执行新Create/Evaluate、AMD网络、FRUC测试或实卡，也未操作用户当前应用。未push、发布或打包运行时。
+
+文档验证：`git diff --check` exit0；PowerShell链接/围栏/空白检查通过，覆盖7份文档、29个本地链接，新方案也检查了未跟踪文件的行尾空白。Git仅提示既有CRLF自动转换设置。一次多文件patch因旧标题不匹配整体拒绝，没有写入；读取实际标题后重新应用成功。这些结果只证明文档一致性。
+
+下一条任务：R0，修专业页XeSS选择器的布局/命中并验证实际后端切换；完整任务顺序和真实阻塞处理见新方案。上轮的软件通过与FRUC失败证据保留，不冒充本轮新增修复结果。
+
 # 2026-09-10 旧 Loop 退役与调度修复
 
 用户明确废弃初期 Loop；AGENTS/README/旧 Playbook/ACTIVE_DELIVERY_PLAN/gates README 已标明旧控制哈希、STOP、Phase 队列不再阻塞当前修复，未改 CONTROL_HASHES 自我放行。delivery 删旧 STOP 依赖并显式加载当前 PowerShell 自带 Utility 模块；导出完整性代码和断言未改。

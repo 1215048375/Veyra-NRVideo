@@ -9,7 +9,7 @@
 
 namespace veyra::gfx {
 struct XessPresenter::Impl {
-    uint64_t generated=0;
+    uint64_t generated=0,presented=0;
 #ifdef VEYRA_HAS_XESS
     HMODULE fgDll=nullptr,llDll=nullptr;
     xefg_swapchain_handle_t fg=nullptr;
@@ -48,6 +48,9 @@ struct XessPresenter::Impl {
 XessPresenter::XessPresenter():p_(std::make_unique<Impl>()){}
 XessPresenter::~XessPresenter()=default;
 bool XessPresenter::initialize(ID3D12Device* device,ID3D12CommandQueue* queue,IDXGIFactory2* factory,HWND window,const DXGI_SWAP_CHAIN_DESC1& desc,IDXGISwapChain3** swapchain){
+    if(GetEnvironmentVariableW(L"VEYRA_TEST_XESS_INIT_FAILURE",nullptr,0)){
+        log::warn("xess-fg","test-only initialization rejection; runtime not loaded");return false;
+    }
 #ifdef VEYRA_HAS_XESS
     auto& p=*p_;const auto root=runtime::localDataDirectory()/"intel"/"experimental";
     auto load=[&](const wchar_t* name,const char* hash){auto path=std::filesystem::absolute(root/name);
@@ -141,6 +144,7 @@ bool XessPresenter::afterPresent(){
     xefg_swapchain_present_status_t status{};
     if(!p.check(p.xefgSwapChainGetLastPresentStatusFn(p.fg,&status),"PresentStatus"))return false;
     if(status.isFrameGenEnabled&&status.frameGenResult==XEFG_SWAPCHAIN_RESULT_SUCCESS&&status.framesPresented>1)p.generated+=status.framesPresented-1;
+    if(status.frameGenResult>=0)p.presented+=status.framesPresented;
     if(log::verboseFrameLogs()||p.id%60==0||status.frameGenResult<0)log::info("xess-fg",std::format("presentId={} enabled={} result={} framesPresented={} generatedTotal={} (SDK submissions, not measured scanout)",p.id,status.isFrameGenEnabled,int(status.frameGenResult),status.framesPresented,p.generated));
     return status.frameGenResult>=0;
 #else
@@ -148,4 +152,5 @@ bool XessPresenter::afterPresent(){
 #endif
 }
 uint64_t XessPresenter::generatedCount()const{return p_->generated;}
+uint64_t XessPresenter::presentedCount()const{return p_->presented;}
 }

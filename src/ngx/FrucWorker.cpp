@@ -16,7 +16,7 @@
 namespace veyra::ngx {
 using Microsoft::WRL::ComPtr;
 namespace {
-bool hrOk(HRESULT hr,const char* op){log::info("fruc",std::format("{} hr=0x{:X}",op,unsigned(hr)));return SUCCEEDED(hr);}
+bool hrOk(HRESULT hr,const char* op,bool frequent=false){if(!frequent||FAILED(hr)||log::verboseFrameLogs())log::info("fruc",std::format("{} hr=0x{:X}",op,unsigned(hr)));return SUCCEEDED(hr);}
 template<class Fn, class... Args>
 NvOFFRUC_STATUS callSafe(unsigned& seh, Fn fn, Args... args) {
     __try { return fn(args...); }
@@ -39,6 +39,25 @@ struct WorkerKernel {
     using GetContext = CUresult (CUDAAPI*)(CUcontext*);
     using SetContext = CUresult (CUDAAPI*)(CUcontext);
     HMODULE cuda=nullptr; GetContext getContext=nullptr; SetContext setContext=nullptr;
+    bool reseed=false;
+    using DxDevice=CUresult(CUDAAPI*)(CUdevice*,IDXGIAdapter*);
+    using DxRegister=CUresult(CUDAAPI*)(CUgraphicsResource*,ID3D11Resource*,unsigned);
+    DxRegister dxRegister=nullptr;
+    decltype(&cuCtxCreate) createContext=nullptr;
+    decltype(&cuCtxDestroy) destroyContext=nullptr;
+    decltype(&cuArrayCreate) createArray=nullptr;
+    decltype(&cuArrayDestroy) destroyArray=nullptr;
+    decltype(&cuGraphicsMapResources) mapResources=nullptr;
+    decltype(&cuGraphicsUnmapResources) unmapResources=nullptr;
+    decltype(&cuGraphicsUnregisterResource) unregisterGraphics=nullptr;
+    decltype(&cuGraphicsSubResourceGetMappedArray) mappedArray=nullptr;
+    decltype(&cuMemcpy2DAsync) copyAsync=nullptr;
+    CUdevice cudaDevice=0;
+    CUcontext ownedContext[3]={}; // Only slot 0 owns the context shared by all streams.
+    CUarray arrays[3][3]={};
+    CUgraphicsResource graphics[3][3]={};
+    ComPtr<ID3D11Texture2D> bridge[3][3];
+    ComPtr<ID3D11DeviceContext4> context4;
     CUcontext streamContext[3]={};
     HMODULE lib=nullptr;unsigned width=0,height=0,count=0;uint64_t serial=0;
     ComPtr<ID3D11Device> device;ComPtr<ID3D11Device5> device5;
@@ -66,16 +85,26 @@ struct WorkerKernel {
             if(setContext&&streamContext[j])cudaOk(setContext(streamContext[j]),"ReleaseContext");
             if(registered[j]) {
                 NvOFFRUC_UNREGISTER_RESOURCE_PARAM r{};
-                r.uiCount=3;r.pArrResource[0]=tex[0].Get();r.pArrResource[1]=tex[1].Get();r.pArrResource[2]=tex[2+j].Get();
+                r.uiCount=3;for(unsigned i=0;i<3;++i)r.pArrResource[i]=arrays[j][i];
                 checkedCall("Unregister",unreg,handles[j],&r);
                 registered[j]=false;
             }
             checkedCall("Destroy",destroy,handles[j]);
             handles[j]=nullptr;streamContext[j]=nullptr;
         }
+        if(ownedContext[0]){
+            cudaOk(setContext(ownedContext[0]),"InteropReleaseContext");
+            for(unsigned j=0;j<3;++j){
+            for(unsigned i=0;i<3;++i){if(graphics[j][i])cudaOk(unregisterGraphics(graphics[j][i]),"InteropUnregister");if(arrays[j][i])cudaOk(destroyArray(arrays[j][i]),"InteropFreeArray");graphics[j][i]=nullptr;arrays[j][i]=nullptr;}
+            }
+            if(scope.saved==ownedContext[0])scope.saved=nullptr;
+            cudaOk(destroyContext(ownedContext[0]),"InteropDestroyContext");ownedContext[0]=nullptr;
+        }
     }
     ~WorkerKernel() {
         release();
+        for(auto& stream:bridge)for(auto& texture:stream)texture.Reset();
+        context4.Reset();
         for(auto& t:tex)t.Reset();
         fence11.Reset();context.Reset();device5.Reset();device.Reset();
         if(lib)FreeLibrary(lib);
@@ -88,16 +117,25 @@ struct WorkerKernel {
         if(!scope.valid)return false;
         for(unsigned j=0;j<count;++j) {
             NvOFFRUC_CREATE_PARAM c{};
-            c.uiWidth=width;c.uiHeight=height;c.pDevice=device.Get();
-            c.eResourceType=DirectX11Resource;c.eSurfaceFormat=ARGBSurface;c.eCUDAResourceType=CudaResourceTypeUndefined;
+            c.uiWidth=width;c.uiHeight=height;c.pDevice=nullptr;
+            c.eResourceType=CudaResource;c.eSurfaceFormat=ARGBSurface;c.eCUDAResourceType=CudaResourceCuArray;
+            if(!ownedContext[0]&&!cudaOk(createContext(&ownedContext[0],0,cudaDevice),"InteropCreateContext"))return false;
+            if(!cudaOk(setContext(ownedContext[0]),"InteropSharedContext"))return false;
             if(!checkedCall("Create",create,&c,&handles[j])||!handles[j])return false;
-            // This local runtime leaves each newly created stream's CUDA context
-            // current. Preserve it and explicitly bind it for subsequent calls.
+            // Each FRUC stream uses the caller-owned CUDA context and arrays.
             if(!cudaOk(getContext(&streamContext[j]),"StreamContext")||!streamContext[j])return false;
+            if(streamContext[j]!=ownedContext[0]){log::error("fruc","CUDA context ownership changed during Create");return false;}
             log::info("fruc",std::format("Context stream={} ptr={}",j,static_cast<void*>(streamContext[j])));
             NvOFFRUC_REGISTER_RESOURCE_PARAM r{};
-            r.uiCount=3;r.pD3D11FenceObj=fence11.Get();
-            r.pArrResource[0]=tex[0].Get();r.pArrResource[1]=tex[1].Get();r.pArrResource[2]=tex[j+2].Get();
+            r.uiCount=3;r.pD3D11FenceObj=nullptr;
+            for(unsigned i=0;i<3;++i){
+                {
+                    CUDA_ARRAY_DESCRIPTOR d{};d.Width=width;d.Height=height;d.Format=CU_AD_FORMAT_UNSIGNED_INT8;d.NumChannels=4;
+                    D3D11_TEXTURE2D_DESC texture{};texture.Width=width;texture.Height=height;texture.MipLevels=texture.ArraySize=1;texture.Format=DXGI_FORMAT_R8G8B8A8_UNORM;texture.SampleDesc.Count=1;texture.Usage=D3D11_USAGE_DEFAULT;texture.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_RENDER_TARGET;
+                    if(!hrOk(device->CreateTexture2D(&texture,nullptr,&bridge[j][i]),"InteropBridgeTexture")||!cudaOk(createArray(&arrays[j][i],&d),"InteropCreateArray")||!cudaOk(dxRegister(&graphics[j][i],bridge[j][i].Get(),0),"InteropRegisterTexture"))return false;
+                }
+                r.pArrResource[i]=arrays[j][i];
+            }
             if(!checkedCall("Register",reg,handles[j],&r))return false;
             registered[j]=true;
             if(!cudaOk(setContext(scope.saved),"RestoreAfterCreate"))return false;
@@ -124,26 +162,64 @@ bool WorkerKernel::initialize(FrucWorkerMessage& info) {
     if(!hrOk(device5->OpenSharedFence(reinterpret_cast<HANDLE>(info.fence),IID_PPV_ARGS(&fence11)),"OpenFence"))return false;
     for(unsigned j=0;j<count+2;++j)
         if(!hrOk(device5->OpenSharedResource1(reinterpret_cast<HANDLE>(info.textures[j]),IID_PPV_ARGS(&tex[j])),"OpenTexture"))return false;
+    {
+        const auto getDevice=reinterpret_cast<DxDevice>(GetProcAddress(cuda,"cuD3D11GetDevice"));
+        dxRegister=reinterpret_cast<DxRegister>(GetProcAddress(cuda,"cuGraphicsD3D11RegisterResource"));
+        createContext=reinterpret_cast<decltype(createContext)>(GetProcAddress(cuda,"cuCtxCreate_v2"));
+        destroyContext=reinterpret_cast<decltype(destroyContext)>(GetProcAddress(cuda,"cuCtxDestroy_v2"));
+        createArray=reinterpret_cast<decltype(createArray)>(GetProcAddress(cuda,"cuArrayCreate_v2"));
+        destroyArray=reinterpret_cast<decltype(destroyArray)>(GetProcAddress(cuda,"cuArrayDestroy"));
+        mapResources=reinterpret_cast<decltype(mapResources)>(GetProcAddress(cuda,"cuGraphicsMapResources"));
+        unmapResources=reinterpret_cast<decltype(unmapResources)>(GetProcAddress(cuda,"cuGraphicsUnmapResources"));
+        unregisterGraphics=reinterpret_cast<decltype(unregisterGraphics)>(GetProcAddress(cuda,"cuGraphicsUnregisterResource"));
+        mappedArray=reinterpret_cast<decltype(mappedArray)>(GetProcAddress(cuda,"cuGraphicsSubResourceGetMappedArray"));
+        copyAsync=reinterpret_cast<decltype(copyAsync)>(GetProcAddress(cuda,"cuMemcpy2DAsync_v2"));
+        if(!getDevice||!dxRegister||!createContext||!destroyContext||!createArray||!destroyArray||!mapResources||!unmapResources||!unregisterGraphics||!mappedArray||!copyAsync||!cudaOk(getDevice(&cudaDevice,adapter.Get()),"InteropSameAdapter")||!hrOk(context.As(&context4),"InteropContext4"))return false;
+    }
     return createStreams();
 }
 bool WorkerKernel::execute(FrucWorkerMessage& info) {
     ContextScope scope(*this);if(!scope.valid)return false;
     auto wait=info.inputFence;
+    if(!hrOk(context4->Wait(fence11.Get(),wait),"InteropInputWait",true))return false;
+    if(!cudaOk(setContext(ownedContext[0]),"ProcessContext"))return false;
+    CUgraphicsResource mapped[6]{};
+    for(unsigned j=0;j<count;++j){mapped[j*2]=graphics[j][info.parity];mapped[j*2+1]=graphics[j][2];context->CopyResource(bridge[j][info.parity].Get(),tex[info.parity].Get());}
+    context->Flush();
+    struct MappingScope {
+        WorkerKernel& owner;CUgraphicsResource* resources;unsigned count;bool active=false;
+        ~MappingScope(){if(active)cudaOk(owner.unmapResources(count,resources,nullptr),"InteropErrorUnmap");}
+    }mapping{*this,mapped,count*2};
+    if(!cudaOk(mapResources(count*2,mapped,nullptr),"InteropMap"))return false;
+    mapping.active=true;
     for(unsigned j=0;j<count;++j) {
-        if(!cudaOk(setContext(streamContext[j]),"ProcessContext"))return false;
         NvOFFRUC_PROCESS_IN_PARAMS in{};NvOFFRUC_PROCESS_OUT_PARAMS out{};
-        in.stFrameDataInput.pFrame=tex[info.parity].Get();in.stFrameDataInput.nTimeStamp=info.currentMs;
-        in.uSyncWait.FenceWaitValue.uiFenceValueToWaitOn=wait;
-        out.stFrameDataOutput.pFrame=tex[j+2].Get();
+        in.stFrameDataInput.pFrame=arrays[j][info.parity];in.stFrameDataInput.nTimeStamp=info.currentMs;
+        in.bSkipWarp=reseed;
+        out.stFrameDataOutput.pFrame=arrays[j][2];
         out.stFrameDataOutput.nTimeStamp=info.previousMs+(info.currentMs-info.previousMs)*double(j+1)/(count+1);
         out.stFrameDataOutput.bHasFrameRepetitionOccurred=&info.repeated[j];
-        out.uSyncSignal.FenceSignalValue.uiFenceValueToSignalOn=++wait;
+        ++wait;
+        {
+            CUarray input=nullptr;if(!cudaOk(mappedArray(&input,mapped[j*2],0,0),"InteropInputArray"))return false;
+            CUDA_MEMCPY2D copy{};copy.srcMemoryType=CU_MEMORYTYPE_ARRAY;copy.srcArray=input;copy.dstMemoryType=CU_MEMORYTYPE_ARRAY;copy.dstArray=arrays[j][info.parity];copy.WidthInBytes=size_t(width)*4;copy.Height=height;
+            if(!cudaOk(copyAsync(&copy,nullptr),"InteropInputCopy"))return false;
+        }
         unsigned seh=0;auto result=callSafe(seh,process,handles[j],&in,&out);
         info.result=uint32_t(result);info.seh=seh;
         if(result!=NvOFFRUC_SUCCESS||seh||log::verboseFrameLogs())log::info("fruc",std::format("Process inputMs={} outputMs={} sub={} result={} seh={} repeated={}",info.currentMs,out.stFrameDataOutput.nTimeStamp,j+1,int(result),seh,info.repeated[j]));
         if(result!=NvOFFRUC_SUCCESS||seh)return false;
+        {
+            CUarray output=nullptr;if(!cudaOk(mappedArray(&output,mapped[j*2+1],0,0),"InteropOutputArray"))return false;
+            CUDA_MEMCPY2D copy{};copy.srcMemoryType=CU_MEMORYTYPE_ARRAY;copy.srcArray=arrays[j][2];copy.dstMemoryType=CU_MEMORYTYPE_ARRAY;copy.dstArray=output;copy.WidthInBytes=size_t(width)*4;copy.Height=height;
+            if(!cudaOk(copyAsync(&copy,nullptr),"InteropOutputCopy"))return false;
+        }
     }
-    info.outputFence=wait;return true;
+    if(!cudaOk(unmapResources(count*2,mapped,nullptr),"InteropUnmap"))return false;
+    mapping.active=false;
+    for(unsigned j=0;j<count;++j)context->CopyResource(tex[j+2].Get(),bridge[j][2].Get());
+    if(!hrOk(context4->Signal(fence11.Get(),wait),"InteropOutputSignal",true))return false;context->Flush();
+    reseed=false;info.outputFence=wait;return true;
 }
 } // namespace veyra::ngx
 int wmain(int argc,wchar_t** argv) {
@@ -163,6 +239,7 @@ int wmain(int argc,wchar_t** argv) {
         if(ready)for(;;) {
             if(WaitForSingleObject(request,INFINITE)!=WAIT_OBJECT_0){exitCode=2;break;}
             if(info->command==2)break;
+            if(info->command==3){kernel.reseed=true;info->result=0;info->seh=0;if(!SetEvent(response)){exitCode=2;break;}continue;}
             if(info->command!=1||info->parity>1){exitCode=2;break;}
             info->result=1;info->seh=0;
             const bool ok=kernel.execute(*info);

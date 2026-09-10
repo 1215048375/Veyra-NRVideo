@@ -17,9 +17,12 @@ public:
     explicit PresentationWorker(Cancelled interrupt):interrupt_(std::move(interrupt)),thread_([this]{run();}){}
     ~PresentationWorker(){stopping_=true;++epoch_;wake_.notify_all();if(thread_.joinable())thread_.join();}
     PresentationWorker(const PresentationWorker&)=delete;
-    bool waitForSlot(){
+    bool waitForSlot(const std::function<void()>& progress={}){
         std::unique_lock lock(mutex_);
-        while(queue_.size()+unsigned(active_)>=2&&!failed_&&!stopping_&&!interrupt_())wake_.wait_for(lock,std::chrono::milliseconds(1));
+        while(queue_.size()+unsigned(active_)>=2&&!failed_&&!stopping_&&!interrupt_()){
+            lock.unlock();if(progress)progress();lock.lock();
+            if(queue_.size()+unsigned(active_)>=2)wake_.wait_for(lock,std::chrono::milliseconds(1));
+        }
         return !failed_&&!stopping_&&!interrupt_();
     }
     bool push(Job job,std::function<void()> discarded={}){std::lock_guard lock(mutex_);if(failed_||stopping_||queue_.size()+unsigned(active_)>=2)return false;queue_.push_back({epoch_.load(),std::move(job),std::move(discarded)});wake_.notify_all();return true;}

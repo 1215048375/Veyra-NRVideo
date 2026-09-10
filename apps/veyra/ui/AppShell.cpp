@@ -3,6 +3,7 @@
 #include "../SettingsWindow.h"
 #include "Theme.h"
 #include "WorkspaceChrome.h"
+#include "LiveStatusPanel.h"
 #include "WorkspaceTransition.h"
 #include "UiSessionState.h"
 #include "UiPreferenceStore.h"
@@ -35,7 +36,7 @@ veyra::engine::EngineController engine;
 veyra::engine::ExportJobManager exportJob;
 veyra::ui::UiSessionState uiState;
 veyra::ui::UiPreferenceStore preferences(veyra::runtime::localDataDirectory());veyra::ui::UiPreferences uiPreferences;
-HWND inspector=nullptr,metricLabel=nullptr,tooltips=nullptr,diagnosticPanel=nullptr;bool showDiagnostics=false,inspectorResizing=false;int proposedInspectorWidth=320;bool preferWatching=true,jobPaused=false;int subtitlePixels=22;
+HWND inspector=nullptr,metricLabel=nullptr,tooltips=nullptr,diagnosticPanel=nullptr,liveStatusPanel=nullptr;bool showDiagnostics=false,inspectorResizing=false;int proposedInspectorWidth=320;bool preferWatching=true,jobPaused=false;int subtitlePixels=22;
 veyra::engine::EnhancementSettings lastSuccessful,jobExpected;bool haveSuccessful=false;uint64_t masterPendingRevision=0,masterPendingSession=0;bool masterPreviousEnabled=true;
 std::wstring smokeView;bool smokeViewApplied=false;
 std::wstring smokeDualOutput;bool smokeEmpty=false;DWORD modeGdiStart=0,modeHandlesStart=0;SIZE_T modePrivateStart=0;
@@ -138,7 +139,7 @@ void layout(){
     auto pane=[&](int x,int y,int width,int height,int radius,BYTE tint){return GlassPane{{dip(mainWindow,x),dip(mainWindow,y),dip(mainWindow,x+width),dip(mainWindow,y+height)},dip(mainWindow,radius),tint};};
     std::vector<GlassPane> panes;
     if(full){if(fullControls)panes.push_back(pane(0,h-88,w,88,1,142));}
-    else if(g.pro){panes.push_back(pane(4,4,64,h-8,22,24));panes.push_back(pane(g.left,g.bottom,g.viewWidth,h-g.bottom-20,20,32));if(g.panelWidth){panes.push_back(pane(g.right,g.top,g.panelWidth,g.viewHeight,20,30));panes.push_back(pane(g.right,g.bottom,g.panelWidth,h-g.bottom-20,20,40));}}
+    else if(g.pro){panes.push_back(pane(4,4,64,h-8,22,24));panes.push_back(pane(g.left,g.bottom,g.viewWidth,h-g.bottom-20,20,32));if(g.panelWidth){panes.push_back(pane(g.right,g.top,g.panelWidth,g.statusTop-g.top-10,20,30));panes.push_back(pane(g.right,g.statusTop,g.panelWidth,h-g.statusTop-20,20,40));}}
     else{panes.push_back(pane(0,h-88,w,88,1,32));}
     backdrop.render(r.right,r.bottom,g.pro,full,panes);
     struct Placement{HWND child;int x,y,width,height;UINT flags;};std::vector<Placement> placements;
@@ -158,7 +159,8 @@ void layout(){
     put(ProRailVideo,12,92,44,44,!full&&pro);put(ProRailCapture,12,148,44,44,!full&&pro);put(ImageOpen,12,204,44,44,!full&&pro);
     for(int id:{ProRailVideo,ProRailCapture,ImageOpen})surface(GetDlgItem(mainWindow,id),RGB(16,17,18));
     for(int i=0;i<4;++i)put(TabEnhance+i,g.right+12+i*((g.panelWidth-24)/4),g.top+12,(g.panelWidth-24)/4,32,rightVisible);
-    pos(inspector,g.right+12,g.top+56,g.panelWidth-24,g.viewHeight-68,rightVisible);
+    pos(inspector,g.right+12,g.top+56,g.panelWidth-24,g.statusTop-g.top-68,rightVisible);
+    pos(liveStatusPanel,g.right,g.statusTop,g.panelWidth,h-g.statusTop-20,rightVisible);
     const bool transport=!full||fullControls;int barTop=full?h-88:g.bottom;int tx=full?16:g.left+16,tw=full?w-32:g.viewWidth-32;
     pos(playbackBar,0,h-88,w,88,full&&fullControls);
     pos(seekBar,full?0:pro?tx:g.left,barTop-5,full?w:pro?tw:g.viewWidth,12,transport&&!target.capture&&!target.image&&!(pro&&showDiagnostics&&!full));surface(seekBar,pro&&!full?panel:cinemaPanel);
@@ -240,7 +242,7 @@ veyra::ui::icon(GetDlgItem(hwnd,ProRailVideo),Icon::Video);veyra::ui::icon(GetDl
 veyra::ui::icon(GetDlgItem(hwnd,Recent),Icon::Recent);veyra::ui::icon(GetDlgItem(hwnd,Open),Icon::Video,true);veyra::ui::icon(GetDlgItem(hwnd,Capture),Icon::Capture,true);
 for(int id:{Open,Capture,Recent,Master,Sr,ModeSwitch,WindowMin,WindowMax,WindowClose,Stop,Mute,Subtitle,Fullscreen,ProRailVideo,ProRailCapture,ImageOpen,Info})veyra::ui::ghost(GetDlgItem(hwnd,id));
 SetPropW(GetDlgItem(hwnd,Open),L"veyra.tip",HANDLE(L"打开视频 / 图片 · Ctrl+O"));SetPropW(GetDlgItem(hwnd,Capture),L"veyra.tip",HANDLE(L"连接采集卡"));SetPropW(GetDlgItem(hwnd,Sr),L"veyra.tip",HANDLE(L"超分辨率 · 专业面板选择 DLSS / RTX 视频超分"));
-inspector=veyra::ui::createSettingsPanel(hwnd,engine,applySettings);selectInspector(uiPreferences.inspector);refreshDailyPresets();SendDlgItemMessageW(hwnd,Volume,TBM_SETPOS,TRUE,LPARAM(uiPreferences.volume*100));veyra::ui::marked(GetDlgItem(hwnd,Play));
+inspector=veyra::ui::createSettingsPanel(hwnd,engine,applySettings);liveStatusPanel=veyra::ui::createLiveStatusPanel(hwnd,engine);selectInspector(uiPreferences.inspector);refreshDailyPresets();SendDlgItemMessageW(hwnd,Volume,TBM_SETPOS,TRUE,LPARAM(uiPreferences.volume*100));veyra::ui::marked(GetDlgItem(hwnd,Play));
 SetPropW(video,L"veyra.tip",HANDLE(L"专业模式：滚轮缩放 · 中键拖动画面 · 右键恢复适应窗口。缩放不影响增强或保存尺寸。"));tooltips=CreateWindowExW(WS_EX_TOPMOST,TOOLTIPS_CLASSW,nullptr,WS_POPUP|TTS_ALWAYSTIP|TTS_NOPREFIX,0,0,0,0,hwnd,nullptr,GetModuleHandleW(nullptr),nullptr);SendMessageW(tooltips,TTM_SETMAXTIPWIDTH,0,360);EnumChildWindows(hwnd,[](HWND child,LPARAM context)->BOOL{auto tip=reinterpret_cast<HWND>(context);wchar_t cls[32]{};GetClassNameW(child,cls,32);if(child==video||_wcsicmp(cls,L"BUTTON")==0||_wcsicmp(cls,L"EDIT")==0||_wcsicmp(cls,L"COMBOBOX")==0){TOOLINFOW info{sizeof(info)};info.uFlags=TTF_IDISHWND|TTF_SUBCLASS;info.hwnd=GetAncestor(child,GA_ROOT);info.uId=UINT_PTR(child);info.lpszText=LPSTR_TEXTCALLBACKW;SendMessageW(tip,TTM_ADDTOOLW,0,LPARAM(&info));}return TRUE;},LPARAM(tooltips));
 if(smokeSeconds>0)startTick=GetTickCount64();diagnosticPanel=veyra::ui::createTelemetryPanel(hwnd,engine);DragAcceptFiles(hwnd,TRUE);SetTimer(hwnd,1,100,nullptr);layout();return 0;}
 case WM_NCCALCSIZE:if(wp)return 0;break;
@@ -325,7 +327,8 @@ if(smokeStep==3&&elapsed>4100&&!smokeSave.empty()){engine.saveFrame(smokeSave);s
 if(smokeStep==4&&elapsed>5200&&GetEnvironmentVariableW(L"VEYRA_TEST_LARGE_IMAGE_SAVE_THROW",nullptr,0)){const auto retained=engine.snapshot();if(!retained.failed&&retained.running&&retained.frames>0){engine.saveFrame(smokeSave);smokeStep=5;veyra::log::info("image-save-test","retry after injected allocation failure; result/session retained");}}
 }auto s=engine.snapshot();const auto subtitleText=uiState.subtitles&&!(showDiagnostics&&uiState.mode==veyra::ui::Mode::Professional&&!full)?veyra::engine::subtitleAt(subtitles,s.position):L"";veyra::ui::updateSubtitleOverlay(subtitleLabel,subtitleText,subtitlePixels);
 const double submittedFps=s.submissionFps.value_or(0.0);
-veyra::ui::setText(GetDlgItem(hwnd,FpsLabel),std::format(L"处理 {:.1f} fps",s.fps));
+const bool xessRate=s.applied.frameGenerationBackend==veyra::engine::FrameGenerationBackend::XeSS&&s.applied.multiplier>1;
+veyra::ui::setText(GetDlgItem(hwnd,FpsLabel),s.running&&!s.image&&s.transport==veyra::engine::TransportState::Playing&&!s.metrics.flow.rateWindowReady?std::wstring(L"帧率采样中"):std::format(L"{} {:.1f} fps",xessRate?L"SDK提交":L"处理产出",xessRate?s.metrics.flow.xessSdkSubmitFps:s.metrics.flow.outputCompletedFps));
 auto text=s.capture?std::format(L"{}\r\n输入 {:.1f} / 已处理 {:.1f} / 显示提交 {:.1f}fps | 回调至Present返回p95 {:.1f}ms（非总延迟）| 丢弃 {} | 有效生成 {}",s.status,s.captureFps,s.fps,submittedFps,s.captureAgeP95Ms,s.captureDropped,s.generated):std::format(L"{}\r\n{:.1f} / {:.1f}秒  已处理 {:.1f}fps  提交迟到 {:+.1f}ms  源帧 {} / 有效生成 {}",s.status,s.position,s.duration,s.fps,s.lateMs,s.frames,s.generated);
 if(smokeZoom&&startTick&&s.frames>0){const auto elapsed=GetTickCount64()-startTick;
     if(zoomStep==0&&elapsed>1300){if(uiState.mode==veyra::ui::Mode::Daily)switchMode();zoomBefore=s;RECT r{};GetWindowRect(video,&r);const LPARAM point=MAKELPARAM(r.left+(r.right-r.left)*7/10,r.top+(r.bottom-r.top)/2);if(smokeHover){SetFocus(GetDlgItem(hwnd,ModeSwitch));PostMessageW(hwnd,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA*3),point);hoverPostedTick=GetTickCount64();zoomStep=4;}else{SendMessageW(video,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA*3),point);zoomStep=std::abs(engine.previewView().zoom-1.728f)<.001f?1:-1;}}

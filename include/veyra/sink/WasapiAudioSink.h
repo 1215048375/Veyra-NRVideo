@@ -1,10 +1,5 @@
 #pragma once
 
-// WasapiAudioSink - product audio playback extracted verbatim from the
-// verified player_probe implementation (Phase 6 audio evidence: event-driven
-// shared mode, PTS-anchored master clock, atomic seek, bounded ring, never
-// dropping decoded audio in player mode).
-//
 // AudioPipeline: FFmpeg audio demux/decode + watermarked bounded ring
 // (low 250ms / prefill 500ms / high 1000ms, 2s hard bound).
 // AudioRenderer: event-driven WASAPI shared-mode endpoint whose device clock
@@ -24,6 +19,7 @@
 #include <vector>
 
 #include "veyra/Log.h"
+#include "veyra/sink/AudioPcmSource.h"
 
 struct AVFormatContext;
 struct AVCodecContext;
@@ -41,7 +37,7 @@ constexpr uint32_t kAudioRate = 48000;
 
 class AudioRenderer; // forward: pipeline thread needs the renderer
 
-class AudioPipeline {
+class AudioPipeline : public AudioPcmSource {
 public:
     AudioPipeline();
     ~AudioPipeline();
@@ -59,11 +55,12 @@ public:
     uint64_t seekCount() const;
     double lastPrefillMs() const;
     double firstPtsAfterLastSeek() const;
+    bool decodingComplete() const { return decodedEof_.load(); }
 
     // Pull up to maxFrames stereo frames; sets the PTS of the first pulled
     // frame. Returns frames pulled (0 legal; caller writes silence and it is
     // counted as an underrun by the pump only when the endpoint had space).
-    size_t pull(float* dst, size_t maxFrames, double* firstPtsMs);
+    size_t pull(float* dst, size_t maxFrames, double* firstPtsMs) override;
 
     void stopThread();
     void setPaused(bool value) { paused_.store(value); }
@@ -83,8 +80,8 @@ private:
     };
 
     void pushDecoded(const AVFrame* frame);
+    void pushConverted(int frames);
     void decodeBlock();
-    double bufferedMsLocked() const;
     void closeAll();
 
     friend class AudioThread;
@@ -97,6 +94,8 @@ private:
     int streamIndex_ = -1;
     bool havePacket_ = false;
     bool demuxEof_ = false;
+    bool drainSent_ = false;
+    std::atomic<bool> decodedEof_{false};
     double nextPtsMs_ = 0.0;           // PTS of the NEXT decoded sample
     double discardUntilPtsMs_ = -1.0;  // seek pruning
     static constexpr size_t kMaxRingFrames = kAudioRate * 2; // 2s hard bound
@@ -110,7 +109,7 @@ private:
     std::condition_variable seekDoneCv_;
     std::atomic<bool> stopFlag_{false};
     std::atomic<bool> paused_{false};
-    bool seekRequested_ = false;
+    std::atomic<bool> seekRequested_{false};
     bool seekDone_ = true;
     double seekTargetMs_ = 0.0;
 
@@ -129,17 +128,16 @@ public:
     bool start();
     void setGain(float value){gain_.store(value);}
 
-    // Called by the audio thread after prefill: begins playback anchored at
-    // the PTS of the sample that will be written first.
-    bool startAnchored(double firstBufferPtsMs);
+    // Write actual PCM before starting the endpoint and its media clock.
+    bool startAnchored(AudioPcmSource& pipeline);
     void setPaused(bool value);
 
     // Event-driven pump for ONE event cycle. Writes real data when the ring
     // has it, silence otherwise (underrun counted). Returns false on hard
     // failure.
-    bool pumpOnce(AudioPipeline& pipeline, double* firstWrittenPtsMs);
+    bool pumpOnce(AudioPcmSource& pipeline, double* firstWrittenPtsMs);
 
-    // Master clock: real media PTS of the sample currently being played.
+    // Master clock, or NaN when unstarted/reset or the device clock failed.
     double mediaTimeMs() const;
 
     // Atomic seek support: stop + reset the endpoint; the clock is invalid
@@ -166,10 +164,10 @@ private:
     std::atomic<UINT64> anchorPos_{0};
     std::atomic<double> anchorPtsMs_{0.0};
     std::atomic<bool> started_{false};
-    bool running_ = false;
+    std::atomic<bool> running_{false};
     bool comInited_ = false;
     std::atomic<uint64_t> underruns_{0};
-    uint64_t framesWritten_ = 0;
+    std::atomic<uint64_t> framesWritten_{0};
     std::vector<float> chunk_{std::vector<float>(8192 * 2)};
 };
 

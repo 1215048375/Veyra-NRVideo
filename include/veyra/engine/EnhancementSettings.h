@@ -10,6 +10,7 @@ enum class FrameGenerationBackend { Dlss, Fruc, XeSS };
 enum class FlowQuality { Performance, Balanced, Quality };
 enum class OpticalFlowBackend { Nvidia, AmdFidelityFx };
 enum class ContentRate { Transport, Auto, Fps30, Fps50, Fps60, Capture60To30 };
+enum class AudioSyncMode { Automatic, Manual, Off };
 constexpr std::string_view frameGenerationBackendName(FrameGenerationBackend backend) {
     switch(backend) {
     case FrameGenerationBackend::Dlss: return "DLSS";
@@ -66,11 +67,14 @@ struct EnhancementSettings {
     OpticalFlowBackend opticalFlowBackend=OpticalFlowBackend::Nvidia;
     bool amdFlowHalfResolution=false;
     ContentRate content=ContentRate::Transport;
+    AudioSyncMode audioSync=AudioSyncMode::Automatic;
+    int32_t audioOffsetMs=0;
     bool operator==(const EnhancementSettings&) const = default;
     std::string validate() const {
         auto range=[](float v,float hi){return std::isfinite(v)&&v>=0&&v<=hi;};
         if(auto error=protection.validate();!error.empty())return error;
         if(!revision)return "settingsRevision must be nonzero";
+        if(audioSync<AudioSyncMode::Automatic||audioSync>AudioSyncMode::Off||audioOffsetMs<-250||audioOffsetMs>250)return "invalid audio sync setting";
         if(!range(model.intensity,1)||!range(model.tone,1)||!range(model.structure,1))return "model parameter out of range";
         if(model.skin!=-1&&!range(model.skin,2))return "skin parameter out of range";
         if(model.style<0||model.style>2||model.autoMask<0||model.autoMask>1||model.uiCorrection<0||model.uiCorrection>1)return "invalid experimental parameter";

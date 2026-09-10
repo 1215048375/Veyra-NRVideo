@@ -11,14 +11,19 @@ namespace {
 unsigned windowDpi=96;HWND window=nullptr;engine::EngineController* engine=nullptr;HFONT font=nullptr;std::wstring preview;
 std::wstring wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),nullptr,0);std::wstring r(n,0);MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),r.data(),n);return r;}
 std::wstring value(std::optional<double> v){if(!v)return L"未能测量";std::wostringstream o;o<<std::fixed<<std::setprecision(3)<<*v;return o.str();}
-void refresh(){auto s=engine->snapshot();const wchar_t* names[]={L"上传/颜色转换",L"DLSS SR",L"NVOF GPU队列区间（含同步）",L"DLSS5 NR",L"NR变化量合成",L"DLSSG 子帧1",L"DLSSG 子帧2",L"DLSSG 子帧3",L"DLSSG批次",L"最终blit"};std::wostringstream o;
+void refresh(){auto s=engine->snapshot();const wchar_t* names[]={L"上传/颜色转换",L"超分 SR",L"光流 GPU队列区间（含同步）",L"NR",L"NR变化量合成",L"FG 子帧1",L"FG 子帧2",L"FG 子帧3",L"FG批次",L"最终blit"};std::wostringstream o;
     o<<L"GPU时间戳（毫秒）；未执行不记作0。样本帧 "<<s.metrics.identity.sourceFrameId<<L" / epoch "<<s.metrics.identity.epoch<<L" / 设置版本 "<<s.metrics.identity.settingsRevision<<L"\r\n";
     for(size_t i=0;i<s.metrics.gpu.size();++i){const auto& g=s.metrics.gpu[i];o<<names[i]<<L"："<<(g.state==diagnostics::SampleState::NotExecuted?L"未执行":g.state==diagnostics::SampleState::Pending?L"待GPU完成":value(g.milliseconds))<<L"\r\n";}
     o<<L"\r\nCPU与调度（毫秒，独立于GPU）：取帧 "<<value(s.metrics.decodeCpuMs)<<L" / 图提交 "<<value(s.metrics.submitCpuMs)<<L" / GPU就绪等待 "<<value(s.metrics.gpuWaitCpuMs)<<L"\r\n截止时间等待 "<<value(s.metrics.deadlineWaitCpuMs)<<L" / Present调用 "<<value(s.metrics.presentCpuMs)<<L"\r\n源帧 "<<s.metrics.sourceFrames<<L" / 有效生成 "<<s.metrics.validGenerated<<L" / 实际提交 "<<s.metrics.submitted<<L" / 过期补帧 "<<s.metrics.expired<<L"\r\n当前批次容量 "<<s.metrics.queueWatermark<<L"（上限4）；采集入口容量1；采集丢弃 "<<s.captureDropped<<L"\r\n实际提交频率（最近1秒观察）："<<value(s.submissionFps)<<L"fps；实际显示扫描率/光子延迟：未测\r\n";
     const auto flowName=s.applied.flow==engine::FlowQuality::Performance?L"性能":s.applied.flow==engine::FlowQuality::Balanced?L"平衡":L"质量";
     const auto& f=s.metrics.flow;const auto& c=f.counters;
+    o<<L"\r\n最近一秒链路统计：均值 / P95 ms，n为样本数\r\n";
+    for(size_t i=0;i<f.gpuTiming.size();++i){const auto& a=f.gpuTiming[i];o<<names[i]<<L"："<<value(a.mean)<<L" / "<<value(a.p95)<<L" n="<<a.samples<<L"\r\n";}
     o<<L"\r\n当前统计窗口：会话 "<<f.latest.sessionId<<L" / 设置 "<<f.latest.frame.settingsRevision<<L" / epoch "<<f.latest.frame.epoch
      <<L"\r\nDLSS/FRUC 有效生成 "<<value(f.validGeneratedFps)<<L" fps / Present 提交 "<<value(f.presentSubmitFps)<<L" fps"
+     <<L"\r\n实际源帧完成 "<<value(f.sourceCompletedFps)<<L" fps / 总处理产出 "<<value(f.outputCompletedFps)<<L" fps"
+     <<L"\r\nXeSS SDK送呈现 "<<value(f.xessSdkSubmitFps)<<L" fps（不能与处理产出混加）"
+     <<L"\r\n软件首尾延迟均值 "<<value(f.softwareLatencyMs)<<L" / P95 "<<value(f.softwareLatencyP95Ms)<<L" ms；有效样本 "<<f.latencySamples
      <<L"\r\nXeSS SDK 生成提交 "<<c.xessSdkGenerated<<L"（不等于屏幕扫描帧数）"
      <<L"\r\n补帧候选 "<<c.fgCandidate<<L" / 提交前跳过 "<<c.fgSkippedBeforeEval<<L" / 已执行 "<<c.fgEvaluated<<L" / 预热 "<<c.fgWarmup
      <<L"\r\n有效生成 "<<c.fgReadyValid<<L" / 无效 "<<c.fgInvalid<<L" / 已呈现 "<<c.generatedPresented<<L" / 过期 "<<c.generatedExpiredAfterEval

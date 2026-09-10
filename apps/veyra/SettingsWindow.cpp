@@ -11,6 +11,7 @@ namespace {
 HWND window=nullptr,body=nullptr;engine::EngineController* controller=nullptr;HFONT font=nullptr;
 std::function<bool(engine::EnhancementSettings)> apply;
 engine::PresetStore store(runtime::localDataDirectory()/"user-presets.v1");bool loaded=false,dirty=false,populating=false,enhancementEnabled=true;int page=0,scroll=0,contentHeight=0;uint64_t displayedRevision=0;engine::EnhancementSettings configuredSettings;
+std::wstring displayedBackendWarning;
 struct Item{HWND h;int page,x,y,w,height;};std::vector<Item> items;
 HWND item(int id){for(auto& entry:items)if(GetDlgCtrlID(entry.h)==id)return entry.h;return nullptr;}
 LRESULT send(int id,UINT message,WPARAM w=0,LPARAM l=0){return SendMessageW(item(id),message,w,l);}
@@ -54,6 +55,9 @@ void populate(engine::EnhancementSettings s){
     send(204,CB_SETCURSEL,int(s.flow),0);send(205,CB_SETCURSEL,int(s.content),0);
     send(209,CB_SETCURSEL,int(s.opticalFlowBackend),0);
     check(215,s.amdFlowHalfResolution?BST_CHECKED:BST_UNCHECKED);
+    send(216,CB_SETCURSEL,int(s.audioSync));
+    if(GetFocus()!=item(217))putText(217,std::to_wstring(s.audioOffsetMs).c_str());
+    EnableWindow(item(217),s.audioSync==engine::AudioSyncMode::Manual);
     EnableWindow(item(204),s.opticalFlowBackend==engine::OpticalFlowBackend::Nvidia);
     EnableWindow(item(215),s.opticalFlowBackend==engine::OpticalFlowBackend::AmdFidelityFx);
     displayedRevision=s.revision;populating=false;dirty=false;
@@ -64,6 +68,9 @@ bool read(engine::EnhancementSettings& s,bool allPages=false){s=enhancementEnabl
         const auto multiplier=send(202,CB_GETCURSEL,0,0),generation=send(208,CB_GETCURSEL,0,0),flowBackend=send(209,CB_GETCURSEL,0,0),flowQuality=send(204,CB_GETCURSEL,0,0),content=send(205,CB_GETCURSEL,0,0);
         if(multiplier==CB_ERR||generation==CB_ERR||flowBackend==CB_ERR||flowQuality==CB_ERR||content==CB_ERR){message(L"设置控件未完成初始化；未保存预设");return false;}
         s.multiplier=uint32_t(multiplier+1);s.frameGenerationBackend=static_cast<engine::FrameGenerationBackend>(generation);s.opticalFlowBackend=static_cast<engine::OpticalFlowBackend>(flowBackend);s.amdFlowHalfResolution=checked(215)==BST_CHECKED;s.flow=static_cast<engine::FlowQuality>(flowQuality);s.content=static_cast<engine::ContentRate>(content);
+        s.audioSync=static_cast<engine::AudioSyncMode>(send(216,CB_GETCURSEL));
+        wchar_t offset[32]{};GetWindowTextW(item(217),offset,32);wchar_t* offsetEnd=nullptr;const auto parsed=wcstol(offset,&offsetEnd,10);
+        if(offsetEnd==offset||*offsetEnd||parsed<-250||parsed>250){message(L"声音偏移须为 -250 至 250 ms");return false;}s.audioOffsetMs=int(parsed);
         for(int j=0;j<3;++j)if(GetPropW(item(730+j),L"veyra.selected")){s.srTarget=static_cast<pipeline::SrTarget>(j);break;}
         if(s.frameGenerationBackend==engine::FrameGenerationBackend::XeSS)s.multiplier=std::min(s.multiplier,2u);
     }if(!s.validate().empty()){message(L"参数越界，未提交。悬停数值框查看允许范围。");return false;}return true;}
@@ -85,6 +92,8 @@ bool liveField(int id){
         case 208:s.frameGenerationBackend=static_cast<engine::FrameGenerationBackend>(send(id,CB_GETCURSEL));if(s.frameGenerationBackend==engine::FrameGenerationBackend::XeSS)s.multiplier=std::min(s.multiplier,2u);break;
         case 209:s.opticalFlowBackend=static_cast<engine::OpticalFlowBackend>(send(id,CB_GETCURSEL));break;
         case 215:s.amdFlowHalfResolution=checked(id)==BST_CHECKED;break;
+        case 216:s.audioSync=static_cast<engine::AudioSyncMode>(send(id,CB_GETCURSEL));break;
+        case 217:{wchar_t value[32]{};GetWindowTextW(item(id),value,32);wchar_t* end=nullptr;const auto parsed=wcstol(value,&end,10);if(end==value||*end||parsed<-250||parsed>250){message(L"声音偏移须为 -250 至 250 ms");return false;}s.audioOffsetMs=int(parsed);break;}
         case 207:s.videoSrQuality=uint32_t(send(id,CB_GETCURSEL));break;
         case 700:case 701:case 702:s.model.style=id-700;break;
         case 710:case 711:s.model.autoMask=id-710;break;
@@ -120,9 +129,10 @@ HWND add(const wchar_t* cls,const wchar_t* text,int id,DWORD style,int group,int
 void button(const wchar_t* title,int id,int group,int x,int y,int width=-1){add(L"BUTTON",title,id,BS_PUSHBUTTON|WS_TABSTOP,group,x,y,width,36);}
 void combo(int id,int group,int y,std::initializer_list<const wchar_t*> names){auto h=add(L"COMBOBOX",L"",id,CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP,group,12,y,-1,200);for(auto name:names)SendMessageW(h,CB_ADDSTRING,0,LPARAM(name));}
 LRESULT CALLBACK proc(HWND h,UINT msg,WPARAM wp,LPARAM lp){
+    if(msg==WM_COMMAND&&!populating&&((LOWORD(wp)==216&&HIWORD(wp)==CBN_SELCHANGE)||(LOWORD(wp)==217&&HIWORD(wp)==EN_CHANGE))){liveField(LOWORD(wp));return 0;}
     if(msg==WM_COMMAND&&!populating&&((LOWORD(wp)==209&&HIWORD(wp)==CBN_SELCHANGE)||(LOWORD(wp)==215&&HIWORD(wp)==BN_CLICKED))){liveField(LOWORD(wp));return 0;}
     switch(msg){
-case WM_CREATE:{window=h;font=makeFont(h);items.clear();
+case WM_CREATE:{window=h;font=makeFont(h);items.clear();displayedBackendWarning.clear();
     WNDCLASSW bodyClass{};bodyClass.lpfnWndProc=bodyProc;bodyClass.hInstance=GetModuleHandleW(nullptr);bodyClass.lpszClassName=L"VeyraInspectorBody";bodyClass.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&bodyClass);
     body=CreateWindowExW(WS_EX_CONTROLPARENT,bodyClass.lpszClassName,L"滚动参数",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,0,88,300,300,h,nullptr,bodyClass.hInstance,nullptr);
     add(L"BUTTON",L"实验性 NVIDIA NR 增强",200,BS_AUTOCHECKBOX|WS_TABSTOP,0,12,12,-1,36);
@@ -138,10 +148,23 @@ case WM_CREATE:{window=h;font=makeFont(h);items.clear();
     add(L"STATIC",L"肤质 / 风格 / 遮罩 / UI键为本地实验参数。未验证的效果不会标成可用能力。",1102,0,0,12,956,-1,70);
     button(L"还原默认",211,-1,12,86);
     add(L"STATIC",L"补帧与运动估算",1103,0,1,12,12,-1,30);
-    combo(202,1,52,{L"关闭补帧",L"2X · 一张中间帧",L"3X · 两张中间帧",L"4X · 三张中间帧"});
-    combo(204,1,340,{L"NR / DLSS光流 · 性能",L"NR / DLSS光流 · 平衡",L"NR / DLSS光流 · 质量"});
-    combo(205,1,392,{L"采用源时间戳",L"自动识别内容节奏",L"识别30fps内容节奏",L"识别50fps内容节奏",L"识别60fps内容节奏",L"采集60→30fps处理（PS5 30帧）"});
-    add(L"STATIC",L"FRUC倍率越高，耗时越多。光流档位用于NR/DLSS；FRUC内部自动控制。补帧需等待下一张源帧，倍率不等于实测显示帧率。",1104,0,1,12,446,-1,88);
+    add(L"STATIC",L"补帧方式",1111,0,1,12,50,-1,24);
+    combo(208,1,78,{L"DLSS 帧生成",L"NVIDIA FRUC · 视频补帧",L"Intel XeSS · 实验显示补帧 2X"});
+    add(L"STATIC",L"补帧倍率",1112,0,1,12,122,-1,24);
+    combo(202,1,150,{L"关闭补帧",L"2X · 一张中间帧",L"3X · 两张中间帧",L"4X · 三张中间帧"});
+    add(L"STATIC",L"运动估算",1113,0,1,12,194,-1,24);
+    combo(209,1,222,{L"NVIDIA NVOF 光流",L"AMD FidelityFX 光流 · 实验"});
+    add(L"BUTTON",L"AMD 性能档 · 光流宽高各减半",215,BS_AUTOCHECKBOX|WS_TABSTOP,1,12,266,-1,36);
+    combo(204,1,310,{L"NR / DLSS光流 · 性能",L"NR / DLSS光流 · 平衡",L"NR / DLSS光流 · 质量"});
+    add(L"STATIC",L"内容节奏",1114,0,1,12,354,-1,24);
+    combo(205,1,382,{L"采用源时间戳",L"自动识别内容节奏",L"识别30fps内容节奏",L"识别50fps内容节奏",L"识别60fps内容节奏",L"采集60→30fps处理（PS5 30帧）"});
+    add(L"STATIC",L"AMD FidelityFX 为运动估算；不是 AMD NR。XeSS 为实验预览 2X，不支持导出。",1110,0,1,12,426,-1,72);
+    add(L"STATIC",L"FRUC倍率越高，耗时越多。光流档位用于NR/DLSS；FRUC内部自动控制。补帧需等待下一张源帧，倍率不等于实测显示帧率。",1104,0,1,12,506,-1,88);
+    add(L"STATIC",L"采集音频同步",1115,0,1,12,608,-1,26);
+    combo(216,1,644,{L"自动同步 · 软件估算",L"手动声音偏移",L"关闭补偿"});
+    add(L"STATIC",L"声音偏移 ms",1116,0,1,12,692,160,28);
+    add(L"EDIT",L"0",217,ES_AUTOHSCROLL|ES_RIGHT|WS_TABSTOP,1,182,692,-1,28);
+    SetPropW(item(217),L"veyra.tip",HANDLE(L"-250 至 250 ms；正值让声音更晚。负值只能减少已有延迟，实际补偿最低为0。"));
 
     add(L"STATIC",L"用户预设",1105,0,2,12,12,-1,30);combo(300,2,56,{});add(L"EDIT",L"新预设",301,ES_AUTOHSCROLL|WS_TABSTOP,2,12,108,-1,36);send(301,EM_SETLIMITTEXT,48,0);
     const wchar_t* names[]={L"载入所选预设",L"新建内建默认预设",L"保存当前参数为新预设",L"重命名所选",L"删除所选",L"设为启动增强默认"};for(int i=0;i<6;++i)button(names[i],310+i,2,12,164+i*44);
@@ -161,10 +184,6 @@ case WM_CREATE:{window=h;font=makeFont(h);items.clear();
     combo(207,0,100,{L"DLSS SR",L"RTX 视频超分 · 低",L"RTX 视频超分 · 中",L"RTX 视频超分 · 高",L"RTX 视频超分 · 最高"});
     for(auto& entry:items)if(entry.page==0&&entry.y>=100)entry.y+=44;
     button(L"2K",730,0,12,100,80);button(L"4K",731,0,100,100,80);button(L"8K",732,0,188,100,80);
-    combo(208,1,8,{L"DLSS 帧生成",L"NVIDIA FRUC · 视频补帧",L"Intel XeSS · 实验显示补帧 2X"});
-    combo(209,1,148,{L"NVIDIA NVOF 光流",L"AMD FidelityFX 光流 · 实验"});
-    add(L"BUTTON",L"AMD 性能档 · 光流宽高各减半",215,BS_AUTOCHECKBOX|WS_TABSTOP,1,12,196,-1,36);
-    add(L"STATIC",L"AMD FidelityFX 只替换运动估算，不提供 AMD DLSS5 / NR / 超分 / FRUC / DLSS 补帧 / NVENC。XeSS 当前只支持预览 2X，不能导出。",1110,0,1,12,244,-1,72);
     loadStore();refreshPresets();populate(controller->snapshot().desired);message(store.error());SetTimer(h,1,250,nullptr);arrange();return 0;}
 case WM_SIZE:arrange();return 0;
 case WM_ERASEBKGND:return 1;
@@ -185,7 +204,14 @@ case WM_COMMAND:{const int id=LOWORD(wp);if(!populating&&((id>=202&&id<=205||id=
     else if(id>=501&&id<=505)SendMessageW(GetParent(h),WM_APP+41,id,id==501?send(500,CB_GETCURSEL,0,0):id==505?checked(505):0);
     if(!ok)message(store.error());return 0;}
 case WM_HSCROLL:{int id=GetDlgCtrlID(reinterpret_cast<HWND>(lp));if(id>=600&&id<612){int index=id-600;float v=float(SendMessageW(reinterpret_cast<HWND>(lp),TBM_GETPOS,0,0))/(index>=4&&index<=6?1:100);if(index==3&&v<0)v=-1;std::wostringstream o;o<<std::setprecision(4)<<v;putText(100+index,o.str().c_str());}return 0;}
-case WM_TIMER:{auto s=controller->snapshot();syncProtection(enhancementEnabled?s.desired.protection:configuredSettings.protection);if(enhancementEnabled&&!dirty&&displayedRevision!=s.desired.revision)populate(s.desired);check(200,enhancementEnabled&&s.desired.nr?BST_CHECKED:BST_UNCHECKED);check(201,enhancementEnabled&&s.desired.sr?BST_CHECKED:BST_UNCHECKED);std::wostringstream o;if(!s.running&&!s.frames&&s.transport!=engine::TransportState::Opening)o<<L"未打开媒体 · 设置待启用\n";else o<<L"期望版本 "<<s.desired.revision<<L" / 已应用 "<<s.applied.revision<<(s.applying?L" · 应用中":L"")<<L"\n强度 "<<s.applied.model.intensity<<L" · 变化量 "<<s.applied.residual.total<<L" · 倍率 "<<s.applied.multiplier<<L"X";setText(item(400),o.str());return 0;}
+case WM_TIMER:{auto s=controller->snapshot();syncProtection(enhancementEnabled?s.desired.protection:configuredSettings.protection);if(enhancementEnabled&&!dirty&&displayedRevision!=s.desired.revision)populate(s.desired);check(200,enhancementEnabled&&s.desired.nr?BST_CHECKED:BST_UNCHECKED);check(201,enhancementEnabled&&s.desired.sr?BST_CHECKED:BST_UNCHECKED);std::wostringstream o;if(!s.running&&!s.frames&&s.transport!=engine::TransportState::Opening)o<<L"未打开媒体 · 设置待启用\n";else{
+    o<<L"期望版本 "<<s.desired.revision<<L" / 已应用 "<<s.applied.revision<<(s.applying?L" · 应用中":L"");
+    const wchar_t* backend=s.applied.frameGenerationBackend==engine::FrameGenerationBackend::XeSS?L"XeSS":s.applied.frameGenerationBackend==engine::FrameGenerationBackend::Fruc?L"FRUC":L"DLSS";
+    o<<L"\n"<<backend<<L" · "<<(s.applied.multiplier<=1?L"补帧关闭":s.fgActive?L"补帧运行":L"等待有效补帧");
+    if(!s.backendWarning.empty())message(s.backendWarning);
+    else if(!displayedBackendWarning.empty())message(L"设置已应用");
+    displayedBackendWarning=s.backendWarning;
+}setText(item(400),o.str());return 0;}
 case WM_DESTROY:KillTimer(h,1);DeleteObject(font);window=nullptr;body=nullptr;items.clear();return 0;
 }return DefWindowProcW(h,msg,wp,lp);}
 }

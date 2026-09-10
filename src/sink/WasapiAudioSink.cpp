@@ -1,14 +1,11 @@
 #include "veyra/sink/AudioGain.h"
-// WasapiAudioSink implementation - moved verbatim from tools/player_probe
-// main.cpp (lines ~172-686, Phase 6 session evidence). Semantics preserved:
-// watermarked bounded production ring, event-driven pump, PTS-anchored master
-// clock, atomic seek re-sequence, player mode never drops decoded audio.
 #include "veyra/sink/WasapiAudioSink.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <format>
+#include <limits>
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -120,7 +117,7 @@ double AudioPipeline::requestSeek(double targetMs)
     if (!seekDoneCv_.wait_for(lock, std::chrono::milliseconds(3000), [this] { return seekDone_; })) {
         veyra::log::error("audio", "seek prefill timed out");
     }
-    return segments_.empty() ? targetMs : segments_.front().startPtsMs;
+    return seekDone_ ? firstPtsAfterSeek_.load() : std::numeric_limits<double>::quiet_NaN();
 }
 
 void AudioPipeline::pushDecoded(const AVFrame* frame)
@@ -130,20 +127,50 @@ void AudioPipeline::pushDecoded(const AVFrame* frame)
         AVChannelLayout outLayout = AV_CHANNEL_LAYOUT_STEREO;
         AVChannelLayout inLayout = frame->ch_layout.nb_channels > 0
             ? frame->ch_layout : outLayout;
-        swr_alloc_set_opts2(&swr_,
+        const int result = swr_alloc_set_opts2(&swr_,
             &outLayout, AV_SAMPLE_FMT_FLT, kAudioRate,
             &inLayout, static_cast<AVSampleFormat>(frame->format), frame->sample_rate,
             0, nullptr);
-        if (swr_ == nullptr || swr_init(swr_) < 0) return;
+        if (result < 0 || swr_ == nullptr || swr_init(swr_) < 0) {
+            log::error("audio", "resampler initialization failed");
+            return;
+        }
     }
+    // Output begins at this input PTS minus the samples retained by swr.
+    // Tagging it with the input block end shifts audio by one whole block.
+    const auto timestamp = frame->best_effort_timestamp != AV_NOPTS_VALUE
+        ? frame->best_effort_timestamp : frame->pts;
+    if (timestamp != AV_NOPTS_VALUE) {
+        const double ptsMs = timestamp * av_q2d(stream_->time_base) * 1000.0;
+        nextPtsMs_ = ptsMs - 1000.0 * swr_get_delay(swr_, frame->sample_rate) / frame->sample_rate;
+    }
+    const auto capacity = swr_get_out_samples(swr_, frame->nb_samples);
+    if (capacity <= 0 || capacity > static_cast<int>(kMaxRingFrames)) {
+        log::error("audio", "decoded audio block exceeds bounded conversion capacity");
+        return;
+    }
+    converted_.resize(static_cast<size_t>(capacity) * 2);
     uint8_t* planes[1] = { reinterpret_cast<uint8_t*>(converted_.data()) };
     const int outSamples = swr_convert(swr_, planes,
         static_cast<int>(converted_.size() / 2),
         const_cast<const uint8_t**>(frame->extended_data), frame->nb_samples);
-    if (outSamples <= 0) return;
+    if (outSamples < 0) { log::error("audio", std::format("swr_convert failed code={}", outSamples)); return; }
+    pushConverted(outSamples);
+}
+
+void AudioPipeline::pushConverted(int frames)
+{
+    if (frames <= 0) return;
+    size_t skip = 0;
+    if (discardUntilPtsMs_ >= 0 && nextPtsMs_ < discardUntilPtsMs_) {
+        skip = std::min(static_cast<size_t>(frames), static_cast<size_t>(
+            std::ceil((discardUntilPtsMs_ - nextPtsMs_) * kAudioRate / 1000.0 - 1e-7)));
+    }
+    nextPtsMs_ += 1000.0 * skip / kAudioRate;
+    const size_t addFrames = static_cast<size_t>(frames) - skip;
+    if (!addFrames) return;
 
     std::unique_lock<std::mutex> lock(mutex_);
-    const size_t addFrames = static_cast<size_t>(outSamples);
     if (ringFrames_ + addFrames > kMaxRingFrames) {
         // Player mode: never drop. This is a hard error (bounded ring
         // should never overflow because production is watermarked).
@@ -151,7 +178,7 @@ void AudioPipeline::pushDecoded(const AVFrame* frame)
         veyra::log::error("audio", "ring overflow despite watermarks (bug)");
         return;
     }
-    ring_.insert(ring_.end(), converted_.data(), converted_.data() + addFrames * 2);
+    ring_.insert(ring_.end(), converted_.data() + skip * 2, converted_.data() + static_cast<size_t>(frames) * 2);
     ringFrames_ += addFrames;
     if (!segments_.empty()) {
         Segment& last = segments_.back();
@@ -169,12 +196,43 @@ void AudioPipeline::pushDecoded(const AVFrame* frame)
 
 void AudioPipeline::decodeBlock()
 {
-    // Decode until high watermark or EOF; called only when below high.
-    while (bufferedMsLocked() < kAudioHighWatermarkMs && !stopFlag_ && !seekRequested_) {
+    AVFrame* frame = av_frame_alloc();
+    if (!frame) return;
+    // Always receive pending frames before sending another packet. EAGAIN
+    // leaves the packet owned here until the decoder actually accepts it.
+    while (bufferedMs() < kAudioHighWatermarkMs && !stopFlag_ && !seekRequested_ && !decodedEof_) {
+        const int received = avcodec_receive_frame(codecCtx_, frame);
+        if (received == 0) {
+            pushDecoded(frame);
+            av_frame_unref(frame);
+            continue;
+        }
+        if (received == AVERROR_EOF) {
+            if (swr_) {
+                uint8_t* planes[] = {reinterpret_cast<uint8_t*>(converted_.data())};
+                const int count = swr_convert(swr_, planes, static_cast<int>(converted_.size() / 2), nullptr, 0);
+                if (count > 0) { pushConverted(count); continue; }
+                if (count < 0) log::error("audio", std::format("resampler drain failed code={}", count));
+            }
+            decodedEof_ = true;
+            break;
+        }
+        if (received != AVERROR(EAGAIN)) {
+            log::error("audio", std::format("decode receive failed code={}", received));
+            decodedEof_ = true;
+            break;
+        }
+        if (demuxEof_) {
+            if (drainSent_) { log::error("audio", "decoder requested input after drain"); decodedEof_ = true; break; }
+            const int sent = avcodec_send_packet(codecCtx_, nullptr);
+            if (sent < 0 && sent != AVERROR_EOF) { log::error("audio", std::format("decoder drain failed code={}", sent)); break; }
+            drainSent_ = true;
+            continue;
+        }
         if (!havePacket_) {
             if (av_read_frame(fmt_, packet_) < 0) {
                 demuxEof_ = true;
-                break;
+                continue;
             }
             havePacket_ = true;
             if (packet_->stream_index != streamIndex_) {
@@ -183,29 +241,17 @@ void AudioPipeline::decodeBlock()
                 continue;
             }
         }
-        if (avcodec_send_packet(codecCtx_, havePacket_ ? packet_ : nullptr) == 0 && havePacket_) {
+        const int sent = avcodec_send_packet(codecCtx_, packet_);
+        if (sent == 0) {
             av_packet_unref(packet_);
             havePacket_ = false;
+        } else if (sent != AVERROR(EAGAIN)) {
+            log::error("audio", std::format("decode send failed code={}", sent));
+            decodedEof_ = true;
+            break;
         }
-        AVFrame* frame = av_frame_alloc();
-        bool enough = false;
-        while (avcodec_receive_frame(codecCtx_, frame) == 0) {
-            const double ptsMs = 1000.0 * frame->pts * stream_->time_base.num / stream_->time_base.den;
-            nextPtsMs_ = ptsMs + 1000.0 * frame->nb_samples / kAudioRate;
-            if (discardUntilPtsMs_ < 0.0 || ptsMs >= discardUntilPtsMs_) {
-                pushDecoded(frame);
-            }
-            av_frame_unref(frame);
-            if (bufferedMsLocked() >= kAudioHighWatermarkMs) { enough = true; break; }
-        }
-        av_frame_free(&frame);
-        if (enough || demuxEof_) break;
     }
-}
-
-double AudioPipeline::bufferedMsLocked() const
-{
-    return 1000.0 * static_cast<double>(ringFrames_) / kAudioRate;
+    av_frame_free(&frame);
 }
 
 void AudioPipeline::closeAll()
@@ -256,13 +302,12 @@ bool AudioRenderer::start()
     return true;
 }
 
-bool AudioRenderer::startAnchored(double firstBufferPtsMs)
+bool AudioRenderer::startAnchored(AudioPcmSource& pipeline)
 {
-    // Prefill the whole endpoint buffer with REAL samples happens on the
-    // first pump() call; anchor NOW at the device position with the PTS
-    // of the first sample we are about to submit.
+    double firstBufferPtsMs = -1;
+    if (!pumpOnce(pipeline, &firstBufferPtsMs) || framesWritten_ == 0) return false;
     UINT64 pos = 0, qpc = 0;
-    (void)clock_->GetPosition(&pos, &qpc);
+    if (FAILED(clock_->GetPosition(&pos, &qpc)) || !clockFrequency_) return false;
     anchorPos_ = pos;
     anchorPtsMs_.store(firstBufferPtsMs);
     if (FAILED(client_->Start())) return false;
@@ -272,23 +317,25 @@ bool AudioRenderer::startAnchored(double firstBufferPtsMs)
     return true;
 }
 
-bool AudioRenderer::pumpOnce(AudioPipeline& pipeline, double* firstWrittenPtsMs)
+bool AudioRenderer::pumpOnce(AudioPcmSource& pipeline, double* firstWrittenPtsMs)
 {
-    if (!running_ || !started_) return true;
-    if (WaitForSingleObject(event_, 50) != WAIT_OBJECT_0) return true;
+    if (!running_) return false;
+    if (started_ && WaitForSingleObject(event_, 50) != WAIT_OBJECT_0) return true;
     UINT32 padding = 0;
     if (FAILED(client_->GetCurrentPadding(&padding))) return false;
     const UINT32 avail = bufferFrames_ - padding;
     if (avail == 0) return true;
+    chunk_.resize(static_cast<size_t>(avail) * 2);
+    BYTE* dest = nullptr;
+    if (FAILED(render_->GetBuffer(avail, &dest))) return false;
     double firstPts = -1.0;
     const size_t got = pipeline.pull(chunk_.data(), avail, &firstPts);
     if (firstWrittenPtsMs) *firstWrittenPtsMs = firstPts;
-    BYTE* dest = nullptr;
-    if (FAILED(render_->GetBuffer(avail, &dest))) return false;
+    if (!started_ && !got) { render_->ReleaseBuffer(0, 0); return true; }
     if (got > 0) {
         const float target=std::clamp(gain_.load(),0.0f,1.0f);
         applyStereoGain(chunk_.data(),got,target,smoothedGain_);
-        if(target!=loggedGain_&&std::abs(smoothedGain_-target)<.00001f){loggedGain_=target;log::info("audio-gain",std::format("target={} reached={} framesWritten={} clockPreserved=true applicationPCM=true",target,smoothedGain_,framesWritten_));}
+        if(target!=loggedGain_&&std::abs(smoothedGain_-target)<.00001f){loggedGain_=target;log::info("audio-gain",std::format("target={} reached={} framesWritten={} clockPreserved=true applicationPCM=true",target,smoothedGain_,framesWritten_.load()));}
         std::memcpy(dest, chunk_.data(), got * 8);
         if (got < avail) {
             std::memset(dest + got * 8, 0, (avail - got) * 8);
@@ -298,17 +345,17 @@ bool AudioRenderer::pumpOnce(AudioPipeline& pipeline, double* firstWrittenPtsMs)
         std::memset(dest, 0, static_cast<size_t>(avail) * 8);
         underruns_.fetch_add(1);
     }
-    (void)render_->ReleaseBuffer(avail, 0);
+    if (FAILED(render_->ReleaseBuffer(avail, 0))) return false;
     framesWritten_ += avail;
     return true;
 }
 
 double AudioRenderer::mediaTimeMs() const
 {
-    if (!running_ || !started_) return anchorPtsMs_.load();
+    if (!running_ || !started_) return std::numeric_limits<double>::quiet_NaN();
     UINT64 pos = 0, qpc = 0;
     if (FAILED(clock_->GetPosition(&pos, &qpc)) || clockFrequency_ == 0) {
-        return anchorPtsMs_.load();
+        return std::numeric_limits<double>::quiet_NaN();
     }
     const double consumedMs = 1000.0 * static_cast<double>(pos - anchorPos_) /
         static_cast<double>(clockFrequency_);
@@ -317,8 +364,8 @@ double AudioRenderer::mediaTimeMs() const
 
 void AudioRenderer::stopAndReset()
 {
-    if (client_) { (void)client_->Stop(); (void)client_->Reset(); }
     started_ = false;
+    if (client_) { (void)client_->Stop(); (void)client_->Reset(); }
     framesWritten_ = 0;
 }
 
@@ -363,7 +410,7 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer)
     }
     const double firstPts = headPtsMs();
     if (renderer != nullptr && firstPts >= 0.0) {
-        renderer->startAnchored(firstPts);
+        if (!renderer->startAnchored(*this)) log::error("audio", "initial endpoint prefill/start failed");
     }
     lastPrefillMs_.store(std::chrono::duration<double>(
         std::chrono::steady_clock::now() - t0).count() * 1000.0);
@@ -391,17 +438,25 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer)
                     segments_.clear();
                     if (havePacket_) { av_packet_unref(packet_); havePacket_ = false; }
                     avcodec_flush_buffers(codecCtx_);
+                    if (swr_) swr_free(&swr_);
                     const int64_t tbTarget = static_cast<int64_t>(
                         target * stream_->time_base.den / 1000 / stream_->time_base.num);
-                    avformat_seek_file(fmt_, streamIndex_, INT64_MIN, tbTarget, INT64_MAX, 0);
+                    const int seekResult = avformat_seek_file(fmt_, streamIndex_, INT64_MIN, tbTarget, INT64_MAX, 0);
+                    if (seekResult < 0) log::error("audio", std::format("seek failed code={}", seekResult));
                     demuxEof_ = false;
+                    drainSent_ = false;
+                    decodedEof_ = false;
+                    nextPtsMs_ = target;
                     discardUntilPtsMs_ = target;
                 }
                 decodeBlock();  // drops pts < target, fills to high watermark
                 double startPts = headPtsMs();
                 if (startPts < 0.0) startPts = target;
                 firstPtsAfterSeek_.store(startPts);
-                if (renderer != nullptr) { renderer->startAnchored(startPts); if (pauseNow) renderer->setPaused(true); }
+                if (renderer != nullptr) {
+                    if (!renderer->startAnchored(*this)) log::error("audio", "seek endpoint prefill/start failed");
+                    if (pauseNow) renderer->setPaused(true);
+                }
                 {
                     std::lock_guard<std::mutex> l2(mutex_);
                     discardUntilPtsMs_ = -1.0;

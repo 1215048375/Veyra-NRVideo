@@ -1128,7 +1128,9 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     out.videoFenceValue = ring_.lastSignaledValue();
 
     if(runFg&&frucBackend_){
-        if(resetFg&&realFrameIndex_>0&&(!ring_.drainQueue()||!frucBackend_->reset()))return false;
+        // Reseeding changes the next FRUC call, not resource ownership. Its
+        // input fence follows previous output copies on the same direct queue.
+        if(resetFg&&realFrameIndex_>0&&!frucBackend_->reset())return false;
         auto* flist=ring_.acquireNext(slot,st);if(!flist)return false;
         gpuTimer_.mark(flist,GpuStage::FgBatch);
         frucBackend_->recordInput(flist,videoFrame_[parity].Get(),parity);

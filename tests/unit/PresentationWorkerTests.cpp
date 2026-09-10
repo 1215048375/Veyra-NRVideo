@@ -16,6 +16,11 @@ int main(){
     check(discarded==1&&worker.occupancy()==0,"queued cancellation counted exactly once and occupancy drains");
     std::promise<void> next;auto nextFuture=next.get_future();check(worker.waitForSlot()&&worker.push([&](const auto&){next.set_value();return true;}),"producer resumes after cancellation");
     check(nextFuture.wait_for(1s)==std::future_status::ready,"new epoch job executes");worker.cancelAndDrain();
+    std::atomic<bool> observed=false;std::promise<void> waiting;auto waitingFuture=waiting.get_future();
+    check(worker.push([&](const auto& cancelled){waiting.set_value();while(!observed&&!cancelled())std::this_thread::sleep_for(1ms);return true;}),"hold presenter behind independently completed work");
+    check(waitingFuture.wait_for(1s)==std::future_status::ready&&worker.push([](const auto&){return true;}),"fill bounded queue during presentation deadline");
+    check(worker.waitForSlot([&]{check(worker.occupancy()==2,"completion polling runs outside queue mutex");observed=true;})&&observed,"backpressure observes completion before presenter releases slot");
+    worker.cancelAndDrain();
     check(worker.push([](const auto&){return false;}),"inject presentation failure");
     auto deadline=std::chrono::steady_clock::now()+1s;while(!worker.failed()&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(1ms);
     check(worker.failed()&&!worker.waitForSlot(),"failure propagates without blocking producer");

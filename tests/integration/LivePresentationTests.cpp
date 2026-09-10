@@ -8,18 +8,31 @@ using namespace veyra;
 using namespace std::chrono_literals;
 int wmain(int argc,wchar_t**argv){
     SetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS",L"1");
-    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--fruc")==0||wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--fruc")==0||wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     std::filesystem::create_directories(argv[2]);Logger::instance().openFile((std::filesystem::path(argv[2])/"engine.log").wstring());Logger::instance().setConsoleEnabled(false);
     HWND window=CreateWindowExW(0,L"STATIC",L"Live scheduler replay",WS_POPUP,0,0,960,540,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     if(!window)return 3;engine::EngineController engine;engine::PlayerOptions options;options.nr=false;options.fg=false;options.captureReplayForTest=true;
     const bool halfRate=argc==4&&wcscmp(argv[3],L"--half-rate")==0;
     const bool overload=argc==4&&std::wstring(argv[3]).find(L"--overload")==0;
+    const bool fileOverload=argc==4&&wcscmp(argv[3],L"--file-overload")==0;
     if(argc==4&&wcscmp(argv[3],L"--fruc")==0)options.settings.frameGenerationBackend=engine::FrameGenerationBackend::Fruc;
     if(overload){options.nr=options.sr=options.fg=true;options.realtime=false;options.fgMultiplier=4;options.settings.videoSrQuality=4;options.captureReplayDisableFgAdmissionForTest=wcscmp(argv[3],L"--overload-baseline")==0;SetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS",nullptr);}
     if(halfRate)options.settings.content=engine::ContentRate::Capture60To30;
+    if(fileOverload){options.captureReplayForTest=false;options.nr=options.sr=options.fg=true;options.realtime=false;options.fgMultiplier=4;options.settings.videoSrQuality=4;}
     int failures=0;auto check=[&](bool pass,const char* s){std::cout<<(pass?"PASS ":"FAIL ")<<s<<std::endl;if(!pass)++failures;};
     auto until=[&](auto predicate,int seconds=8){auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(seconds);while(std::chrono::steady_clock::now()<deadline){MSG msg;while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}auto s=engine.snapshot();if(s.failed){std::wcerr<<s.status<<'\n';return false;}if(predicate(s))return true;std::this_thread::sleep_for(5ms);}return false;};
     engine.open(window,argv[1],options);
+    if(fileOverload){
+        engine.setVolume(0,true);bool held=false,resumed=false;double maxLead=0;
+        check(until([&](const auto& s){held|=s.audioRebuffering;resumed|=held&&!s.audioRebuffering&&s.frames>10;maxLead=std::max(maxLead,s.lateMs);return s.frames>=100;},35),"overloaded file keeps advancing without dropping source frames or deadlocking");
+        check(held&&resumed,"actual GPU overload holds audio and resumes after video catches up");
+        const auto before=engine.snapshot();engine.pause(true);engine.seek(.5);
+        check(until([](const auto& s){return s.transport==engine::TransportState::Paused&&s.position>=.49&&s.position<.6;}),"paused seek survives an audio overload hold");
+        engine.pause(false);check(until([&](const auto& s){return s.frames>before.frames+8;}),"file resumes after overload and seek");
+        engine.stop();check(until([&](const auto&){return engine.idle();},5),"file overload shutdown");
+        std::cout<<"FILE_OVERLOAD held="<<held<<" resumed="<<resumed<<" maxObservedLeadMs="<<maxLead<<'\n';
+        DestroyWindow(window);CoUninitialize();return failures?1:0;
+    }
     if(overload){
         check(until([](const auto& s){return s.frames>=150;},35),"native4K NR + VSR high + FG4 completes bounded overload replay");
         const auto s=engine.snapshot();const auto& c=s.metrics.flow.counters;
