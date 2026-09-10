@@ -169,7 +169,11 @@ int wmain(int argc,wchar_t** argv){
         const int velocity = i < 24 ? 2 : -2;
         for(int y=0;y<int(height);++y)for(int x=0;x<int(width);++x){
             const int px=(x-phase*velocity+int(width))%int(width);auto* p=frame->data[0]+y*frame->linesize[0]+x*4;
-            p[0]=uint8_t((px*17+y*7)%256);p[1]=uint8_t(((px/16+y/16)%2)*180+30);p[2]=uint8_t((px*3+y*11)%256);p[3]=255;
+            // A spatially non-periodic pattern makes a two-pixel translation
+            // identifiable. The previous striped pattern had repeating aliases.
+            uint32_t hash=uint32_t(px)*0x9E3779B9u^uint32_t(y)*0x85EBCA6Bu;
+            hash^=hash>>16;hash*=0x7FEB352Du;hash^=hash>>15;hash*=0x846CA68Bu;hash^=hash>>16;
+            p[0]=uint8_t(hash);p[1]=uint8_t(hash>>8);p[2]=uint8_t(hash>>16);p[3]=255;
         }
         out={};ok=graph.process(frame,i*1000.0/30,i==0||i==24,out,i+1);
         if(ok)ok=presenter.present(ctx,ring,graph,out.videoSlot,false,false,0,false,.5f,out.batch.identity);

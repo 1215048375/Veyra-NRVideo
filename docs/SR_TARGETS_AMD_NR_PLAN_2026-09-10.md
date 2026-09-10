@@ -202,7 +202,7 @@ AMF只替换压缩编码器，继续共享颜色转换、源PTS、CFR判定、�
 
 应用EXE未变：`E97B716B99116BEC942262FFEF1612299CBB2F4B0BDA7C308A5BFF318B3B5157`。原NR仍为指定SHA `E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E`、165840496字节、310.8.0.0、签名Valid。
 
-本文最初研究阶段没有构建、2K/8K Create/Evaluate、AMD网络执行、实卡测试、阶段gate或独立Reviewer通过结论。后续同日实施已完成 Release 构建；RTX 5070 上 `veyra_experimental_backend_tests.exe sr2k` 和 `sr8k` 各完成三次 DLSS SR Evaluate，并读回确认非黑的 `2560x1440` 与 `7680x4320` 输出；AMD OF 独立短测成功 Create/Dispatch/Destroy 48 次。没有 AMD GPU、AMD NR 网络、实卡、阶段 gate 或独立 Reviewer 通过结论；没有提交、push 或 Release 变更。UI闪白修复的原工作树保留；原生NR性能、FRUC reset像素等历史未决问题没有被本方案关闭。
+本文最初研究阶段没有构建、2K/8K Create/Evaluate、AMD网络执行、实卡测试、阶段gate或独立Reviewer通过结论。后续同日实施已完成 Release 构建；RTX 5070 上 `veyra_experimental_backend_tests.exe sr2k` 和 `sr8k` 各完成三次 DLSS SR Evaluate，并读回确认非黑的 `2560x1440` 与 `7680x4320` 输出；AMD OF 独立短测成功 Create/Dispatch/Destroy 48 次，使用非周期纹理的源图右移2像素得到 canonical `current -> previous` flow `(-2, 0)`，左移2像素得到 `(2, 0)`。这验证的是 AMD 光流方向，不是 AMD NR 网络执行。没有 AMD GPU、AMD NR 网络、实卡、阶段 gate 或独立 Reviewer 通过结论；没有提交、push 或 Release 变更。UI闪白修复的原工作树保留；原生NR性能、FRUC reset像素等历史未决问题没有被本方案关闭。
 
 文档检查通过：两份方案及交接页的本地链接、代码围栏和行尾空白检查；`loop/STATE.json`解析及Phase7状态检查；`git diff --check`。研究文本缓存经`git check-ignore`确认仍被忽略。这些检查只证明文档一致性，不是新后端或画质验收。
 

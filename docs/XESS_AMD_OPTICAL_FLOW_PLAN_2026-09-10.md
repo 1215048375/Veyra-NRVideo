@@ -2,7 +2,7 @@
 
 日期：2026-09-10。状态：研究完成；已有窄范围产品接入，仍处于 Phase 7 `in_progress`。本文不改变阶段门槛或默认处理路线。
 
-当前实现包含统一的 2K / 4K / 8K SR 目标、AMD FidelityFX 光流 provider 和 Intel XeSS-FG 代理交换链显示后端。`logs/backend-20260910` 的 RTX 5070 窄测记录了 AMD OF Create/Dispatch/Destroy 成功（48 次 dispatch）和 XeSS 初始化、资源标记、Present 成功（43 次 SDK generated 计数，debugErrors=0）；SR 2K/8K 输出非黑。它们只证明该机器上的 SDK 调用链，**不证明** AMD GPU 兼容性、实际扫描输出帧率、画质、8K 实时性或长时稳定性。
+当前实现包含统一的 2K / 4K / 8K SR 目标、AMD FidelityFX 光流 provider 和 Intel XeSS-FG 代理交换链显示后端。RTX 5070 窄测记录了 AMD OF Create/Dispatch/Destroy 成功（48 次 dispatch），并以非周期纹理验证 canonical `current -> previous` 方向：源图右移 2 像素得到 `(-2, 0)`，左移 2 像素得到 `(2, 0)`；XeSS 初始化、资源标记和 Present 成功（43 次 SDK generated 计数，debugErrors=0）；SR 2K/8K 输出非黑。它们只证明该机器上的所测 SDK 调用链与 AMD OF 的已知平移方向，**不证明** AMD GPU 兼容性、实际扫描输出帧率、画质、8K 实时性或长时稳定性。
 
 最新扩展：[2K / 8K 超分与 AMD NR 接入方案](SR_TARGETS_AMD_NR_PLAN_2026-09-10.md)。AMD 光流与 AMD 执行 NR 是两个不同模块：当前接入不提供 AMD DLSS5/NR、DLSS SR、NVIDIA FRUC、DLSS 帧生成、NVENC 或 AMD AMF 导出。该文保留 AMD NR 的后续研究路线，不能把已有光流实现写成 AMD DLSS5。
 
@@ -226,7 +226,7 @@ R1 如没有速度收益但能在明确场景改善运动/NR，可以作为用�
 
 实际执行：Git 状态/日志、`rg`与源码读取、`gh api` 查询 Magpie/Intel/AMD 的固定提交、树、Release和compare，以及官方 raw 文档/源码下载到忽略目录；本机 Magpie版本读取；应用和指定NR hash/签名核对。随后完成 Release 构建，并执行契约、预设、XeSS 和 AMD OF 短测。
 
-`veyra_repair_contract_tests.exe` 的 36 项检查通过；`veyra_repair_preset_tests.exe` 使用临时预设文件路径通过。RTX 5070 上的 `veyra_experimental_backend_tests.exe xess` 成功完成 XeSS 初始化、资源标记和 Present，记录 `generated=43`、`debugErrors=0`；`... amd` 成功完成 AMD OF Create/Dispatch/Destroy，记录 `amdDispatches=48`、`debugErrors=0`；`... sr2k` 与 `... sr8k` 各完成三次 DLSS SR Evaluate，并读回确认非黑的 `2560x1440` 与 `7680x4320` 输出。每项执行均少于五秒。这些短测只证明本机 SDK 调用、资源提交和所测 SR 输出，不证明真实扫描输出帧率、画质、AMD GPU 兼容性、实卡效果、8K 实时性或长期稳定性。
+`veyra_repair_contract_tests.exe` 的 36 项检查通过；`veyra_repair_preset_tests.exe` 使用临时预设文件路径通过；`veyra_motion_validation_tests.exe` 的水平/垂直 confidence 验证及 D3D12 debug 检查通过。RTX 5070 上的 `veyra_experimental_backend_tests.exe xess` 成功完成 XeSS 初始化、资源标记和 Present，记录 `generated=43`、`debugErrors=0`；`... amd` 成功完成 AMD OF Create/Dispatch/Destroy，记录 `amdDispatches=48`、`debugErrors=0`，且非周期纹理平移的最终 canonical flow 为右移 `(-2, 0)`、左移 `(2, 0)`；`... sr2k` 与 `... sr8k` 各完成三次 DLSS SR Evaluate，并读回确认非黑的 `2560x1440` 与 `7680x4320` 输出。每项执行均少于五秒。这些短测只证明本机 SDK 调用、资源提交、AMD OF 所测方向和所测 SR 输出，不证明真实扫描输出帧率、画质、AMD GPU 兼容性、实卡效果、8K 实时性或长期稳定性。
 
 本轮应用 EXE 由当前 Release 构建生成；指定 NR hash 仍为 `E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E`，签名 Valid。没有修改控制面或原始产品方案，没有 push、Release 或 Runtime Pack 变更。
 
