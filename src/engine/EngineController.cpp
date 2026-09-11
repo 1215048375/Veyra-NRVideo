@@ -215,6 +215,17 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 markResetStage(diagnostics::ResetStage::FirstValid);
                 finishReset(diagnostics::ResetOutcome::Completed);
             };
+            auto historyResetCause=[&](const pipeline::FramePacket& packet)->pipeline::ResetReason{
+                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::Open))return pipeline::ResetReason::Open;
+                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::Seek))return pipeline::ResetReason::Seek;
+                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::Drop))return pipeline::ResetReason::FrameDrop;
+                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::Resize))return pipeline::ResetReason::Resize;
+                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::DeviceLost))return pipeline::ResetReason::DeviceLost;
+                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::PauseResume))return pipeline::ResetReason::PauseResume;
+                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::Discontinuity))return pipeline::ResetReason::FrameDrop;
+                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::Cut))return pipeline::ResetReason::SceneCut;
+                return pipeline::ResetReason::SceneCut;
+            };
             OnExit resetExit{[&]{finishReset(stop_?diagnostics::ResetOutcome::Cancelled:diagnostics::ResetOutcome::Failed);}};
             auto collectTimings=[&]{
                 for(const auto& sample:graph.takeGpuTimings())if(frameFlow)frameFlow->gpuFrame(sample,host100ns());
@@ -430,6 +441,13 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 if(veyra::log::verboseFrameLogs())veyra::log::info("source-identity",std::format("source={} totalRead={} graphProcessed={} cached={} revision={} nvofStandalone={}",pkt.sequence,sourceFrames,frames+1,rereadCached,options.settings.revision,gd.enableNvofStandalone));
                 reset=false;hasOutput=true;
                 const auto processDone=Clock::now();
+                if(!resetRecord&&out.historyReset){
+                    resetStart=processStart;resetStageStart=processStart;
+                    resetRecord=diagnostics::FrameFlowMetrics::ResetRecord{};resetRecord->sessionId=runSessionId;resetRecord->settingsRevision=out.batch.identity.settingsRevision;resetRecord->epoch=out.batch.identity.epoch;resetRecord->sourceFrameId=out.batch.identity.sourceFrameId;resetRecord->reason=static_cast<uint8_t>(historyResetCause(pkt));
+                    resetRecord->stageMs[size_t(diagnostics::ResetStage::Drain)]=0.0;resetRecord->stageMs[size_t(diagnostics::ResetStage::Destroy)]=0.0;resetRecord->stageMs[size_t(diagnostics::ResetStage::Create)]=0.0;
+                    resetRecord->rebuilt=false;markResetStage(diagnostics::ResetStage::Warmup);
+                    if(frameFlow)frameFlow->resetLifecycle(*resetRecord);
+                }
                 if(resetRecord&&resetRecord->epoch==0){
                     resetRecord->epoch=out.batch.identity.epoch;resetRecord->sourceFrameId=out.batch.identity.sourceFrameId;
                     markResetStage(diagnostics::ResetStage::Warmup);
@@ -443,7 +461,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     if(settingsChanged||!completionRates)completionRates=std::make_shared<FrameCompletionRates>(host100ns());
                     frameFlow=std::shared_ptr<FrameFlowWindow>(new FrameFlowWindow(runSessionId,out.batch.identity,host100ns(),completionRates),[](FrameFlowWindow* window){logFrameFlow(window->snapshot(monotonic100ns()),"closed");delete window;});
                     if(resetRecord)frameFlow->resetLifecycle(*resetRecord);else if(lastResetRecord)frameFlow->resetLifecycle(*lastResetRecord);
-                    frameFlow->update([&](auto& m){m.counters.historyResets=out.historyReset;m.counters.settingsResets=settingsChanged;m.counters.captureDropResets=pipeline::hasFrameFlag(pkt.flags,pipeline::FrameFlagBits::Drop);});
+                    frameFlow->update([&](auto& m){m.counters.historyResets+=uint64_t(out.historyReset);m.counters.settingsResets+=uint64_t(settingsChanged);m.counters.captureDropResets+=uint64_t(pipeline::hasFrameFlag(pkt.flags,pipeline::FrameFlagBits::Drop));});
                     captureFlowBase=captureFlowLast;
                     {std::lock_guard lock(mutex_);rateSkippedBase=snapshot_.captureRateSkipped;activeFlow_=frameFlow;}
                     veyra::log::info("metrics",std::format("reset session={} appliedRevision={} epoch={} sourceBase={}",runSessionId,metricsRevision,metricsEpoch,statsSourceBase));

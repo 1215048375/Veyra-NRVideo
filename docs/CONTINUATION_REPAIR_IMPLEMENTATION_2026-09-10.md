@@ -10,6 +10,8 @@
 
 验证：完整 release 构建 `logs/continuation-repair-20260910/reset-lifecycle-build-final.log` exit 0；`continuation-reset-final-rollback` 约 8.8 秒 32 项 PASS，覆盖真实 live scheduler 的 NR+2X 重建、匹配 GPU-ready、paused cached preview、失败回滚、停止取消及旧计数隔离。合成文件回放，不是实体采集卡；没有宣称扫描输出或物理显卡拔插已验证。测试 EXE SHA `474726E22BBAB4D8629C5232594EF6E05FC904A526D344543E94980A41AC5554`，worker SHA `EC8150FF88C7C84FACDF92B920DED2D6CEC5F682990C375A92550AFD5E818695`。
 
+随后把普通 open/history boundary 也接入相同记录，修正 `historyResets/settingsResets/captureDropResets` 从覆盖赋值为累计。`continuation-reset-cause-live-final` 62.6 秒通过 source-gap 与 EOF 尾批验收：3600/3600 real ready/presented、0 cancelled；它是合成回放，未当作实体采集结论。第一次 20/30 秒窗口失败是素材在本机需要约一分钟读完，已保留失败日志并将测试等待改为90秒，仍受单次290秒 watchdog限制。
+
 ## 2026-09-11 续接实证（优先于下面历史进度）
 
 ### 最新续接：可控音频重锚淡出

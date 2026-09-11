@@ -46,7 +46,10 @@ int wmain(int argc,wchar_t**argv){
     if(sourceGap){
         check(until([](const auto& s){return s.frames==12&&s.metrics.flow.counters.realPresented==12&&s.processedCompleted==12;}),"source Waiting still completes and presents all outstanding real frames");
         check(until([](const auto& s){return s.frames>=20;}),"source resumes after gap without deadlock");
-        check(until([](const auto& s){return s.transport==engine::TransportState::Ended;},20),"EOF drains final live batch before marking ended");
+        // The fixture can take roughly a minute in this host and this path intentionally runs
+        // every source frame through the live scheduler; leave headroom for
+        // host scheduling without changing the bounded 290s test watchdog.
+        check(until([](const auto& s){return s.transport==engine::TransportState::Ended;},90),"EOF drains final live batch before marking ended");
         const auto s=engine.snapshot();const auto& c=s.metrics.flow.counters;
         std::cout<<"EOS frames="<<s.frames<<" ready="<<s.processedCompleted<<" presented="<<c.realPresented<<" cancelled="<<c.cancelledBeforePresent<<'\n';
         check(s.frames>20&&s.processedCompleted==s.frames&&c.realPresented==c.realSubmitted,"last real source frame is completed and current epoch fully presented");

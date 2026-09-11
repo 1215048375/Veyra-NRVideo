@@ -1,6 +1,7 @@
 # 2026-09-11 继续修复目标模式执行中
 
 最新 reset/rebuild 计时：`FrameFlowMetrics` 增加带 session/revision/epoch/source identity 的设置生命周期记录，区分轻量重置与资源重建，并记录 drain/destroy/create/warmup/first GPU-ready 五段 CPU 观测、完成/回滚/取消/失败结果。真实设置事务、暂停缓存预览、注入失败回滚、停止中取消均已通过 `continuation-reset-final-rollback`（约8.8秒，32项，合成文件回放）。完整 release 构建 `reset-lifecycle-build-final.log` exit0。未执行实体采集卡、真实系统跨DPI或AMD provider；目标仍active。
+普通 open/history boundary 随后接入同一记录，reset counters 改为累计；source-gap/EOF 最终 `continuation-reset-cause-live-final` 62.6秒通过（3600 real frames ready/presented，0 cancelled）。早期20/30秒窗口失败原因是素材在本机需要约一分钟读完，失败日志保留，测试上限调整为90秒（单次 watchdog仍290秒）。
 
 最新可控淡出：基线`78675f2`，为采集设置/PTS/大偏差重锚和文件播放中seek加入真实240帧PCM淡出，WASAPI padding消耗后Reset再淡入；边界最长80ms，取消/错误退出，正常pump不加等待。55项timeline、7项真实player、11.105秒合成采集通过；重锚额外等待约16至40ms，普通偏差10.6至21.3ms。最终delivery `6304c4518f864f34a4bb91392cd16ab1`23项PASS，应用SHA `A86DB75E321677C2B9EDC0380D3BC4DCC13FAD3DE5BA05D59DA5C1C30C6BB97A`；命令、测试身份与边界见实施记录最新段。真实RTX执行，未实卡/外部听觉验收，无发布。下一任务补reset排空/销毁/创建/预热恢复计时及逐帧轨迹；AMD完整网络/provider仍缺，目标active。
 
