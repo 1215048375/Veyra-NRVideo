@@ -12,7 +12,7 @@ parser.add_argument('--prefix', type=Path, required=True)
 parser.add_argument('--vcpkg', type=Path, required=True)
 parser.add_argument('--source', type=Path, required=True)
 parser.add_argument('--output', type=Path, required=True)
-parser.add_argument('--version', default='0.0.3')
+parser.add_argument('--version', required=True)
 args = parser.parse_args()
 if args.output.exists():
     raise SystemExit('Output exists; choose a new candidate')

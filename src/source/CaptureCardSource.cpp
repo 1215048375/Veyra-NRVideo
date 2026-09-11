@@ -96,6 +96,7 @@ bool CaptureCardSource::setAudioGain(float gain){
     p.lastAudioGain=gain;p.audioGainSupported=SUCCEEDED(hr);log::info("capture-audio",std::format("application gain={} hr=0x{:X}",gain,unsigned(hr)));return p.audioGainSupported;
 }
 void CaptureCardSource::videoPresented(double pts,int64_t time){if(p_->audioSession)p_->audioSession->videoPresented(pts,time);}
+void CaptureCardSource::videoReset(){if(p_->audioSession)p_->audioSession->videoReset();}
 void CaptureCardSource::setAudioSync(unsigned mode,int offset){if(p_->audioSession)p_->audioSession->setSync(mode,offset);}
 sink::CaptureAudioState CaptureCardSource::audioState()const{auto state=p_->audioSession?p_->audioSession->snapshot():sink::CaptureAudioState{};if(!p_->audioError.empty())state.error=p_->audioError;return state;}
 bool CaptureCardSource::open(const SourceOpenDesc& desc){return configure(desc)&&start();}

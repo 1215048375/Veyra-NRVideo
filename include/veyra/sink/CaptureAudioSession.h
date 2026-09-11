@@ -23,6 +23,8 @@ public:
     void stop();
     bool push(const void* data,size_t bytes,double ptsMs,bool discontinuity);
     void videoPresented(double ptsMs,int64_t host100ns);
+    // Invalidate only software presentation; preserve the shared input mapping.
+    void videoReset();
     void setGain(float);
     // 0 automatic, 1 manual, 2 off. Positive offset delays sound.
     void setSync(unsigned mode,int offsetMs);

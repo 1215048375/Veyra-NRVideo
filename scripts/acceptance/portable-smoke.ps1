@@ -1,5 +1,8 @@
 param([Parameter(Mandatory=$true)][string]$PackageDirectory,[Parameter(Mandatory=$true)][string]$InputFile,[Parameter(Mandatory=$true)][string]$OutputDirectory)
 $ErrorActionPreference='Stop'
+# A PowerShell 7 parent may omit Windows PowerShell's Utility module from the
+# inherited module paths. Load this host's hashing/JSON cmdlets explicitly.
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1') -Force
 $package=(Resolve-Path -LiteralPath $PackageDirectory).Path
 $inputPath=(Resolve-Path -LiteralPath $InputFile).Path
 $output=[IO.Path]::GetFullPath($OutputDirectory)

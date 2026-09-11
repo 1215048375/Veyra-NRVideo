@@ -12,7 +12,7 @@
 
 Windows 视频播放器与采集卡增强工具。支持视频、图片和采集卡实时预览，可组合使用超分辨率、NR 画面增强与补帧。
 
-[下载 0.0.3 免安装版](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.3) · [更新记录](docs/RELEASE_NOTES_0.0.3.md) · [反馈问题](https://github.com/Likely7/Veyra-NRVideo/issues)
+[下载 0.0.4 免安装版](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.4) · [更新记录](docs/RELEASE_NOTES_0.0.4.md) · [反馈问题](https://github.com/Likely7/Veyra-NRVideo/issues)
 
 ## 功能
 
@@ -28,11 +28,11 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片和采集
 
 日常模式以观看为主；专业模式展开增强参数、诊断和导出工具。切换模式不需要重新打开视频。
 
-0.0.3 新增 NR 运行版本切换：NVIDIA 原版默认启用，另附 RTX 40/50 社区兼容实验版。RTX 40 尚未完成实机验证；专业模式布局重排仍在规划中。
+0.0.4 修复增强处理造成的音画不同步，以及 NR 耗时轻微波动时的音频卡顿；同时修正 XeSS 补帧下的音频播放时序。
 
 ## 下载与运行
 
-1. 在 [Releases](https://github.com/Likely7/Veyra-NRVideo/releases) 下载 **Veyra-0.0.3-win64-portable.zip**，不要下载 Source code。
+1. 在 [Releases](https://github.com/Likely7/Veyra-NRVideo/releases) 下载 **Veyra-0.0.4-win64-portable.zip**，不要下载 Source code。
 2. 完整解压到一个可写文件夹，双击 **Veyra.exe**。无需安装 SDK、Python 或开发工具。
 3. 使用当前显卡驱动。要使用 NVIDIA NR、DLSS、RTX Video SR 和 NVENC，需兼容的 NVIDIA RTX 显卡；本版本主要在 RTX 5070 上验证。
 
@@ -58,6 +58,8 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片和采集
 专业模式中分别开启 NR、超分和补帧。超分下方选择算法及目标尺寸；补帧页选择 DLSS 或 XeSS 及可用倍率。建议从实时 NR、较低 RTX Video SR 档位和2X补帧开始，结合对比画面与实时状态调整。
 
 处理跟不上时降低画质、倍率或目标尺寸。软件延迟指采集回调到 Present 返回，不包含完整采集卡和屏幕扫描延迟；补帧不能降低游戏输入延迟。
+
+音画同步自动跟随软件处理链路，采集卡音视频共同的输入延迟不会重复补偿。轻微耗时波动不会逐帧停放声音；如果 GPU 持续处理不过来，仍可能等待视频，需要降低增强负载。
 
 ### 导出与运行组件
 
@@ -87,6 +89,6 @@ NR 与 DLSS 帧生成属于 **community experimental / 社区实验集成**，�
 
 ## 开发与许可
 
-[构建说明](docs/BUILD.md) · [组件清单](docs/RUNTIME_COMPONENTS_0.0.3.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
+[构建说明](docs/BUILD.md) · [组件清单](docs/RUNTIME_COMPONENTS_0.0.4.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
 
 源码采用 [GPLv3](LICENSE)。SDK、模型和运行时不进入源码仓库；Release 组件按各自许可与实验发布范围单独提供。

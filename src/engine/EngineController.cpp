@@ -148,7 +148,13 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             if(physicalCapture&&!captureSource.start()){status(L"无法启动采集，请查看诊断",true);break;}
             {std::lock_guard lock(mutex_);snapshot_.duration=duration;snapshot_.running=true;snapshot_.transport=TransportState::Playing;snapshot_.image=isImage;snapshot_.capture=isCapture;snapshot_.applied=options.snapshot();snapshot_.desired=desired_;}
             status(isImage?L"图片已增强，可保存PNG/JPEG":std::format(L"{} | 输入 {}×{} / 底图 {}×{} / NR {}×{} / 光流 {}×{} / FG与输出 {}×{} | {}",isCapture?L"实时采集":L"播放",width,height,gd.workWidth,gd.workHeight,gd.nrWidth,gd.nrHeight,gd.flowWidth,gd.flowHeight,gd.workWidth,gd.workHeight,gd.nrWidth<gd.workWidth?L"实时内部处理并回填":L"原生NR（性能成本较高）"));
-            pipeline::EnhanceGraph::FrameOutputs out;bool reset=true,hasOutput=false,audioRebuffering=false,seekPreviewPending=false;std::deque<double> latenessSamples;
+            pipeline::EnhanceGraph::FrameOutputs out;bool reset=true,hasOutput=false,audioRebuffering=false,seekPreviewPending=false;
+            bool fileAwaitingVideo=true,fileAudioAlignPending=true;std::deque<double> latenessSamples;
+            if(!isImage&&!isCapture&&audioPipe.open(path)){
+                audioPipe.holdForVideo();audioPipe.startThread(&audio,true);audioStarted=true;
+                std::lock_guard lock(mutex_);snapshot_.audioAvailable=true;
+            }
+            auto holdFileAudio=[&]{if(audioStarted)audioPipe.holdForVideo();fileAwaitingVideo=true;};
             TimingWindow captureAges,scheduleWaits,processTimes,presentTimes,decodeTimes,gpuReadyTimes;
             std::array<TimingWindow,size_t(diagnostics::GpuStage::Count)> gpuStageTimes;
             std::array<uint64_t,size_t(diagnostics::GpuStage::Count)> lastGpuSampleEnd{};
@@ -160,6 +166,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             bool fileEndpointLossInjected=false;
             auto publishAudioStatus=[&]{
                 const bool recovering=audioPipe.endpointRecovering();const auto error=audioPipe.endpointError();const auto count=audioPipe.endpointRecoveries();
+                {std::lock_guard lock(mutex_);snapshot_.audioRebuffering=audioPipe.waitingForVideo();snapshot_.audioVideoWaits=audioPipe.videoWaitCount();}
                 if(recovering!=publishedAudioRecovery||error!=publishedAudioError||count!=publishedAudioRecoveries){
                     publishedAudioRecovery=recovering;publishedAudioError=error;publishedAudioRecoveries=count;
                     std::lock_guard lock(mutex_);snapshot_.audioEndpointRecovering=recovering;snapshot_.audioEndpointError=error;snapshot_.audioEndpointRecoveries=count;
@@ -293,6 +300,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 }
                 const auto previous=options.snapshot();const auto previousDesc=gd;bool transaction=false;
                 if(requested.revision!=previous.revision){
+                    holdFileAudio();
                     finishReset(diagnostics::ResetOutcome::Cancelled);
                     resetStart=resetStageStart=Clock::now();
                     resetRecord=diagnostics::FrameFlowMetrics::ResetRecord{};
@@ -300,6 +308,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     resetRecord->reason=static_cast<uint8_t>(pipeline::ResetReason::Settings);
                     if(frameFlow)frameFlow->resetLifecycle(*resetRecord);
                     drainLivePresentation();
+                    if(physicalCapture)captureSource.videoReset();
                     // A drain may outlive several slider notifications. Build
                     // only the latest pending configuration at this boundary.
                     {std::lock_guard lock(mutex_);requested=desired_;}
@@ -338,18 +347,20 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 if(stop_)break;
                 const double seek=seekSeconds_.exchange(-1);
                 if(seek>=0&&!isImage&&!isCapture){
+                    holdFileAudio();fileAudioAlignPending=true;
                     if(!ring.drainQueue()||!activeSource->seek({static_cast<int64_t>(seek*1000000),1000000})){status(L"跳转失败",true);break;}
                     discardBefore=seek*1000;seekPreviewPending=true;reset=true;pendingResetCause=pipeline::ResetReason::Seek;anchorMs=discardBefore;anchor=Clock::now();lastAudioClockMs=discardBefore;audioClockExhausted=false;audioRebuffering=false;if(audioStarted){audioPipe.setPaused(paused_);audioPipe.requestSeek(discardBefore);}
                 }
                 if(!transaction&&((paused_&&!seekPreviewPending)||(isImage&&hasOutput))){
                     drainLivePresentation();
+                    if(!wasPaused){holdFileAudio();if(physicalCapture)captureSource.videoReset();}
                     if(audioStarted)audioPipe.setPaused(true);wasPaused=true;
                     const bool referencesValid=hasOutput&&out.batch.count&&out.batch.frames[out.batch.count-1].lease&&out.batch.frames[out.batch.count-1].lease->referencesValid;
                     if(hasOutput&&!presenter.present(ctx,ring,graph,out.videoSlot,false,referencesValid,comparisonMode_,comparisonBase_,comparisonSplit_,out.batch.identity,previewView())){status(L"画面呈现失败",true);break;}
                     if(hasOutput&&graph.resolveGeneration(out))completeReset(out.batch.identity);
                     std::this_thread::sleep_for(std::chrono::milliseconds(16));continue;
                 }
-                if(wasPaused&&!paused_){audioRebuffering=false;if(audioStarted)audioPipe.setPaused(false);anchor=Clock::now();anchorMs=out.ptsMs;reset=true;pendingResetCause=pipeline::ResetReason::PauseResume;wasPaused=false;}
+                if(wasPaused&&!paused_){holdFileAudio();audioRebuffering=false;if(audioStarted)audioPipe.setPaused(false);anchor=Clock::now();anchorMs=out.ptsMs;reset=true;pendingResetCause=pipeline::ResetReason::PauseResume;wasPaused=false;}
                 // Backpressure before reading the capacity-one source mailbox:
                 // when a lease frees we consume the newest available sample.
                 if(liveScheduler&&!transaction){
@@ -495,7 +506,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     veyra::log::info("capture-timeline",std::format("interval100ns={} packetDurationKnown={} packetDurationPositive={} nominalFps={} FG={} pacing={}",duration100ns,!pkt.duration.isUnknown(),pkt.duration.num>0,activeSource->info().averageFps,options.fg,paceSourcePts?"source-pts":"capture-ready"));
                     liveTimeline.reset(out.batch.identity.epoch,out.batch.b100ns,captureArrival,options.fg?duration100ns:0,paceSourcePts);
                 }
-                if(!audioStarted&&!isImage&&!isCapture&&frames==0){if(audioPipe.open(path)){audioPipe.startThread(&audio,true);audioStarted=true;{std::lock_guard lock(mutex_);snapshot_.audioAvailable=true;}}anchor=Clock::now();anchorMs=lastAudioClockMs=pts;}
+                if(!isImage&&!isCapture&&frames==0){anchor=Clock::now();anchorMs=lastAudioClockMs=pts;}
                 auto nowMs=[&](){
                     if(!audioStarted)return anchorMs+std::chrono::duration<double,std::milli>(Clock::now()-anchor).count();
                     publishAudioStatus();const double a=audio.mediaTimeMs();
@@ -585,13 +596,17 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 if(!rereadCached&&!isImage)completedProcessing(out.batch.identity);
                 gpuWaitMs=elapsedMs(readyStart);gpuReadyTimes.add(gpuWaitMs);
                 frameFlow->cpu(diagnostics::CpuStage::ReadyWait,gpuWaitMs,host100ns());
-                if(audioStarted&&!isCapture&&!paused_){
+                // WASAPI prefill is allowed before video; device-clock playback
+                // is not. Align only open/seek, never discard audio to catch up
+                // with a slow graph during ordinary playback or settings edits.
+                if(audioStarted&&fileAudioAlignPending){
+                    while(!stop_&&audioPipe.endpointRecovering()){publishAudioStatus();deadlineWait.slice();}
                     const double media=audio.mediaTimeMs();
-                    if(std::isfinite(media)){
-                        const double lead=media-pts;
-                        if(!audioRebuffering&&lead>80){audioRebuffering=true;audioPipe.setPaused(true);veyra::log::info("audio-sync",std::format("video overload: holding audio clock leadMs={:.2f}",lead));}
-                        else if(audioRebuffering&&lead<=20){audioRebuffering=false;audioPipe.setPaused(false);veyra::log::info("audio-sync",std::format("video caught up: resume common timeline leadMs={:.2f}",lead));}
+                    if(std::isfinite(media)&&media+1.0<pts){
+                        const double aligned=audioPipe.requestSeek(pts);
+                        if(!std::isfinite(aligned)){status(L"音频时间线对齐失败",true);break;}
                     }
+                    fileAudioAlignPending=false;
                 }
                 bool interrupted=false,presentFailed=false;
                 for(uint32_t i=0;i<out.batch.count;++i){
@@ -599,8 +614,10 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     if(generated&&item.validity!=pipeline::GenerationValidity::Valid){++handled;continue;}
                     if(generated&&comparisonMode_!=0)continue;
                     if(isCapture&&generated&&liveTimeline.expired(item.pts100ns,host100ns(),100000)){++expired;++handled;frameFlow->update([](auto& m){++m.counters.generatedExpiredAfterEval;});continue;}
+                    const double itemPtsMs=item.pts100ns/10000.0;
+                    if(audioStarted&&!fileAwaitingVideo)audioPipe.videoReady(itemPtsMs);
                     const auto waitStart=Clock::now();
-                    while(!stop_&&!paused_&&seekSeconds_<0&&(isCapture?host100ns()<liveTimeline.deadline(item.pts100ns):nowMs()+0.25<item.pts100ns/10000.0))deadlineWait.slice();
+                    while(!stop_&&!paused_&&seekSeconds_<0&&(isCapture?host100ns()<liveTimeline.deadline(item.pts100ns):!fileAwaitingVideo&&nowMs()+0.25<itemPtsMs))deadlineWait.slice();
                     frameWaitMs+=elapsedMs(waitStart);
                     frameFlow->cpu(diagnostics::CpuStage::DeadlineWait,elapsedMs(waitStart),host100ns());
                     if(stop_||(paused_&&!seekPreviewPending)||seekSeconds_>=0){interrupted=true;break;}
@@ -612,6 +629,19 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     item.lease->consumerFence=ring.lastSignaledValue();
                     if(presenter.submittedCount()>before)traceFrame(diagnostics::TraceKind::Present,item.identity,out.batch.batchId,item.lease->consumerFence,item.pts100ns,item.subframe,1,elapsedMs(begin));
                     if(presenter.submittedCount()>before){++handled;frameFlow->presented(generated,item.lease->consumerFence,host100ns());}
+                    if(presenter.submittedCount()>before&&!isCapture&&!isImage){
+                        const double intervalMs=double(liveSourceInterval100ns(pkt.duration,activeSource->info().averageFps))/10000.0;
+                        // XeSS owns generated frames inside its swapchain. The
+                        // engine sees only real B frames, so its audio coverage
+                        // must last a SOURCE interval, never a hidden subframe.
+                        const bool callerPresentsGenerated=options.fg&&!graph.xessEnabled()&&comparisonMode_==0;
+                        double nextPtsMs=itemPtsMs+intervalMs/(callerPresentsGenerated?options.fgMultiplier:1);
+                        for(uint32_t next=i+1;next<out.batch.count;++next){const auto& candidate=out.batch.frames[next];
+                            if(candidate.kind!=pipeline::FrameKind::Generated||(candidate.validity==pipeline::GenerationValidity::Valid&&comparisonMode_==0)){nextPtsMs=candidate.pts100ns/10000.0;break;}}
+                        if(audioStarted){audioPipe.videoPresented(nextPtsMs);audioPipe.setPaused(paused_);}
+                        if(fileAwaitingVideo)veyra::log::info("audio-sync",std::format("video anchor presented ptsMs={:.3f} audioPtsMs={:.3f} nextPtsMs={:.3f} paused={} (Present return, scanout unmeasured)",itemPtsMs,audio.mediaTimeMs(),nextPtsMs,paused_.load()));
+                        fileAwaitingVideo=false;anchor=Clock::now();anchorMs=itemPtsMs;
+                    }
                     if(presenter.submittedCount()>before&&!generated&&!rereadCached)frameFlow->latency(std::chrono::duration_cast<std::chrono::nanoseconds>(decodeStart.time_since_epoch()).count()/100,host100ns());
                     if(presenter.submittedCount()>before&&generated&&lineage)frameFlow->generatedLatency(*lineage,host100ns());
                     if(presenter.submittedCount()>before){++submitted;const auto time=host100ns();submissionTimes.push_back(time);while(submissionTimes.size()>1&&time-submissionTimes.front()>10000000)submissionTimes.pop_front();if(veyra::log::verboseFrameLogs())veyra::log::info("submit",std::format("batch={} epoch={} revision={} subframe={} pts100ns={} host100ns={} fence={} (submission, display unmeasured)",out.batch.batchId,item.identity.epoch,item.identity.settingsRevision,item.subframe,item.pts100ns,host100ns(),item.lease->consumerFence));}
@@ -621,6 +651,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 seekPreviewPending=false;
                 }
                 if(!liveScheduler){scheduleWaits.add(frameWaitMs);presentTimes.add(framePresentMs);}
+                audioRebuffering=audioStarted&&audioPipe.waitingForVideo();
                 const double lateness=isCapture?0:nowMs()-pts;
                 if(!paused_&&!isCapture){latenessSamples.push_back(std::abs(lateness));if(latenessSamples.size()>1200)latenessSamples.pop_front();}
                 std::vector<double> sorted(latenessSamples.begin(),latenessSamples.end());std::sort(sorted.begin(),sorted.end());
@@ -646,6 +677,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 ++frames;{std::lock_guard lock(mutex_);snapshot_.metrics=measured;snapshot_.position=pts/1000;snapshot_.frames=sourceFrames;snapshot_.generated=graphStats.fgGeneratedFrames;snapshot_.lateMs=lateness;snapshot_.lateP95Ms=sorted.empty()?0:sorted[size_t((sorted.size()-1)*0.95)];
                     snapshot_.nrActive=graph.nrEnabled()&&graphStats.nrEvaluateCount>0;
                     snapshot_.audioRebuffering=audioRebuffering;
+                    snapshot_.audioVideoWaits=audioPipe.videoWaitCount();
                     snapshot_.srActive=gd.enableSr&&graphStats.srEvaluateCount>0;
                     snapshot_.fgActive=options.fg&&(graph.xessEnabled()?presenter.xessActive()&&graphStats.fgGeneratedFrames>0:graph.fgEnabled()&&measured.flow.counters.fgReadyValid>0);
                     if(transaction&&nvidiaAdapter&&(!graph.xessEnabled()||presenter.xessActive()))snapshot_.backendWarning.clear();

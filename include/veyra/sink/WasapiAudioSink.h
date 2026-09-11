@@ -16,6 +16,7 @@
 #include <deque>
 #include <format>
 #include <mutex>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -67,6 +68,15 @@ public:
 
     void stopThread();
     void setPaused(bool value) { paused_.store(value); }
+
+    // File playback: prefill while held, then let the device clock advance
+    // with a bounded jitter allowance beyond video coverage. Enforced on the audio owner even
+    // while the GPU owner is blocked in feature creation/evaluation.
+    void holdForVideo();
+    void videoReady(double ptsMs);
+    void videoPresented(double nextPtsMs);
+    bool waitingForVideo() const { return videoWaiting_.load(); }
+    uint64_t videoWaitCount() const { return videoWaitCount_.load(); }
 
     // Seek protocol (engine thread calls; audio thread executes). Blocks
     // until the audio thread finished the atomic re-sequence and prefilled.
@@ -133,6 +143,9 @@ private:
     std::atomic<bool> endpointRecovering_{false},clockExhausted_{false},endpointLossForTest_{false};
     std::atomic<HRESULT> endpointError_{S_OK};
     std::atomic<uint64_t> endpointRecoveries_{0};
+    std::atomic<bool> videoSync_{false},videoHold_{false},videoWaiting_{false};
+    std::atomic<double> videoLimitMs_{std::numeric_limits<double>::infinity()};
+    std::atomic<uint64_t> videoWaitCount_{0};
 };
 
 class AudioRenderer {

@@ -32,7 +32,7 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
     int64_t lastArrival=0;
     CaptureAudioState state;
     std::thread thread;
-    static constexpr double maxQueuedMs=500;
+    static constexpr double maxAutoDelayMs=1500,maxQueuedMs=2000;
     double queuedMs()const{return 1000.0*(pcm.size()/2)/kAudioRate+1000.0*(inputBytes+convertingBytes)/format.nAvgBytesPerSec;}
     void queueChanged(){state.bufferedMs=queuedMs();state.bufferHighWaterMs=std::max(state.bufferHighWaterMs,state.bufferedMs);}
     void clearPcmLocked(){pcm.clear();haveHead=false;pcmTimeline.clear();pcmHead=pcmTail=0;pullEnd.reset();}
@@ -156,9 +156,14 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
             const double now=double(hostTime())/10000;
             const bool fresh=video&&now-vHost<500;
             const double requested=appliedMode==0&&fresh?vHost-vPts-ingress:appliedMode==1?double(appliedOffset):0;
-            const double target=std::clamp(requested,0.0,250.0);
+            const double maxDelay=appliedMode==0?maxAutoDelayMs:250.0;
+            const double target=std::clamp(requested,0.0,maxDelay);
             const double mapping=ingress+target;
-            const bool limited=requested<0||requested>250;
+            const bool limited=requested<0||requested>maxDelay;
+            if(appliedMode==0&&!fresh&&renderer.started()){
+                renderer.fadeAndReset(*this,stop);endpointEventReady=false;
+                std::lock_guard lock(mutex);++state.resets;
+            }
             bool justStarted=false;
             const double startupPrefillMs=std::min(renderer.capacityMs(),10.0);
             if(!renderer.started()&&haveHead&&1000.0*(pcm.size()/2)/kAudioRate>=startupPrefillMs&&(appliedMode!=0||fresh)){
@@ -258,6 +263,7 @@ bool CaptureAudioSession::push(const void* data,size_t bytes,double pts,bool dis
     p.inputBytes+=bytes;p.input.push_back(std::move(c));p.queueChanged();p.wake.notify_one();return true;
 }
 void CaptureAudioSession::videoPresented(double pts,int64_t time){std::lock_guard lock(p_->mutex);p_->videoPts=pts;p_->videoHost=double(time)/10000;p_->haveVideo=true;}
+void CaptureAudioSession::videoReset(){std::lock_guard lock(p_->mutex);p_->haveVideo=false;if(p_->mode==0)p_->pendingReset=true;p_->wake.notify_all();}
 void CaptureAudioSession::setGain(float value){p_->gain=std::clamp(value,0.0f,1.0f);}
 void CaptureAudioSession::setSync(unsigned mode,int offset){p_->mode=std::min(mode,2u);p_->offset=std::clamp(offset,-250,250);}
 CaptureAudioState CaptureAudioSession::snapshot()const{std::lock_guard lock(p_->mutex);return p_->state;}

@@ -1536,3 +1536,33 @@ FRUC候选bSkipWarp/延后重建/时间归零/首对预热均未通过新增rese
 
 用户提供 `REAMDE MP4.mp4` 作为项目 README 开头的演示视频。文件为 28,200,658 bytes，H.264 1920x1080 60fps、AAC、14.048 秒；未涉及 NVIDIA SDK/runtime、抓帧或测试输入。由于 GitHub README 不保证仓库 MP4 的 HTML5 `<video>` 标签会渲染，使用 ffmpeg 生成 `assets/readme-demo.gif`（480x270、10fps、14秒、约 7.5 MB），中英文 README 均在顶部直接展示自动循环 GIF，并链接到原始 MP4。未创建新 Release；本轮未运行产品构建或 GPU/实卡测试。
 
+## 2026-09-11 软件 NR/SR/FG 音画同步修复
+
+按用户纠正，本次只处理软件增加的视频等待，不额外补偿采集卡音视频共同硬件延迟。实施、文件清单、全部命令及失败证据见 `docs/SOFTWARE_AV_SYNC_REPAIR_2026-09-11.md`。文件音频预填充后等首帧 Present；音频线程按可呈现 PTS 自行停止设备时钟，替代视频线程等 GPU 完成后才以 80/20ms 追赶的旧逻辑。设置重建/seek/暂停恢复保留等待状态；文件普通播放不靠丢源帧或跳过 PCM 追赶。采集重建/暂停失效旧视频锚点，自动补偿上限 250→1500ms、原始+转换中+PCM 总预算 2000ms；手动范围不变。
+
+实际构建 `scripts/build.ps1 -Root <root> -Preset x64-release`，最终 `logs/software-av-sync-20260911/build4.log` exit0。`run-short-test.ps1` 包装运行：audio_timeline 68 PASS（60s超时）、capture_audio 16 PASS（60s超时，80/160/400/900ms 软件延迟、共同900ms输入偏移、重建/断流/边界）、file-endpoint 7 PASS（60s超时）、capture-endpoint PASS（30s超时）。实际 RTX5070 超分4K+原生NR+FG4 文件 Engine 测试10 PASS（180s超时），Present 时最大音频领先26.667ms，包含FG4→2重建与播放/暂停seek；该项为build3，最终端点时钟回退修正后由音频68项、endpoint及delivery覆盖。Feature18/DLSSG Create/Evaluate `0x1`、SEH0；证据 `file-overload/engine.log`。
+
+最终 delivery `logs/delivery/ab1cf0c67a174cc3845c0eb1336c1bae/result.json`：23 PASS、48.892s，包含实际NR/NVOF、4K播放/图像和NVENC H264/HEVC音轨/帧数/时间戳/取消。最终EXE SHA256 `CD4E5EDA37CEACE83C09D327E123A160A0AE814E84729C5D18BD9D4FA68548EE`；根目录 `Veyra.cmd` 指向该本机构建。未改导出完整性gate。
+
+失败记录保留：两次新增音频检查exit1，真实停在120ms并在350ms后保持120ms，最初断言`<120`不含边界；同时修正等待标记在Stop前发布的时序。最终按22ms端点采用覆盖范围后30ms内、不持续增长的验收标准。一次空参数测试包装失败、一次测试运行期间重链接LNK1104；后续顺序构建及检查通过。未执行物理采集/屏幕扬声器对照、长期漂移或XeSS内部延迟验证；不宣称零物理偏差或解决GPU吞吐不足。源码改动均为自有代码/测试/文档，无SDK/DLL/模型变更，无push或Release。下一项为用户本机文件与实卡验收。
+
+## 2026-09-11 音频连续性二次修复（处理30/35ms正常波动）
+
+用户验收指出第一版仍会把正常NR波动变成声音卡顿。核对最新实际会话：4K30文件、XeSS/DLSS；上一版XeSS每33.3ms真实帧却只给音频16.7ms许可，而且任何越界立即Stop。新增 `AudioVideoContinuity.h`，音频owner保留20ms死区、持续100ms或硬领先80ms才重缓冲；显式首帧/seek/重建/暂停仍保持。引擎修正XeSS及对比模式的源帧覆盖，不按不可见子帧停声音。没有新增长期队列或固定延迟，不处理采集卡共同硬件延迟。具体文件、完整命令及证据见 `docs/SOFTWARE_AV_SYNC_REPAIR_2026-09-11.md` 末节。
+
+`scripts/build.ps1 -Root <root> -Preset x64-release` 最终build3 exit0。`run-short-test.ps1`包装：真实PCM/WASAPI抖动before exit1，2X/4X都出现额外停表与速度损失；after 15 PASS、0额外停表/0underrun。完整audio-full 68 PASS。采集30/35ms交替5秒，稳定段额外reset/underrun/missing均0、P95偏差24.997ms；因此本轮不改采集生产算法。日志统一 `logs/audio-jitter-20260911/`。
+
+实际原生1080及原生4K NR＋XeSS分别6 PASS：原生4K source/base/nr/flow=3840×2160，100真实帧前进3.33333秒/耗时3.33008秒，音频额外等待0，末次软件偏差0.896ms；真实Feature18 Create `0x1`/SEH0、XeSS Init/PresentStatus `0`且有生成帧。第一份1080测试因外部GPU争用失败（测试退出GPU仍90–93%、Magpie运行），用户停用增强后开测GPU5%，重测上述两项通过；失败记录没有删除。原生4K SR/NR/DLSS4故意过载12项通过，最大观测领先96.667ms；接受连续性容差后旧“仍过载的重建后<35ms”断言调整为有界检查，并新增性能恢复后独立<35ms检查，防止仅放宽断言掩盖固定偏移。
+
+最终delivery `logs/delivery/c2d5b549af744590b66188aff1dd7cbc/result.json`：23 PASS、45.421s，EXE SHA256 `93F9C4D7D596D833B7E3E347FBC225D77626810F42638E9B57BE88FBED949AC1`。所有单次测试有30/60/180/300s外部上限，导出gate未改。`git diff --check`通过，无SDK/DLL/模型/媒体进入源码变更，无push或发布。实卡听感/声学扫描、长期连续性仍未执行；本轮保证的是被测小波动下不中断音频，不承诺GPU持续过载也能无限保持一倍速与同步。用户重开根目录Veyra.cmd使用本机构建继续验收。
+
+
+## 2026-09-11 0.0.4 发布候选
+
+用户要求更新 GitHub 并指定 0.0.4。收录两轮软件音画同步及音频连续性修复；中英文 README、构建说明、版本日志、组件说明和 AGENTS 发布授权已同步。完整命令、文件身份、候选资产 SHA256 与验证边界见 `docs/RELEASE_0.0.4_EXECUTION.md`。保留 README 顶部自动播放演示与 WGC 捕获教程。
+
+全新 `scripts/build.ps1 -Preset x64-release -BuildDirectory out/build/release-0.0.4` 构建174目标exit0，正式EXE版本0.0.4、SHA256 `455B17D533D837A88B1A9D8BC27F452677A7D1010033E91EB9B37BF6353DFD9E`。`package-portable.ps1 -Version 0.0.4`沿用七个既有运行文件，发布者身份/签名检查通过，社区版明确HashMismatch；程序仍无manifest加载锁。新解压目录51个清单条目逐文件核验通过，总52文件、forbiddenFiles=0。FFmpeg源码资料10442条，SPDX及实际DLL的LGPL配置匹配。运行组件/SDK/模型不进入源码Git。
+
+`portable-smoke.ps1`清洁PATH、无manifest、包外工作目录的五组检查通过，日志`logs/release-0.0.4/portable-final/result.json`；基础、双NR、DLSS/VideoSR/FG均真实执行，三组分别224/222/227个生成帧。首次测试在最后写报告时Get-FileHash模块无法加载而exit1；显式导入执行宿主Utility后完整重跑成功，保留失败日志，不改产品或断言。先前XeSS各6项PASS被误记7项的文档计数已依stdout纠正。
+
+最终解压EXE的delivery `logs/delivery/f0ab3a10a1ea44e99f8b20e619fbdbdc/result.json`，23 PASS、44.899秒；包含真实NR/NVOF、4K播放/图像/NVENC双编码音轨和完整性。独立发布构建音频完整回归68 PASS、原生4K30 NR＋XeSS连续性6 PASS（额外音频暂停0；3.33333秒媒体/3.33291秒墙钟）、合成采集30/35ms抖动回归exit0。所有单次超时30/60/240/300秒，日志`logs/release-0.0.4/`。未新增实卡声学同步、RTX40或长期直播验证。下一步为原子推送源码/标签、上传并核对四个Release附件后公开发布。

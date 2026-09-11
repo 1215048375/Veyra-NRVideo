@@ -1,4 +1,5 @@
 #include "veyra/sink/AudioGain.h"
+#include "veyra/sink/AudioVideoContinuity.h"
 #include "veyra/sink/WasapiAudioSink.h"
 
 #include <algorithm>
@@ -109,6 +110,7 @@ void AudioPipeline::stopThread()
 
 double AudioPipeline::requestSeek(double targetMs)
 {
+    if(videoSync_)holdForVideo();
     std::unique_lock<std::mutex> lock(mutex_);
     seekTargetMs_ = targetMs;
     seekDone_ = false;
@@ -157,6 +159,25 @@ void AudioPipeline::pushDecoded(const AVFrame* frame)
         const_cast<const uint8_t**>(frame->extended_data), frame->nb_samples);
     if (outSamples < 0) { log::error("audio", std::format("swr_convert failed code={}", outSamples)); return; }
     pushConverted(outSamples);
+}
+
+void AudioPipeline::holdForVideo()
+{
+    videoHold_=true;videoSync_=true;wake_.notify_all();
+}
+
+void AudioPipeline::videoReady(double ptsMs)
+{
+    // Initial/reset prefill must wait for an actual Present, not GPU readiness.
+    if(videoSync_&&!videoHold_&&std::isfinite(ptsMs))
+        videoLimitMs_=std::max(videoLimitMs_.load(),ptsMs+2.0);
+    wake_.notify_all();
+}
+
+void AudioPipeline::videoPresented(double nextPtsMs)
+{
+    if(!videoSync_||!std::isfinite(nextPtsMs))return;
+    videoLimitMs_=nextPtsMs;videoHold_=false;wake_.notify_all();
 }
 
 void AudioPipeline::pushConverted(int frames)
@@ -486,6 +507,14 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint)
     bool endpointReady = renderer && (!ownEndpoint || renderer->start());
     double lastClockMs = 0, recoveryTargetMs = 0;
     auto retryAt = t0;
+    AudioVideoContinuity continuity;
+    auto videoBlocked=[&]{
+        const double observed=endpointReady?renderer->mediaTimeMs():lastClockMs;
+        const double current=std::isfinite(observed)?observed:lastClockMs;
+        return videoSync_&&continuity.blocked(videoHold_,current,videoLimitMs_,std::chrono::steady_clock::now());
+    };
+    auto shouldPause=[&]{return paused_.load()||videoBlocked();};
+    auto publishVideoWait=[&](bool paused){const bool waiting=paused&&videoBlocked();if(videoWaiting_.exchange(waiting)!=waiting&&waiting)++videoWaitCount_;};
     auto recovering = [&](HRESULT error) {
         endpointError_ = FAILED(error) ? error : E_FAIL;
         endpointRecovering_ = true;
@@ -529,8 +558,9 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint)
     }
     const double firstPts = headPtsMs();
     clockExhausted_=decodedEof_&&firstPts<0;
+    bool pauseApplied = shouldPause();
     if (endpointReady && firstPts >= 0.0) {
-        if (!renderer->startAnchored(*this,paused_)) recovering(renderer->lastError());
+        if (!renderer->startAnchored(*this,pauseApplied)) recovering(renderer->lastError());
         else endpointRecovering_=false;
     }
     lastPrefillMs_.store(std::chrono::duration<double>(
@@ -538,9 +568,8 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint)
     veyra::log::info("audio", std::format("startup prefill done in {:.0f}ms firstPtsMs={:.1f} bufferedMs={:.0f}",
         lastPrefillMs_.load(), firstPts, bufferedMs()));
 
-    bool pauseApplied = paused_;
     while (!stopFlag_.load()) {
-        const bool pauseNow = paused_.load();
+        const bool pauseNow = shouldPause();
         if(endpointReady){
             const double current=renderer->mediaTimeMs();
             if(std::isfinite(current))lastClockMs=current;
@@ -551,6 +580,7 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint)
         }
         if (pauseNow != pauseApplied && endpointReady) renderer->setPaused(pauseNow);
         pauseApplied = pauseNow;
+        publishVideoWait(pauseApplied);
         // Seek request? Atomic re-sequence.
         {
             std::unique_lock<std::mutex> lock(mutex_);
@@ -567,7 +597,8 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint)
                 firstPtsAfterSeek_.store(startPts);
                 if(!seekOk&&renderer)recovering(E_FAIL);
                 if (seekOk&&endpointReady && !clockExhausted_) {
-                    if (!renderer->startAnchored(*this,pauseNow)) recovering(renderer->lastError());
+                    pauseApplied=shouldPause();
+                    if (!renderer->startAnchored(*this,pauseApplied)) recovering(renderer->lastError());
                 }
                 {
                     std::lock_guard<std::mutex> l2(mutex_);
@@ -586,7 +617,8 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint)
                 if(renderer->start()){
                     endpointReady=true;
                     const bool rewound=rewind(recoveryTargetMs);
-                    if(rewound&&(clockExhausted_||renderer->startAnchored(*this,pauseNow))){
+                    pauseApplied=shouldPause();
+                    if(rewound&&(clockExhausted_||renderer->startAnchored(*this,pauseApplied))){
                         endpointRecovering_=false;++endpointRecoveries_;
                         log::info("audio-recovery",std::format("restored mediaPtsMs={:.3f} paused={} recoveries={}",recoveryTargetMs,pauseNow,endpointRecoveries_.load()));
                     }else recovering(renderer->lastError());
@@ -596,11 +628,18 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint)
             wake_.wait_for(lock,std::chrono::milliseconds(5),[&]{return stopFlag_||seekRequested_;});
             continue;
         }
-        if (pauseNow) { std::this_thread::sleep_for(std::chrono::milliseconds(5)); continue; }
+        if (pauseNow) { std::unique_lock lock(mutex_);wake_.wait_for(lock,std::chrono::milliseconds(2));continue; }
         // Regular cycle: pump the endpoint, then top up below high watermark.
         if (renderer != nullptr) {
             double firstPts = -1.0;
-            if (!renderer->pumpOnce(*this, &firstPts)) {
+            // Re-check after the endpoint wait: a video hold/seek can arrive
+            // during it. Do not submit another block before applying the hold.
+            if(!renderer->waitForEvent()){
+                if(!ownEndpoint)break;
+                recovering(renderer->lastError());continue;
+            }
+            if(shouldPause())continue;
+            if (!renderer->pumpOnce(*this, &firstPts,false)) {
                 if(!ownEndpoint){log::error("audio","pumpOnce failed");break;}
                 recovering(renderer->lastError());continue;
             }

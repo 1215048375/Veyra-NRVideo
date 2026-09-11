@@ -49,10 +49,42 @@ void decode(const std::filesystem::path& file) {
     check(pipe.overruns()==0, "bounded PCM ring did not overflow");
     pipe.stopThread();
 }
+int jitter(const std::filesystem::path& dir) {
+    const auto file=dir/"video-jitter.wav";fixture(file,48000,6000);
+    // Alternating 0/5ms completion jitter around 30fps. Real/generated frames
+    // are announced exactly as their owner can observe them; XeSS has only B.
+    for(unsigned multiplier:{1u,2u,4u}){
+        AudioPipeline pipe;AudioRenderer renderer;renderer.setGain(0);
+        check(pipe.open(file.wstring()),"open continuous-audio jitter fixture");
+        pipe.holdForVideo();pipe.startThread(&renderer,true);
+        check(until([&]{return renderer.started()&&!pipe.endpointRecovering()&&pipe.waitingForVideo();}),"prefill held before jitter replay");
+        const auto waits=pipe.videoWaitCount();
+        const auto begin=std::chrono::steady_clock::now();
+        pipe.videoPresented(1000.0/30/multiplier);
+        for(unsigned i=1;i<=90;++i){
+            const double pts=i*1000.0/30;
+            std::this_thread::sleep_until(begin+std::chrono::microseconds(int64_t((pts+(i%2?5.0:0.0))*1000)));
+            for(unsigned sub=1;sub<multiplier;++sub){
+                const double generated=pts-1000.0/30+sub*1000.0/30/multiplier;
+                pipe.videoReady(generated);pipe.videoPresented(generated+1000.0/30/multiplier);
+            }
+            pipe.videoReady(pts);pipe.videoPresented(pts+1000.0/30/multiplier);
+        }
+        const double elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-begin).count();
+        const double media=renderer.mediaTimeMs();const auto stops=pipe.videoWaitCount()-waits;
+        std::cout<<"JITTER multiplier="<<multiplier<<" wallMs="<<elapsed<<" audioMs="<<media<<" additionalVideoPauses="<<stops<<" underruns="<<renderer.underruns()<<'\n';
+        check(stops==0,"5ms video jitter never stops continuous audio");
+        check(std::abs(media-elapsed)<35,"real endpoint keeps one-times audio playback through jitter");
+        check(renderer.underruns()==0&&pipe.overruns()==0,"jitter does not drop PCM or insert silent underruns");
+        pipe.stopThread();
+    }
+    return failures?1:0;
+}
 }
 int wmain(int argc, wchar_t** argv) {
-    if (argc!=2) return 2;
+    if (argc!=2&&!(argc==3&&wcscmp(argv[2],L"--jitter")==0)) return 2;
     const std::filesystem::path dir=argv[1]; std::filesystem::create_directories(dir);
+    if(argc==3)return jitter(dir);
     for(uint32_t rate:{48000u,44100u}) { const auto file=dir/(std::to_string(rate)+".wav"); fixture(file,rate); decode(file); }
     AudioRenderer renderer;
     check(!std::isfinite(renderer.mediaTimeMs()), "unstarted clock is invalid");
@@ -151,5 +183,37 @@ int wmain(int argc, wchar_t** argv) {
     check(reads>10&&!std::isfinite(recoveryRenderer.mediaTimeMs()),"concurrent clock readers survive endpoint releases and shutdown");
     check(recoveryPipe.overruns()==0,"endpoint outages preserve bounded file PCM queue");
     recoveryRenderer.shutdown();
+    // Real PCM and a real WASAPI clock with a deliberately stalled video owner.
+    // No GPU-duration estimate and no physical capture delay are fed to audio.
+    AudioPipeline gated;AudioRenderer gatedRenderer;gatedRenderer.setGain(0);
+    check(gated.open(longFile.wstring()),"open software video-delay fixture");
+    gated.holdForVideo();gated.startThread(&gatedRenderer,true);
+    check(until([&]{return gatedRenderer.started()&&!gated.endpointRecovering();}),"video gate prefills endpoint without playing it");
+    const double initial=gatedRenderer.mediaTimeMs();
+    gated.videoReady(0);std::this_thread::sleep_for(350ms);
+    check(std::abs(gatedRenderer.mediaTimeMs()-initial)<.1,"350ms NR startup and GPU-ready alone cannot advance sound");
+    gated.videoPresented(100);
+    check(until([&]{return gated.waitingForVideo()&&gatedRenderer.mediaTimeMs()>=100;}),"audio owner stops at video coverage while GPU owner is blocked");
+    const double stalled=gatedRenderer.mediaTimeMs();std::this_thread::sleep_for(350ms);
+    std::cout<<"VIDEO_GATE stallStartMs="<<stalled<<" stallEndMs="<<gatedRenderer.mediaTimeMs()<<'\n';
+    check(stalled<=210&&std::abs(gatedRenderer.mediaTimeMs()-stalled)<.1,"long GPU stall stays bounded after jitter grace and clock stops accumulating lead");
+    gated.videoReady(260);
+    check(until([&]{return gatedRenderer.mediaTimeMs()>=260;}),"ready later frame can reach its deadline after missing FG candidates");
+    gated.videoPresented(310);
+    check(until([&]{return gatedRenderer.mediaTimeMs()>=290;}),"actual next video releases audio clock");
+    gated.holdForVideo();std::this_thread::sleep_for(70ms);
+    const double rebuilding=gatedRenderer.mediaTimeMs();std::this_thread::sleep_for(250ms);
+    check(std::abs(gatedRenderer.mediaTimeMs()-rebuilding)<.1,"settings rebuild freezes PCM position without skipping samples");
+    const auto target=gated.requestSeek(1200);
+    gated.videoReady(1200);std::this_thread::sleep_for(200ms);
+    check(std::abs(target-1200)<.1&&std::abs(gatedRenderer.mediaTimeMs()-1200)<.1,"playing seek stays held until new video is presented");
+    gated.setPaused(true);gated.videoPresented(1300);std::this_thread::sleep_for(70ms);
+    check(std::abs(gatedRenderer.mediaTimeMs()-1200)<.1,"paused seek preview cannot start audio");
+    gated.holdForVideo();gated.setPaused(false);std::this_thread::sleep_for(150ms);
+    check(std::abs(gatedRenderer.mediaTimeMs()-1200)<.1,"resume waits for video history warmup");
+    gated.videoPresented(1300);
+    check(until([&]{return gatedRenderer.mediaTimeMs()>1250;}),"resume uses real retained PCM after video anchor");
+    check(gated.videoWaitCount()>=4&&gated.overruns()==0,"software video holds are observed and PCM queue remains bounded");
+    gated.stopThread();
     return failures ? 1 : 0;
 }
