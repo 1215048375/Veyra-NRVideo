@@ -1534,5 +1534,5 @@ FRUC候选bSkipWarp/延后重建/时间归零/首对预热均未通过新增rese
 
 ## 2026-09-11 README 演示视频
 
-用户提供 `REAMDE MP4.mp4` 作为项目 README 开头的演示视频。文件为 28,200,658 bytes，H.264 1920x1080 60fps、AAC、14.048 秒；未涉及 NVIDIA SDK/runtime、抓帧或测试输入。视频加入源码仓库作为公开 README 展示资源，中英文 README 均使用 GitHub raw URL 的 HTML5 `<video>` 播放器，并保留直接打开/下载链接作为回退。未创建新 Release；本轮未运行产品构建或 GPU/实卡测试。
+用户提供 `REAMDE MP4.mp4` 作为项目 README 开头的演示视频。文件为 28,200,658 bytes，H.264 1920x1080 60fps、AAC、14.048 秒；未涉及 NVIDIA SDK/runtime、抓帧或测试输入。由于 GitHub README 不保证仓库 MP4 的 HTML5 `<video>` 标签会渲染，使用 ffmpeg 生成 `assets/readme-demo.gif`（480x270、10fps、14秒、约 7.5 MB），中英文 README 均在顶部直接展示自动循环 GIF，并链接到原始 MP4。未创建新 Release；本轮未运行产品构建或 GPU/实卡测试。
 

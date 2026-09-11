@@ -3,12 +3,12 @@
 [English](README_EN.md) | 简体中文
 
 <p align="center">
-  <video src="https://github.com/Likely7/Veyra-NRVideo/raw/refs/heads/main/REAMDE%20MP4.mp4" controls muted playsinline width="960">
-    <a href="https://github.com/Likely7/Veyra-NRVideo/blob/main/REAMDE%20MP4.mp4">打开演示视频</a>
-  </video>
+  <a href="https://github.com/Likely7/Veyra-NRVideo/blob/main/REAMDE%20MP4.mp4">
+    <img src="assets/readme-demo.gif" alt="Veyra 演示视频" width="960">
+  </a>
 </p>
 
-<p align="center"><a href="https://github.com/Likely7/Veyra-NRVideo/raw/refs/heads/main/REAMDE%20MP4.mp4">下载/打开演示视频</a></p>
+<p align="center">演示视频会自动播放；点击画面可打开原始 MP4。</p>
 
 Windows 视频播放器与采集卡增强工具。支持视频、图片和采集卡实时预览，可组合使用超分辨率、NR 画面增强与补帧。
 
