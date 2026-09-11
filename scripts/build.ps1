@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Root,
     [Parameter(Mandatory = $true)][ValidateSet("x64-debug", "x64-release")][string]$Preset,
+    [string]$BuildDirectory,
     [switch]$Clean
 )
 
@@ -49,6 +50,7 @@ if (-not (Test-Path -LiteralPath $vcvars -PathType Leaf)) {
 }
 
 $buildDir = Join-Path $Root ("out\build\" + $Preset)
+if ($BuildDirectory) { $buildDir = [IO.Path]::GetFullPath($BuildDirectory) }
 if ($Clean -and (Test-Path -LiteralPath $buildDir -PathType Container)) {
     Remove-Item -LiteralPath $buildDir -Recurse -Force
 }
@@ -85,9 +87,9 @@ $batchLines = @(
     ('call "{0}" >nul 2>&1' -f $vcvars),
     ('if errorlevel 1 exit /b 4' -f $null),
     ('cd /d "{0}"' -f $Root),
-    ('"{0}" --preset {1}{2}' -f $cmakeExe, $Preset, $configureExtra),
+    ('"{0}" --preset {1} -B "{2}"{3}' -f $cmakeExe, $Preset, $buildDir, $configureExtra),
     'if errorlevel 1 exit /b 5',
-    ('"{0}" --build --preset {1}' -f $cmakeExe, $Preset),
+    ('"{0}" --build "{1}"' -f $cmakeExe, $buildDir),
     'if errorlevel 1 exit /b 6',
     'exit /b 0'
 )
@@ -95,5 +97,10 @@ Set-Content -LiteralPath $batchFile -Value $batchLines -Encoding ASCII
 
 & cmd.exe /c ('"{0}"' -f $batchFile)
 $exitCode = $LASTEXITCODE
+if ($exitCode -eq 0 -and (Test-Path -LiteralPath (Join-Path $buildDir 'veyra.exe'))) {
+    foreach ($name in @('avcodec-63.dll','avformat-63.dll','avutil-61.dll','swresample-7.dll','swscale-10.dll')) {
+        Copy-Item -LiteralPath (Join-Path $ffmpegRoot "bin/$name") -Destination $buildDir
+    }
+}
 Write-Host ("build.ps1: preset {0} exitCode={1}" -f $Preset, $exitCode)
 exit $exitCode

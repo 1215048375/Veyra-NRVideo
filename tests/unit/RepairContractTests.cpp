@@ -77,6 +77,17 @@ int main(){
     engine::PresentationScheduler timeline;timeline.reset(3,0,1000000,200000);
     check(timeline.deadline(200000)==1400000&&timeline.deadline(400000)==1600000,"live deadlines do not drift with CPU completion");
     check(timeline.expired(0,1400000,100000)&&!timeline.anchored(4),"expire generated debt and reject epoch change");
+    // First arrival is 12ms late; the next is on time and GPU work takes 3ms.
+    // The previous no-FG mapping holds an already-ready frame another 9ms.
+    engine::PresentationScheduler captureTimeline;
+    captureTimeline.reset(1,0,1120000,0);
+    constexpr int64_t nextPts=166667,nextReady=1000000+nextPts+30000;
+    check(captureTimeline.deadline(nextPts)-nextReady==90000,"reproduce 9ms no-FG hold after first-callback jitter");
+    captureTimeline.reset(1,0,1120000,0,false);
+    check(captureTimeline.deadline(nextPts)<=nextReady,"unbuffered capture presents ready frame without inherited jitter");
+    check(captureTimeline.deadline(6000600000LL)<=6001030000LL,"unbuffered capture cannot accumulate source-clock drift");
+    captureTimeline.reset(2,0,2000000,166667,true);
+    check(captureTimeline.deadline(166667)==2333334,"switch to FG restores continuous source-PTS pacing and lookahead");
     check(!engine::admitLiveFg(1200000,1000000,0,std::nullopt,0),"warmup rejects already-expired FG before evaluate");
     check(engine::admitLiveFg(900000,1000000,0,std::nullopt,0),"warmup does not invent a measured completion estimate");
     check(!engine::admitLiveFg(900000,1000000,2,30.0,1),"predicted completion beyond deadline skips optional pair");

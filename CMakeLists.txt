@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(veyra VERSION 0.0.1 LANGUAGES CXX)
+project(veyra VERSION 0.0.2 LANGUAGES CXX RC)
 
 # ---------------------------------------------------------------------------
 # Veyra cache variables and feature switches (Playbook section 5.1).
@@ -315,6 +315,12 @@ if(VEYRA_NVOF_SDK_ROOT AND EXISTS "${VEYRA_NVOF_SDK_ROOT}/NvOFInterface/nvOptica
   target_link_libraries(veyra_nvof_probe PRIVATE veyra_gfx veyra_base)
 endif()
 
+# Resolve FFmpeg before any consumer, including the shared enhancement graph.
+if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avformat.h")
+  list(APPEND CMAKE_MODULE_PATH "${VEYRA_FFMPEG_ROOT}/share/ffmpeg")
+  find_package(FFMPEG REQUIRED)
+endif()
+
 # EnhanceGraph (the real GPU chain) needs the NGX + NVOF backends; wire it
 # into veyra_pipeline only when both exist so bare contract builds still work.
 if(TARGET veyra_ngx AND TARGET veyra_nvof AND VEYRA_FFMPEG_ROOT)
@@ -332,10 +338,6 @@ endif()
 # dependency set from the pinned vcpkg install.
 # ---------------------------------------------------------------------------
 if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avformat.h")
-  # vcpkg ships FindFFMPEG.cmake under share/ffmpeg; the vcpkg toolchain
-  # normally injects it, so point the module path here explicitly.
-  list(APPEND CMAKE_MODULE_PATH "${VEYRA_FFMPEG_ROOT}/share/ffmpeg")
-  find_package(FFMPEG REQUIRED)
   add_library(veyra_media STATIC
     src/media/FFmpegDemuxer.cpp
     src/media/FFmpegVideoDecoder.cpp
@@ -608,4 +610,6 @@ if(VEYRA_CLIP_TOOLS_ROOT AND EXISTS "${VEYRA_CLIP_TOOLS_ROOT}/include/libavcodec
 endif()
 
 # Layered child subtitle windows require a modern-Windows compatibility manifest.
+configure_file(apps/veyra/version.rc.in ${CMAKE_CURRENT_BINARY_DIR}/veyra-version.rc @ONLY)
+target_sources(veyra PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/veyra-version.rc)
 target_link_options(veyra PRIVATE "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/apps/veyra/veyra.manifest")

@@ -18,6 +18,9 @@ if '--worker' not in sys.argv:
         subprocess.run(['taskkill.exe', '/PID', str(child.pid), '/T', '/F'], capture_output=True, timeout=5)
         sys.exit('FAIL: FG selector test exceeded 90 seconds')
 sys.argv.remove('--worker')
+portable = '--portable' in sys.argv
+if portable:
+    sys.argv.remove('--portable')
 reject_xess = '--reject-xess' in sys.argv
 if reject_xess:
     sys.argv.remove('--reject-xess')
@@ -98,7 +101,8 @@ media = pathlib.Path('logs/video-sdk-trial-20260909/known-pan15.mp4').resolve()
 out = pathlib.Path('logs/continuation-repair-20260910') / ('ui-fg-' + str(time.time_ns()))
 out.mkdir(parents=True)
 env = os.environ.copy()
-env['PATH'] = r'C:\veyra-deps\installed\x64-windows\bin;' + env['PATH']
+env['PATH'] = (os.path.join(os.environ['SYSTEMROOT'], 'System32') + ';' + os.environ['SYSTEMROOT']
+               if portable else r'C:\veyra-deps\installed\x64-windows\bin;' + env['PATH'])
 env['VEYRA_LOG_FILE'] = str((out / 'app.log').resolve())
 if reject_xess:
     env['VEYRA_TEST_XESS_INIT_FAILURE'] = '1'
@@ -115,7 +119,8 @@ def log():
 with (out / 'stdout.log').open('w') as stdout, (out / 'stderr.log').open('w') as stderr:
     process = subprocess.Popen([str(exe), '--smoke-view', 'professional', '--smoke-seconds', '80',
                                 str(media), '--no-nr', '--no-sr', '--fg'],
-                               stdout=stdout, stderr=stderr, env=env, startupinfo=startup)
+                               stdout=stdout, stderr=stderr, env=env, startupinfo=startup,
+                               cwd=exe.parent if portable else None)
     try:
         main = wait_for(lambda: windows(process.pid, 'VeyraApp'))[0]
         u.ShowWindow(main, 4)

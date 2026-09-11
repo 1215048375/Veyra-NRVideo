@@ -489,8 +489,11 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 }
                 if(isCapture&&!rereadCached&&!liveTimeline.anchored(out.batch.identity.epoch)){
                     const auto duration100ns=liveSourceInterval100ns(pkt.duration,activeSource->info().averageFps);
-                    veyra::log::info("capture-timeline",std::format("interval100ns={} packetDurationKnown={} packetDurationPositive={} nominalFps={} FG={}",duration100ns,!pkt.duration.isUnknown(),pkt.duration.num>0,activeSource->info().averageFps,options.fg));
-                    liveTimeline.reset(out.batch.identity.epoch,out.batch.b100ns,captureArrival,options.fg?duration100ns:0);
+                    // File replay has no device pacing and still needs its PTS
+                    // clock. Physical capture without FG presents as soon as ready.
+                    const bool paceSourcePts=options.fg||!physicalCapture;
+                    veyra::log::info("capture-timeline",std::format("interval100ns={} packetDurationKnown={} packetDurationPositive={} nominalFps={} FG={} pacing={}",duration100ns,!pkt.duration.isUnknown(),pkt.duration.num>0,activeSource->info().averageFps,options.fg,paceSourcePts?"source-pts":"capture-ready"));
+                    liveTimeline.reset(out.batch.identity.epoch,out.batch.b100ns,captureArrival,options.fg?duration100ns:0,paceSourcePts);
                 }
                 if(!audioStarted&&!isImage&&!isCapture&&frames==0){if(audioPipe.open(path)){audioPipe.startThread(&audio,true);audioStarted=true;{std::lock_guard lock(mutex_);snapshot_.audioAvailable=true;}}anchor=Clock::now();anchorMs=lastAudioClockMs=pts;}
                 auto nowMs=[&](){

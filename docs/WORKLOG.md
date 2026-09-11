@@ -1,5 +1,23 @@
 # 2026-09-11 继续修复目标模式执行中
 
+## 最新交付：0.0.2 便携发布与用户DLL替换
+
+用户授权发布到`Likely7/Veyra-NRVideo`，并要求去掉运行时校验。取消XeSS固定哈希/签名锁、移除诊断中的假定原件hash、支持Release运行目录；绝对路径/API初始化检查保留。发布者默认包仍做来源/身份审计，不向Git提交SDK/runtime。中英文README、教程、Release Notes与组件说明已重写；完整命令、文件范围、失败及验证边界见 [0.0.2执行记录](RELEASE_0.0.2_EXECUTION.md)。
+
+新目录完整构建通过，修复首次配置FFmpeg依赖顺序与便携XeSS CRT查找。最终EXE `A07B73C2CD946AD50FD8516A51DB3B0CD6759945BB85E82D65F0D8CEB18B6170`；CPU81项，最终delivery23项42.929秒，解压后清洁PATH/无manifest的基础与SR+NR+FG两路线、XeSS/DLSS UI切换及非黑4K保存通过。真实Create为`0x1`/SEH0；本机VSR实际走驱动NGX实现，未证明包内VSR DLL被使用。日志`logs/release-002-portable-verified`、`logs/delivery/130f307d2be14370876e63b6a9f1c6f9`。未新增实卡或长期验收。
+
+最终包`out/releases/0.0.2-final/Veyra-0.0.2-win64-portable.zip`为185295449字节，SHA256 `D1A6D37D61D1E61F8D700EC534DFA718F1909C6781F1AF47F1CFD4955AE4E2C3`；另有FFmpeg开源对应资料ZIP与校验文件。源码/历史审计未发现SDK、运行DLL或模型；本次仅上传授权的Release资产。远端提交与发布确认另记实际结果，不以候选构建代替发布。
+
+## 最新任务：采集延迟对照排查
+
+用户反馈采集预览慢于OBS/PotPlayer，重新开启这一范围的排查。基线`4e2bd73`、干净工作区；只发现OBS进程，未抢占设备。本机OBS日志为1080p60/YUY2/缓冲关闭；官方32.1.2源码确认非缓冲取最新帧。`v0.0.1`仍走强制RGB32旧链，不能把本机开发修复当成发布用户已收到。
+
+确定缺陷：物理采集FG关闭仍按首回调锚定的源PTS等待，首帧迟到/时钟漂移能扣留已处理画面。本次改为GPU-ready驱动，保留文件/测试回放及FG节奏；新增策略日志。旧测试仅测产品未调用的`livePairHoldMs`，本次新增直接调度器复现：构造首帧晚12ms/后帧处理3ms会多等9ms，修正后消除该等待；不是实卡测量。
+
+完整命令、修改文件、证据和未测项见 [采集延迟排查](CAPTURE_LATENCY_AUDIT_2026-09-11.md)。构建`logs/capture-latency-build-20260911.log`exit0，81项合同/41项时序/28项实际RTX回放PASS；delivery `1be4f528d272465585c96ada5b9b88e3`23项42.907秒PASS。Feature18 Create与DLSSG Create/Evaluate `0x1`/SEH0。应用SHA `CDCB2303402438FC208E00B6F9F88708B16249FEB32410FE6E5D484FBBB15747`，运行时身份有效，无SDK/runtime提交，无push或Release更新。
+
+显示队列、MJPEG兼容解码和XeSS重复节拍等待仍是待测方向，不宣称是反馈的全部根因；实卡即时分支、同源外部延迟/扫描、音画验收未执行。下一条任务是确认反馈者版本与采集格式，全部增强关闭做三软件同源A/B。下方“性能暂缓”为上一任务范围，不覆盖本次新指令。
+
 ## 最新交付：FRUC 与诊断收尾完成，等待用户验收
 
 按最新用户六项决定收尾：彻底删除FRUC后端/worker/协议/命令行及旧测试，v8预设显式迁移v4-v7的FRUC和XeSS，打包脚本修复，旧运行DLL/EXE四文件清理。修正之前把暂停恢复/PTS跳变/设置记成切镜或Resize的诊断错误；新增固定8192事件轨迹及覆盖统计，接入现有脱敏诊断预览，不逐帧写磁盘，不改画质/调度和导出检查。

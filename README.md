@@ -1,118 +1,72 @@
 # Veyra
 
-Windows 本地视频播放器与画面增强工作台。它把视频播放、采集卡预览、图片增强和视频导出放进同一个原生应用：日常模式专注看画面，专业模式集中放增强、补帧、对比、诊断和导出工具。
+[English](README_EN.md) | 简体中文
 
-Veyra is a native Windows video player and image-enhancement workspace. It combines local playback, capture-card preview, image enhancement, and video export in one application. Daily mode is built for watching; Professional mode exposes enhancement, frame generation, comparison, diagnostics, and export tools.
+Windows 视频播放器与采集卡增强工具。支持视频、图片和采集卡实时预览，可组合使用超分辨率、NR 画面增强与补帧。
 
-> 这是 `0.0.1` 的早期实验版本。便携包包含经哈希和签名校验的 Runtime Pack，让兼容 RTX 环境可直接启用对应增强；NR 和 DLSSG 属于社区实验运行时，不代表 NVIDIA 官方合作、认证或支持。This is an early experimental build. The portable package includes a hash- and signature-verified Runtime Pack. NR and DLSSG are community-experimental runtimes and do not imply NVIDIA endorsement, certification, or support.
+[下载 0.0.2 免安装版](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.2) · [更新记录](docs/RELEASE_NOTES_0.0.2.md) · [反馈问题](https://github.com/Likely7/Veyra-NRVideo/issues)
 
-## 功能 / Features
+## 功能
 
-- 默认日常模式：大画面、底部播放控制、打开媒体、采集卡、音量、字幕和全屏。
-- 专业模式：带展开动画的参数工作台；同一播放会话不中断。
-- H.264 / HEVC 视频、PNG / JPEG 图片、DirectShow / UVC 采集设备。
-- 可选 DLSS SR、RTX Video SR、实验性 NVIDIA NR、NVOF 运动置信度，以及 DLSS / XeSS 补帧后端。
-- 实验性 Intel XeSS 显示补帧 2X，以及 AMD FidelityFX 光流运动估算；XeSS 当前只用于预览。
-- 原图与增强结果的即时对比、分屏拖动、专业模式内的画面缩放和性能诊断。
-- PNG / JPEG 图片导出，D3D12 NVENC H.264 / HEVC 视频导出。
-- Windows 11 Desktop Acrylic 控制面板；视频区域保持不透明，未打开媒体时为纯黑。
-
-- Daily mode by default: a large picture area with playback, media opening, capture, volume, subtitles, and fullscreen controls.
-- Professional mode: an expanding settings workspace without interrupting the current session.
-- H.264 / HEVC video, PNG / JPEG images, and DirectShow / UVC capture devices.
-- Optional DLSS SR, RTX Video SR, experimental NVIDIA NR, NVOF motion confidence, plus DLSS and XeSS frame-generation backends.
-- Experimental Intel XeSS 2X display frame generation and AMD FidelityFX optical-flow estimation; XeSS is currently preview-only.
-- Same-frame comparison, split view, preview zoom in Professional mode, and performance diagnostics.
-- PNG / JPEG image export and D3D12 NVENC H.264 / HEVC video export.
-- Windows 11 Desktop Acrylic for controls; the video area stays opaque and is pure black with no media open.
-
-## 使用方法 / How to use
-
-### 免安装包 / Portable package
-
-1. 下载并解压 `Veyra-0.0.1-win64-portable.zip`。
-2. 双击 `Veyra.exe`。
-3. 在日常模式点击“打开视频 / 图片”或“采集”，然后播放、暂停、调节音量或进入全屏。
-4. 点击“切换专业模式”展开完整面板。这里可以选择增强、超分、补帧、预设、对比和导出。
-
-压缩包中的 `runtime_local/nvidia` 包含版本固定的 Runtime Pack。软件会读取 `release-runtime-manifest.json`，校验 DLL 哈希和签名；校验、驱动或硬件不兼容时自动关闭对应增强，基础播放器、采集与导出仍可启动。不要自行替换其中的 DLL，也不要从游戏目录、驱动缓存或未知来源复制文件。
-
-1. Download and extract `Veyra-0.0.1-win64-portable.zip`.
-2. Run `Veyra.exe`.
-3. In Daily mode, choose Open Video / Image or Capture, then play, pause, adjust volume, or enter fullscreen.
-4. Select Switch to Professional Mode to expand the complete workspace. This is where enhancement, super resolution, frame generation, presets, comparison, and export are configured.
-
-The package includes a version-pinned Runtime Pack in `runtime_local/nvidia`. The release builder generates `release-runtime-manifest.json` and verifies DLL hashes and signatures; NR also validates its pinned identity at startup. If driver, hardware, or initialization compatibility fails, Veyra disables only the affected enhancement while the player, capture, and export paths remain available. Do not replace these DLLs or copy files from games, driver caches, or unknown sources.
-
-### 从源码构建 / Build from source
-
-准备 Windows x64、Visual Studio 2022 C++ 工具链、CMake 3.24+、Ninja 和 Windows SDK。NVIDIA 与 FFmpeg 依赖请按各自许可准备在本地，仓库不会自动下载它们。
-
-```powershell
-git clone https://github.com/Likely7/Veyra-DLSS-Video-Player.git
-Set-Location Veyra-DLSS-Video-Player
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Root . -Preset x64-release
-.\Veyra.cmd
-```
-
-Prepare Windows x64, the Visual Studio 2022 C++ toolchain, CMake 3.24+, Ninja, and the Windows SDK. Supply NVIDIA and FFmpeg dependencies locally under their own licenses; this repository does not download them automatically.
-
-## 技术路线 / Technical approach
-
-三个输入入口共享同一条 GPU 图，不复制三套增强逻辑：
-
-```text
-视频 / 图片 / 采集卡
-        → 颜色与时间戳解析
-        → SR（可选）
-        → NR（可选）
-        → 帧生成（可选）
-        → 呈现、图片导出或 NVENC 视频导出
-```
-
-The three input modes use one shared GPU graph rather than three separate enhancement implementations:
-
-```text
-Video / image / capture card
-        → color and timestamp handling
-        → optional SR
-        → optional NR
-        → optional frame generation
-        → presentation, image export, or NVENC video export
-```
-
-- Veyra uses C++20, Win32, D3D12, FFmpeg, and Windows media APIs.
-- SR is performed before NR; frame generation is performed after NR. Player subtitles and OSD are composed after frame generation.
-- Capture uses a latest-frame mailbox to limit latency. Frame generation requires the next real source frame; it cannot remove a capture card's inherent delay.
-- Realtime NR can use an explicitly labelled 1080p-class internal working size for 4K input. Native 4K NR remains available but costs substantially more GPU time. Export retains its native-size path.
-- HDMI and ordinary video do not contain game-engine depth, motion vectors, exposure, or HUD-free color. Veyra estimates only what can be derived from pixels and does not claim game-native equivalence.
-
-## 当前边界 / Current limits
-
-- SDR is the supported delivery path. HDR, AV1 / ProRes export, and VFR-preserving export are not part of this version.
-- Depth is not a shipped default provider. Current motion guidance uses NVOF confidence handling where available.
-- 3X and 4X frame generation are experimental. A selected multiplier does not guarantee that every source-frame pair produces a valid generated frame or that every configuration runs in real time.
-- Actual scanout latency, long-term stability, capture audio behavior, and every GPU / driver combination require further real-device validation.
-- AMD FidelityFX supplies optical-flow estimation only. AMD NR development is on hold. NVIDIA NR, DLSS SR, DLSS frame generation and NVENC require compatible NVIDIA hardware; there is no AMD AMF export backend. XeSS may initialize on other adapters when its runtime and device support it.
-- XeSS 2X diagnostics confirm SDK submissions only. They do not prove scanout frame rate, visual quality, or AMD-GPU compatibility.
-- No NVIDIA runtime, SDK archive, headers, libraries, models, or samples are in this Git repository. The user-authorized Release Runtime Pack is a separate Release-only payload and remains experimental.
-
-## 项目结构 / Project layout
-
-当前修复以最新用户要求、`AGENTS.md`、对应 `docs` 修复方案和 `docs/WORKLOG.md` 为准。早期 `loop/` 状态、控制哈希与 Phase 队列已归档，不再作为开发前置门禁。Current work follows the latest task, `AGENTS.md`, its repair plan and `docs/WORKLOG.md`; the legacy Loop state and control-hash gates are historical only.
-
-当前修复进度：[FRUC移除与诊断收尾](docs/FRUC_REMOVAL_AND_DIAGNOSTICS_2026-09-11.md)。FRUC 已移除，旧预设迁移、真实产出统计、XeSS切换、受控音频同步和诊断收尾已有软件回归；AMD NR 暂时搁置，实体采集由用户验收。这里的开发改动尚未更新已发布的0.0.1用户包。
-
-FRUC removal, legacy preset migration, completed-output telemetry, XeSS switching, controlled audio synchronization and diagnostic changes have software regression evidence in the linked report. AMD NR is on hold; physical capture acceptance belongs to user testing. These changes have not been published as an update to the 0.0.1 package.
-
-| Path | Purpose |
+| 功能 | 支持内容 |
 | --- | --- |
-| `apps/veyra` | Win32 application and the two-mode interface |
-| `include/veyra`, `src` | Shared engine, media, GPU, enhancement, and export code |
-| `shaders` | GPU shader sources and build rules |
-| `tests`, `scripts` | Tests, build commands, and local acceptance helpers |
-| `docs` | User guide, architecture notes, work log, and implementation plans |
+| 播放与采集 | H.264 / HEVC 视频、PNG / JPEG 图片、DirectShow / UVC 采集卡 |
+| 超分辨率 | DLSS SR、RTX Video SR；2K / 4K / 8K 目标，保持画面比例 |
+| NR 增强 | 实验性 NVIDIA NR；实时档与原生档，风格、强度和局部保护调整 |
+| 帧生成 | DLSS 2X / 3X / 4X，实验性 XeSS 2X 预览补帧 |
+| 调整与对比 | 设置实时生效、还原默认、原画对比、分屏、画面缩放 |
+| 导出 | PNG / JPEG 图片，NVENC H.264 / HEVC 视频 |
+| 实时状态 | 源帧处理、有效补帧、呈现提交、链路耗时和软件延迟 |
 
-## 许可 / License
+日常模式以观看为主；专业模式展开增强参数、诊断和导出工具。切换模式不需要重新打开视频。
 
-The repository keeps its existing [GNU GPL v3 license](LICENSE). Third-party notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). This repository license does not grant rights to redistribute NVIDIA SDKs, runtimes, drivers, or other external components.
+## 下载与运行
+
+1. 在 [Releases](https://github.com/Likely7/Veyra-NRVideo/releases) 下载 **Veyra-0.0.2-win64-portable.zip**，不要下载 Source code。
+2. 完整解压到一个可写文件夹，双击 **Veyra.exe**。无需安装 SDK、Python 或开发工具。
+3. 使用当前显卡驱动。要使用 NVIDIA NR、DLSS、RTX Video SR 和 NVENC，需兼容的 NVIDIA RTX 显卡；本版本主要在 RTX 5070 上验证。
+
+系统要求：Windows 11 x64、DirectX 12。便携包含当前功能所需运行组件，显卡驱动和采集卡驱动由系统提供。8K 超分和原生高分辨率增强需要更多显存，不保证每个组合都能实时运行。
+
+升级时先退出旧版，解压到新目录。需要保留设置时，复制旧目录下的 `runtime_local/*.v1` 与 `veyra.ini`；不要用旧目录整体覆盖新版运行组件。
+
+## 使用教程
+
+### 视频与图片
+
+点击底栏“打开”选择文件。底栏提供播放、进度、音量、字幕和全屏；切换到专业模式后，鼠标位于画面上时可用滚轮缩放。
+
+### 采集卡
+
+1. 连接设备，关闭其他软件对同一采集卡的占用。
+2. 点击“采集”，选择设备、分辨率、帧率、像素格式及音频设备。
+3. 先关闭增强确认基础画面，再按需打开 NR、超分和补帧。同一模式下可优先试 YUY2 / NV12。
+4. 若主机游戏为30fps、采集卡输出60fps，在专业模式的内容节奏中选择60转30；真正60fps内容使用原始采集节奏。
+
+### 增强与补帧
+
+专业模式中分别开启 NR、超分和补帧。超分下方选择算法及目标尺寸；补帧页选择 DLSS 或 XeSS 及可用倍率。建议从实时 NR、较低 RTX Video SR 档位和2X补帧开始，结合对比画面与实时状态调整。
+
+处理跟不上时降低画质、倍率或目标尺寸。软件延迟指采集回调到 Present 返回，不包含完整采集卡和屏幕扫描延迟；补帧不能降低游戏输入延迟。
+
+### 导出与运行组件
+
+在专业模式选择图片保存或视频导出、格式与输出位置。XeSS 目前仅用于预览；视频导出使用已支持的 DLSS 路径。
+
+允许自行替换 DLL：退出软件后，NVIDIA 文件放在 `runtime/experimental/`，XeSS / XeLL 放在 `runtime_local/intel/experimental/`，保留文件名。软件不锁定哈希或签名；清单仅记录发布包原件，替换版的接口与硬件兼容性不作保证。卸载整个软件只需退出后删除解压目录。
+
+## 技术路线与边界
+
+```text
+视频 / 图片 / 采集卡 → 颜色处理 → SR → NR → 帧生成 → 显示 / 导出
+```
+
+C++20、Win32、D3D12；文件由 FFmpeg 处理，采集使用 DirectShow，视频导出使用 NVENC。各入口共享增强管线，采集保留最新帧，光流提供估算的运动信息。
+
+NR 与 DLSS 帧生成属于 **community experimental / 社区实验集成**，不是 NVIDIA 官方认证或完整游戏原生集成。采集画面没有游戏引擎的原生深度和运动数据，效果可能存在拖影或细节变化。AMD NR 暂未提供；FRUC 已移除；HDR、AV1 / ProRes 导出尚不支持。实卡兼容性与长期稳定性仍需持续验证。
+
+## 开发与许可
+
+[构建说明](docs/BUILD.md) · [组件清单](docs/RUNTIME_COMPONENTS_0.0.2.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
+
+源码采用 [GPLv3](LICENSE)。SDK、模型和运行时不进入源码仓库；Release 组件按各自许可与实验发布范围单独提供。

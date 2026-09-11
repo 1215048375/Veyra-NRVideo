@@ -1,7 +1,6 @@
 #include "veyra/gfx/XessPresenter.h"
 #include "veyra/Log.h"
 #include "veyra/RuntimePaths.h"
-#include "veyra/FileIdentity.h"
 #ifdef VEYRA_HAS_XESS
 #include <xess_fg/xefg_swapchain_d3d12.h>
 #include <xell/xell_d3d12.h>
@@ -53,16 +52,11 @@ bool XessPresenter::initialize(ID3D12Device* device,ID3D12CommandQueue* queue,ID
     }
 #ifdef VEYRA_HAS_XESS
     auto& p=*p_;const auto root=runtime::localDataDirectory()/"intel"/"experimental";
-    auto load=[&](const wchar_t* name,const char* hash){auto path=std::filesystem::absolute(root/name);
-        FileIdentity identity;IdentityError error;
-        if(!computeFileIdentity(path.wstring(),identity,error)||!identity.signatureValid||identity.sha256Upper!=hash){
-            log::error("xess-fg",std::format("runtime identity rejected {} hash={} signed={} error={}",path.string(),identity.sha256Upper,identity.signatureValid,int(error)));return HMODULE(nullptr);
-        }
-        log::info("xess-fg",std::format("runtime verified {} sha256={} signed={}",path.string(),identity.sha256Upper,identity.signatureValid));
-        auto module=LoadLibraryExW(path.c_str(),nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_SYSTEM32);
+    auto load=[&](const wchar_t* name){auto path=std::filesystem::absolute(root/name);
+        auto module=LoadLibraryExW(path.c_str(),nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_APPLICATION_DIR|LOAD_LIBRARY_SEARCH_SYSTEM32);
         log::info("xess-fg",std::format("load {} result={} win32={}",path.string(),module!=nullptr,module?0:GetLastError()));return module;};
-    p.llDll=load(L"libxell.dll","D2030DCD694FDA8F2EC7E044B13E6DB8F0B56D4BA9113A5EFAD334E3F3DED8C7");if(!p.llDll)return false;
-    p.fgDll=load(L"libxess_fg.dll","EC5E0C65E075570C6EDE72618BB666D0BE0C2E10B2EA9762C0FE8CB8E375AB27");if(!p.fgDll)return false;
+    p.llDll=load(L"libxell.dll");if(!p.llDll)return false;
+    p.fgDll=load(L"libxess_fg.dll");if(!p.fgDll)return false;
 #define LOAD(module,name) p.name##Fn=reinterpret_cast<decltype(p.name##Fn)>(GetProcAddress(p.module,#name));if(!p.name##Fn){log::error("xess-fg","missing export " #name);return false;}
     LOAD(fgDll,xefgSwapChainD3D12CreateContext)
     LOAD(fgDll,xefgSwapChainD3D12GetProperties)

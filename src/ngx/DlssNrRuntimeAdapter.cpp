@@ -330,15 +330,11 @@ bool DlssNrRuntimeAdapter::load(const std::wstring& runtimeDir, Status& status)
     }
     dllPath_ = std::wstring(resolved) + L"\\nvngx_dlssnr.dll";
 
-    // Containment (Playbook 8.2): the canonicalized directory must still be
-    // the configured runtime_local/nvidia staging root before any load.
-    const std::wstring expectedSuffix = L"\\runtime_local\\nvidia";
-    if (dllPath_.size() <= expectedSuffix.size() + wcslen(L"nvngx_dlssnr.dll") ||
-        _wcsnicmp(dllPath_.c_str() + dllPath_.size() - (expectedSuffix.size() + wcslen(L"\\nvngx_dlssnr.dll")),
-            (std::wstring(expectedSuffix) + L"\\nvngx_dlssnr.dll").c_str(),
-            expectedSuffix.size() + wcslen(L"\\nvngx_dlssnr.dll")) != 0) {
+    // Development staging and the explicitly named experimental Release pack.
+    const auto allowed=[&](const wchar_t* suffix){const size_t n=wcslen(suffix);return dllPath_.size()>n&&_wcsicmp(dllPath_.c_str()+dllPath_.size()-n,suffix)==0;};
+    if (!allowed(L"\\runtime_local\\nvidia\\nvngx_dlssnr.dll")&&!allowed(L"\\runtime\\experimental\\nvngx_dlssnr.dll")) {
         status = Status::InvalidArgument;
-        veyra::log::error("ngx", "nr-adapter: resolved runtime path is outside runtime_local/nvidia; refusing to load");
+        veyra::log::error("ngx", "nr-adapter: resolved runtime path is outside approved staging/experimental directory; refusing to load");
         return false;
     }
 

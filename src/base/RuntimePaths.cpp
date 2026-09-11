@@ -32,7 +32,10 @@ std::filesystem::path shaderDirectory()
     return applicationRoot() / "shaders";
 }
 
-std::filesystem::path localRuntimeDirectory() { return applicationRoot() / "runtime_local" / "nvidia"; }
+std::filesystem::path localRuntimeDirectory() {
+    const auto root=applicationRoot();
+    return std::filesystem::exists(root/"runtime")?root/"runtime"/"experimental":root/"runtime_local"/"nvidia";
+}
 std::filesystem::path localDataDirectory() { return applicationRoot() / "runtime_local"; }
 std::filesystem::path logsDirectory() { return applicationRoot() / "logs"; }
 
