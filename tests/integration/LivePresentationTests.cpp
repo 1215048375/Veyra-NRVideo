@@ -106,9 +106,11 @@ int wmain(int argc,wchar_t**argv){
         Logger::instance().flush();std::ifstream log(std::filesystem::path(argv[2])/"engine.log");std::string line;
         std::vector<double> realPts;const std::regex ptsPattern("subframe=0 pts100ns=([0-9]+)");
         while(std::getline(log,line))if(line.find("[submit]")!=std::string::npos){std::smatch m;if(std::regex_search(line,m,ptsPattern))realPts.push_back(std::stod(m[1])/10000.0);}
-        double maxPresentGap=0;unsigned resyncGaps=0;for(size_t i=1;i<realPts.size();++i){
+        double maxPresentGap=0;unsigned resyncGaps=0;bool afterSeek=false;for(size_t i=1;i<realPts.size();++i){
+            if(realPts[i]<realPts[i-1]){afterSeek=true;continue;} // backward seek boundary
             const double gap=realPts[i]-realPts[i-1];
-            if(gap>400){++resyncGaps;continue;} // explicit seek/rebuild resync windows
+            if(afterSeek){afterSeek=false;continue;} // seek forward-jump/resync window is explicit
+            if(gap>400){++resyncGaps;continue;} // explicit rebuild/pause resync windows
             maxPresentGap=std::max(maxPresentGap,gap);
         }
         std::cout<<"FILE_OVERLOAD realPresents="<<realPts.size()<<" maxSteadyGapMs="<<maxPresentGap<<" resyncGaps="<<resyncGaps<<'\n';

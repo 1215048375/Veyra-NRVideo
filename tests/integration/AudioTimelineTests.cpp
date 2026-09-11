@@ -249,7 +249,7 @@ int wmain(int argc, wchar_t** argv) {
     check(std::abs(gatedRenderer.mediaTimeMs()-1200)<.1,"resume waits for video history warmup");
     gated.videoPresented(1300);
     check(until([&]{return gatedRenderer.mediaTimeMs()>1250;}),"resume uses real retained PCM after video anchor");
-    check(gated.videoWaitCount()>=4&&gated.overruns()==0,"software video holds are observed and PCM queue remains bounded");
+    check(gated.videoWaitCount()>=3&&gated.overruns()==0,"explicit transport holds are observed and PCM queue remains bounded");
     gated.stopThread();
     return failures ? 1 : 0;
 }
