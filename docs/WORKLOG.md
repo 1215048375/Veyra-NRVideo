@@ -1648,3 +1648,9 @@ FRUC候选bSkipWarp/延后重建/时间归零/首对预热均未通过新增rese
 ## 2026-09-12 目标模式施工节点一
 
 用户已授权施工。timer/真实FPS、PS5显示曲线、sensor/touch/反馈与仅观看初步实现已构建，ON/OFF、69项native、SDL虚拟输入、20+20实际UI切换、GPU灰阶色块及完整delivery47.45秒通过。命令、真实失败、日志、哈希与剩余问题见 docs/REMOTEPLAY_REPAIR_PROGRESS_2026-09-12.md。完整实机、校准/事件与设备路由仍在继续，目标未完成，无发布。
+
+## 2026-09-12 PS5修复收尾与用户验收
+
+补齐SDL触摸事件/传感器批次、120样本静止校准、16项/100ms跨线程输入队列、失焦立即释放、能力状态与音频子系统引用计数修复。用户反馈“可以了，我测试了没问题”；未逐项覆盖的蓝牙/多设备/主机直连账号共存等如实保留。最终校准超时起点修正另经自动测试。
+
+build-product/native-source/off-check成功；boundary默认与virtual、H264/H265 source成功，CTest69/69（0.50s），实际20+20 UI切换通过。运行中的EXE导致LNK1104，正常关闭后重建成功。完整命令、日志、SHA256、用户验收与自动验证边界见 docs/REMOTEPLAY_REPAIR_PROGRESS_2026-09-12.md 节点二。本地Git存档，不push/release；源码无SDK/DLL/模型/凭据。

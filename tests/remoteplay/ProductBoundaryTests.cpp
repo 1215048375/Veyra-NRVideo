@@ -14,6 +14,14 @@ namespace veyra::source {
 struct RemotePlaySessionSourceTestAccess {
 static void mailbox(){
     RemotePlaySessionSource s;s.started_=true;
+    const auto now=remoteplay::monotonic100ns();
+    remoteplay::ControllerState down;down.inputActive=true;down.touches[0].id=1;
+    s.controller(down);s.controller({});
+    if(s.takeControllerLocked(now)!=remoteplay::ControllerState{})throw std::runtime_error("focus loss must cancel pending actions");
+    s.controller(down);auto up=down;up.touches[0].id=-1;s.controller(up);
+    if(s.takeControllerLocked(now).touches[0].id!=1||s.takeControllerLocked(now).touches[0].id!=-1)throw std::runtime_error("input edges overwritten by decoder owner");
+    for(int i=0;i<40;++i)s.controller(down);
+    if(s.pendingControllers_.size()>16||s.takeControllerLocked(now+2000000)!=remoteplay::ControllerState{})throw std::runtime_error("input queue bound or stale release");
     AVFrame* raw=av_frame_alloc();raw->width=16;raw->height=16;raw->format=AV_PIX_FMT_YUV420P;
     if(av_frame_get_buffer(raw,32)<0)throw std::bad_alloc();
     pipeline::FramePacket packet;SourceInfo info;info.width=16;info.height=16;
@@ -48,9 +56,19 @@ int virtualInput(){
     SDL_SetJoystickVirtualTouchpad(joystick,0,0,true,.25f,.75f,1);
     SDL_SetJoystickVirtualTouchpad(joystick,0,1,true,1,0,1);
     auto first=input.poll(true);bool ok=first.motionValid&&std::abs(first.accel[1]-1)<1e-5&&std::abs(first.gyro[2]-.3f)<1e-5;
+    ok&=first.motionSampleCount>0;
+    first=input.poll(true);
     ok&=first.touches[0].id>=0&&first.touches[1].id>=0&&first.touches[0].id!=first.touches[1].id&&first.touches[0].x==479&&first.touches[0].y==809;
     SDL_SetJoystickVirtualTouchpad(joystick,0,0,true,.5f,.5f,1);auto moved=input.poll(true);ok&=moved.touches[0].id==first.touches[0].id&&moved.touches[0].x==959;
     SDL_SetJoystickVirtualTouchpad(joystick,0,0,false,0,0,0);auto up=input.poll(true);ok&=up.touches[0].id==-1;
+    // Both edges arrive between UI ticks: a tap must still produce down then up.
+    SDL_SetJoystickVirtualTouchpad(joystick,0,0,true,.4f,.4f,1);SDL_UpdateGamepads();
+    SDL_SetJoystickVirtualTouchpad(joystick,0,0,false,.4f,.4f,0);SDL_UpdateGamepads();
+    auto tapDown=input.poll(true),tapUp=input.poll(true);ok&=tapDown.touches[0].id>=0&&tapUp.touches[0].id<0;
+    ok&=input.calibrate();
+    gyro[0]=.01f;gyro[1]=.02f;gyro[2]=.03f;
+    for(int i=0;i<121;++i){SDL_SendJoystickVirtualSensorData(joystick,SDL_SENSOR_GYRO,20000000+i*1000000,gyro,3);input.poll(true);}
+    auto calibrated=input.poll(true);ok&=std::abs(calibrated.gyro[0])<1e-5&&std::abs(calibrated.gyro[2])<1e-5;
     ControllerFeedback f;f.rumble=true;f.left=5;input.feedback(f,true);ok&=rumbleCalls>0;
     const auto before=rumbleCalls;ok&=input.poll(false)==ControllerState{};ok&=rumbleCalls>before;
     ControllerFeedback bounded;for(int i=0;i<20;++i){ControllerFeedback packet;packet.haptics.resize(120,1);bounded.merge(std::move(packet));ok&=bounded.haptics.size()<=600;}

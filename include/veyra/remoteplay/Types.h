@@ -89,6 +89,7 @@ struct ControllerFeedback {
     }
 };
 struct ControllerState {
+    bool inputActive=false; // Distinguishes a released button/touch from focus/device loss.
     // Semantic buttons; translated explicitly to Chiaki in the native bridge.
     enum Button : std::uint32_t { Cross=1u<<0, Circle=1u<<1, Square=1u<<2, Triangle=1u<<3,
         Left=1u<<4, Right=1u<<5, Up=1u<<6, Down=1u<<7, L1=1u<<8, R1=1u<<9,
@@ -101,6 +102,8 @@ struct ControllerState {
     // SDL coordinate frame: angular velocity rad/s, acceleration in g.
     std::array<float,3> gyro{},accel{0,1,0};
     uint64_t motionTimestampUs=0;bool motionValid=false;
+    struct MotionSample {std::array<float,3> gyro{},accel{0,1,0};uint64_t timestampUs=0;bool operator==(const MotionSample&)const=default;};
+    std::array<MotionSample,16> motionSamples{};uint8_t motionSampleCount=0;
     bool operator==(const ControllerState&) const = default;
 };
 } // namespace veyra::remoteplay

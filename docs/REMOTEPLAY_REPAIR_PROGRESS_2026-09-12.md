@@ -1,5 +1,9 @@
 # PS5 目标模式施工进度
 
+## 当前结论（2026-09-12，节点二）
+
+用户在收到《羊蹄山之魂》实测请求后反馈：“可以了，我测试了没问题”。记录为本轮用户实机验收通过，不推断为蓝牙/多设备/仅观看账号共存逐项通过。以下节点一的待办是当时状态；本节与末尾节点二记录优先。未发布、未推送。
+
 基线计划提交325b9e9，tag checkpoint/ps5-full-repair-2026-09-12。用户指定《羊蹄山之魂》实测。目标仍active，未发布。
 
 ## 节点一实现
@@ -30,3 +34,29 @@
 真实游戏反馈、仅观看主机直连、USB/蓝牙拔插与完整效果路由、gyro静止偏移校准、触摸短边沿与传感器事件采样、设备能力显示、同源视觉对照、暂停与网络恢复。不能声称全部手柄功能实机通过。用户已收到测试请求，需打开新测试版供测试；没有发布。
 
 UI已通过但完整控制器仍需上述收口。后续修改不要基于本页把未验收项误标完成。外部SDK/runtime不入Git。
+
+## 节点二：输入事件、校准与交付存档
+
+- SDL事件保留双指down/move/up，16项有界触点队列；同次UI采样内的按下/抬起分次传出。动作与触摸按键独立。
+- gyro/accel使用SDL事件时间与最多16项批次；Chiaki跳过重复时间戳，防止同一快照重复积分。时间断点重置姿态。单位仍为rad/s与g。
+- PS5面板增加陀螺仪校准：返回播放器后开始计时，120个稳定样本估计静止偏移；运动样本清空积累，10秒超时保留原值。换设备清理校准。能力状态显示传感器、触摸板、扳机路径和真实触觉端点打开状态；仅观看不再提示电脑手柄生效。
+- UI至解码owner不再只覆盖最新ControllerState：16项有界队列保留边沿和传感器批次，4ms发送机会，100ms过期上限。失焦/断开使用独立inputActive状态立即清空排队动作；正常抬指不被误判为失焦。溢出先释放再发最新状态，记录警告。
+- 修复手柄重连时重复初始化SDL音频子系统导致引用计数累加。
+- 最终校准超时修正在用户实测版本之后，仅改变校准计时起点；最终二进制另经自动回归，不冒充用户重新测试过该二进制。
+
+### 本节点实际执行
+
+命令脚本均在out/remoteplay/audit-20260911（忽略目录）；测试使用scripts/run-short-test.ps1的30秒单项上限。
+
+- build-product.cmd -> logs/ps5-input-accepted-build.log：成功。此前ps5-input-events/queue/calibration-build发生LNK1104，因为正在运行的veyra.exe被锁；正常关闭已结束测试的窗口后链接成功，没有强杀。
+- build-native-source.cmd -> logs/ps5-input-accepted-native-build.log：20/20；build-off-check.cmd -> logs/ps5-input-accepted-off-build.log：成功。
+- boundary默认/--virtual -> logs/ps5-input-accepted-boundary.stdout.log、ps5-input-accepted-virtual.stdout.log：exit0。覆盖输入跨线程边沿、失焦清队、过期/容量、双指短触、传感器单位及静止校准、反馈容量；虚拟输入不连接PS5。
+- ctest --test-dir out/remoteplay/audit-20260911/native-source-repair --output-on-failure --timeout 30 -> logs/ps5-input-accepted-ctest.log：69/69，0.50秒。
+- veyra_remoteplay_source_tests（single、reorder.h264、hevc三个夹具）-> logs/ps5-input-accepted-source.stdout.log：exit0。
+- scripts/remoteplay/test-ui.ps1 -> logs/ps5-input-accepted-ui：20次模式动画及20次全屏切换、面板开关和无效配对拒绝通过，截图复查布局正常。
+- 最终out/remoteplay/product-repair/veyra.exe SHA256：BCF9A2E98BD0E5553FE9A9772FEAC7F4226360A41127B4A573C3B5E4ACF3B86A。
+- 本节点未改颜色/GPU增强。节点一真实D3D12颜色夹具与47.45秒delivery证据仍单独保留，没有重复运行或冒充当前实机逐项验证。
+
+### 验证边界
+
+用户确认本次测试没问题。本轮修复交付收尾；不把未报告的场景列为已通过。蓝牙完整触觉、多手柄与多音频端点、中文端点命名、仅观看同账号/第二账号共存、网络断续/休眠恢复和同源视觉定量对照仍需对应设备/场景验证。当前触觉只自动选择唯一手柄及唯一匹配名称的四声道端点；歧义不自动路由，不能承诺多设备或蓝牙与USB等价。后续唯一优先任务：若用户在其他连接方式复现问题，按设备及日志补对应能力适配；不重新改已验收链路，不自动发布。

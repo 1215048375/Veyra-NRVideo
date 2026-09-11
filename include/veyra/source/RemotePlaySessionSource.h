@@ -2,6 +2,7 @@
 #include "RemotePlaySource.h"
 #include "veyra/sink/CaptureAudioSession.h"
 #include <condition_variable>
+#include <deque>
 #include <mutex>
 #include <thread>
 
@@ -33,6 +34,7 @@ private:
     friend struct RemotePlaySessionSourceTestAccess;
     void publishDecoded(const AVFrame*,pipeline::FramePacket,const SourceInfo&);
     void run(std::stop_token, RemotePlayConnectDesc);
+    remoteplay::ControllerState takeControllerLocked(remoteplay::HostTime now);
     struct Frame { std::shared_ptr<AVFrame> frame; pipeline::FramePacket packet; SourceInfo info; };
     mutable std::mutex mutex_;
     std::condition_variable ready_;
@@ -43,6 +45,7 @@ private:
     SourceInfo info_, publishedInfo_;
     remoteplay::SessionInbox::Snapshot snapshot_;
     remoteplay::ControllerState controller_;
+    std::deque<std::pair<remoteplay::HostTime,remoteplay::ControllerState>> pendingControllers_;
     remoteplay::HostTime controllerStamp_=0;
     std::string pin_;
     uint64_t skipped_=0;

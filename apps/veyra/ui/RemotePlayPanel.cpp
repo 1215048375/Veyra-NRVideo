@@ -11,7 +11,8 @@
 namespace veyra::ui {
 namespace {
 HWND window=nullptr;HFONT font=nullptr;
-enum {Host=1,Account,PairPin,Quality,CodecChoice,Pair,Connect,Cancel,Scan,Wake,LoginPin,SendPin,StatusText,Help,Bitrate,Forget,ViewOnly};
+enum {Host=1,Account,PairPin,Quality,CodecChoice,Pair,Connect,Cancel,Scan,Wake,LoginPin,SendPin,StatusText,Help,Bitrate,Forget,ViewOnly,Calibrate};
+std::function<bool()> calibrate;
 std::function<void(source::RemotePlayConnectDesc)> connect;
 std::function<void(std::string)> login;
 std::function<RemotePlayPanelStatus()> connectionStatus;std::function<void()> disconnect;bool watching=false;
@@ -77,7 +78,7 @@ void arrange(){
     move(Quality,160,150,220,150);move(CodecChoice,392,150,160,150);
     move(Connect,160,199,180,36);move(Wake,352,199,200,36);
     move(LoginPin,160,250,180,28);move(SendPin,352,250,200,30);
-    move(Bitrate,160,295,180,180);move(Forget,352,295,80,32);move(Cancel,440,295,112,32);move(StatusText,20,341,530,64);move(ViewOnly,20,408,530,28);move(Help,20,442,530,86);
+    move(Bitrate,160,295,180,180);move(Forget,352,295,80,32);move(Cancel,440,295,112,32);move(StatusText,20,341,530,64);move(ViewOnly,20,408,400,28);move(Calibrate,432,408,120,28);move(Help,20,442,530,86);
 }
 LRESULT CALLBACK proc(HWND h,UINT msg,WPARAM wp,LPARAM lp){switch(msg){
 case WM_CREATE:{window=h;closing=false;font=makeFont(h);titleTheme(h);
@@ -86,6 +87,7 @@ case WM_CREATE:{window=h;closing=false;font=makeFont(h);titleTheme(h);
         SendMessageW(c,WM_SETFONT,WPARAM(font),TRUE);themeControl(c);return c;
     };
     add(L"BUTTON",L"仅观看（手柄连接 PS5；更改后需重新连接）",ViewOnly,BS_AUTOCHECKBOX|WS_TABSTOP);
+    add(L"BUTTON",L"校准陀螺仪",Calibrate,BS_PUSHBUTTON|WS_TABSTOP);
     add(L"STATIC",L"PS5 地址",100,0,20,21,130,25);add(L"STATIC",L"PSN Account ID",101,0,20,65,130,25);
     add(L"STATIC",L"8 位配对码",102,0,20,109,130,25);add(L"STATIC",L"串流格式",103,0,20,153,130,25);add(L"STATIC",L"登录 PIN（可选）",104,0,20,253,135,25);
     add(L"STATIC",L"码率",105,0,20,298,130,25);add(L"COMBOBOX",L"",Host,CBS_DROPDOWN|CBS_AUTOHSCROLL|WS_TABSTOP);SendDlgItemMessageW(h,Host,CB_LIMITTEXT,253,0);
@@ -103,6 +105,7 @@ case WM_CREATE:{window=h;closing=false;font=makeFont(h);titleTheme(h);
 case WM_TIMER:if(busy&&done){if(worker.joinable())worker.join();busy=false;Outcome result;{std::lock_guard lock(mutex);result=std::move(outcome);}if(!result.savedPath.empty()){currentProfile=result.savedPath;refreshProfiles();}buttons();SetDlgItemTextW(h,StatusText,result.message.c_str());if(!result.hosts.empty())SetDlgItemTextW(h,Host,std::wstring(result.hosts[0].host.begin(),result.hosts[0].host.end()).c_str());if(closing)DestroyWindow(h);}
     if(window&&watching&&!busy){auto state=connectionStatus();SetDlgItemTextW(h,StatusText,state.message.c_str());SetDlgItemTextW(h,Cancel,state.active?L"断开连接":L"取消操作");EnableWindow(GetDlgItem(h,Cancel),state.active);if(!state.active)watching=false;}return 0;
 case WM_COMMAND:switch(LOWORD(wp)){
+    case Calibrate:if(calibrate&&calibrate())MessageBoxW(h,L"将手柄平放并保持静止，关闭此提示后返回播放器。\n采集 120 个稳定样本完成校准；10 秒内不稳定则保留原校准。",L"陀螺仪校准",MB_OK);else MessageBoxW(h,L"请先连接串流及带陀螺仪的电脑手柄。仅观看模式不使用电脑手柄。",L"无法校准",MB_OK);break;
     case Host:if(HIWORD(wp)==CBN_SELCHANGE&&!busy){const auto index=SendDlgItemMessageW(h,Host,CB_GETCURSEL,0,0);if(index>=0&&size_t(index)<profiles.size()){currentProfile=profiles[size_t(index)].path;loadSelection();}}break;
     case Forget:if(!busy&&!currentProfile.empty()){std::error_code ec;const bool removed=std::filesystem::remove(currentProfile,ec);if(removed){currentProfile.clear();refreshProfiles();if(profiles.empty()){SetDlgItemTextW(h,Account,L"");SetDlgItemTextW(h,Host,L"");}SetDlgItemTextW(h,StatusText,L"配对已删除。现有串流会保留；下次连接需选择其他主机或重新配对。");}else SetDlgItemTextW(h,StatusText,L"删除失败，请检查文件权限。");}break;
     case Pair:{if(busy)break;auto host=ascii(Host),id=ascii(Account),pin=ascii(PairPin);auto account=remoteplay::accountIdFromBase64(id);if(!account)account=remoteplay::accountIdFromDecimal(id);
@@ -124,7 +127,8 @@ case WM_DESTROY:if(worker.joinable()){worker.request_stop();worker.join();}KillT
 case WM_SIZE:arrange();return 0;
 }return DefWindowProcW(h,msg,wp,lp);}
 }
-void showRemotePlayPanel(HWND parent,std::function<void(source::RemotePlayConnectDesc)> start,std::function<void(std::string)> pin,std::function<RemotePlayPanelStatus()> status,std::function<void()> stop){
+void showRemotePlayPanel(HWND parent,std::function<void(source::RemotePlayConnectDesc)> start,std::function<void(std::string)> pin,std::function<RemotePlayPanelStatus()> status,std::function<void()> stop,std::function<bool()> calibration){
+    calibrate=std::move(calibration);
     connect=std::move(start);login=std::move(pin);connectionStatus=std::move(status);disconnect=std::move(stop);if(window){SetForegroundWindow(window);return;}
     WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"VeyraRemotePlaySetup";wc.hbrBackground=panelBrush();wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
     CreateWindowExW(WS_EX_TOOLWINDOW,wc.lpszClassName,L"PS5 · Remote Play",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,dip(parent,590),dip(parent,580),parent,nullptr,wc.hInstance,nullptr);

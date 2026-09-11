@@ -1,5 +1,7 @@
 # Remote Play 接续入口
 
+2026-09-12最新：[PS5颜色/UI/手柄修复记录](../REMOTEPLAY_REPAIR_PROGRESS_2026-09-12.md)。真实PS5连接和基本增强已由用户确认；本轮修复后用户再次反馈“测试了没问题”。下方“下一步首次连接”是历史状态，不要重新当阻塞。保留蓝牙、多设备、仅观看账号共存等未逐项验证边界；本次不发布。
+
 最新实现与测试证据见 [修复执行记录](../REMOTEPLAY_REPAIR_EXECUTION_2026-09-11.md)，用户操作见 [PS5实机验收](../REMOTEPLAY_PS5_ACCEPTANCE_2026-09-11.md)。
 
 本机分支 `agent/remoteplay-integration`。修复前存档 `bf21bef`；源层修复 `8827721`；产品集成节点 `9e5c034` / `checkpoint/remoteplay-product-integrated-2026-09-11`。最终验收文档提交之后以 `git log -5` 为准。

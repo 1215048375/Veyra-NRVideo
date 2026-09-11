@@ -230,15 +230,16 @@ BackendResult ChiakiBackend::submitController(const ControllerState& state){
         {ControllerState::Touchpad,CHIAKI_CONTROLLER_BUTTON_TOUCHPAD},{ControllerState::PS,CHIAKI_CONTROLLER_BUTTON_PS}};
     for(auto b:buttons)if(state.buttons&b.semantic)c.buttons|=static_cast<std::uint32_t>(b.target);
     for(size_t i=0;i<state.touches.size();++i){c.touches[i].id=state.touches[i].id;c.touches[i].x=state.touches[i].x;c.touches[i].y=state.touches[i].y;}
-    const bool validMotion=state.motionValid&&std::all_of(state.gyro.begin(),state.gyro.end(),[](float v){return std::isfinite(v);})&&std::all_of(state.accel.begin(),state.accel.end(),[](float v){return std::isfinite(v);});
-    if(validMotion){
-        if(!p_->lastMotion||state.motionTimestampUs<p_->lastMotion||state.motionTimestampUs-p_->lastMotion>100000){
-            chiaki_orientation_tracker_init(&p_->orientation);chiaki_accel_new_zero_set_inactive(&p_->accelZero,false);
-        }
-        if(state.motionTimestampUs!=p_->lastMotion){
-            chiaki_orientation_tracker_update(&p_->orientation,state.gyro[0],state.gyro[1],state.gyro[2],state.accel[0],state.accel[1],state.accel[2],&p_->accelZero,false,uint32_t(state.motionTimestampUs));
-            p_->lastMotion=state.motionTimestampUs;
-        }
+    const auto applyMotion=[&](const std::array<float,3>& gyro,const std::array<float,3>& accel,uint64_t timestamp){
+        if(!timestamp||!std::all_of(gyro.begin(),gyro.end(),[](float v){return std::isfinite(v);})||!std::all_of(accel.begin(),accel.end(),[](float v){return std::isfinite(v);}))return;
+        // Repeated state snapshots contain the same batch; never integrate twice.
+        if(p_->lastMotion&&timestamp<=p_->lastMotion)return;
+        if(!p_->lastMotion||timestamp-p_->lastMotion>100000){chiaki_orientation_tracker_init(&p_->orientation);chiaki_accel_new_zero_set_inactive(&p_->accelZero,false);}
+        chiaki_orientation_tracker_update(&p_->orientation,gyro[0],gyro[1],gyro[2],accel[0],accel[1],accel[2],&p_->accelZero,false,uint32_t(timestamp));p_->lastMotion=timestamp;
+    };
+    if(state.motionValid){
+        for(size_t i=0;i<std::min(size_t(state.motionSampleCount),state.motionSamples.size());++i){const auto& sample=state.motionSamples[i];applyMotion(sample.gyro,sample.accel,sample.timestampUs);}
+        applyMotion(state.gyro,state.accel,state.motionTimestampUs);
         chiaki_orientation_tracker_apply_to_controller_state(&p_->orientation,&c);
     }else p_->lastMotion=0;
     c.l2_state=state.l2;c.r2_state=state.r2;c.left_x=state.leftX;c.left_y=state.leftY;c.right_x=state.rightX;c.right_y=state.rightY;

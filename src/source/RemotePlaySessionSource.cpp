@@ -8,7 +8,7 @@ extern "C" {
 namespace veyra::source {
 bool RemotePlaySessionSource::connect(RemotePlayConnectDesc desc) {
     close();
-    { std::lock_guard lock(mutex_); initialized_=started_=failed_=false; skipped_=0; rates_={}; feedback_={}; controller_={}; snapshot_={}; }
+    { std::lock_guard lock(mutex_); initialized_=started_=failed_=false; skipped_=0; rates_={}; feedback_={}; controller_={}; pendingControllers_.clear(); snapshot_={}; }
     owner_=std::jthread([this, request=std::move(desc)](std::stop_token stop) mutable { run(stop,std::move(request)); });
     std::unique_lock lock(mutex_);
     ready_.wait(lock,[&]{return initialized_;});
@@ -48,14 +48,16 @@ void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc de
             auto nextController=lastFrame;
             auto rateStart=lastFrame;uint64_t previousReceived=0,previousDecoded=0;
             while(!stop.stop_requested()) {
-                std::string pin; remoteplay::ControllerState controller;
-                {std::lock_guard lock(mutex_);pin.swap(pin_);controller=remoteplay::monotonic100ns()-controllerStamp_<=1000000?controller_:remoteplay::ControllerState{};}
+                std::string pin;
+                {std::lock_guard lock(mutex_);pin.swap(pin_);}
                 if(!pin.empty()) {
                     const auto r=source.submitLoginPin(pin);SecureZeroMemory(pin.data(),pin.size());
                     if(!r.ok)log::warn("remoteplay",std::format("{} code={}",r.operation,r.code));
                 }
                 const auto now=std::chrono::steady_clock::now();
                 if(!desc.request.viewOnly&&now>=nextController) {
+                    remoteplay::ControllerState controller;
+                    {std::lock_guard lock(mutex_);controller=takeControllerLocked(remoteplay::monotonic100ns());}
                     const auto r=source.submitController(controller);
                     if(!r.ok)log::warn("remoteplay",std::format("{} code={}",r.operation,r.code));
                     nextController=now+std::chrono::milliseconds(4);
@@ -118,7 +120,25 @@ void RemotePlaySessionSource::close() noexcept {
     std::lock_guard lock(mutex_);latest_.reset();view_.reset();info_={};started_=false;
     SecureZeroMemory(pin_.data(),pin_.size());pin_.clear();
 }
-void RemotePlaySessionSource::controller(remoteplay::ControllerState state){std::lock_guard lock(mutex_);controller_=state;controllerStamp_=remoteplay::monotonic100ns();}
+void RemotePlaySessionSource::controller(remoteplay::ControllerState state){
+    std::lock_guard lock(mutex_);controllerStamp_=remoteplay::monotonic100ns();
+    // A neutral input (focus/device loss) cancels queued actions immediately.
+    if(!state.inputActive)pendingControllers_.clear();
+    if(pendingControllers_.size()>=16){
+        pendingControllers_.clear();pendingControllers_.push_back({controllerStamp_,{}});
+        log::warn("remoteplay-input","Controller queue overflow; releasing before latest state");
+    }
+    pendingControllers_.push_back({controllerStamp_,std::move(state)});
+}
+remoteplay::ControllerState RemotePlaySessionSource::takeControllerLocked(remoteplay::HostTime now){
+    if(now-controllerStamp_>1000000){pendingControllers_.clear();controller_={};return controller_;}
+    if(!pendingControllers_.empty()&&now-pendingControllers_.front().first>1000000){
+        while(!pendingControllers_.empty()&&now-pendingControllers_.front().first>1000000)pendingControllers_.pop_front();
+        controller_={};return controller_;
+    }
+    if(!pendingControllers_.empty()){controller_=std::move(pendingControllers_.front().second);pendingControllers_.pop_front();}
+    return controller_;
+}
 void RemotePlaySessionSource::loginPin(std::string pin){std::lock_guard lock(mutex_);SecureZeroMemory(pin_.data(),pin_.size());pin_=std::move(pin);}
 remoteplay::SessionInbox::Snapshot RemotePlaySessionSource::sessionSnapshot()const{std::lock_guard lock(mutex_);return snapshot_;}
 RemotePlaySessionSource::Rates RemotePlaySessionSource::rates()const{std::lock_guard lock(mutex_);return rates_;}
