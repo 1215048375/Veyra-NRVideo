@@ -2,6 +2,14 @@
 
 状态：目标模式执行中。范围按 [继续修复方案](CONTINUATION_REPAIR_PLAN_2026-09-10.md)，未完成全计划。起始代码 `be00e27`，保留上一轮方案文档改动。不启用旧Loop。
 
+## 2026-09-11 续接实证：设置重置/重建生命周期计时
+
+为避免把整段 `graph.process` 或 GPU `Evaluate` 返回误报成“重置完成”，`FrameFlowMetrics` 现在保存最近一次设置事务的 session、请求 revision、实际 epoch/source identity、是否重建、结果（完成/回滚/取消/失败）以及五个独立 CPU 观测区间：排空、销毁、创建、首帧预热提交、首个 GPU-ready 输出。每个区间在边界推进时切换起点；首个有效输出必须通过对应 batch 的真实 fence，旧 revision/epoch 的完成事件不能结束新事务。状态面板显示这些值，仍将 GPU timestamp 与 CPU 观测分开。
+
+设置失败记录为 `RolledBack`，不会显示“已恢复有效输出”；停止发生在重建首帧前记录 `Cancelled`，不伪造 FirstValid。暂停缓存预览也通过同一完成条件。排空失败直接停止并记录 `Failed`。当前记录容量随现有活动流窗口保留，后续仍需把高频 capture drop/scene-cut 等历史边界接入统一 reset cause 和有界逐帧轨迹，不能把这一项冒充所有 reset 已完成。
+
+验证：完整 release 构建 `logs/continuation-repair-20260910/reset-lifecycle-build-final.log` exit 0；`continuation-reset-final-rollback` 约 8.8 秒 32 项 PASS，覆盖真实 live scheduler 的 NR+2X 重建、匹配 GPU-ready、paused cached preview、失败回滚、停止取消及旧计数隔离。合成文件回放，不是实体采集卡；没有宣称扫描输出或物理显卡拔插已验证。测试 EXE SHA `474726E22BBAB4D8629C5232594EF6E05FC904A526D344543E94980A41AC5554`，worker SHA `EC8150FF88C7C84FACDF92B920DED2D6CEC5F682990C375A92550AFD5E818695`。
+
 ## 2026-09-11 续接实证（优先于下面历史进度）
 
 ### 最新续接：可控音频重锚淡出
@@ -206,3 +214,4 @@ R1首版UI切换通过：`ui-fg-1789053218053203700/result.json`，EXE SHA `C457
 R0 NR backend/provider、R1完整计时与状态布局验收、A1 AMD完整网络、R2 FRUC同步/完整GPU状态机、R3音画同步及R4集成回归均未完成。新指标仍由原presentation worker观测GPU-ready，尚未解决该观测时机受调度等待影响的问题。文档和测试通过不是全目标完成。
 
 下一步：完成R1窗口自身截图与小尺寸布局审查、补充统计回归，再按方案推进AMD provider和FRUC/音频。代码在工作树，未push、打包或发布。
+

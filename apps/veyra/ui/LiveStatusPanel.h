@@ -54,6 +54,14 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         rows.emplace_back(L"生成呈现距A到达",xess?L"SDK内部不可测":timing(f.pairTiming[size_t(diagnostics::PairTiming::GeneratedFromA)]));
         rows.emplace_back(L"生成呈现距B到达",xess?L"SDK内部不可测":timing(f.pairTiming[size_t(diagnostics::PairTiming::GeneratedFromB)]));
         rows.emplace_back(L"延迟样本 / 统计溢出",std::format(L"{} / {}",f.latencySamples,f.timingOverflow));
+        if(f.reset.sessionId){
+            const auto& r=f.reset;
+            const auto outcome=r.outcome==diagnostics::ResetOutcome::Completed?L"已恢复有效输出":r.outcome==diagnostics::ResetOutcome::RolledBack?L"已回滚":r.outcome==diagnostics::ResetOutcome::Cancelled?L"已取消":r.outcome==diagnostics::ResetOutcome::Failed?L"失败":L"等待有效输出";
+            rows.emplace_back(std::format(L"最近设置{} · {}",r.rebuilt?L"重建":L"重置",r.settingsRevision),outcome);
+            rows.emplace_back(L"切换总耗时",ms(r.totalMs));
+            const wchar_t* resetNames[]={L"排空",L"销毁资源",L"创建资源",L"首帧预热提交",L"首帧完成观测"};
+            for(size_t i=0;i<r.stageMs.size();++i)rows.emplace_back(resetNames[i],ms(r.stageMs[i]));
+        }
         rows.emplace_back(L"补帧方式",s.applied.multiplier<=1?L"关闭":std::format(L"{} {}X",xess?L"XeSS":s.applied.frameGenerationBackend==engine::FrameGenerationBackend::Fruc?L"FRUC":L"DLSS",s.applied.multiplier));
         rows.emplace_back(L"NR内部尺寸",s.applied.nr?std::format(L"{} x {}",s.metrics.resolution.nr.width,s.metrics.resolution.nr.height):L"关闭");
         rows.emplace_back(L"音频同步",s.audioAvailable?(s.capture?(s.captureAudio.running?L"软件估算同步":L"等待视频锚点"):(s.audioEndpointRecovering?L"音频设备恢复中 · 时间线保持":s.audioRebuffering?L"视频过载 · 同步缓冲":L"音频主时钟")):L"无音频");

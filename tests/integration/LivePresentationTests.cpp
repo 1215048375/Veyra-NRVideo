@@ -9,7 +9,7 @@ using namespace veyra;
 using namespace std::chrono_literals;
 int wmain(int argc,wchar_t**argv){
     SetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS",L"1");
-    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--fruc")==0||wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--fruc-overload")==0||wcscmp(argv[3],L"--fruc-overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0||wcscmp(argv[3],L"--source-gap")==0||wcscmp(argv[3],L"--file-endpoint")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--fruc")==0||wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--fruc-overload")==0||wcscmp(argv[3],L"--fruc-overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0||wcscmp(argv[3],L"--source-gap")==0||wcscmp(argv[3],L"--file-endpoint")==0||wcscmp(argv[3],L"--reset-rollback")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     std::filesystem::create_directories(argv[2]);Logger::instance().openFile((std::filesystem::path(argv[2])/"engine.log").wstring());Logger::instance().setConsoleEnabled(false);
     HWND window=CreateWindowExW(0,L"STATIC",L"Live scheduler replay",WS_POPUP,0,0,960,540,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     if(!window)return 3;engine::EngineController engine;engine::PlayerOptions options;options.nr=false;options.fg=false;options.captureReplayForTest=true;
@@ -88,12 +88,28 @@ int wmain(int argc,wchar_t**argv){
     }
     auto state=engine.snapshot();auto settings=state.desired;settings.nr=true;settings.multiplier=2;engine.requestSettings(settings);
     check(until([](const auto& s){return s.applied.nr&&s.applied.multiplier==2&&!s.applying&&s.nrEvaluated>2&&s.generated>0;}),"NR and 2x transaction while two batches are in flight");
+    check(until([](const auto& s){const auto& r=s.metrics.flow.reset;return r.settingsRevision==s.applied.revision&&r.outcome==diagnostics::ResetOutcome::Completed&&r.totalMs.has_value();}),"settings reset completes only after matching GPU-ready output");
+    {
+        const auto s=engine.snapshot();const auto& r=s.metrics.flow.reset;double stages=0;bool measured=true;
+        for(const auto& ms:r.stageMs){measured&=ms.has_value()&&*ms>=0;if(ms)stages+=*ms;}
+        check(r.sessionId==s.sessionId&&r.epoch==s.metrics.identity.epoch&&r.sourceFrameId>0&&measured&&r.totalMs&&*r.totalMs+.01>=stages,"reset identity and disjoint drain/destroy/create/warmup/ready intervals are measured");
+    }
     check(until([](const auto& s){const auto& m=s.metrics.flow;return m.pairTiming[size_t(diagnostics::PairTiming::GeneratedFromA)].samples>0&&m.pairTiming[size_t(diagnostics::PairTiming::GeneratedFromB)].samples>0;}),"presented generated frames have actual A/B latency samples");
     state=engine.snapshot();const auto liveRevision=state.applied.revision;check(state.metrics.identity.settingsRevision==state.applied.revision,"GPU metrics belong to applied revision");
     const auto& flow=state.metrics.flow;
     check(flow.latest.sameWindow(state.sessionId,state.metrics.identity)&&flow.counters.fgEvaluated>0,"flow counters carry actual session, epoch and revision");
     check(flow.counters.commandSlotHighWater<=6&&flow.counters.presentationBatchHighWater<=2,"command and presentation queues remain bounded");
     check(flow.counters.fgCandidate==flow.counters.fgSkippedBeforeEval+flow.counters.fgEvaluated,"each candidate is accounted before evaluate");
+    if(argc==4&&wcscmp(argv[3],L"--reset-rollback")==0){
+        SetEnvironmentVariableW(L"VEYRA_TEST_REJECT_NR_DISABLE",L"1");
+        settings=state.desired;settings.nr=false;engine.requestSettings(settings);
+        const auto rejected=engine.snapshot().desired.revision;
+        check(until([&](const auto& s){return s.rejectedRevision==rejected&&!s.applying&&s.applied.nr;}),"failed first evaluation restores previous NR configuration");
+        SetEnvironmentVariableW(L"VEYRA_TEST_REJECT_NR_DISABLE",nullptr);
+        check(until([&](const auto& s){const auto& r=s.metrics.flow.reset;return r.settingsRevision==rejected&&r.outcome==diagnostics::ResetOutcome::RolledBack&&r.totalMs.has_value();}),"failed reset keeps rejected revision and rollback timing instead of success");
+        check(until([&](const auto& s){return s.frames>state.frames+5&&s.metrics.flow.counters.realReady>0;}),"restored graph produces completed real frames after rollback");
+        state=engine.snapshot();
+    }
     const auto audioEpoch=state.metrics.identity.epoch;const auto audioFrames=state.frames;
     settings=state.desired;settings.audioSync=engine::AudioSyncMode::Manual;settings.audioOffsetMs=75;
     check(engine.requestSettings(settings),"audio-only change accepted while NR/FG are active");
@@ -107,6 +123,7 @@ int wmain(int argc,wchar_t**argv){
     check(until([&](const auto& s){return !s.applying&&s.applied.audioOffsetMs==90&&s.applied.revision==liveRevision;}),"audio edit applies while paused without rerunning video");
     settings=engine.snapshot().desired;settings.model.style=1;engine.requestSettings(settings);
     check(until([](const auto& s){return s.applied.model.style==1&&!s.applying;}),"settings apply while paused");
+    check(until([](const auto& s){return s.metrics.flow.reset.settingsRevision==s.applied.revision&&s.metrics.flow.reset.outcome==diagnostics::ResetOutcome::Completed;}),"paused cached preview reset observes its actual GPU completion");
     const auto pausedRevision=engine.snapshot().applied.revision;
     engine.pause(false);const auto before=engine.snapshot().frames;check(until([&](const auto& s){return s.frames>=before+8&&s.metrics.submitted>0;}),"resume resets history and restarts bounded presentation");
     settings=engine.snapshot().desired;settings.multiplier=4;engine.requestSettings(settings);
@@ -120,7 +137,13 @@ int wmain(int argc,wchar_t**argv){
         check(until([](const auto& s){return !s.applying&&!s.captureHalfRate&&s.metrics.sourceFrames>=80;}),"switch back to original capture cadence live");
         const auto s=engine.snapshot();check(s.fps>=55&&s.fps<=65,"GPU completed throughput returns to about 60fps");
     }
+    uint64_t cancelledRevision=0;
+    if(argc==4&&wcscmp(argv[3],L"--reset-rollback")==0){
+        settings=engine.snapshot().desired;settings.nr=true;settings.multiplier=2;engine.requestSettings(settings);cancelledRevision=engine.snapshot().desired.revision;
+        check(until([&](const auto& s){return s.metrics.flow.reset.settingsRevision==cancelledRevision&&s.metrics.flow.reset.outcome==diagnostics::ResetOutcome::InProgress;}),"pending rebuild is observable before first output");
+    }
     engine.stop();const auto stopLimit=std::chrono::steady_clock::now()+5s;while(!engine.idle()&&std::chrono::steady_clock::now()<stopLimit)std::this_thread::sleep_for(5ms);check(engine.idle(),"stop drains presenter before graph shutdown");
+    if(cancelledRevision){const auto s=engine.snapshot();const auto& r=s.metrics.flow.reset;check(r.settingsRevision==cancelledRevision&&r.outcome==diagnostics::ResetOutcome::Cancelled&&!r.stageMs[size_t(diagnostics::ResetStage::FirstValid)],"stopped rebuild records cancellation without invented valid output");}
     Logger::instance().flush();std::ifstream log(std::filesystem::path(argv[2])/"engine.log");std::string line;bool liveFresh=false,pausedCached=false;
     while(std::getline(log,line))if(line.find("source-identity")!=std::string::npos){
         if(line.find("cached=false revision="+std::to_string(liveRevision)+" ")!=std::string::npos)liveFresh=true;

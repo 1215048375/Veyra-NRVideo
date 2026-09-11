@@ -13,6 +13,7 @@
 #include "veyra/source/MediaFileSource.h"
 #include "veyra/source/CaptureCardSource.h"
 #include "veyra/pipeline/EnhanceGraph.h"
+#include "veyra/pipeline/ResetCoordinator.h"
 #include "veyra/sink/WasapiAudioSink.h"
 #include "veyra/sink/ImageExportSink.h"
 #include "veyra/gfx/D3D12DeviceContext.h"
@@ -36,7 +37,8 @@ int64_t monotonic100ns(){return std::chrono::duration_cast<std::chrono::nanoseco
 struct OnExit {std::function<void()> action;~OnExit(){action();}};
 void logFrameFlow(const diagnostics::FrameFlowMetrics& m,const char* state){
     const auto& c=m.counters;const auto& id=m.latest;
-    veyra::log::info("frame-flow",std::format("state={} session={} revision={} epoch={} source={} batch={} readyFence={} consumerFence={} captureReceived={} mailboxOverwritten={} sourceAccepted={} sourceSkippedBeforeGraph={} realSubmitted={} fgCandidate={} fgSkippedBeforeEval={} fgEvaluated={} fgWarmup={} fgReadyValid={} fgInvalid={} realPresented={} generatedPresented={} generatedExpiredAfterEval={} cancelledBeforePresent={} commandSlots={} commandHighWater={} presentationHighWater={} slotWaitCount={} slotWaitMs={:.3f} generatedFps={:.2f} presentSubmitFps={:.2f}",state,id.sessionId,id.frame.settingsRevision,id.frame.epoch,id.frame.sourceFrameId,id.batchId,id.readyFence,id.consumerFence,c.captureReceived,c.mailboxOverwritten,c.sourceAccepted,c.sourceSkippedBeforeGraph,c.realSubmitted,c.fgCandidate,c.fgSkippedBeforeEval,c.fgEvaluated,c.fgWarmup,c.fgReadyValid,c.fgInvalid,c.realPresented,c.generatedPresented,c.generatedExpiredAfterEval,c.cancelledBeforePresent,c.commandSlotsInFlight,c.commandSlotHighWater,c.presentationBatchHighWater,m.slotReuseWaitCount,m.slotReuseWaitMs.value_or(0),m.validGeneratedFps,m.presentSubmitFps));
+    const auto& r=m.reset; const auto ms=[&](diagnostics::ResetStage s){return r.stageMs[size_t(s)].value_or(-1.0);};
+    veyra::log::info("frame-flow",std::format("state={} session={} revision={} epoch={} source={} batch={} readyFence={} consumerFence={} captureReceived={} mailboxOverwritten={} sourceAccepted={} sourceSkippedBeforeGraph={} realSubmitted={} fgCandidate={} fgSkippedBeforeEval={} fgEvaluated={} fgWarmup={} fgReadyValid={} fgInvalid={} realPresented={} generatedPresented={} generatedExpiredAfterEval={} cancelledBeforePresent={} commandSlots={} commandHighWater={} presentationHighWater={} slotWaitCount={} slotWaitMs={:.3f} generatedFps={:.2f} presentSubmitFps={:.2f} resetRevision={} resetEpoch={} resetReason={} resetOutcome={} resetDrainMs={:.3f} resetDestroyMs={:.3f} resetCreateMs={:.3f} resetWarmupMs={:.3f} resetFirstValidMs={:.3f} resetTotalMs={:.3f}",state,id.sessionId,id.frame.settingsRevision,id.frame.epoch,id.frame.sourceFrameId,id.batchId,id.readyFence,id.consumerFence,c.captureReceived,c.mailboxOverwritten,c.sourceAccepted,c.sourceSkippedBeforeGraph,c.realSubmitted,c.fgCandidate,c.fgSkippedBeforeEval,c.fgEvaluated,c.fgWarmup,c.fgReadyValid,c.fgInvalid,c.realPresented,c.generatedPresented,c.generatedExpiredAfterEval,c.cancelledBeforePresent,c.commandSlotsInFlight,c.commandSlotHighWater,c.presentationBatchHighWater,m.slotReuseWaitCount,m.slotReuseWaitMs.value_or(0),m.validGeneratedFps,m.presentSubmitFps,r.settingsRevision,r.epoch,unsigned(r.reason),unsigned(r.outcome),ms(diagnostics::ResetStage::Drain),ms(diagnostics::ResetStage::Destroy),ms(diagnostics::ResetStage::Create),ms(diagnostics::ResetStage::Warmup),ms(diagnostics::ResetStage::FirstValid),r.totalMs.value_or(-1.0)));
 }
 }
 EngineController::EngineController(){worker_=std::thread(&EngineController::dispatch,this);}
@@ -189,6 +191,31 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             };
             std::vector<std::shared_ptr<CompletionWatch>> pendingCompletions;
             std::shared_ptr<FrameFlowWindow> frameFlow;
+            std::optional<diagnostics::FrameFlowMetrics::ResetRecord> resetRecord;
+            std::optional<diagnostics::FrameFlowMetrics::ResetRecord> lastResetRecord;
+            Clock::time_point resetStart{},resetStageStart{};
+            auto markResetStage=[&](diagnostics::ResetStage stage){
+                if(!resetRecord)return;
+                const auto now=Clock::now();
+                resetRecord->stageMs[size_t(stage)]=std::chrono::duration<double,std::milli>(now-resetStageStart).count();
+                resetStageStart=now;
+                if(frameFlow)frameFlow->resetLifecycle(*resetRecord);
+            };
+            auto finishReset=[&](diagnostics::ResetOutcome outcome){
+                if(!resetRecord)return;
+                resetRecord->outcome=outcome;resetRecord->totalMs=elapsedMs(resetStart);
+                lastResetRecord=resetRecord;
+                if(frameFlow)frameFlow->resetLifecycle(*resetRecord);
+                const auto& r=*resetRecord;const auto ms=[&](diagnostics::ResetStage s){return r.stageMs[size_t(s)].value_or(-1.0);};
+                veyra::log::info("reset-lifecycle",std::format("session={} revision={} epoch={} source={} reason={} outcome={} drainMs={:.3f} destroyMs={:.3f} createMs={:.3f} warmupSubmitMs={:.3f} firstValidObserveMs={:.3f} totalMs={:.3f} (CPU observed; -1=not measured)",r.sessionId,r.settingsRevision,r.epoch,r.sourceFrameId,unsigned(r.reason),unsigned(r.outcome),ms(diagnostics::ResetStage::Drain),ms(diagnostics::ResetStage::Destroy),ms(diagnostics::ResetStage::Create),ms(diagnostics::ResetStage::Warmup),ms(diagnostics::ResetStage::FirstValid),*r.totalMs));
+                resetRecord.reset();
+            };
+            auto completeReset=[&](pipeline::FrameIdentity identity){
+                if(!resetRecord||resetRecord->settingsRevision!=identity.settingsRevision||resetRecord->epoch!=identity.epoch||resetRecord->sourceFrameId!=identity.sourceFrameId)return;
+                markResetStage(diagnostics::ResetStage::FirstValid);
+                finishReset(diagnostics::ResetOutcome::Completed);
+            };
+            OnExit resetExit{[&]{finishReset(stop_?diagnostics::ResetOutcome::Cancelled:diagnostics::ResetOutcome::Failed);}};
             auto collectTimings=[&]{
                 for(const auto& sample:graph.takeGpuTimings())if(frameFlow)frameFlow->gpuFrame(sample,host100ns());
                 for(const auto& sample:presenter.takeGpuTimings(ctx.fence()))if(frameFlow)frameFlow->gpuFrame(sample,host100ns());
@@ -208,6 +235,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     {
                         if(liveStats.identity.epoch==batch.batch.identity.epoch&&liveStats.identity.settingsRevision==batch.batch.identity.settingsRevision&&batch.fgEvaluated&&!batch.historyReset&&!batch.fgRecovery){liveCompletion.add(elapsedMs(watch.processStart));lastFgCompletion=host100ns();}
                     }
+                    completeReset(batch.batch.identity);
                     watch.readyObserved=Clock::now();watch.ready=true;it=pendingCompletions.erase(it);
                 }
                 collectTimings();
@@ -223,7 +251,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             source::CaptureMetrics captureFlowBase{},captureFlowLast{};
             uint64_t rateSkippedBase=0;
             // Queued steps capture these locals; cancel before their destruction.
-            OnExit stopPresentation{[&]{liveScheduler.reset();std::lock_guard lock(mutex_);if(snapshot_.sessionId==runSessionId){if(frameFlow)snapshot_.metrics.flow=frameFlow->snapshot(host100ns());activeFlow_.reset();}}};
+            OnExit stopPresentation{[&]{liveScheduler.reset();finishReset(stop_?diagnostics::ResetOutcome::Cancelled:diagnostics::ResetOutcome::Failed);std::lock_guard lock(mutex_);if(snapshot_.sessionId==runSessionId){if(frameFlow)snapshot_.metrics.flow=frameFlow->snapshot(host100ns());activeFlow_.reset();}}};
             const bool injectSourceGap=options.captureReplayForTest&&GetEnvironmentVariableW(L"VEYRA_TEST_REPLAY_SOURCE_GAP",nullptr,0)>0;
             std::optional<Clock::time_point> sourceGapUntil;
             while(!stop_){
@@ -250,11 +278,18 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 }
                 const auto previous=options.snapshot();const auto previousDesc=gd;bool transaction=false;
                 if(requested.revision!=previous.revision){
+                    finishReset(diagnostics::ResetOutcome::Cancelled);
+                    resetStart=resetStageStart=Clock::now();
+                    resetRecord=diagnostics::FrameFlowMetrics::ResetRecord{};
+                    resetRecord->sessionId=runSessionId;resetRecord->settingsRevision=requested.revision;
+                    resetRecord->reason=static_cast<uint8_t>(pipeline::ResetReason::Resize);
+                    if(frameFlow)frameFlow->resetLifecycle(*resetRecord);
                     drainLivePresentation();
                     // A drain may outlive several slider notifications. Build
                     // only the latest pending configuration at this boundary.
                     {std::lock_guard lock(mutex_);requested=desired_;}
-                    if(requested.revision==previous.revision)continue;
+                    if(requested.revision==previous.revision){finishReset(diagnostics::ResetOutcome::Cancelled);continue;}
+                    resetRecord->settingsRevision=requested.revision;
                     auto next=PlayerOptions::from(requested);auto nextDesc=gd;
                     const auto plan=pipeline::ResolutionPlan::make({width,height},next.sr,requested.nrPolicy,isImage,requested.revision,requested.srTarget);
                     nextDesc.workWidth=plan.base.width;nextDesc.workHeight=plan.base.height;nextDesc.nrWidth=plan.nr.width;nextDesc.nrHeight=plan.nr.height;nextDesc.flowWidth=plan.flow.width;nextDesc.flowHeight=plan.flow.height;
@@ -265,7 +300,11 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     nextDesc.opticalFlowBackend=requested.opticalFlowBackend;nextDesc.amdFlowHalfResolution=requested.amdFlowHalfResolution;
                     const bool rebuild=gd.opticalFlowBackend!=nextDesc.opticalFlowBackend||gd.amdFlowHalfResolution!=nextDesc.amdFlowHalfResolution||gd.enableNr!=nextDesc.enableNr||gd.enableFg!=nextDesc.enableFg||gd.frameGenerationBackend!=nextDesc.frameGenerationBackend||gd.fgMultiplier!=nextDesc.fgMultiplier||gd.videoSrQuality!=nextDesc.videoSrQuality||gd.flowQuality!=nextDesc.flowQuality||gd.workWidth!=nextDesc.workWidth||gd.workHeight!=nextDesc.workHeight||gd.nrWidth!=nextDesc.nrWidth||gd.nrHeight!=nextDesc.nrHeight||gd.flowWidth!=nextDesc.flowWidth||gd.flowHeight!=nextDesc.flowHeight;
                     bool accepted=ring.drainQueue();out={};hasOutput=false;
-                    if(accepted&&rebuild){presenter.close();graph.shutdown();accepted=graph.initialize(nextDesc)&&presenter.open(ctx,window,graph)&&graph.createViews();
+                    resetRecord->rebuilt=rebuild;
+                    markResetStage(diagnostics::ResetStage::Drain);
+                    if(!accepted){finishReset(diagnostics::ResetOutcome::Failed);status(L"设置切换排空失败，已停止",true);break;}
+                    if(accepted&&rebuild){presenter.close();graph.shutdown();markResetStage(diagnostics::ResetStage::Destroy);accepted=graph.initialize(nextDesc)&&presenter.open(ctx,window,graph)&&graph.createViews();
+                        markResetStage(diagnostics::ResetStage::Create);
                         if(accepted&&graph.xessEnabled()&&!presenter.xessActive()){
                             veyra::log::warn("settings","requested XeSS presenter unavailable; rejecting transaction and restoring previous backend");
                             accepted=false;
@@ -274,10 +313,14 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     }else if(accepted)accepted=graph.applySettings(requested);
                     if(accepted){
                         options=next;gd=nextDesc;transaction=true;reset=true;
+                        resetRecord->epoch=0;
                         if(!nvidiaAdapter&&(next.nr||next.sr||(next.fg&&!xessFg)))veyra::log::warn("capability",std::format("non-NVIDIA adapter disabled requested settings revision={} nr={} sr={} fgBackend={} flowBackend={}",requested.revision,next.nr,next.sr,frameGenerationBackendName(requested.frameGenerationBackend),opticalFlowBackendName(requested.opticalFlowBackend)));
                     }
-                    else {std::lock_guard lock(mutex_);desired_.rejectVideoRequest(requested,previous);snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.applying=desired_!=previous;snapshot_.status=L"设置应用失败，已恢复上一套参数";snapshot_.backendWarning=requested.frameGenerationBackend==FrameGenerationBackend::XeSS?L"XeSS 未能启用，已恢复上一套参数":L"后端切换失败，已恢复上一套参数";}
+                    else {
+                        finishReset(diagnostics::ResetOutcome::RolledBack);
+                        std::lock_guard lock(mutex_);desired_.rejectVideoRequest(requested,previous);snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.applying=desired_!=previous;snapshot_.status=L"设置应用失败，已恢复上一套参数";snapshot_.backendWarning=requested.frameGenerationBackend==FrameGenerationBackend::XeSS?L"XeSS 未能启用，已恢复上一套参数":L"后端切换失败，已恢复上一套参数";}
                 }
+                if(stop_)break;
                 const double seek=seekSeconds_.exchange(-1);
                 if(seek>=0&&!isImage&&!isCapture){
                     if(!ring.drainQueue()||!activeSource->seek({static_cast<int64_t>(seek*1000000),1000000})){status(L"跳转失败",true);break;}
@@ -288,6 +331,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     if(audioStarted)audioPipe.setPaused(true);wasPaused=true;
                     const bool referencesValid=hasOutput&&out.batch.count&&out.batch.frames[out.batch.count-1].lease&&out.batch.frames[out.batch.count-1].lease->referencesValid;
                     if(hasOutput&&!presenter.present(ctx,ring,graph,out.videoSlot,false,referencesValid,comparisonMode_,comparisonBase_,comparisonSplit_,out.batch.identity,previewView())){status(L"画面呈现失败",true);break;}
+                    if(hasOutput&&graph.resolveGeneration(out))completeReset(out.batch.identity);
                     std::this_thread::sleep_for(std::chrono::milliseconds(16));continue;
                 }
                 if(wasPaused&&!paused_){audioRebuffering=false;if(audioStarted)audioPipe.setPaused(false);anchor=Clock::now();anchorMs=out.ptsMs;reset=true;wasPaused=false;}
@@ -370,12 +414,14 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     };
                 }
                 uint64_t processWaitBase=0,processSubmitBase=0;double processWaitMsBase=0,processSlotWaitMs=0;
+                if(resetRecord&&resetRecord->epoch==0)resetStageStart=Clock::now();
                 bool processed=false;{processWaitBase=ring.cpuWaitCount();processWaitMsBase=ring.cpuWaitMilliseconds();processSubmitBase=ring.submitCount();processed=!injectedReject&&graph.process(frame,pts,historyReset,out,pkt.sequence,&pkt.colorInfo,comparisonMode_!=0,admitFg);processSlotWaitMs=ring.cpuWaitMilliseconds()-processWaitMsBase;}
                 if(!processed){
                     if(transaction){
                         ring.drainQueue();out={};presenter.close();graph.shutdown();options=PlayerOptions::from(previous);
                         gd=previousDesc;
                         if(graph.initialize(gd)&&presenter.open(ctx,window,graph)&&graph.createViews()&&graph.process(frame,pts,true,out,pkt.sequence,&pkt.colorInfo,comparisonMode_!=0)){
+                            finishReset(diagnostics::ResetOutcome::RolledBack);
                             std::lock_guard lock(mutex_);desired_.rejectVideoRequest(requested,previous);snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.applying=desired_!=previous;snapshot_.status=L"参数执行失败，已整套回滚";transaction=false;
                         }else{status(L"参数回滚失败，已停止",true);break;}
                     }else{status(L"增强执行失败；请查看日志",true);break;}
@@ -384,6 +430,10 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 if(veyra::log::verboseFrameLogs())veyra::log::info("source-identity",std::format("source={} totalRead={} graphProcessed={} cached={} revision={} nvofStandalone={}",pkt.sequence,sourceFrames,frames+1,rereadCached,options.settings.revision,gd.enableNvofStandalone));
                 reset=false;hasOutput=true;
                 const auto processDone=Clock::now();
+                if(resetRecord&&resetRecord->epoch==0){
+                    resetRecord->epoch=out.batch.identity.epoch;resetRecord->sourceFrameId=out.batch.identity.sourceFrameId;
+                    markResetStage(diagnostics::ResetStage::Warmup);
+                }
                 if(!frameFlow||metricsRevision!=options.settings.revision||metricsEpoch!=out.batch.identity.epoch){
                     const bool settingsChanged=metricsRevision!=options.settings.revision;
                     metricsRevision=options.settings.revision;metricsEpoch=out.batch.identity.epoch;statsStart=Clock::now();statsSourceBase=sourceFrames-uint64_t(!rereadCached);
@@ -392,6 +442,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     if(liveScheduler){liveStats={};liveStats.identity=out.batch.identity;liveSubmissions.clear();liveAges.clear();liveWaits.clear();livePresent.clear();liveReady.clear();liveCompletion.clear();}
                     if(settingsChanged||!completionRates)completionRates=std::make_shared<FrameCompletionRates>(host100ns());
                     frameFlow=std::shared_ptr<FrameFlowWindow>(new FrameFlowWindow(runSessionId,out.batch.identity,host100ns(),completionRates),[](FrameFlowWindow* window){logFrameFlow(window->snapshot(monotonic100ns()),"closed");delete window;});
+                    if(resetRecord)frameFlow->resetLifecycle(*resetRecord);else if(lastResetRecord)frameFlow->resetLifecycle(*lastResetRecord);
                     frameFlow->update([&](auto& m){m.counters.historyResets=out.historyReset;m.counters.settingsResets=settingsChanged;m.counters.captureDropResets=pipeline::hasFrameFlag(pkt.flags,pipeline::FrameFlagBits::Drop);});
                     captureFlowBase=captureFlowLast;
                     {std::lock_guard lock(mutex_);rateSkippedBase=snapshot_.captureRateSkipped;activeFlow_=frameFlow;}
@@ -500,6 +551,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 if((paused_&&!seekPreviewPending)||seekSeconds_>=0){reset=true;if(veyra::log::verboseFrameLogs())veyra::log::info("submit",std::format("batch={} cancelled before submit (pause/seek)",out.batch.batchId));continue;}
                 unsigned valid=0,invalid=0;for(unsigned i=0;i<out.batch.count;++i)if(out.batch.frames[i].kind==pipeline::FrameKind::Generated){if(out.batch.frames[i].validity==pipeline::GenerationValidity::Valid)++valid;else ++invalid;}
                 frameFlow->ready(out.batch.batchId,!rereadCached&&!isImage,valid,invalid,host100ns());
+                completeReset(out.batch.identity);
                 if(!rereadCached&&!isImage)completedProcessing(out.batch.identity);
                 gpuWaitMs=elapsedMs(readyStart);gpuReadyTimes.add(gpuWaitMs);
                 frameFlow->cpu(diagnostics::CpuStage::ReadyWait,gpuWaitMs,host100ns());

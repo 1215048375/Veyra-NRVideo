@@ -59,6 +59,12 @@ public:
         metrics_.latest.sessionId=session;metrics_.latest.frame=id;
     }
     template<class F> void update(F action){std::lock_guard lock(mutex_);action(metrics_);}
+    // CPU-observed reset/rebuild lifecycle; GPU execution remains in GPU timing.
+    void resetLifecycle(const diagnostics::FrameFlowMetrics::ResetRecord& record){
+        std::lock_guard lock(mutex_);
+        if(record.sessionId!=metrics_.latest.sessionId)return;
+        metrics_.reset=record;
+    }
     void cpu(diagnostics::CpuStage index,double ms,int64_t now){std::lock_guard lock(mutex_);stage(gpuCount+unsigned(index),ms,now);}
     void pairArrived(const FrameLineage& pair){
         std::lock_guard lock(mutex_);
