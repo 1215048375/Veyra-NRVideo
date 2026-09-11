@@ -163,10 +163,13 @@ bool RemotePlaySource::openDecoder(remoteplay::Codec codec, std::uint32_t width,
     codecContext_->height = static_cast<int>(height);
     codecContext_->time_base = AVRational{1, static_cast<int>(request_.video.fps)};
     codecContext_->pkt_timebase = codecContext_->time_base;
+    // Allow the 1088-line coded padding of 1080p H.264; bound allocation before decode.
+    codecContext_->max_pixels = 1920LL * 1088;
     codecContext_->thread_count = 1;
     codecContext_->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
-    if (avcodec_open2(codecContext_, decoder, nullptr) < 0) {
-        veyra::log::error("remoteplay", "FFmpeg remote decoder open failed");
+    const int opened = avcodec_open2(codecContext_, decoder, nullptr);
+    if (opened < 0) {
+        veyra::log::error("remoteplay", std::format("FFmpeg remote decoder open failed code={}", opened));
         avcodec_free_context(&codecContext_);
         return false;
     }

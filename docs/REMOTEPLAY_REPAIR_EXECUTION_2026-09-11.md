@@ -40,7 +40,7 @@
 
 没有关闭用户播放器、占用采集卡、连接PS5、执行NVIDIA runtime或完整产品测试。节点一测试只证明上述真实FFmpeg与离线行为，不证明串流可用。原交接第18节是修复前缺陷账本，当前实现状态以本文节点证据更新。
 
-## 节点二：真实 metadata、共享产品入口与独立 owner（进行中）
+## 节点二：真实 metadata、共享产品入口与独立 owner（代码与离线验收已完成）
 
 已接入代码并在 `out/remoteplay/product-repair` 链接完整 `veyra.exe`；仍等待最终 UI / delivery 检查和用户 PS5 验收。
 
@@ -73,3 +73,41 @@
 - `product-mailbox-build.log` 增量8步成功；`boundary-final.stdout.log` 实际调用产品 `publishDecoded`：容量一覆盖计数、交付最新帧、历史断点与消费后不重播通过，连同invalid连接重开和SDL失焦测试全部exit0。
 - `scripts/remoteplay/test-ui.ps1` 实际启动新exe的隔离empty smoke：查找PS5按钮、打开/关闭面板2次、空参数配对被本地拒绝、正常退出，`ui-panel-test.log` PASS；未发送网络请求。截图 `ui-panel/remoteplay-panel.png` 已人工查看，文字/输入/按钮完整、无白底旧控件遮挡；截图前清空Account ID和PIN。
 - 以官方SDK/运行时执行的delivery尚未运行。Remote Play OFF全新目录构建正在执行。上述截图/自动行为不证明PS5连接。
+
+
+## 最终交付状态：等待用户 PS5 实机连接
+
+- 产品集成存档：`9e5c034`，标签 `checkpoint/remoteplay-product-integrated-2026-09-11`；之后收口补连接状态/断开、码率5–100Mbps、多个已配对地址选择/删除/重配、保存最后连接格式，文档收口另一个commit。
+- 当前可执行文件：`out/remoteplay/product-repair/veyra.exe`，SHA256 `E66D01B3E5060EAAB508F35E4DE16FDBF1A08CE179290121EDAEF30B43C41203`。FFmpeg五个DLL和shaders已位于同目录，SDL/Chiaki静态链接；继续使用现有本机NR/SR/FG运行组件，未新增/替换NVIDIA文件。
+- 桌面快捷方式“Veyra PS5 测试版”指向该exe，空白启动、初始NR/SR/FG关闭，用户可配对后逐项开启。
+- `product-off-build.log`：全新Remote Play OFF目录全目标176步链接成功，正式build.ps1 exit0。ON的正式全目标build亦exit0。root CMake没有悬空source/backend变量。
+- `native-ctest-final.log`：69/69 PASS（67 core＋真实native初始化＋实际DPAPI）。`hevc-source-fixed`是真FFmpeg source回归，单独运行而非冒充CTest覆盖。
+- `boundary-final`：真实decoded mailbox / invalid connect→close→reopen / SDL初始化与失焦归零PASS。
+- `ui-profiles-final-test.log`：最终exe实际面板打开关闭两轮、本地无效配对拒绝、码率与profile控件存在PASS；`ui-profiles-final/remoteplay-panel.png`已查看，全部控件与文字可见。没有通过测试脚本登录/连接真实主机，也没有删除用户配对。
+- `scripts/gates/delivery.ps1` 第一次PASS，47.53秒，`logs/delivery/bec2ca6893d84738a4111be1b4c580e9/result.json`；补连接状态后再跑PASS，46.76秒，`logs/delivery/d8b637d3d5c247dea1fd3a39f420e684/result.json`。实际覆盖NR/NVOF、4K播放、暂停/seek、图片保存、H264/HEVC NVENC含音轨导出、取消导出。第二次对应exe哈希`0BD67E3D...`，此后改PS5面板的码率/profile管理并完成最终UI回归，再为RemotePlay解码增加分配上限并重跑source与boundary回归，未重跑第三次整套GPU gate；不得声称两个hash相同。
+- 最后原有文件source23/23与UI384布局组合PASS；RemotePlay GUI是独立实际UI短测。
+- 原始交接审计账本作为历史保留，下一条任务是用户按 `docs/REMOTEPLAY_PS5_ACCEPTANCE_2026-09-11.md` 连接PS5验证真实网络/声音/手柄/NR-SR-FG/重连。并不宣称已完成真实PS5验收。
+
+### 可续接命令
+
+```powershell
+# 从项目根运行，依赖在本机项目外受控目录
+./scripts/build.ps1 -Root $PWD -Preset x64-release -BuildDirectory "$PWD/out/remoteplay/product-repair" -RemotePlay `
+  -ChiakiCheckout C:/veyra-deps/chiaki-source `
+  -ChiakiStage "$PWD/out/remoteplay/chiaki-msvc-stage" `
+  -RemotePlayPrefixPath C:/veyra-deps/remoteplay-installed/x64-windows-static `
+  -ProtocPath C:/veyra-deps/remoteplay-installed/x64-windows/tools/protobuf/protoc.exe `
+  -PkgConfigPath C:/veyra-deps/vcpkg/downloads/tools/msys2/3e71d1f8e22ab23f/mingw64/bin/pkg-config.exe
+./scripts/remoteplay/test-ui.ps1 -PlayerExe ./out/remoteplay/product-repair/veyra.exe -OutputDirectory ./logs/remoteplay-ui-recheck
+./scripts/gates/delivery.ps1 -Root $PWD -BuildDirectory ./out/remoteplay/product-repair -PlayerExe ./out/remoteplay/product-repair/veyra.exe
+```
+
+Native/source独立构建入口与fixture命令见上文；每个run-short-test限制30秒、fixture encoder各60秒、delivery整套约47秒。SDL通过项目外vcpkg安装`sdl3[core]:x64-windows-static`，源码版本/归档摘要写在dependency-lock.json，所有第三方二进制仍不在Git。
+
+### 实机前明确边界
+
+局域网PS5、SDR720/1080、30/60、软件H264/H265解码是本轮范围。时间基于本地到达与连续样本估计，不是主机原生PTS；音画固定偏差/网络抖动需要实机核对。公网PSN、HDR、硬解零拷贝、触摸坐标/陀螺仪/震动/自适应扳机回传不在本轮交付范围。罕见Chiaki join失败隔离路径没有真实失败注入证据；没有把其代码存在当测试通过。
+
+本轮仅本地Git和本机测试，没有push、Release或SDK/runtime上传。源码格式检查排除原样保留的上游许可证和unified patch上下文；暂存列表无DLL/LIB/EXE/模型/凭据。
+
+最后源层收口：FFmpeg max_pixels约束为1920×1088，允许1080p编码填充行，避免仅在解码后检查尺寸；open失败记录实际错误码。product-bounded-build.log/source-bounded-build.log链接成功；source-final-bounded.stdout.log和boundary-bounded.stdout.log均exit0，覆盖真实H264/H265首帧、重排PTS、PCM及owner边界。没有改文件/采集GPU路径。

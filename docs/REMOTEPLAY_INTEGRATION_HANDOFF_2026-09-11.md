@@ -1,5 +1,7 @@
 # Veyra PS5 Remote Play 集成交接
 
+> 施工已继续并形成可执行本机测试版。**当前结果、Git节点、证据与剩余实机项以 [执行记录最终节](REMOTEPLAY_REPAIR_EXECUTION_2026-09-11.md#最终交付状态等待用户-ps5-实机连接) 和 [PS5验收步骤](REMOTEPLAY_PS5_ACCEPTANCE_2026-09-11.md) 为准。** 下文尤其第18节保留修复前事实，不是当前缺陷清单。
+
 > 二次审计后用户授权当前 Agent 继续施工，节点状态改由 [修复执行记录](REMOTEPLAY_REPAIR_EXECUTION_2026-09-11.md) 维护。本文第18节保留修复前证据，不应据旧缺陷表断言新代码仍未修。
 
 日期：2026-09-11  

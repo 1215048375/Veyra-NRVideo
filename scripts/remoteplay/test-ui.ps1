@@ -40,6 +40,7 @@ try {
   $deadline=[DateTime]::UtcNow.AddSeconds(3)
   do {$panel=[RpUi]::Find($process.Id,'VeyraRemotePlaySetup');if($panel -eq [IntPtr]::Zero){Start-Sleep -Milliseconds 25}}while($panel -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline)
   if($panel -eq [IntPtr]::Zero){throw 'Remote Play panel missing'}
+  foreach($control in @(15,16)){if([RpUi]::GetDlgItem($panel,$control) -eq [IntPtr]::Zero){throw 'Bitrate/profile management missing'}}
   # Invalid local validation only; never contact a console or use a real key.
   foreach($field in @(1,2,3,11)){[RpUi]::SetWindowText([RpUi]::GetDlgItem($panel,$field),'')|Out-Null}
   [RpUi]::PostMessage($panel,0x111,[IntPtr]6,[IntPtr]::Zero)|Out-Null

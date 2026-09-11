@@ -30,6 +30,10 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片和采集
 
 0.0.4 修复增强处理造成的音画不同步，以及 NR 耗时轻微波动时的音频卡顿；同时修正 XeSS 补帧下的音频播放时序。
 
+### 开发分支：PS5 串流
+
+当前开发分支接入了 PS5 局域网串流、配对、加密保存与手柄输入，复用原有增强链路，等待实机验收。**现有0.0.4 Release不包含此功能。** [本机测试步骤与范围](docs/REMOTEPLAY_PS5_ACCEPTANCE_2026-09-11.md)。
+
 ## 下载与运行
 
 1. 在 [Releases](https://github.com/Likely7/Veyra-NRVideo/releases) 下载 **Veyra-0.0.4-win64-portable.zip**，不要下载 Source code。

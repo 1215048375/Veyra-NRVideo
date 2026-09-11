@@ -1631,3 +1631,10 @@ FRUC候选bSkipWarp/延后重建/时间归零/首对预热均未通过新增rese
 ## 2026-09-11 Remote Play 目标模式节点二施工
 
 用户授权继续至可执行交付，重大节点本地Git存档，实机PS5由用户验收；本轮没有push/release授权。已恢复metadata、严格依赖验证，共享生产CMake、独立网络/解码owner及PCM/WASAPI、DPAPI、配对连接UI和SDL手柄输入。源码编译/正式完整产品build成功；H264/H265/回绕、PCM/PTS、DPAPI、原source23与UI384组合回归通过。当前最终UI、OFF build、delivery及最新mailbox测试继续进行，不能据此称PS5完成实测。详情与真实失败修复记录见 `docs/REMOTEPLAY_REPAIR_EXECUTION_2026-09-11.md` 节点二。
+
+
+## 2026-09-11 Remote Play 本机测试版收口
+
+节点 `9e5c034` 已存档，追加连接状态/断开、码率与多主机配对管理、中文实机教程和中英文README开发分支说明。ON/OFF正式构建通过；69项native/core/DPAPI、真H264/H265 source/回绕/PCM/PTS、decoded mailbox与SDL边界、原source23项、UI384组合和实际PS5面板本地操作均通过。完整delivery两次PASS（47.53/46.76秒），后续只调整PS5面板并重新实测UI；证据与exe哈希边界详见修复执行记录最终节。用户尚未连接PS5，下一步由用户验收真实串流；没有宣称真实音画同步、网络恢复或手柄硬件已通过。创建桌面本机测试快捷方式，无远端发布。
+
+最终源层加FFmpeg解码分配上限（允许1080p的1088编码填充行）与open错误码，重新构建产品/source并运行source-final-bounded、boundary-bounded均exit0；最终exe SHA256：E66D01B3E5060EAAB508F35E4DE16FDBF1A08CE179290121EDAEF30B43C41203。实机连接仍交用户验证。

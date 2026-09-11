@@ -1,11 +1,11 @@
-# 交给下一位 Agent 的接续指令
+# Remote Play 接续入口
 
-> 用户已改为由当前 Agent 继续施工。修复前审计保留；最新完成项与下一步见 [执行记录](../REMOTEPLAY_REPAIR_EXECUTION_2026-09-11.md)，不要把下文修复前状态当作最新代码结论。
+最新实现与测试证据见 [修复执行记录](../REMOTEPLAY_REPAIR_EXECUTION_2026-09-11.md)，用户操作见 [PS5实机验收](../REMOTEPLAY_PS5_ACCEPTANCE_2026-09-11.md)。
 
-唯一交接入口：[`../REMOTEPLAY_INTEGRATION_HANDOFF_2026-09-11.md`](../REMOTEPLAY_INTEGRATION_HANDOFF_2026-09-11.md)。先完整阅读该文档和工作区最新 `AGENTS.md`，保护当前未提交改动，不要 reset、checkout 或重新运行用户包中的 `apply.py`，也不要自动 push 或发布。
+本机分支 `agent/remoteplay-integration`。修复前存档 `bf21bef`；源层修复 `8827721`；产品集成节点 `9e5c034` / `checkpoint/remoteplay-product-integrated-2026-09-11`。最终验收文档提交之后以 `git log -5` 为准。
 
-**先读交接文档第 18 节二次审计。** Windows/MSVC 原生 Chiaki 初始化已通过，但新审计真实复现了 H.264 配置头导致首帧失败、PCM 截断、音频时间轴错误和解码重排 PTS 错配；同时发现移植删去了原包的元数据回调。不能拿67项 core测试通过当作 source 正确。
+已接入真实metadata、共享CMake、网络/解码与GPU解耦、独立音频owner、DPAPI、配对/连接/取消/PIN/发现/唤醒、SDL基础手柄输入。不要重新套用用户Code01的apply.py，也不要reset当前分支。
 
-当前唯一任务：按第 17 节先建立会失败的 H.264 config/AU 真解码 source 回归，再修第6、18节的数据适配问题。音频必须用固定段锚点加样本偏移，旧交接逐块使用当前 arrival 的建议已撤回；元数据、实际尺寸、IDR/解码恢复、音频重启和停止失败都需覆盖。原始错误与审计工具在忽略的 `logs/remoteplay-audit-20260911/`、`out/remoteplay/audit-20260911/`。
+下一步由用户连接PS5实机验收。收到问题后结合`logs/veyra-app.log`、实际参数和复现步骤排查；没有真实PS5数据时不得把离线probe或软件gate当成串流成功。源码构建、source测试和UI测试命令见执行记录。当前源码禁止SDK/DLL/模型/凭据；本轮无push/release授权。
 
-完成上述闭环后，按交接文档第 12 节继续生产 CMake、统一引擎路径、Remote Play 音频、DPAPI/UI、手柄和 PS5 实机验收。不能因为离线测试或 native 初始化通过就声称串流功能已经完成。
+[原交接第18节](../REMOTEPLAY_INTEGRATION_HANDOFF_2026-09-11.md#18-2026-09-11-二次代码审计用户要求交给其他-agent-修) 是修复前审计证据，保留供追溯，不是当前未完成清单。
