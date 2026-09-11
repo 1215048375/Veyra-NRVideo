@@ -8,7 +8,7 @@ extern "C" {
 namespace veyra::source {
 bool RemotePlaySessionSource::connect(RemotePlayConnectDesc desc) {
     close();
-    { std::lock_guard lock(mutex_); initialized_=started_=failed_=false; skipped_=0; controller_={}; snapshot_={}; }
+    { std::lock_guard lock(mutex_); initialized_=started_=failed_=false; skipped_=0; rates_={}; feedback_={}; controller_={}; snapshot_={}; }
     owner_=std::jthread([this, request=std::move(desc)](std::stop_token stop) mutable { run(stop,std::move(request)); });
     std::unique_lock lock(mutex_);
     ready_.wait(lock,[&]{return initialized_;});
@@ -46,6 +46,7 @@ void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc de
             } else log::error("remoteplay-audio","output initialization failed; video remains available");
             auto lastFrame=std::chrono::steady_clock::now();
             auto nextController=lastFrame;
+            auto rateStart=lastFrame;uint64_t previousReceived=0,previousDecoded=0;
             while(!stop.stop_requested()) {
                 std::string pin; remoteplay::ControllerState controller;
                 {std::lock_guard lock(mutex_);pin.swap(pin_);controller=remoteplay::monotonic100ns()-controllerStamp_<=1000000?controller_:remoteplay::ControllerState{};}
@@ -54,15 +55,22 @@ void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc de
                     if(!r.ok)log::warn("remoteplay",std::format("{} code={}",r.operation,r.code));
                 }
                 const auto now=std::chrono::steady_clock::now();
-                if(now>=nextController) {
+                if(!desc.request.viewOnly&&now>=nextController) {
                     const auto r=source.submitController(controller);
                     if(!r.ok)log::warn("remoteplay",std::format("{} code={}",r.operation,r.code));
                     nextController=now+std::chrono::milliseconds(4);
                 }
                 pipeline::FramePacket packet; const AVFrame* frame=nullptr;
                 const auto result=source.read(packet,&frame);
+                auto feedback=source.takeFeedback();
                 const auto snapshot=source.sessionSnapshot();
-                {std::lock_guard lock(mutex_);snapshot_=snapshot;}
+                {std::lock_guard lock(mutex_);snapshot_=snapshot;feedback_.merge(std::move(feedback));
+                    rates_.received=snapshot.video.accessUnits;rates_.ingressDropped=snapshot.video.dropped;
+                    const double elapsed=std::chrono::duration<double>(now-rateStart).count();
+                    if(elapsed>=1){rates_.receivedFps=double(rates_.received-previousReceived)/elapsed;
+                        rates_.decodedFps=double(rates_.decoded-previousDecoded)/elapsed;rates_.ready=true;
+                        previousReceived=rates_.received;previousDecoded=rates_.decoded;rateStart=now;}
+                }
                 if(result==SourceReadStatus::Error) {std::lock_guard lock(mutex_);failed_=true;break;}
                 if(result==SourceReadStatus::Frame && frame) {
                     publishDecoded(frame,packet,source.info());
@@ -92,6 +100,7 @@ void RemotePlaySessionSource::publishDecoded(const AVFrame* frame,pipeline::Fram
     auto* cloned=av_frame_clone(frame);if(!cloned)throw std::bad_alloc();
     Frame item{std::shared_ptr<AVFrame>(cloned,[](AVFrame* p){av_frame_free(&p);}),packet,info};
     std::lock_guard lock(mutex_);
+    ++rates_.decoded;
     if(latest_){++skipped_;item.packet.flags|=latest_->packet.flags;
         item.packet.flags|=static_cast<pipeline::FrameFlags>(pipeline::FrameFlagBits::Discontinuity);}
     latest_=std::move(item);
@@ -112,5 +121,7 @@ void RemotePlaySessionSource::close() noexcept {
 void RemotePlaySessionSource::controller(remoteplay::ControllerState state){std::lock_guard lock(mutex_);controller_=state;controllerStamp_=remoteplay::monotonic100ns();}
 void RemotePlaySessionSource::loginPin(std::string pin){std::lock_guard lock(mutex_);SecureZeroMemory(pin_.data(),pin_.size());pin_=std::move(pin);}
 remoteplay::SessionInbox::Snapshot RemotePlaySessionSource::sessionSnapshot()const{std::lock_guard lock(mutex_);return snapshot_;}
+RemotePlaySessionSource::Rates RemotePlaySessionSource::rates()const{std::lock_guard lock(mutex_);return rates_;}
+remoteplay::ControllerFeedback RemotePlaySessionSource::takeFeedback(){std::lock_guard lock(mutex_);auto result=std::move(feedback_);feedback_={};return result;}
 uint64_t RemotePlaySessionSource::skipped()const{std::lock_guard lock(mutex_);return skipped_;}
 }

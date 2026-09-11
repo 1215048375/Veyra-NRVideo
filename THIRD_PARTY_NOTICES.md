@@ -56,3 +56,6 @@ statically built using vcpkg. SDL provides DualSense and other controller device
 support; Veyra maps its public gamepad API to Chiaki semantic input. No SDL audio
 or video playback path is used. Retained notices: `licenses/remoteplay/SDL3_NOTICES.txt`.
 This local integration has not been pushed or released.
+# Remote Play controller additions (2026-09-12)
+
+Veyra calls the pinned Chiaki orientation tracker API (AGPL-3.0-only with OpenSSL exception). DualSense SDL report offsets and 3 kHz stereo to four-channel haptic routing were checked against chiaki-ng gui/src/controllermanager.cpp and streamsession.cpp. Existing Chiaki and SDL license notices apply. No third-party binary was added.

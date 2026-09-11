@@ -29,7 +29,7 @@ $oldLog=$env:VEYRA_LOG_FILE
 $process=$null
 try {
  $env:VEYRA_LOG_FILE=Join-Path $OutputDirectory 'ui-app.log'
- $process=Start-Process -FilePath $PlayerExe -ArgumentList @('--smoke-empty','--smoke-seconds','20','--no-nr','--no-sr','--no-fg') -PassThru -WindowStyle Hidden
+ $process=Start-Process -FilePath $PlayerExe -ArgumentList @('--smoke-empty','--smoke-seconds','45','--no-nr','--no-sr','--no-fg') -PassThru -WindowStyle Hidden
  $deadline=[DateTime]::UtcNow.AddSeconds(8)
  do {$main=[RpUi]::Find($process.Id,'VeyraApp');if($main -eq [IntPtr]::Zero){Start-Sleep -Milliseconds 50}}while($main -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline)
  if($main -eq [IntPtr]::Zero){throw 'Veyra main window did not open'}
@@ -56,6 +56,21 @@ try {
   [RpUi]::PostMessage($panel,0x10,[IntPtr]::Zero,[IntPtr]::Zero)|Out-Null
   Start-Sleep -Milliseconds 150
   if([RpUi]::Find($process.Id,'VeyraRemotePlaySetup') -ne [IntPtr]::Zero){throw 'Panel did not close'}
+ }
+ # Exercise the real mode animation in the RemotePlay-enabled executable.
+ for($cycle=0;$cycle -lt 20;$cycle++){
+  [RpUi]::PostMessage($main,0x111,[IntPtr]220,[IntPtr]::Zero)|Out-Null
+  Start-Sleep -Milliseconds 310
+ }
+ $modeLog=Get-Content (Join-Path $OutputDirectory 'ui-app.log') -Raw
+ if(([regex]::Matches($modeLog,'completed; final layout')).Count -lt 20){throw 'Mode animation timer did not complete all transitions'}
+ for($cycle=0;$cycle -lt 20;$cycle++){
+  $fullscreen=[RpUi]::GetDlgCtrlID([RpUi]::Button($main,'全屏 F11'))
+  if($fullscreen -eq 0){$fullscreen=[RpUi]::GetDlgCtrlID([RpUi]::Button($main,'全屏'))}
+  if($fullscreen -eq 0){$fullscreen=[RpUi]::GetDlgCtrlID([RpUi]::Button($main,'退出全屏'))}
+  if($fullscreen -eq 0){throw 'Fullscreen button not found'}
+  [RpUi]::PostMessage($main,0x111,[IntPtr]$fullscreen,[IntPtr]::Zero)|Out-Null
+  Start-Sleep -Milliseconds 50
  }
  [RpUi]::PostMessage($main,0x10,[IntPtr]::Zero,[IntPtr]::Zero)|Out-Null
  if(-not $process.WaitForExit(5000)){throw 'Owned UI test did not exit'}

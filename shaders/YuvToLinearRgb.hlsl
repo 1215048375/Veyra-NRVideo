@@ -57,7 +57,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     const float2 uv = chromaPlane[uint2(dispatchThreadId.x / 2, dispatchThreadId.y / 2)];
     float3 rgb = YuvToRgb(y, uv);
     rgb = saturate(rgb);
-    if (colorParams0.z > 1.5) {
+    if (colorParams0.z > 2.5) {
+        rgb = pow(rgb, 2.4); // BT.1886 EOTF, ideal black SDR display intent.
+    } else if (colorParams0.z > 1.5) {
         rgb = float3(rgb.r < 0.081 ? rgb.r / 4.5 : pow((rgb.r + 0.099) / 1.099, 1.0/0.45),
                      rgb.g < 0.081 ? rgb.g / 4.5 : pow((rgb.g + 0.099) / 1.099, 1.0/0.45),
                      rgb.b < 0.081 ? rgb.b / 4.5 : pow((rgb.b + 0.099) / 1.099, 1.0/0.45));

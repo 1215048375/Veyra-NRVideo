@@ -2,6 +2,8 @@
 #include "veyra/remoteplay/ControllerInput.h"
 #include "veyra/remoteplay/Discovery.h"
 #include <string_view>
+#include <SDL3/SDL.h>
+#include <cmath>
 #include <iostream>
 extern "C" {
 #include <libavutil/frame.h>
@@ -24,7 +26,39 @@ static void mailbox(){
 };
 }
 
+int virtualInput(){
+    using namespace veyra::remoteplay;
+    if(!SDL_InitSubSystem(SDL_INIT_GAMEPAD))return 20;
+    SDL_VirtualJoystickDesc desc;SDL_INIT_INTERFACE(&desc);desc.type=SDL_JOYSTICK_TYPE_GAMEPAD;
+    desc.vendor_id=0x054c;desc.product_id=0x0ce6;desc.name="Veyra isolated input fixture";
+    desc.naxes=6;desc.nbuttons=21;desc.button_mask=(1u<<21)-1;desc.axis_mask=63;
+    SDL_VirtualJoystickTouchpadDesc touch{};touch.nfingers=2;desc.ntouchpads=1;desc.touchpads=&touch;
+    SDL_VirtualJoystickSensorDesc sensors[2]={{SDL_SENSOR_GYRO,120},{SDL_SENSOR_ACCEL,120}};desc.nsensors=2;desc.sensors=sensors;
+    desc.SetSensorsEnabled=[](void*,bool){return true;};
+    unsigned rumbleCalls=0;desc.userdata=&rumbleCalls;
+    desc.Rumble=[](void* p,Uint16,Uint16){++*static_cast<unsigned*>(p);return true;};
+    desc.SendEffect=[](void*,const void*,int){return true;};
+    const auto id=SDL_AttachVirtualJoystick(&desc);if(!id)return 21;
+    auto* joystick=SDL_OpenJoystick(id);ControllerInput input;
+    if(!joystick||!input.start(id))return 22;
+    input.poll(true);
+    float gyro[3]={.1f,.2f,.3f},accel[3]={0,SDL_STANDARD_GRAVITY,0};
+    SDL_SendJoystickVirtualSensorData(joystick,SDL_SENSOR_GYRO,10000000,gyro,3);
+    SDL_SendJoystickVirtualSensorData(joystick,SDL_SENSOR_ACCEL,10000000,accel,3);
+    SDL_SetJoystickVirtualTouchpad(joystick,0,0,true,.25f,.75f,1);
+    SDL_SetJoystickVirtualTouchpad(joystick,0,1,true,1,0,1);
+    auto first=input.poll(true);bool ok=first.motionValid&&std::abs(first.accel[1]-1)<1e-5&&std::abs(first.gyro[2]-.3f)<1e-5;
+    ok&=first.touches[0].id>=0&&first.touches[1].id>=0&&first.touches[0].id!=first.touches[1].id&&first.touches[0].x==479&&first.touches[0].y==809;
+    SDL_SetJoystickVirtualTouchpad(joystick,0,0,true,.5f,.5f,1);auto moved=input.poll(true);ok&=moved.touches[0].id==first.touches[0].id&&moved.touches[0].x==959;
+    SDL_SetJoystickVirtualTouchpad(joystick,0,0,false,0,0,0);auto up=input.poll(true);ok&=up.touches[0].id==-1;
+    ControllerFeedback f;f.rumble=true;f.left=5;input.feedback(f,true);ok&=rumbleCalls>0;
+    const auto before=rumbleCalls;ok&=input.poll(false)==ControllerState{};ok&=rumbleCalls>before;
+    ControllerFeedback bounded;for(int i=0;i<20;++i){ControllerFeedback packet;packet.haptics.resize(120,1);bounded.merge(std::move(packet));ok&=bounded.haptics.size()<=600;}
+    input.stop();SDL_CloseJoystick(joystick);SDL_DetachVirtualJoystick(id);SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    std::cout<<"VIRTUAL_INPUT motion_touch_lifecycle_focus_feedback_bounded="<<ok<<" REAL_PS5_NOT_TESTED=1\n";return ok?0:23;
+}
 int main(int argc,char** argv){
+    if(argc==2&&std::string_view(argv[1])=="--virtual")return virtualInput();
     if(argc==2&&std::string_view(argv[1])=="--discover"){
         const auto report=veyra::remoteplay::discoverLocalPs5({});
         for(const auto& line:report.diagnostics)std::cout<<line<<'\n';

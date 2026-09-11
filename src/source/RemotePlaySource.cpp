@@ -76,6 +76,7 @@ bool RemotePlaySource::connect(const RemotePlayConnectDesc& desc)
     request_ = remoteplay::NativeConnectRequest{};
     request_.host = desc.request.host;
     request_.video = desc.request.video;
+    request_.viewOnly = desc.request.viewOnly;
     request_.credentials.accountId = desc.request.credentials.accountId;
     request_.credentials.registrationKey = desc.request.credentials.registrationKey;
     request_.credentials.sessionKey = desc.request.credentials.sessionKey;
@@ -112,6 +113,7 @@ bool RemotePlaySource::connect(const RemotePlayConnectDesc& desc)
     info_.color.rangeAssumed = true;
     info_.color.matrix = pipeline::YuvMatrix::BT709;
     info_.color.matrixAssumed = true;
+    info_.color.displayReferred709 = true;
     info_.color.transfer = pipeline::TransferFunction::BT709;
     info_.color.transferAssumed = true;
     info_.color.primaries = pipeline::ColorPrimaries::BT709;

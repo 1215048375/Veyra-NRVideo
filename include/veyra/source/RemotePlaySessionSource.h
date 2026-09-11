@@ -19,8 +19,11 @@ public:
     void close() noexcept override;
     void controller(remoteplay::ControllerState state);
     void loginPin(std::string pin);
+    remoteplay::ControllerFeedback takeFeedback();
     remoteplay::SessionInbox::Snapshot sessionSnapshot() const;
     uint64_t skipped() const;
+    struct Rates {uint64_t received=0,decoded=0,ingressDropped=0;double receivedFps=0,decodedFps=0;bool ready=false;};
+    Rates rates() const;
     sink::CaptureAudioState audioState() const { return audio_.snapshot(); }
     void setAudioGain(float value) { audio_.setGain(value); }
     void setAudioSync(unsigned mode, int offset) { audio_.setSync(mode, offset); }
@@ -43,6 +46,8 @@ private:
     remoteplay::HostTime controllerStamp_=0;
     std::string pin_;
     uint64_t skipped_=0;
+    Rates rates_;
+    remoteplay::ControllerFeedback feedback_;
     sink::CaptureAudioSession audio_;
 };
 }

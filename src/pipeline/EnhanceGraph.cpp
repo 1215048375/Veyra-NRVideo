@@ -662,7 +662,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     if (!frame || !initialized_ || !std::isfinite(ptsMs)) return false;
     const auto resolved=resolveFrameColor(*frame,color?*color:ColorDescription{});
     if(resolved.matrix==YuvMatrix::BT2020NCL||resolved.matrix==YuvMatrix::BT2020CL||resolved.transfer==TransferFunction::BT2020_10){veyra::log::error("graph","BT.2020 input is not supported by the BT.601/709 SDR conversion");return false;}
-    if(reset||!realFrameIndex_)veyra::log::info("color",std::format("range={} assumed={} matrix={} assumed={} transfer={} assumed={}",int(resolved.range),resolved.rangeAssumed,int(resolved.matrix),resolved.matrixAssumed,int(resolved.transfer),resolved.transferAssumed));
+    if(reset||!realFrameIndex_)veyra::log::info("color",std::format("range={} assumed={} matrix={} assumed={} transfer={} assumed={} display709={}",int(resolved.range),resolved.rangeAssumed,int(resolved.matrix),resolved.matrixAssumed,int(resolved.transfer),resolved.transferAssumed,resolved.displayReferred709));
     if (frame->color_trc == AVCOL_TRC_SMPTE2084 || frame->color_trc == AVCOL_TRC_ARIB_STD_B67) {
         veyra::log::error("graph", "HDR input is unsupported by the V1 SDR pipeline"); return false;
     }
@@ -849,14 +849,14 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     // 2. YUV -> RGBA16F.
     tracker_.transition(list, srcRgba_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     if(desc_.rgbInput||desc_.yuy2Input){
-        const float c[8]={uintBits(srcW_),uintBits(srcH_),uintBits(transferCode(resolved.transfer)),uintBits(resolved.range==ColorRange::Limited?1u:0u),
+        const float c[8]={uintBits(srcW_),uintBits(srcH_),uintBits(workingTransferCode(resolved)),uintBits(resolved.range==ColorRange::Limited?1u:0u),
             resolved.range==ColorRange::Full?0.0f:1.0f,resolved.matrix==YuvMatrix::BT601?0.0f:1.0f,0,0};
         rgbPass_.bind(list,c,gpuHandleOf(rgbPass_,0).ptr,gpuHandleOf(rgbPass_,1).ptr);
         list->Dispatch((srcW_+15)/16,(srcH_+15)/16,1);
     }else{
         const float constants[8] = { resolved.range==ColorRange::Full?0.0f:1.0f,
             resolved.matrix==YuvMatrix::BT601?0.0f:1.0f,
-            float(transferCode(resolved.transfer)), 0.0f,
+            float(workingTransferCode(resolved)), 0.0f,
             uintBits(srcW_), uintBits(srcH_), 0.0f, 0.0f };
         yuvPass_.bind(list, constants, gpuHandleOf(yuvPass_, 0).ptr, gpuHandleOf(yuvPass_, 2).ptr);
         list->Dispatch((srcW_ + 15) / 16, (srcH_ + 15) / 16, 1);

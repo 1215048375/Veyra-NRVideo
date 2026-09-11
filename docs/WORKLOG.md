@@ -1644,3 +1644,7 @@ FRUC候选bSkipWarp/延后重建/时间归零/首对预热均未通过新增rese
 
 ## 2026-09-12 PS5颜色/UI/完整手柄排查与计划
 用户确认基本串流、USB和已测增强组合通过；新增发灰、专业状态/模式重绘及全屏手柄故障，要求完整gyro/触摸板与效果，不急发布。静态检查确认AppShell动画/手柄共用timer2及endTransition误停输入；PS5输入FPS仍读captureStats。颜色日志Limited/BT709显式信令，尚未确定发灰根因；核查BT709逆曲线→sRGB显示及范围/alpha链路。ControllerInput/Backend未接gyro/触点/反馈。详见 docs/REMOTEPLAY_COLOR_UI_CONTROLLER_REPAIR_PLAN_2026-09-12.md。仅文档，无产品修改/新实机测试/发布。
+
+## 2026-09-12 目标模式施工节点一
+
+用户已授权施工。timer/真实FPS、PS5显示曲线、sensor/touch/反馈与仅观看初步实现已构建，ON/OFF、69项native、SDL虚拟输入、20+20实际UI切换、GPU灰阶色块及完整delivery47.45秒通过。命令、真实失败、日志、哈希与剩余问题见 docs/REMOTEPLAY_REPAIR_PROGRESS_2026-09-12.md。完整实机、校准/事件与设备路由仍在继续，目标未完成，无发布。

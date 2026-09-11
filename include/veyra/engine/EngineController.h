@@ -11,7 +11,7 @@
 #include "veyra/engine/PreviewView.h"
 #include "veyra/sink/CaptureAudioSession.h"
 namespace veyra::source { struct RemotePlayConnectDesc; class RemotePlaySessionSource; }
-namespace veyra::remoteplay { struct ControllerState; }
+namespace veyra::remoteplay { struct ControllerState;struct ControllerFeedback; }
 namespace veyra::sink { struct RgbaImage; }
 namespace veyra::gfx { class D3D12DeviceContext; class CommandSlotRing; }
 namespace veyra::engine {
@@ -52,6 +52,7 @@ struct PlayerSnapshot {
     bool fgBudgetLimited=false,xessGenerationSuppressed=false;
     bool running=false,failed=false,image=false,capture=false,remotePlay=false;
     int remotePlayState=0; uint64_t remotePlaySkipped=0;
+    double remoteReceivedFps=0,remoteDecodedFps=0;bool remoteRatesReady=false;uint64_t remoteReceived=0,remoteDecoded=0,remoteIngressDropped=0;
 };
 class EngineController {
 public:
@@ -62,6 +63,7 @@ public:
     void open(HWND video,const std::wstring& path,PlayerOptions options);
 #ifdef VEYRA_ENABLE_REMOTEPLAY
     void openRemotePlay(HWND, source::RemotePlayConnectDesc, PlayerOptions);
+    remoteplay::ControllerFeedback remotePlayFeedback();
     void remotePlayController(const remoteplay::ControllerState&);
     void remotePlayLoginPin(std::string);
 #endif

@@ -74,6 +74,20 @@ struct PcmBlock {
     std::size_t frames() const noexcept { return channels ? samples.size()/channels : 0; }
     bool valid() const noexcept;
 };
+struct ControllerFeedback {
+    bool rumble=false,triggers=false,motionReset=false;
+    uint8_t left=0,right=0;
+    std::array<uint8_t,11> leftTrigger{},rightTrigger{};
+    std::vector<int16_t> haptics; // Stereo PCM 3kHz; hard cap 600 samples (100ms).
+    void merge(ControllerFeedback next){
+        if(next.rumble){rumble=true;left=next.left;right=next.right;}
+        if(next.triggers){triggers=true;leftTrigger=next.leftTrigger;rightTrigger=next.rightTrigger;}
+        motionReset|=next.motionReset;
+        if(next.haptics.size()>600)next.haptics.resize(600);
+        if(haptics.size()+next.haptics.size()>600)haptics.clear();
+        haptics.insert(haptics.end(),next.haptics.begin(),next.haptics.end());
+    }
+};
 struct ControllerState {
     // Semantic buttons; translated explicitly to Chiaki in the native bridge.
     enum Button : std::uint32_t { Cross=1u<<0, Circle=1u<<1, Square=1u<<2, Triangle=1u<<3,
@@ -82,6 +96,11 @@ struct ControllerState {
     std::uint32_t buttons = 0;
     std::int16_t leftX=0, leftY=0, rightX=0, rightY=0;
     std::uint8_t l2=0, r2=0;
+    struct Touch {int8_t id=-1;uint16_t x=0,y=0;bool operator==(const Touch&)const=default;};
+    std::array<Touch,2> touches{};
+    // SDL coordinate frame: angular velocity rad/s, acceleration in g.
+    std::array<float,3> gyro{},accel{0,1,0};
+    uint64_t motionTimestampUs=0;bool motionValid=false;
     bool operator==(const ControllerState&) const = default;
 };
 } // namespace veyra::remoteplay

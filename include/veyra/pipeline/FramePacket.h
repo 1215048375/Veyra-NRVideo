@@ -88,6 +88,9 @@ struct ColorDescription {
     uint16_t rotationDegrees = 0;       // 0 / 90 / 180 / 270
     SampleAspectRatio sar;
 
+    // Display intent is separate from source VUI. PS5 SDR is displayed with
+    // BT.1886 (ideal black), not inverse camera OETF, before sRGB presentation.
+    bool displayReferred709 = false;
     bool rangeAssumed = false;
     bool matrixAssumed = false;
     bool transferAssumed = false;

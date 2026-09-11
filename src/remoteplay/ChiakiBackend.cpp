@@ -8,6 +8,8 @@
 #endif
 #include <chiaki/opusdecoder.h>
 #include <chiaki/controller.h>
+#include <chiaki/orientation.h>
+#include <cmath>
 #include <chiaki/log.h>
 #include <algorithm>
 #include <atomic>
@@ -59,6 +61,10 @@ struct ChiakiBackend::Impl {
     std::uint32_t channels=0,rate=0;
     std::uint64_t sampleIndex=0;
     bool audioDiscontinuity=true;
+    ChiakiOrientationTracker orientation{};ChiakiAccelNewZero accelZero{};
+    uint64_t lastMotion=0;
+    std::mutex feedbackMutex;ControllerFeedback feedback;
+
     static void logCallback(ChiakiLogLevel level,const char*,void* user) noexcept {
         auto& self=*static_cast<Impl*>(user);
         // Raw upstream log strings/hexdumps may contain keys. Do not forward them.
@@ -75,8 +81,20 @@ struct ChiakiBackend::Impl {
             self.connected=false;self.quitReason=static_cast<int>(event->quit.reason);
             // A remote termination is not a successful decoded EOF.
             self.token.failed(2000+static_cast<int>(event->quit.reason));break;
-        default:break; // No unsolicited mic, standby, haptics or keyboard side effects.
+        case CHIAKI_EVENT_RUMBLE:{std::lock_guard lock(self.feedbackMutex);self.feedback.rumble=true;self.feedback.left=event->rumble.left;self.feedback.right=event->rumble.right;break;}
+        case CHIAKI_EVENT_TRIGGER_EFFECTS:{std::lock_guard lock(self.feedbackMutex);auto& f=self.feedback;f.triggers=true;f.leftTrigger[0]=event->trigger_effects.type_left;f.rightTrigger[0]=event->trigger_effects.type_right;std::copy_n(event->trigger_effects.left,10,f.leftTrigger.begin()+1);std::copy_n(event->trigger_effects.right,10,f.rightTrigger.begin()+1);break;}
+        case CHIAKI_EVENT_MOTION_RESET:{std::lock_guard lock(self.feedbackMutex);self.feedback.motionReset=true;break;}
+        default:break; // No mic, standby or keyboard side effects.
+
         }
+    }
+    static void hapticsCallback(uint8_t* data,size_t size,void* user)noexcept{
+        auto& self=*static_cast<Impl*>(user);
+        if(!self.active||!data||!size||size%4||size>1200)return;
+        try{std::lock_guard lock(self.feedbackMutex);auto& pcm=self.feedback.haptics;
+            if(pcm.size()+size/2>600)pcm.clear();
+            const auto at=pcm.size();pcm.resize(at+size/2);std::memcpy(pcm.data()+at,data,size);
+        }catch(...){++self.errors;}
     }
     static bool videoCallback(std::uint8_t* data,std::size_t size,
         const ChiakiVeyraVideoSampleInfo* info,void* user) noexcept {
@@ -148,7 +166,7 @@ BackendResult ChiakiBackend::start(const NativeConnectRequest& request,SessionIn
         request.video.fps==30?CHIAKI_VIDEO_FPS_PRESET_30:CHIAKI_VIDEO_FPS_PRESET_60);
     info.video_profile.codec=request.video.codec==Codec::H264?CHIAKI_CODEC_H264:CHIAKI_CODEC_H265;
     info.video_profile.bitrate=request.video.bitrateKbps;
-    info.video_profile_auto_downgrade=false;info.enable_keyboard=false;info.enable_dualsense=false;
+    info.video_profile_auto_downgrade=false;info.enable_keyboard=false;info.enable_dualsense=!request.viewOnly;
     info.auto_regist=false;info.packet_loss_max=0.05;info.enable_idr_on_fec_failure=true;
     const auto code=chiaki_session_init(&s.session,&info,&s.log);
     wipe(info.regist_key,sizeof(info.regist_key));wipe(info.morning,sizeof(info.morning));wipe(info.psn_account_id,sizeof(info.psn_account_id));
@@ -157,6 +175,8 @@ BackendResult ChiakiBackend::start(const NativeConnectRequest& request,SessionIn
     chiaki_opus_decoder_init(&s.opus,&s.log);s.opusInitialized=true;
     chiaki_opus_decoder_set_cb(&s.opus,Impl::opusSettings,Impl::opusFrame,&s);
     ChiakiAudioSink sink{};chiaki_opus_decoder_get_sink(&s.opus,&sink);chiaki_session_set_audio_sink(&s.session,&sink);
+    ChiakiAudioSink hapticSink{};hapticSink.user=&s;hapticSink.frame_cb=Impl::hapticsCallback;
+    chiaki_session_set_haptics_sink(&s.session,&hapticSink);
     chiaki_session_set_event_cb(&s.session,Impl::eventCallback,&s);
     chiaki_session_set_veyra_video_sample_cb(&s.session,Impl::videoCallback,&s);
     s.active=true;
@@ -209,8 +229,26 @@ BackendResult ChiakiBackend::submitController(const ControllerState& state){
         {ControllerState::Options,CHIAKI_CONTROLLER_BUTTON_OPTIONS},{ControllerState::Share,CHIAKI_CONTROLLER_BUTTON_SHARE},
         {ControllerState::Touchpad,CHIAKI_CONTROLLER_BUTTON_TOUCHPAD},{ControllerState::PS,CHIAKI_CONTROLLER_BUTTON_PS}};
     for(auto b:buttons)if(state.buttons&b.semantic)c.buttons|=static_cast<std::uint32_t>(b.target);
+    for(size_t i=0;i<state.touches.size();++i){c.touches[i].id=state.touches[i].id;c.touches[i].x=state.touches[i].x;c.touches[i].y=state.touches[i].y;}
+    const bool validMotion=state.motionValid&&std::all_of(state.gyro.begin(),state.gyro.end(),[](float v){return std::isfinite(v);})&&std::all_of(state.accel.begin(),state.accel.end(),[](float v){return std::isfinite(v);});
+    if(validMotion){
+        if(!p_->lastMotion||state.motionTimestampUs<p_->lastMotion||state.motionTimestampUs-p_->lastMotion>100000){
+            chiaki_orientation_tracker_init(&p_->orientation);chiaki_accel_new_zero_set_inactive(&p_->accelZero,false);
+        }
+        if(state.motionTimestampUs!=p_->lastMotion){
+            chiaki_orientation_tracker_update(&p_->orientation,state.gyro[0],state.gyro[1],state.gyro[2],state.accel[0],state.accel[1],state.accel[2],&p_->accelZero,false,uint32_t(state.motionTimestampUs));
+            p_->lastMotion=state.motionTimestampUs;
+        }
+        chiaki_orientation_tracker_apply_to_controller_state(&p_->orientation,&c);
+    }else p_->lastMotion=0;
     c.l2_state=state.l2;c.r2_state=state.r2;c.left_x=state.leftX;c.left_y=state.leftY;c.right_x=state.rightX;c.right_y=state.rightY;
     return p_->record(chiaki_session_set_controller_state(&p_->session,&c),"chiaki_session_set_controller_state");
+}
+ControllerFeedback ChiakiBackend::takeFeedback(){
+    if(!p_||!p_->onOwner())return {};
+    std::lock_guard lock(p_->feedbackMutex);auto result=std::move(p_->feedback);p_->feedback={};
+    if(result.motionReset)p_->lastMotion=0;
+    return result;
 }
 NativeSnapshot ChiakiBackend::snapshot()const{
     // Like start/stop, pointer ownership requires the owner; the atomic counters

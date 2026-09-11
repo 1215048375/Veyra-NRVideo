@@ -30,6 +30,7 @@ struct BackendResult {
 struct NativeConnectRequest {
     std::string host;
     VideoProfile video;
+    bool viewOnly=false;
     PairingCredentials credentials;
 };
 struct NativeSnapshot {
@@ -52,6 +53,7 @@ public:
     BackendResult submitController(const ControllerState&);
     BackendResult submitLoginPin(std::string_view);
     NativeSnapshot snapshot() const;
+    ControllerFeedback takeFeedback();
 private:
     struct Impl;
     std::unique_ptr<Impl> p_;

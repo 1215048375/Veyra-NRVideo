@@ -44,4 +44,6 @@ inline ColorDescription resolveFrameColor(const AVFrame& frame,ColorDescription 
     return c;
 }
 inline uint32_t transferCode(TransferFunction t){return t==TransferFunction::Linear?0u:t==TransferFunction::BT709?2u:1u;}
+inline uint32_t workingTransferCode(const ColorDescription& c){return c.displayReferred709&&c.transfer==TransferFunction::BT709?3u:transferCode(c.transfer);}
+
 }
