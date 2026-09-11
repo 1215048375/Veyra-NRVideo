@@ -1,5 +1,7 @@
 # 交给下一位 Agent 的接续指令
 
+> 用户已改为由当前 Agent 继续施工。修复前审计保留；最新完成项与下一步见 [执行记录](../REMOTEPLAY_REPAIR_EXECUTION_2026-09-11.md)，不要把下文修复前状态当作最新代码结论。
+
 唯一交接入口：[`../REMOTEPLAY_INTEGRATION_HANDOFF_2026-09-11.md`](../REMOTEPLAY_INTEGRATION_HANDOFF_2026-09-11.md)。先完整阅读该文档和工作区最新 `AGENTS.md`，保护当前未提交改动，不要 reset、checkout 或重新运行用户包中的 `apply.py`，也不要自动 push 或发布。
 
 **先读交接文档第 18 节二次审计。** Windows/MSVC 原生 Chiaki 初始化已通过，但新审计真实复现了 H.264 配置头导致首帧失败、PCM 截断、音频时间轴错误和解码重排 PTS 错配；同时发现移植删去了原包的元数据回调。不能拿67项 core测试通过当作 source 正确。

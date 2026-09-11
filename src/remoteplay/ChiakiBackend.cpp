@@ -55,6 +55,7 @@ struct ChiakiBackend::Impl {
     // Only the upstream audio/Opus callback thread reads/writes these fields.
     std::uint32_t channels=0,rate=0;
     std::uint64_t sampleIndex=0;
+    bool audioDiscontinuity=true;
     static void logCallback(ChiakiLogLevel level,const char*,void* user) noexcept {
         auto& self=*static_cast<Impl*>(user);
         // Raw upstream log strings/hexdumps may contain keys. Do not forward them.
@@ -93,8 +94,10 @@ struct ChiakiBackend::Impl {
     }
     static void opusSettings(std::uint32_t channels,std::uint32_t rate,void* user) noexcept {
         auto& self=*static_cast<Impl*>(user);
-        self.channels=channels;self.rate=rate;self.sampleIndex=0;
-        if((channels!=1&&channels!=2)||rate<8000||rate>192000){self.channels=0;self.token.failed(-1003);}
+        // Sample position stays monotonic across repeated Opus headers within
+        // one session; restarting at zero makes AudioIngress reject new PCM.
+        self.channels=channels;self.rate=rate;self.audioDiscontinuity=true;
+        if((channels!=1&&channels!=2)||rate!=48000){self.channels=0;self.token.failed(-1003);}
     }
     static void opusFrame(std::int16_t* data,std::size_t count,void* user) noexcept {
         auto& self=*static_cast<Impl*>(user);
@@ -102,10 +105,10 @@ struct ChiakiBackend::Impl {
         if(count==0||count>self.rate/5u||count>(std::numeric_limits<std::uint64_t>::max)()-self.sampleIndex){self.token.failed(-1004);return;}
         try{
             PcmBlock block;block.generation=self.token.generation();block.channels=self.channels;block.rate=self.rate;
-            block.firstSample=self.sampleIndex;block.arrival100ns=monotonic100ns();block.discontinuity=self.sampleIndex==0;
+            block.firstSample=self.sampleIndex;block.arrival100ns=monotonic100ns();block.discontinuity=self.audioDiscontinuity;
             // Opus count is samples PER CHANNEL, not bytes or interleaved elements.
             block.samples.assign(data,data+count*self.channels);self.sampleIndex+=count;++self.audioCallbacks;
-            (void)self.token.audio(std::move(block));
+            if(self.token.audio(std::move(block))) self.audioDiscontinuity=false;
         }catch(...){self.apiError=-1002;self.token.failed(-1002);}
     }
     BackendResult record(ChiakiErrorCode code,const char* name){apiError=static_cast<int>(code);return result(code,name);}

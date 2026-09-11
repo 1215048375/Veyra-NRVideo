@@ -50,6 +50,7 @@ public:
     std::size_t pullAudio(float* stereo, std::size_t frames, double* firstPtsMs);
 
 private:
+    friend struct RemotePlaySourceTestAccess;
     struct DecodedFrame {
         std::shared_ptr<AVFrame> frame;
         pipeline::FramePacket packet;
@@ -73,11 +74,22 @@ private:
     AVFrame* decoderFrame_ = nullptr;
     std::deque<DecodedFrame> ready_;
     std::shared_ptr<AVFrame> lastFrame_;
+    struct PacketStamp { std::int64_t id; pipeline::FramePacket packet; };
+    std::deque<PacketStamp> packetStamps_;
+    std::optional<remoteplay::PcmBlock> audioBlock_;
+    std::size_t audioOffset_ = 0;
+    std::optional<std::uint64_t> audioAnchorSample_;
+    std::int64_t audioAnchorPts_ = 0;
+    std::uint64_t audioNextSample_ = 0;
+    std::uint32_t audioRate_ = 0;
+    std::int64_t nextPacketId_ = 0;
+    remoteplay::Sequence16Extender wireSequence_;
     std::uint64_t sequence_ = 0;
     std::uint64_t fallbackSourceIndex_ = 0;
     std::uint64_t decoderEpoch_ = 1;
     std::uint64_t origin100ns_ = 0;
     bool connected_ = false;
+    bool stopFailed_ = false;
     bool decoderReady_ = false;
     bool waitingForFirstFrame_ = true;
     bool pendingOpenFlag_ = true;

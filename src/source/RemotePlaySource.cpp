@@ -65,6 +65,10 @@ bool RemotePlaySource::open(const SourceOpenDesc&)
 bool RemotePlaySource::connect(const RemotePlayConnectDesc& desc)
 {
     close();
+    if (stopFailed_) {
+        veyra::log::error("remoteplay", "connect refused: previous session did not stop successfully");
+        return false;
+    }
     if (desc.request.video.validate() || !remoteplay::validHost(desc.request.host)) {
         veyra::log::error("remoteplay", "connect rejected: invalid host or video profile");
         return false;
@@ -80,6 +84,7 @@ bool RemotePlaySource::connect(const RemotePlayConnectDesc& desc)
     try {
         inbox_ = std::make_unique<remoteplay::SessionInbox>(desc.queueLimits);
     } catch (...) {
+        request_.credentials = remoteplay::PairingCredentials{};
         veyra::log::error("remoteplay", "invalid queue limits");
         return false;
     }
@@ -87,10 +92,8 @@ bool RemotePlaySource::connect(const RemotePlayConnectDesc& desc)
     token_ = token; // Keep a second weak token; backend owns the moved copy.
     const auto started = backend_.start(request_, token);
     if (!started.ok) {
-        token_.reset();
-        inbox_->invalidate();
-        try { inbox_->finishStop(); } catch (...) {}
         veyra::log::error("remoteplay", std::format("{} failed code={}", started.operation, started.code));
+        close();
         return false;
     }
     info_ = SourceInfo{};
@@ -107,7 +110,7 @@ bool RemotePlaySource::connect(const RemotePlayConnectDesc& desc)
     info_.color.pixelFormat = pipeline::SourcePixelFormat::Yuv420P;
     info_.color.range = pipeline::ColorRange::Limited;
     info_.color.rangeAssumed = true;
-    info_.color.matrix = request_.video.width > 1280 ? pipeline::YuvMatrix::BT709 : pipeline::YuvMatrix::BT601;
+    info_.color.matrix = pipeline::YuvMatrix::BT709;
     info_.color.matrixAssumed = true;
     info_.color.transfer = pipeline::TransferFunction::BT709;
     info_.color.transferAssumed = true;
@@ -144,6 +147,7 @@ bool RemotePlaySource::openDecoder(remoteplay::Codec codec, std::uint32_t width,
         avcodec_free_context(&codecContext_);
         decoderReady_ = false;
     }
+    av_frame_free(&decoderFrame_);
     const AVCodecID codecId = codec == remoteplay::Codec::H264 ? AV_CODEC_ID_H264 : AV_CODEC_ID_HEVC;
     const AVCodec* decoder = avcodec_find_decoder(codecId);
     if (decoder == nullptr) {
@@ -158,6 +162,7 @@ bool RemotePlaySource::openDecoder(remoteplay::Codec codec, std::uint32_t width,
     codecContext_->width = static_cast<int>(width);
     codecContext_->height = static_cast<int>(height);
     codecContext_->time_base = AVRational{1, static_cast<int>(request_.video.fps)};
+    codecContext_->pkt_timebase = codecContext_->time_base;
     codecContext_->thread_count = 1;
     codecContext_->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
     if (avcodec_open2(codecContext_, decoder, nullptr) < 0) {
@@ -216,14 +221,34 @@ bool RemotePlaySource::drainDecoder(std::uint64_t sourceIndex, const pipeline::F
         }
         auto clone = cloneFrame(decoderFrame_);
         if (!clone) return false;
-        pipeline::FramePacket packet = sourcePacket;
+        const auto stamp = std::find_if(packetStamps_.begin(), packetStamps_.end(),
+            [&](const PacketStamp& value) { return value.id == decoderFrame_->pts; });
+        if (stamp == packetStamps_.end()) {
+            veyra::log::error("remoteplay", "decoded frame has no matching packet timestamp");
+            return false;
+        }
+        pipeline::FramePacket packet = stamp->packet;
+        packetStamps_.erase(stamp);
         packet.sequence = ++sequence_;
+        packet.colorInfo = pipeline::resolveFrameColor(*decoderFrame_, info_.color);
         packet.colorInfo.pixelFormat = pixelFormatFromFrame(*decoderFrame_);
+        if (decoderFrame_->width <= 0 || decoderFrame_->height <= 0 ||
+            decoderFrame_->width > 1920 || decoderFrame_->height > 1080 ||
+            packet.colorInfo.pixelFormat == pipeline::SourcePixelFormat::Unknown ||
+            packet.colorInfo.isHdrPath()) return false;
+        if (info_.width != static_cast<uint32_t>(decoderFrame_->width) ||
+            info_.height != static_cast<uint32_t>(decoderFrame_->height)) {
+            info_.width = static_cast<uint32_t>(decoderFrame_->width);
+            info_.height = static_cast<uint32_t>(decoderFrame_->height);
+            packet.flags |= static_cast<pipeline::FrameFlags>(pipeline::FrameFlagBits::Resize);
+        }
+        info_.color = packet.colorInfo;
         packet.color.resource = nullptr;
-        // A packet can legally produce more than one decoded frame. Keep each
-        // frame in order and give additional frames the source cadence PTS.
-        packet.pts = sourcePacket.pts;
+        // The AU contract is one picture per input. Unknown/reused timestamps
+        // are rejected above instead of fabricating timing for extra pictures.
+        (void)sourcePacket;
         (void)sourceIndex;
+        if (ready_.size() >= 4) return false;
         ready_.push_back({std::move(clone), packet});
     }
 }
@@ -238,8 +263,13 @@ bool RemotePlaySource::submitPacket(std::span<const std::uint8_t> bytes,
         return false;
     }
     std::memcpy(packet->data, bytes.data(), bytes.size());
-    packet->pts = static_cast<int64_t>(sourceIndex);
-    packet->dts = packet->pts;
+    if (packetStamps_.size() >= 64 || nextPacketId_ == INT64_MAX) {
+        av_packet_free(&packet);
+        return false;
+    }
+    packet->pts = nextPacketId_++;
+    packet->dts = AV_NOPTS_VALUE;
+    packetStamps_.push_back({packet->pts, sourcePacket});
     bool ok = true;
     for (;;) {
         const int send = avcodec_send_packet(codecContext_, packet);
@@ -263,12 +293,20 @@ SourceReadStatus RemotePlaySource::read(pipeline::FramePacket& out, const AVFram
 {
     if (decodedFrame) *decodedFrame = nullptr;
     if (!connected_) return SourceReadStatus::Error;
+    if (inbox_->takeIdrRequest(remoteplay::monotonic100ns())) {
+        const auto idr = backend_.requestIdr();
+        if (!idr.ok) {
+            veyra::log::warn("remoteplay", std::format("{} code={}", idr.operation, idr.code));
+            if (token_) inbox_->decodeFailed(token_->generation());
+        }
+    }
     if (!ready_.empty()) {
         auto item = std::move(ready_.front());
         ready_.pop_front();
         out = item.packet;
         lastFrame_ = std::move(item.frame);
         if (decodedFrame) *decodedFrame = lastFrame_.get();
+        if (token_) inbox_->decodedFrameReady(token_->generation());
         return SourceReadStatus::Frame;
     }
     const auto now = remoteplay::monotonic100ns();
@@ -279,7 +317,7 @@ SourceReadStatus RemotePlaySource::read(pipeline::FramePacket& out, const AVFram
         return SourceReadStatus::Waiting;
     }
     const auto& sample = queued->sample;
-    if (!decoderReady_ && !openDecoder(sample.codec, sample.width, sample.height)) {
+    if ((!decoderReady_ || queued->resetDecoder) && !openDecoder(sample.codec, sample.width, sample.height)) {
         inbox_->decodeFailed(sample.generation);
         return SourceReadStatus::Error;
     }
@@ -289,17 +327,24 @@ SourceReadStatus RemotePlaySource::read(pipeline::FramePacket& out, const AVFram
         clock_.reset(static_cast<remoteplay::HostTime>(origin100ns_), request_.video.fps);
         pendingOpenFlag_ = true;
     }
-    const std::uint64_t sourceIndex = sample.wireFrameIndex
-        ? *sample.wireFrameIndex
-        : ++fallbackSourceIndex_;
+    const auto extended = sample.wireFrameIndex ? wireSequence_.observe(*sample.wireFrameIndex)
+        : remoteplay::Sequence16Extender::Result{++fallbackSourceIndex_,true,false,0};
+    if (!extended.accepted) { inbox_->decodeFailed(sample.generation); return SourceReadStatus::Waiting; }
+    const std::uint64_t sourceIndex = extended.value;
     const pipeline::FramePacket sourcePacket = makePacket(sample, sourceIndex, decoderEpoch_, queued->resetDecoder);
-    if (queued->configBefore && !submitPacket(queued->configBefore->payload.bytes(), sourceIndex, sourcePacket)) {
-        inbox_->decodeFailed(sample.generation);
-        return SourceReadStatus::Error;
+    std::vector<uint8_t> combined;
+    auto payload = sample.payload.bytes();
+    if (queued->configBefore) {
+        const auto config = queued->configBefore->payload.bytes();
+        combined.reserve(config.size() + payload.size());
+        combined.insert(combined.end(), config.begin(), config.end());
+        combined.insert(combined.end(), payload.begin(), payload.end());
+        payload = combined;
     }
-    if (!submitPacket(sample.payload.bytes(), sourceIndex, sourcePacket)) {
+    if (!submitPacket(payload, sourceIndex, sourcePacket)) {
+        flushDecoder();
         inbox_->decodeFailed(sample.generation);
-        return SourceReadStatus::Error;
+        return SourceReadStatus::Waiting;
     }
     if (ready_.empty()) return SourceReadStatus::Waiting;
     auto item = std::move(ready_.front());
@@ -308,12 +353,14 @@ SourceReadStatus RemotePlaySource::read(pipeline::FramePacket& out, const AVFram
     lastFrame_ = std::move(item.frame);
     if (decodedFrame) *decodedFrame = lastFrame_.get();
     waitingForFirstFrame_ = false;
+    inbox_->decodedFrameReady(sample.generation);
     return SourceReadStatus::Frame;
 }
 
 void RemotePlaySource::flushDecoder() noexcept
 {
     ready_.clear();
+    packetStamps_.clear();
     if (codecContext_) avcodec_flush_buffers(codecContext_);
 }
 
@@ -322,25 +369,40 @@ std::size_t RemotePlaySource::pullAudio(float* stereo, std::size_t frames, doubl
     if (!stereo || frames == 0) return 0;
     std::size_t written = 0;
     while (written < frames) {
-        auto block = inbox_->tryAudio();
-        if (!block) break;
-        if (block->channels == 0 || block->rate == 0) continue;
-        if (firstPtsMs && written == 0) {
-            const auto pts = inbox_->snapshot().commonOrigin100ns +
-                static_cast<std::int64_t>(block->firstSample) * 10000000ll / block->rate;
-            *firstPtsMs = static_cast<double>(pts) / 10000.0;
+        if (!audioBlock_) {
+            audioBlock_ = inbox_->tryAudio();
+            audioOffset_ = 0;
         }
-        const auto copyFrames = std::min(frames - written, block->frames());
+        if (!audioBlock_) break;
+        auto* block = &*audioBlock_;
+        if (!block->valid() || block->rate != 48000) { audioBlock_.reset(); continue; }
+        if (audioOffset_ == 0) {
+            const bool reset = !audioAnchorSample_ || block->discontinuity ||
+                block->firstSample != audioNextSample_ || block->rate != audioRate_;
+            if (reset && written) break;
+            if (reset) {
+                audioAnchorSample_ = block->firstSample;
+                audioAnchorPts_ = block->arrival100ns - static_cast<int64_t>(origin100ns_);
+                audioRate_ = block->rate;
+            }
+        }
+        if (firstPtsMs && written == 0) {
+            *firstPtsMs = static_cast<double>(audioAnchorPts_) / 10000.0 +
+                1000.0 * static_cast<double>(block->firstSample - *audioAnchorSample_ + audioOffset_) / block->rate;
+        }
+        const auto copyFrames = std::min(frames - written, block->frames() - audioOffset_);
         for (std::size_t i = 0; i < copyFrames; ++i) {
             const auto sourceChannels = block->channels;
-            const auto sourceIndex = i * sourceChannels;
+            const auto sourceIndex = (i + audioOffset_) * sourceChannels;
             stereo[(written + i) * 2] = static_cast<float>(block->samples[sourceIndex]) / 32768.0f;
             stereo[(written + i) * 2 + 1] = sourceChannels > 1
                 ? static_cast<float>(block->samples[sourceIndex + 1]) / 32768.0f
                 : stereo[(written + i) * 2];
         }
         written += copyFrames;
-        if (copyFrames < block->frames()) break;
+        audioOffset_ += copyFrames;
+        audioNextSample_ = block->firstSample + audioOffset_;
+        if (audioOffset_ == block->frames()) audioBlock_.reset();
     }
     return written;
 }
@@ -351,15 +413,25 @@ void RemotePlaySource::close() noexcept
     ready_.clear();
     lastFrame_.reset();
     if (token_) {
-        inbox_->invalidate();
-        (void)backend_.stop();
-        try { inbox_->finishStop(); } catch (...) {}
-        token_.reset();
+        try {
+            inbox_->invalidate();
+            const auto stopped = backend_.stop();
+            stopFailed_ = !stopped.ok;
+            if (stopped.ok) {
+                inbox_->finishStop();
+                token_.reset();
+            } else {
+                veyra::log::error("remoteplay", std::format("{} failed code={}; session remains stopping",stopped.operation,stopped.code));
+            }
+        } catch (...) { stopFailed_ = true; }
     }
     flushDecoder();
     av_frame_free(&decoderFrame_);
     avcodec_free_context(&codecContext_);
     decoderReady_ = false;
+    audioBlock_.reset(); audioAnchorSample_.reset(); audioOffset_ = 0;
+    audioNextSample_ = 0; audioRate_ = 0; wireSequence_.reset();
+    request_.credentials = remoteplay::PairingCredentials{};
     info_ = SourceInfo{};
 }
 

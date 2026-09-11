@@ -1622,3 +1622,7 @@ FRUC候选bSkipWarp/延后重建/时间归零/首对预热均未通过新增rese
 本轮未修产品、未改SDK/DLL/模型、未连接PS5/占用采集卡/关闭用户程序，没有完整Veyra/delivery/GPU/实机测试，无commit/push/Release。下一条唯一任务：先建立H.264 config/AU真实source失败回归并修首帧，再依第18节完成源层正确性闭环，之后接主程序；不能只补UI或继续重复native probe来宣称移植完成。
 
 收尾检查：`git diff --check` 无格式错误（仅既有LF/CRLF提示）；6份Markdown围栏/相对文件链接检查0错误；按审查SHA256清单复核产品/构建/测试代码改动列表为空；`git ls-files --others --exclude-standard` 按DLL/LIB/EXE/PDB/压缩包/合成媒体后缀扫描无未忽略二进制。用户原有未提交代码完整保留。
+
+## 2026-09-11 Remote Play 开工与源层首批修复
+
+用户授权继续完成并在大节点创建Git/更新文档。先存档 `bf21bef`（`checkpoint/remoteplay-audited-2026-09-11`），然后修配置/AU首帧、PCM尾部与固定相对锚点、重排PTS映射、Streaming状态、实际尺寸/颜色、decoder frame释放，并补IDR消费、wire展开、48k/Opus样本序号和stop失败状态。详细文件、实际命令、失败及未测项见 `docs/REMOTEPLAY_REPAIR_EXECUTION_2026-09-11.md`。真实FFmpeg source回归显示480/480样本、首帧成功、重排错配10→0；新目录真实Chiaki/core/source构建通过，core67/67、native初始化exit0，单次测试30秒上限。首建遇第三方头/WX失败，标SYSTEM后通过；保留日志 `logs/remoteplay-audit-20260911/native-source-build*.log`、`source-fixed/core-fixed/native-fixed.stdout.log`。尚未接主程序/PS5/音频设备/GPU；其余审计项和UI/手柄等继续，不声明整体完成。源码/SDK/媒体分离，未push发布。

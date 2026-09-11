@@ -1,5 +1,7 @@
 # Veyra PS5 Remote Play 集成交接
 
+> 二次审计后用户授权当前 Agent 继续施工，节点状态改由 [修复执行记录](REMOTEPLAY_REPAIR_EXECUTION_2026-09-11.md) 维护。本文第18节保留修复前证据，不应据旧缺陷表断言新代码仍未修。
+
 日期：2026-09-11  
 当前分支：`agent/remoteplay-integration`  
 代码基线：`0f78cc29f34365589bcd4757e7017236e3ac9cb1`  
