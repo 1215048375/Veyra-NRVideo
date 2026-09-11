@@ -1641,3 +1641,6 @@ FRUC候选bSkipWarp/延后重建/时间归零/首对预热均未通过新增rese
 
 ## 2026-09-12 主机发现修复
 补齐IPv4网卡定向广播、6秒可取消搜索、错误分类与受限日志；构建、边界/UI通过。真实搜索找到开机PS5 192.168.6.232（hosts=1 error=0），未执行配对/串流。首次链接被运行中的exe占用，正常关闭后成功。命令和证据见 docs/REMOTEPLAY_DISCOVERY_REPAIR_2026-09-12.md。
+
+## 2026-09-12 PS5颜色/UI/完整手柄排查与计划
+用户确认基本串流、USB和已测增强组合通过；新增发灰、专业状态/模式重绘及全屏手柄故障，要求完整gyro/触摸板与效果，不急发布。静态检查确认AppShell动画/手柄共用timer2及endTransition误停输入；PS5输入FPS仍读captureStats。颜色日志Limited/BT709显式信令，尚未确定发灰根因；核查BT709逆曲线→sRGB显示及范围/alpha链路。ControllerInput/Backend未接gyro/触点/反馈。详见 docs/REMOTEPLAY_COLOR_UI_CONTROLLER_REPAIR_PLAN_2026-09-12.md。仅文档，无产品修改/新实机测试/发布。
