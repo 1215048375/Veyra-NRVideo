@@ -2,6 +2,8 @@
 
 2026-09-11。用户授权把当前源码、0.0.2免安装包和中英文文档发布到 `Likely7/Veyra-NRVideo`，随后明确要求去掉软件运行时校验、允许替换DLL。旧Loop不参与本次流程。
 
+发布完成：源码提交`a69a9df9fb9002fbd462e63c4d3d668828bbfd79`及`v0.0.2`标签已推送。GitHub于`2026-09-11T03:22:48Z`公开发布，非草稿，四项Release资产均为uploaded；每项远端digest与大小均和本机匹配。链接：https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.2 。证据`logs/release-002-github-published.json`。此后仅补充发布记录，未替换EXE/资产或移动版本标签。
+
 ## 交付范围
 
 - 包含此前未推送的采集调度、音频恢复、状态统计、XeSS/AMD光流、UI和FRUC移除提交，以及本次实卡无FG按GPU-ready呈现修复。

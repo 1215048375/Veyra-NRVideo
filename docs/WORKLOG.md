@@ -2,6 +2,8 @@
 
 ## 最新交付：0.0.2 便携发布与用户DLL替换
 
+已发布：https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.2 。源码提交`a69a9df`及同名标签已推送，四个附件远端SHA256/大小逐项匹配；公开时间`2026-09-11T03:22:48Z`，`isDraft=false`。原`Veyra-DLSS-Video-Player`远端未更新。下文候选阶段的“另记实际结果”由本条闭环，随后仅提交发布记录。
+
 用户授权发布到`Likely7/Veyra-NRVideo`，并要求去掉运行时校验。取消XeSS固定哈希/签名锁、移除诊断中的假定原件hash、支持Release运行目录；绝对路径/API初始化检查保留。发布者默认包仍做来源/身份审计，不向Git提交SDK/runtime。中英文README、教程、Release Notes与组件说明已重写；完整命令、文件范围、失败及验证边界见 [0.0.2执行记录](RELEASE_0.0.2_EXECUTION.md)。
 
 新目录完整构建通过，修复首次配置FFmpeg依赖顺序与便携XeSS CRT查找。最终EXE `A07B73C2CD946AD50FD8516A51DB3B0CD6759945BB85E82D65F0D8CEB18B6170`；CPU81项，最终delivery23项42.929秒，解压后清洁PATH/无manifest的基础与SR+NR+FG两路线、XeSS/DLSS UI切换及非黑4K保存通过。真实Create为`0x1`/SEH0；本机VSR实际走驱动NGX实现，未证明包内VSR DLL被使用。日志`logs/release-002-portable-verified`、`logs/delivery/130f307d2be14370876e63b6a9f1c6f9`。未新增实卡或长期验收。
