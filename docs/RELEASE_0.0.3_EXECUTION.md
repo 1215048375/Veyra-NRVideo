@@ -1,6 +1,10 @@
 # 0.0.3 发布执行记录
 
-状态：构建和最终便携回归通过，待上传核对后另记实际发布结果。用户2026-09-11授权发布当前版本到 `Likely7/Veyra-NRVideo`，更新源码、中英文README和完整便携包，版本0.0.3；保持0.0.2资产与标签不变。
+状态：已发布。用户2026-09-11授权发布当前版本到 `Likely7/Veyra-NRVideo`，更新源码、中英文README和完整便携包，版本0.0.3；保持0.0.2资产与标签不变。
+
+源码提交 `83f6353803861307b7003213dc510a837b6f3966` 与注解标签 `v0.0.3` 已原子推送至nrvideo/main。Release ID `386798119`，公开时间 `2026-09-11T05:09:04Z`，`isDraft=false`、`isPrerelease=false`，latest接口返回v0.0.3。链接：https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.3 。四个附件state=uploaded，远端digest及字节数全部与本机相符；GitHub README blob与该提交一致。此后仅补发布记录，不改EXE、资产或移动版本标签。
+
+发布命令：`git push --atomic nrvideo HEAD:main refs/tags/v0.0.3`；`gh release create v0.0.3 --repo Likely7/Veyra-NRVideo --verify-tag --draft --title "Veyra 0.0.3" --notes-file docs/RELEASE_NOTES_0.0.3.md`；`gh release upload`上传两ZIP及其.sha256；比对后 `gh release edit v0.0.3 --repo Likely7/Veyra-NRVideo --draft=false --latest`。草稿阶段REST按tag查询返回404，改用`gh release view`取得草稿及资产并完成核验，未重复创建Release。
 
 ## 范围
 
