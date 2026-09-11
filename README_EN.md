@@ -3,12 +3,12 @@
 English | [简体中文](README.md)
 
 <p align="center">
-  <video src="https://github.com/Likely7/Veyra-NRVideo/raw/main/REAMDE%20MP4.mp4" controls muted playsinline width="960">
+  <video src="https://github.com/Likely7/Veyra-NRVideo/raw/refs/heads/main/REAMDE%20MP4.mp4" controls muted playsinline width="960">
     <a href="https://github.com/Likely7/Veyra-NRVideo/blob/main/REAMDE%20MP4.mp4">Open the demo video</a>
   </video>
 </p>
 
-<p align="center"><a href="https://github.com/Likely7/Veyra-NRVideo/raw/main/REAMDE%20MP4.mp4">Download / open the demo video</a></p>
+<p align="center"><a href="https://github.com/Likely7/Veyra-NRVideo/raw/refs/heads/main/REAMDE%20MP4.mp4">Download / open the demo video</a></p>
 
 A Windows video player and capture-card enhancement tool. Play videos, process images, and preview capture devices with optional super resolution, NR enhancement, and frame generation.
 
