@@ -15,6 +15,14 @@ struct RemotePlaySessionSourceTestAccess {
 static void mailbox(){
     RemotePlaySessionSource s;s.started_=true;
     const auto now=remoteplay::monotonic100ns();
+    auto inbox=std::make_shared<remoteplay::SessionInbox>();auto token=inbox->begin(now-20000000);token.connected();
+    inbox->decodeStarted(now-15000000,now-15050000);inbox->decodeFinished(now-14900000);inbox->frameDecoded(now-14900000);
+    s.telemetryInbox_=inbox;
+    auto progress=s.sessionSnapshot();
+    if(progress.decodedFrames!=1||progress.decodedFps!=0||progress.decodeMeanMs||!progress.ratesReady)throw std::runtime_error("stale decode telemetry");
+    inbox->decodeStarted(now-100000,now-150000);inbox->decodeFinished(now);inbox->frameDecoded(now);
+    progress=s.sessionSnapshot();
+    if(progress.decodedFrames!=2||progress.decodedFps!=1||progress.decodeMeanMs!=10.0||progress.ingressWaitMeanMs!=5.0||progress.decodeStarted100ns)throw std::runtime_error("independent decode telemetry");
     remoteplay::ControllerState down;down.inputActive=true;down.touches[0].id=1;
     s.controller(down);s.controller({});
     if(s.takeControllerLocked(now)!=remoteplay::ControllerState{})throw std::runtime_error("focus loss must cancel pending actions");

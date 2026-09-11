@@ -18,12 +18,21 @@ bool RemotePlaySessionSource::connect(RemotePlayConnectDesc desc) {
 void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc desc) {
     RemotePlaySource source;
     std::jthread feeder;
+    std::jthread monitor;
     try {
         const bool ok=source.connect(desc);
         desc.request.credentials=remoteplay::PairingCredentials{};
-        {std::lock_guard lock(mutex_);publishedInfo_=source.info();started_=ok;failed_=!ok;initialized_=true;}
+        {std::lock_guard lock(mutex_);publishedInfo_=source.info();started_=ok;failed_=!ok;initialized_=true;telemetryInbox_=source.telemetryInbox();}
         ready_.notify_all();
         if(ok) {
+            monitor=std::jthread([inbox=source.telemetryInbox()](std::stop_token cancel){
+                while(!cancel.stop_requested()){
+                    const auto s=inbox->snapshot();const auto now=remoteplay::monotonic100ns();
+                    const auto age=[&](auto stamp){return stamp>0?double(now-stamp)/10000:-1.0;};
+                    log::info("remoteplay-progress",std::format("state={} received={} decoded={} inputFps={:.1f} decodeFps={:.1f} videoMbps={:.3f} receiveAgeMs={:.1f} decodeAgeMs={:.1f} decodeBusyMs={:.1f} queue={} waitingIdr={} idrRequests={} errors={} (complete-video callback; not network latency)",int(s.state),s.video.accessUnits,s.decodedFrames,s.receivedFps,s.decodedFps,s.videoMbps,age(s.lastVideo100ns),age(s.lastDecoded100ns),age(s.decodeStarted100ns),s.video.depth,s.video.waitingForIdr,s.video.idrRequests,s.errorCode));
+                    for(int i=0;i<10&&!cancel.stop_requested();++i)std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+            });
             WAVEFORMATEX format{}; format.wFormatTag=WAVE_FORMAT_IEEE_FLOAT;format.nChannels=2;
             format.nSamplesPerSec=48000;format.wBitsPerSample=32;format.nBlockAlign=8;format.nAvgBytesPerSec=384000;
             if(audio_.configure(format)&&audio_.start()) {
@@ -47,6 +56,8 @@ void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc de
             auto lastFrame=std::chrono::steady_clock::now();
             auto nextController=lastFrame;
             auto rateStart=lastFrame;uint64_t previousReceived=0,previousDecoded=0;
+            unsigned recoveryAttempts=0;
+            auto nextRecovery=lastFrame+std::chrono::seconds(1);
             while(!stop.stop_requested()) {
                 std::string pin;
                 {std::lock_guard lock(mutex_);pin.swap(pin_);}
@@ -77,7 +88,12 @@ void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc de
                 if(result==SourceReadStatus::Frame && frame) {
                     publishDecoded(frame,packet,source.info());
                     lastFrame=now;
+                    recoveryAttempts=0;nextRecovery=now+std::chrono::seconds(1);
                 } else {
+                    if(snapshot.state==remoteplay::SessionState::Streaming&&now>=nextRecovery&&recoveryAttempts<3){
+                        ++recoveryAttempts;source.recoverVideo();nextRecovery=now+std::chrono::seconds(2);
+                        log::warn("remoteplay-recovery",std::format("no decoded progress; request keyframe attempt={} received={} decoded={} lastReceiveAgeMs={:.1f}",recoveryAttempts,snapshot.video.accessUnits,snapshot.decodedFrames,snapshot.lastVideo100ns?double(remoteplay::monotonic100ns()-snapshot.lastVideo100ns)/10000:-1));
+                    }
                     // A missing console or unrecoverable stream must not leave
                     // a perpetual opening spinner. Login PIN allows more time.
                     const auto deadline=snapshot.state==remoteplay::SessionState::LoginPinRequired?std::chrono::seconds(120):std::chrono::seconds(30);
@@ -94,6 +110,7 @@ void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc de
         {std::lock_guard lock(mutex_);failed_=true;initialized_=true;}
         ready_.notify_all();
     }
+    if(monitor.joinable()){monitor.request_stop();monitor.join();}
     if(feeder.joinable()){feeder.request_stop();feeder.join();}
     audio_.stop();
     source.close();
@@ -140,7 +157,10 @@ remoteplay::ControllerState RemotePlaySessionSource::takeControllerLocked(remote
     return controller_;
 }
 void RemotePlaySessionSource::loginPin(std::string pin){std::lock_guard lock(mutex_);SecureZeroMemory(pin_.data(),pin_.size());pin_=std::move(pin);}
-remoteplay::SessionInbox::Snapshot RemotePlaySessionSource::sessionSnapshot()const{std::lock_guard lock(mutex_);return snapshot_;}
+remoteplay::SessionInbox::Snapshot RemotePlaySessionSource::sessionSnapshot()const{
+    std::shared_ptr<const remoteplay::SessionInbox> inbox;{std::lock_guard lock(mutex_);inbox=telemetryInbox_;if(!inbox)return snapshot_;}
+    return inbox->snapshot();
+}
 RemotePlaySessionSource::Rates RemotePlaySessionSource::rates()const{std::lock_guard lock(mutex_);return rates_;}
 remoteplay::ControllerFeedback RemotePlaySessionSource::takeFeedback(){std::lock_guard lock(mutex_);auto result=std::move(feedback_);feedback_={};return result;}
 uint64_t RemotePlaySessionSource::skipped()const{std::lock_guard lock(mutex_);return skipped_;}

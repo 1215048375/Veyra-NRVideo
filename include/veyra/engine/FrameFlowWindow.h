@@ -98,6 +98,7 @@ public:
         if(!batch||readyBatches_[batch%readyBatches_.size()]==batch)return;
         readyBatches_[batch%readyBatches_.size()]=batch;
         metrics_.counters.fgReadyValid+=valid;metrics_.counters.fgInvalid+=invalid;
+        metrics_.lastReady100ns=now;
         if(real)++metrics_.counters.realReady;
         rates_->ready(real,valid,now);
     }
@@ -114,6 +115,7 @@ public:
         std::lock_guard lock(mutex_);
         if(generated)++metrics_.counters.generatedPresented;else ++metrics_.counters.realPresented;
         metrics_.latest.consumerFence=fence;rates_->presented(now);
+        metrics_.lastPresent100ns=now;
     }
     diagnostics::FrameFlowMetrics snapshot(int64_t now)const{
         std::lock_guard lock(mutex_);auto m=metrics_;rates_->snapshot(m,now);

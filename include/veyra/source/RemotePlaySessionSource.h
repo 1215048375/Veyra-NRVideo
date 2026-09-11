@@ -44,6 +44,7 @@ private:
     std::shared_ptr<AVFrame> view_;
     SourceInfo info_, publishedInfo_;
     remoteplay::SessionInbox::Snapshot snapshot_;
+    std::shared_ptr<const remoteplay::SessionInbox> telemetryInbox_;
     remoteplay::ControllerState controller_;
     std::deque<std::pair<remoteplay::HostTime,remoteplay::ControllerState>> pendingControllers_;
     remoteplay::HostTime controllerStamp_=0;

@@ -1,12 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "veyra/remoteplay/SessionInbox.h"
 #include <limits>
+#include <algorithm>
+#include <vector>
 namespace veyra::remoteplay {
 struct SessionInbox::Shared {
     explicit Shared(QueueLimits limits):video(limits){}
     mutable std::mutex mutex;Generation generation=0;SessionState state=SessionState::Idle;
     HostTime origin=0;bool accepting=false;std::uint64_t stale=0;int error=0;
     VideoIngress video;AudioIngress audio;
+    HostTime lastVideo=0,lastAudio=0,decodeStart=0,lastDecoded=0;
+    uint64_t decodedFrames=0,receivedBytes=0,framesLost=0,framesRecovered=0;
+    struct Sample {HostTime time;double value;};
+    std::deque<Sample> received,decoded,decodeTimes,ingressWait;
+    static void add(std::deque<Sample>& q,HostTime now,double value){
+        while(!q.empty()&&(q.size()>=4096||q.front().time<=now-10000000))q.pop_front();q.push_back({now,value});
+    }
     bool current(Generation g){if(!accepting||g!=generation){++stale;return false;}return true;}
 };
 SessionInbox::SessionInbox(QueueLimits l):shared_(std::make_shared<Shared>(l)){}
@@ -17,6 +26,8 @@ SessionInbox::Token SessionInbox::begin(HostTime origin){
     if(s.state!=SessionState::Idle)throw std::logic_error("Stop and join previous backend before a new session");
     if(s.generation==std::numeric_limits<Generation>::max())throw std::overflow_error("Session generation exhausted");
     ++s.generation;s.video.begin(s.generation);s.audio.begin(s.generation);s.origin=origin;s.state=SessionState::Connecting;s.accepting=true;s.error=0;
+    s.lastVideo=s.lastAudio=s.decodeStart=s.lastDecoded=0;s.decodedFrames=s.receivedBytes=s.framesLost=s.framesRecovered=0;
+    s.received.clear();s.decoded.clear();s.decodeTimes.clear();s.ingressWait.clear();
     return Token{shared_,s.generation};
 }
 void SessionInbox::invalidate(){auto& s=*shared_;std::lock_guard l(s.mutex);s.accepting=false;if(s.state!=SessionState::Idle)s.state=SessionState::Stopping;s.video.close();s.audio.close();}
@@ -32,16 +43,31 @@ std::optional<PcmBlock> SessionInbox::tryAudio(){auto& s=*shared_;std::lock_guar
 bool SessionInbox::takeIdrRequest(HostTime now){auto& s=*shared_;std::lock_guard l(s.mutex);return s.accepting&&s.video.takeIdrRequest(now);}
 void SessionInbox::decodeFailed(Generation g){auto& s=*shared_;std::lock_guard l(s.mutex);if(s.accepting&&s.generation==g)s.video.requireKeyframe();}
 SessionInbox::Snapshot SessionInbox::snapshot()const{
-    auto& s=*shared_;std::lock_guard l(s.mutex);return {s.generation,s.state,s.origin,s.stale,s.error,s.video.stats(),s.audio.stats()};
+    auto& s=*shared_;std::lock_guard l(s.mutex);Snapshot result{s.generation,s.state,s.origin,s.stale,s.error,s.video.stats(),s.audio.stats()};
+    const auto now=monotonic100ns();result.lastVideo100ns=s.lastVideo;result.lastAudio100ns=s.lastAudio;
+    result.decodeStarted100ns=s.decodeStart;result.lastDecoded100ns=s.lastDecoded;
+    result.decodedFrames=s.decodedFrames;result.receivedBytes=s.receivedBytes;result.framesLost=s.framesLost;result.framesRecovered=s.framesRecovered;
+    result.ratesReady=now-s.origin>=10000000;
+    for(const auto& v:s.received)if(v.time>now-10000000){++result.receivedFps;result.videoMbps+=v.value*8/1000000;}
+    for(const auto& v:s.decoded)if(v.time>now-10000000)++result.decodedFps;
+    auto aggregate=[&](const auto& q,std::optional<double>& mean,std::optional<double>* p95){
+        std::vector<double> values;double sum=0;for(const auto& v:q)if(v.time>now-10000000){values.push_back(v.value);sum+=v.value;}
+        if(values.empty())return;mean=sum/values.size();if(p95){std::sort(values.begin(),values.end());*p95=values[(values.size()*95+99)/100-1];}
+    };
+    aggregate(s.decodeTimes,result.decodeMeanMs,&result.decodeP95Ms);aggregate(s.ingressWait,result.ingressWaitMeanMs,nullptr);return result;
 }
+void SessionInbox::decodeStarted(HostTime now,HostTime arrival){auto& s=*shared_;std::lock_guard l(s.mutex);s.decodeStart=now;if(arrival>0&&now>=arrival)Shared::add(s.ingressWait,now,double(now-arrival)/10000);}
+void SessionInbox::decodeFinished(HostTime now){auto& s=*shared_;std::lock_guard l(s.mutex);if(s.decodeStart>0&&now>=s.decodeStart)Shared::add(s.decodeTimes,now,double(now-s.decodeStart)/10000);s.decodeStart=0;}
+void SessionInbox::frameDecoded(HostTime now){auto& s=*shared_;std::lock_guard l(s.mutex);s.lastDecoded=now;++s.decodedFrames;Shared::add(s.decoded,now,1);}
 bool SessionInbox::Token::video(VideoSample sample)const noexcept{
     try{auto s=shared_.lock();if(!s)return false;std::lock_guard l(s->mutex);if(!s->current(generation_))return false;
         if(sample.generation!=generation_)return false;
+        if(sample.kind==SampleKind::AccessUnit){s->lastVideo=monotonic100ns();s->receivedBytes+=sample.payload.bytes().size();s->framesLost+=std::max(0,sample.framesLost);s->framesRecovered+=sample.referenceRecovered?1:0;Shared::add(s->received,s->lastVideo,double(sample.payload.bytes().size()));}
         const auto r=s->video.push(std::move(sample),monotonic100ns());return r==PushStatus::Accepted||r==PushStatus::ConfigStored;
     }catch(...){failed(-1001);return false;}
 }
 bool SessionInbox::Token::audio(PcmBlock block)const noexcept{
-    try{auto s=shared_.lock();if(!s)return false;std::lock_guard l(s->mutex);if(!s->current(generation_)||block.generation!=generation_)return false;return s->audio.push(std::move(block));}
+    try{auto s=shared_.lock();if(!s)return false;std::lock_guard l(s->mutex);if(!s->current(generation_)||block.generation!=generation_)return false;s->lastAudio=monotonic100ns();return s->audio.push(std::move(block));}
     catch(...){failed(-1002);return false;}
 }
 void SessionInbox::Token::connected()const noexcept{

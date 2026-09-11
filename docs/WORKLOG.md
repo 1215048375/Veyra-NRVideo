@@ -1660,3 +1660,6 @@ build-product/native-source/off-check成功；boundary默认与virtual、H264/H2
 
 ### 同日追加：用户复现4K30原生NR＋2X锁原帧率
 新日志revision4确认NR/flow/FG均4K，690次FG候选中682次拒绝、8次Evaluate（1预热＋7有效），7有效全部过期，generatedPresented=0；原帧约30fps且媒体1×。文件一批处理/等待呈现完成后才处理下一批，与插帧中点早于B原帧截止时间的差异形成强疑点。方案P1增加有界提前增强/呈现解耦，不能只调整FG阈值。日志与SHA256见方案补充节；这是用户复现加日志/静态审查，不是Agent新执行的负载测试，产品尚未修改。
+
+## 2026-09-12 全部修复目标开工：P0独立进度
+开工adff31b，分支codex/ps5-scheduler-telemetry-decode。独立inbox接收/解码窗口、GPU/Present进度、受限关键帧恢复已构建和窄测通过；故障注入尚未验证，其他P1-P3继续。详见docs/PS5_TELEMETRY_SCHEDULER_EXECUTION_2026-09-12.md。目标active，无发布。

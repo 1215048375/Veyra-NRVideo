@@ -10,6 +10,7 @@
 #include "veyra/diagnostics/FrameMetrics.h"
 #include "veyra/engine/PreviewView.h"
 #include "veyra/sink/CaptureAudioSession.h"
+#include "veyra/remoteplay/SessionInbox.h"
 namespace veyra::source { struct RemotePlayConnectDesc; class RemotePlaySessionSource; }
 namespace veyra::remoteplay { struct ControllerState;struct ControllerFeedback; }
 namespace veyra::sink { struct RgbaImage; }
@@ -52,6 +53,7 @@ struct PlayerSnapshot {
     bool fgBudgetLimited=false,xessGenerationSuppressed=false;
     bool running=false,failed=false,image=false,capture=false,remotePlay=false;
     int remotePlayState=0; uint64_t remotePlaySkipped=0;
+    remoteplay::SessionInbox::Snapshot remoteStream;
     double remoteReceivedFps=0,remoteDecodedFps=0;bool remoteRatesReady=false;uint64_t remoteReceived=0,remoteDecoded=0,remoteIngressDropped=0;
 };
 class EngineController {

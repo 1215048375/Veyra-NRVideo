@@ -47,7 +47,7 @@ pipeline::SourcePixelFormat pixelFormatFromFrame(const AVFrame& frame)
 } // namespace
 
 RemotePlaySource::RemotePlaySource()
-    : inbox_(std::make_unique<remoteplay::SessionInbox>())
+    : inbox_(std::make_shared<remoteplay::SessionInbox>())
 {
 }
 
@@ -83,7 +83,7 @@ bool RemotePlaySource::connect(const RemotePlayConnectDesc& desc)
 
     origin100ns_ = static_cast<std::uint64_t>(remoteplay::monotonic100ns());
     try {
-        inbox_ = std::make_unique<remoteplay::SessionInbox>(desc.queueLimits);
+        inbox_ = std::make_shared<remoteplay::SessionInbox>(desc.queueLimits);
     } catch (...) {
         request_.credentials = remoteplay::PairingCredentials{};
         veyra::log::error("remoteplay", "invalid queue limits");
@@ -255,6 +255,7 @@ bool RemotePlaySource::drainDecoder(std::uint64_t sourceIndex, const pipeline::F
         (void)sourceIndex;
         if (ready_.size() >= 4) return false;
         ready_.push_back({std::move(clone), packet});
+        inbox_->frameDecoded(remoteplay::monotonic100ns());
     }
 }
 
@@ -262,6 +263,8 @@ bool RemotePlaySource::submitPacket(std::span<const std::uint8_t> bytes,
     std::uint64_t sourceIndex, const pipeline::FramePacket& sourcePacket)
 {
     if (!decoderReady_ || bytes.empty()) return false;
+    inbox_->decodeStarted(remoteplay::monotonic100ns(),sourcePacket.arrivalHost100ns);
+    struct Finish {remoteplay::SessionInbox& inbox;~Finish(){inbox.decodeFinished(remoteplay::monotonic100ns());}} finish{*inbox_};
     AVPacket* packet = av_packet_alloc();
     if (packet == nullptr || av_new_packet(packet, static_cast<int>(bytes.size())) < 0) {
         av_packet_free(&packet);

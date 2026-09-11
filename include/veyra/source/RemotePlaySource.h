@@ -43,6 +43,8 @@ public:
     remoteplay::ControllerFeedback takeFeedback(){return backend_.takeFeedback();}
     bool connected() const noexcept { return connected_; }
     remoteplay::SessionInbox::Snapshot sessionSnapshot() const;
+    std::shared_ptr<const remoteplay::SessionInbox> telemetryInbox()const{return inbox_;}
+    void recoverVideo(){flushDecoder();if(token_)inbox_->decodeFailed(token_->generation());}
 
     const SourceInfo& info() const override { return info_; }
     SourceReadStatus read(pipeline::FramePacket& out, const AVFrame** decodedFrame) override;
@@ -67,7 +69,7 @@ private:
     pipeline::FramePacket makePacket(const remoteplay::VideoSample& sample,
         std::uint64_t sourceIndex, std::uint64_t epoch, bool reset);
 
-    std::unique_ptr<remoteplay::SessionInbox> inbox_;
+    std::shared_ptr<remoteplay::SessionInbox> inbox_;
     remoteplay::ChiakiBackend backend_;
     std::optional<remoteplay::SessionInbox::Token> token_;
     remoteplay::RemotePlayClock clock_;
