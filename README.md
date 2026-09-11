@@ -42,7 +42,7 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片和采集
 
 ## 使用教程
 如果这个项目对你有所帮助，欢迎请作者喝杯咖啡！你的支持是持续维护的最大动力
-<img width="828/3" height="1124/3" alt="7baf2084b2310a7e685c5355bf9307d3" src="https://github.com/user-attachments/assets/1438c8f7-08b4-46fd-ad5e-6d83c46cdec2" />
+<img width="276" height="374" alt="7baf2084b2310a7e685c5355bf9307d3" src="https://github.com/user-attachments/assets/1438c8f7-08b4-46fd-ad5e-6d83c46cdec2" />
 
 ### 视频与图片
 
