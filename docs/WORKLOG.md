@@ -1532,3 +1532,7 @@ FRUC候选bSkipWarp/延后重建/时间归零/首对预热均未通过新增rese
 
 新增 `docs/SCHEDULER_REPAIR_PLAN_2026-09-10.md`：先按revision/epoch建立帧流账本和批量诊断，再仅为实时采集FG加入pre-evaluate deadline skip，随后以有界状态机处理source/graph/fence/present，最后只合入有同源A/B收益的提交、日志或FRUC改动。明确保留mailbox=1、资源lease/fence和文件播放完整性；不把扩大队列、降低质量或原生4K伪装成实时优化。此轮未改产品代码，未运行新的构建/GPU/实卡测试，未更改runtime、控制面、远端或发布；整体Phase7仍in_progress。
 
+## 2026-09-11 README 演示视频
+
+用户提供 `REAMDE MP4.mp4` 作为项目 README 开头的演示视频。文件为 28,200,658 bytes，H.264 1920x1080 60fps、AAC、14.048 秒；未涉及 NVIDIA SDK/runtime、抓帧或测试输入。视频加入源码仓库作为公开 README 展示资源，中英文 README 均使用 GitHub raw URL 的 HTML5 `<video>` 播放器，并保留直接打开/下载链接作为回退。未创建新 Release；本轮未运行产品构建或 GPU/实卡测试。
+
