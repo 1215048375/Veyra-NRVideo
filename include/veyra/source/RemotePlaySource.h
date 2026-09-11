@@ -18,12 +18,18 @@
 
 struct AVCodecContext;
 struct AVFrame;
+struct ID3D12Device;
 
 namespace veyra::source {
 
 struct RemotePlayConnectDesc {
     remoteplay::NativeConnectRequest request;
     remoteplay::QueueLimits queueLimits{};
+    enum class DecodeMode { Automatic, Software, Hardware };
+    DecodeMode decodeMode=DecodeMode::Automatic;
+    // Set by the engine; shared ownership keeps the exact presentation adapter
+    // alive until the decoder owner has stopped, including failed connects.
+    std::shared_ptr<ID3D12Device> decodeDevice;
 };
 
 class RemotePlaySource final : public IFrameSource {
@@ -98,6 +104,9 @@ private:
     bool decoderReady_ = false;
     bool waitingForFirstFrame_ = true;
     bool pendingOpenFlag_ = true;
+    RemotePlayConnectDesc::DecodeMode decodeMode_=RemotePlayConnectDesc::DecodeMode::Automatic;
+    std::shared_ptr<ID3D12Device> decodeDevice_;
+    bool hardwareFallback_=false;
 };
 
 class RemotePlayAudioSource final : public sink::AudioPcmSource {

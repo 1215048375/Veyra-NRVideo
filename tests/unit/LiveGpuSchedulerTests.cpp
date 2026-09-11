@@ -1,5 +1,6 @@
 #include "veyra/engine/LiveGpuScheduler.h"
 #include "veyra/engine/TimingWindow.h"
+#include "veyra/engine/FgRecoveryBudget.h"
 #include <iostream>
 #include <memory>
 #include <atomic>
@@ -36,5 +37,18 @@ int main(){
     check(scheduler.failed()&&failedFinished==2&&scheduler.occupancy()==0,"failure propagates and finalizes queued work");
     check(!scheduler.push([](int64_t){return Scheduler::Step{State::Complete};},[]{}),"failed scheduler rejects new work");
     veyra::engine::TimingWindow timing;for(unsigned i=0;i<100;++i)timing.add(i);check(timing.p95()==94,"percentile order statistic");timing.clear();timing.add(6);check(timing.p95()==6,"reset removes old timing window");
+    veyra::engine::FgRecoveryBudget budget;
+    budget.fgCost(3,10000000);budget.complete(31,true,false,10000000);
+    check(budget.predicted(10000000)&&std::abs(*budget.predicted(10000000)-31)<.001,"base and FG cost do not double count additional generation");
+    check(!budget.admit(10000000,10100000,0,0),"insufficient pair deadline enters limited state");
+    check(!budget.admit(10100000,10600000,0,0),"recovery does not oscillate every input frame");
+    check(budget.admit(12600000,13100000,0,0)&&budget.recovering(),"bounded recovery admits first warmup opportunity");
+    check(budget.admit(12900000,13400000,0,0)&&!budget.recovering(),"second consecutive opportunity exits recovery and can produce a frame");
+    budget.complete(200,true,true,13000000);
+    check(*budget.predicted(13000000)<32,"expensive reset warmup does not poison steady cost");
+    budget.complete(10,false,false,24000000);
+    check(*budget.predicted(24000000)<14,"old slow completion expires even when no FG succeeds");
+    check(!budget.admit(24000000,23800000,0,0),"recovery never admits an already expired deadline");
+    budget.reset();check(!budget.predicted(25000000),"settings revision reset clears prior backend costs");
     return failures?1:0;
 }

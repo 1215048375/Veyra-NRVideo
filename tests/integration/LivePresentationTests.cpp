@@ -11,7 +11,7 @@ using namespace veyra;
 using namespace std::chrono_literals;
 int wmain(int argc,wchar_t**argv){
     SetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS",L"1");
-    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0||wcscmp(argv[3],L"--source-gap")==0||wcscmp(argv[3],L"--file-endpoint")==0||wcscmp(argv[3],L"--file-continuity")==0||wcscmp(argv[3],L"--reset-rollback")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0||wcscmp(argv[3],L"--source-gap")==0||wcscmp(argv[3],L"--file-endpoint")==0||wcscmp(argv[3],L"--file-continuity")==0||wcscmp(argv[3],L"--file-fg-recovery")==0||wcscmp(argv[3],L"--reset-rollback")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     std::filesystem::create_directories(argv[2]);Logger::instance().openFile((std::filesystem::path(argv[2])/"engine.log").wstring());Logger::instance().setConsoleEnabled(false);
     HWND window=CreateWindowExW(0,L"STATIC",L"Live scheduler replay",WS_POPUP,0,0,960,540,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     if(!window)return 3;engine::EngineController engine;engine::PlayerOptions options;options.nr=false;options.fg=false;options.captureReplayForTest=true;
@@ -21,6 +21,8 @@ int wmain(int argc,wchar_t**argv){
     const bool overload=(argc==4&&std::wstring(argv[3]).find(L"--overload")==0);
     const bool fileOverload=argc==4&&wcscmp(argv[3],L"--file-overload")==0;
     const bool fileEndpoint=argc==4&&wcscmp(argv[3],L"--file-endpoint")==0;
+    const bool fileRecovery=argc==4&&wcscmp(argv[3],L"--file-fg-recovery")==0;
+    if(fileRecovery){options.captureReplayForTest=false;options.nr=options.fg=true;options.fgMultiplier=2;engine.setVolume(0,true);}
     const bool fileContinuity=argc==4&&wcscmp(argv[3],L"--file-continuity")==0;
     if(fileContinuity){options.captureReplayForTest=false;options.nr=options.fg=true;options.realtime=false;options.settings.frameGenerationBackend=engine::FrameGenerationBackend::XeSS;engine.setVolume(0,true);}
     if(fileEndpoint){options.captureReplayForTest=false;SetEnvironmentVariableW(L"VEYRA_TEST_FILE_ENDPOINT_LOSS",L"1");engine.setVolume(0,true);}
@@ -30,6 +32,21 @@ int wmain(int argc,wchar_t**argv){
     int failures=0;auto check=[&](bool pass,const char* s){std::cout<<(pass?"PASS ":"FAIL ")<<s<<std::endl;if(!pass)++failures;};
     auto until=[&](auto predicate,int seconds=8){auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(seconds);while(std::chrono::steady_clock::now()<deadline){MSG msg;while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}auto s=engine.snapshot();if(s.failed){std::wcerr<<s.status<<'\n';return false;}if(predicate(s))return true;std::this_thread::sleep_for(5ms);}return false;};
     engine.open(window,argv[1],options);
+    if(fileRecovery){
+        check(until([](const auto& s){return s.metrics.flow.generatedPresentFps>15&&s.metrics.flow.presentSubmitFps>45;},15),"NR plus 2X starts with real generated presentation");
+        const auto before=engine.snapshot();const auto wallStart=std::chrono::steady_clock::now();
+        SetEnvironmentVariableW(L"VEYRA_TEST_VIDEO_WORK_MS",L"70");
+        check(until([&](const auto& s){return s.processedCompleted>=before.processedCompleted+40;},15),"slow owner still advances source output");
+        const auto slow=engine.snapshot();const auto seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-wallStart).count();
+        check(slow.audioVideoWaits==before.audioVideoWaits,"insufficient output rate never stops steady audio");
+        check(std::abs(slow.position-before.position-seconds)<.3,"slow preview follows one-times media timeline");
+        check(slow.previewSkipped>0&&slow.lateMs<250,"overload skips distributed source opportunities and bounds latency");
+        SetEnvironmentVariableW(L"VEYRA_TEST_VIDEO_WORK_MS",nullptr);
+        check(until([&](const auto& s){return s.applied.revision==before.applied.revision&&s.metrics.flow.generatedPresentFps>15&&s.metrics.flow.presentSubmitFps>45;},12),"FG recovers without changing settings or restarting audio");
+        const auto recovered=engine.snapshot();check(recovered.audioVideoWaits==before.audioVideoWaits,"recovery retains continuous audio");
+        std::cout<<"FILE_RECOVERY slowPresent="<<slow.metrics.flow.presentSubmitFps<<" recoveredPresent="<<recovered.metrics.flow.presentSubmitFps<<" generatedPresent="<<recovered.metrics.flow.generatedPresentFps<<" skipped="<<slow.previewSkipped<<"\n";
+        engine.stop();check(until([&](const auto&){return engine.idle();},5),"recovery session drains");DestroyWindow(window);CoUninitialize();return failures?1:0;
+    }
     if(fileContinuity){
         check(until([](const auto& s){return s.frames>=20;}),"XeSS/NR file starts with actual audio");
         const auto before=engine.snapshot();const auto begin=std::chrono::steady_clock::now();

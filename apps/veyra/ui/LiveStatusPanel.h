@@ -1,9 +1,10 @@
 #pragma once
 #include "WorkspaceChrome.h"
+#include <chrono>
 
 namespace veyra::ui {
 namespace live_status {
-struct State {engine::EngineController* engine;int scroll=0,maxScroll=0;};
+struct State {engine::EngineController* engine;int scroll=0,maxScroll=0;bool advanced=false;};
 inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     auto* state=reinterpret_cast<State*>(GetWindowLongPtrW(h,GWLP_USERDATA));
     if(message==WM_NCCREATE){state=new State{static_cast<engine::EngineController*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams)};SetWindowLongPtrW(h,GWLP_USERDATA,LONG_PTR(state));}
@@ -12,6 +13,7 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     case WM_CREATE:SetTimer(h,1,250,nullptr);return 0;
     case WM_TIMER:if(IsWindowVisible(h))InvalidateRect(h,nullptr,FALSE);return 0;
     case WM_SIZE:InvalidateRect(h,nullptr,FALSE);return 0;
+    case WM_LBUTTONUP:if(GET_Y_LPARAM(lp)<dip(h,34)){state->advanced=!state->advanced;state->scroll=0;InvalidateRect(h,nullptr,FALSE);}return 0;
     case WM_MOUSEWHEEL:state->scroll=std::clamp(state->scroll-GET_WHEEL_DELTA_WPARAM(wp)/WHEEL_DELTA*50,0,state->maxScroll);InvalidateRect(h,nullptr,FALSE);return 0;
     case WM_ERASEBKGND:return 1;
     case WM_PAINT:{
@@ -22,39 +24,82 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         const bool xess=s.applied.frameGenerationBackend==engine::FrameGenerationBackend::XeSS&&s.applied.multiplier>1;
         auto write=[&](const std::wstring& value,int x,int y,int w,int ht,int size,COLORREF color){chromeText(paint.dc,h,value,x,y,w,ht,size,color);};
         auto ms=[](std::optional<double> v){return v?std::format(L"{:.1f} ms",*v):std::wstring(L"未测");};
-        auto timing=[&](const diagnostics::TimingAggregate& a){return playing&&a.mean&&a.p95?std::format(L"{:.1f} / {:.1f}",*a.mean,*a.p95):std::wstring(L"未测");};
+        auto timing=[&](const diagnostics::TimingAggregate& a){return playing&&a.mean&&a.p95?(state->advanced?std::format(L"{:.1f} / {:.1f}",*a.mean,*a.p95):ms(a.mean)):std::wstring(L"未测");};
         auto fps=[&](double value){return playing&&!f.rateWindowReady?std::wstring(L"采样中"):std::format(L"{:.1f} fps",value);};
         write(L"实时处理状态",12,8,width-24,24,13,textColor);
+        write(state->advanced?L"收起详情 −":L"展开详情 +",width-96,8,84,24,10,secondary);
         const int half=(width-24)/2;
-        write(xess?L"输出提交 · XeSS SDK":L"处理产出",12,36,half,20,10,secondary);
-        write(s.capture?L"软件总延迟":L"软件驻留时间",12+half,36,half,20,10,secondary);
-        write(fps(xess?f.xessSdkSubmitFps:f.outputCompletedFps),12,57,half,28,18,textColor);
+        write(xess?L"呈现提交 · XeSS SDK":L"实际呈现提交",12,36,half,20,10,secondary);
+        write(s.capture?L"软件延迟 · 平均":L"软件驻留 · 平均",12+half,36,half,20,10,secondary);
+        write(fps(xess?f.xessSdkSubmitFps:f.presentSubmitFps),12,57,half,28,18,textColor);
         write(playing?ms(f.softwareLatencyMs):L"未测",12+half,57,half,28,18,textColor);
         std::vector<std::pair<std::wstring,std::wstring>> rows;
-        rows.emplace_back(L"呈现提交",fps(xess?f.xessSdkSubmitFps:f.presentSubmitFps));
-        rows.emplace_back(L"源帧处理",fps(f.sourceCompletedFps));
-        rows.emplace_back(xess?L"补帧完成":L"有效补帧",xess?L"SDK内部不可测":fps(f.validGeneratedFps));
-        rows.emplace_back(L"正常播放速度",playing?std::format(L"{:.2f} x",s.playbackSpeed):L"未测");
+        rows.emplace_back(L"同一延迟 · P95",playing?ms(f.softwareLatencyP95Ms):L"未测");
+        rows.emplace_back(L"请求目标（非实测）",s.nominalSourceFps>0?std::format(L"{:.1f} fps",s.nominalSourceFps*(s.captureHalfRate?.5:1)*s.applied.multiplier):L"未确定");
+        std::wstring progress=!playing?s.status:s.applying?L"正在应用设置":s.fgBudgetLimited?L"部分补帧未达截止时间":L"播放中";
+        if(playing&&!s.applying&&s.remotePlay){
+            const auto now=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()/100;
+            const auto old=[&](int64_t stamp){return stamp>0&&now-stamp>10000000;};const auto& r=s.remoteStream;
+            if(old(r.lastVideo100ns))progress=L"等待 PS5 视频输入";
+            else if(old(r.decodeStarted100ns))progress=L"解码调用尚未返回";
+            else if(old(r.lastDecoded100ns))progress=r.video.waitingForIdr?L"等待关键帧恢复":L"收到视频，等待解码输出";
+            else if(f.lastSubmit100ns>f.lastReady100ns&&old(f.lastSubmit100ns))progress=L"等待 GPU 完成观测";
+            else if(old(f.lastSubmit100ns))progress=L"已解码，增强提交停顿";
+            else if(old(f.lastPresent100ns))progress=L"GPU已就绪，等待呈现";
+        }
+        rows.emplace_back(L"状态",progress);
+        if(!s.capture)rows.emplace_back(L"媒体播放速度",playing?std::format(L"{:.2f} x",s.playbackSpeed):L"未测");
         if(!s.capture&&!s.image){
             rows.emplace_back(L"预览状态",!playing?L"未运行":s.previewSkipped?std::format(L"已跳帧 {}",s.previewSkipped):s.fgBudgetLimited?L"补帧预算不足":L"正常");
             if(s.xessGenerationSuppressed)rows.emplace_back(L"XeSS补帧",L"欠速暂停生成 · 实验");
         }
-        rows.emplace_back(L"输入",s.capture?std::format(L"{:.1f} fps",s.captureFps):L"文件 / 图片");
-        rows.emplace_back(L"总延迟 P95",playing?ms(f.softwareLatencyP95Ms):L"未测");
-        rows.emplace_back(L"采集覆盖 / 补帧过期",std::format(L"{} / {}",f.counters.mailboxOverwritten,f.counters.generatedExpiredAfterEval));
-        rows.emplace_back(L"链路耗时 · ms",L"均值 / P95");
-        rows.emplace_back(L"取帧 / 解码",timing(f.cpuTiming[size_t(diagnostics::CpuStage::Decode)]));
-        rows.emplace_back(L"命令槽等待",timing(f.cpuTiming[size_t(diagnostics::CpuStage::SlotWait)]));
-        rows.emplace_back(L"图提交",timing(f.cpuTiming[size_t(diagnostics::CpuStage::Submit)]));
+        rows.emplace_back(L"输入",s.remotePlay?std::format(L"PS5 · {:.1f} fps",s.remoteStream.receivedFps):s.capture?std::format(L"采集 · {:.1f} fps",s.captureFps):L"文件 / 图片");
+        rows.emplace_back(L"链路耗时",state->advanced?L"均值 / P95 · ms":L"最近一秒平均");
+        rows.emplace_back(s.remotePlay?L"① PS5实际解码":L"① 文件取帧 / 解码",s.remotePlay?ms(s.remoteStream.decodeMeanMs):timing(f.cpuTiming[size_t(diagnostics::CpuStage::Decode)]));
+        if(s.remotePlay)rows.emplace_back(L"解码后等待增强",timing(f.cpuTiming[size_t(diagnostics::CpuStage::DecodedQueue)]));
         const diagnostics::GpuStage stages[]={diagnostics::GpuStage::Color,diagnostics::GpuStage::Sr,diagnostics::GpuStage::Flow,diagnostics::GpuStage::Nr,diagnostics::GpuStage::Residual,diagnostics::GpuStage::FgBatch,diagnostics::GpuStage::Blit};
-        const wchar_t* names[]={L"输入颜色",L"超分 SR",L"光流队列区间",L"NR",L"残差合成",L"补帧 FG",L"输出 blit"};
+        const wchar_t* names[]={L"② 输入颜色",L"③ 超分 SR",L"④ 光流队列区间",L"⑤ NR 增强",L"⑥ 残差合成",L"⑦ 补帧 FG",L"⑧ 输出合成"};
         for(size_t i=0;i<std::size(stages);++i){const auto& sample=s.metrics.gpu[size_t(stages[i])];
             const auto value=xess&&stages[i]==diagnostics::GpuStage::FgBatch?L"SDK内部不可测":sample.state==diagnostics::SampleState::NotExecuted?L"未执行":timing(f.gpuTiming[size_t(stages[i])]);
             rows.emplace_back(names[i],value);
         }
-        rows.emplace_back(L"GPU就绪等待",timing(f.cpuTiming[size_t(diagnostics::CpuStage::ReadyWait)]));
-        rows.emplace_back(L"呈现等待",timing(f.cpuTiming[size_t(diagnostics::CpuStage::DeadlineWait)]));
-        rows.emplace_back(L"Present调用",timing(f.cpuTiming[size_t(diagnostics::CpuStage::Present)]));
+        rows.emplace_back(L"⑨ 等待显示时间",timing(f.cpuTiming[size_t(diagnostics::CpuStage::DeadlineWait)]));
+        rows.emplace_back(L"⑩ Present提交",timing(f.cpuTiming[size_t(diagnostics::CpuStage::Present)]));
+        rows.emplace_back(L"统计口径",L"并行阶段有重叠，不相加");
+        if(s.remotePlay){
+            const auto& r=s.remoteStream;
+            const auto now=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()/100;
+            auto age=[&](int64_t stamp){return stamp>0?ms(double(std::max<int64_t>(0,now-stamp))/10000):std::wstring(L"尚未收到");};
+            rows.emplace_back(L"PS5 串流",L"接收 → 解码 → 呈现");
+            rows.emplace_back(L"请求串流格式",std::format(L"{}x{} · {} fps · {}",r.requestedProfile.width,r.requestedProfile.height,r.requestedProfile.fps,r.requestedProfile.codec==remoteplay::Codec::H264?L"H.264":L"H.265"));
+            rows.emplace_back(L"请求码率",std::format(L"{:.1f} Mbps",r.requestedProfile.bitrateKbps/1000.0));
+            rows.emplace_back(L"实际解码方式",!r.decodeConfirmed?L"等待首帧":r.hardwareDecode?L"D3D12VA 硬解":r.decodeFallback?L"软件解码 · 硬解已回退":L"CPU 软件解码");
+            rows.emplace_back(L"接收 / 解码",std::format(L"{:.1f} / {:.1f} fps",r.receivedFps,r.decodedFps));
+            rows.emplace_back(L"增强完成",fps(f.sourceCompletedFps));
+            rows.emplace_back(L"原帧 / 生成帧呈现",xess?L"XeSS SDK 内部合计":std::format(L"{:.1f} / {:.1f} fps",f.realPresentFps,f.generatedPresentFps));
+            rows.emplace_back(L"视频有效码率",std::format(L"{:.2f} Mbps",r.videoMbps));
+            rows.emplace_back(L"接收后等待解码",ms(r.ingressWaitMeanMs));
+            rows.emplace_back(L"距上次视频接收",age(r.lastVideo100ns));
+            rows.emplace_back(L"距上次解码完成",age(r.lastDecoded100ns));
+            rows.emplace_back(L"距上次呈现",age(f.lastPresent100ns));
+            rows.emplace_back(L"串流端到端延迟",L"协议未提供，无法直接测量");
+            rows.emplace_back(L"关键帧恢复请求",std::to_wstring(r.video.idrRequests));
+            if(state->advanced){
+                rows.emplace_back(L"协议报告缺失源帧 · 累计",std::to_wstring(r.framesLost));
+                rows.emplace_back(L"参考恢复标记 · 累计",std::to_wstring(r.referenceRecoveryEvents));
+                rows.emplace_back(L"压缩队列丢弃 · 累计",std::to_wstring(r.video.dropped));
+                rows.emplace_back(L"解码邮箱覆盖 · 累计",std::to_wstring(s.remotePlaySkipped));
+                rows.emplace_back(L"FEC 成功 / 实时 RTT",L"当前接口未提供有效测量");
+            }
+        }
+        if(state->advanced){
+        rows.emplace_back(L"GPU完成产出",fps(f.outputCompletedFps));
+        rows.emplace_back(L"源帧处理完成",fps(f.sourceCompletedFps));
+        rows.emplace_back(L"有效生成（含过期）",xess?L"SDK内部不可测":fps(f.validGeneratedFps));
+        rows.emplace_back(L"采集覆盖 / 补帧过期",std::format(L"{} / {}",f.counters.mailboxOverwritten,f.counters.generatedExpiredAfterEval));
+        rows.emplace_back(L"命令槽等待",timing(f.cpuTiming[size_t(diagnostics::CpuStage::SlotWait)]));
+        rows.emplace_back(L"CPU图提交",timing(f.cpuTiming[size_t(diagnostics::CpuStage::Submit)]));
+        rows.emplace_back(L"GPU就绪等待（重叠）",timing(f.cpuTiming[size_t(diagnostics::CpuStage::ReadyWait)]));
         rows.emplace_back(f.pairCaptureCallbacks?L"A/B采集到达间隔":L"A/B软件取帧间隔",xess?L"SDK内部不可测":timing(f.pairTiming[size_t(diagnostics::PairTiming::ArrivalInterval)]));
         rows.emplace_back(L"生成呈现距A到达",xess?L"SDK内部不可测":timing(f.pairTiming[size_t(diagnostics::PairTiming::GeneratedFromA)]));
         rows.emplace_back(L"生成呈现距B到达",xess?L"SDK内部不可测":timing(f.pairTiming[size_t(diagnostics::PairTiming::GeneratedFromB)]));
@@ -86,6 +131,7 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         }
         if(!s.backendWarning.empty())rows.emplace_back(L"后端状态",s.backendWarning);
         if(!s.captureAudio.error.empty())rows.emplace_back(L"采集音频异常",s.captureAudio.error);
+        }
         std::vector<std::pair<std::wstring,std::wstring>> wrapped;
         const auto rowFont=makeFont(h,11,FW_NORMAL);const auto oldFont=SelectObject(paint.dc,rowFont);
         auto split=[&](std::wstring value,int room){
@@ -115,7 +161,7 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         }
         RestoreDC(paint.dc,saved);
         if(state->maxScroll&&available>0){const int thumb=std::max(18,available*available/(int(rows.size())*rowHeight));const int y=top+(available-thumb)*state->scroll/state->maxScroll;RECT r{dip(h,width-4),dip(h,y),dip(h,width-2),dip(h,y+thumb)};FillRect(paint.dc,&r,panelBrush());}
-        write(xess?L"截止代理Present返回；屏幕扫描未测":L"源帧进入软件至Present返回；非光子延迟",12,height-28,width-24,24,9,secondary);
+        write(s.remotePlay?L"完整视频收到→Present；不含主机/屏幕":xess?L"截止代理Present返回；屏幕扫描未测":L"源帧进入软件至Present返回；非光子延迟",12,height-28,width-24,24,9,secondary);
         return 0;
     }
     case WM_NCDESTROY:KillTimer(h,1);delete state;SetWindowLongPtrW(h,GWLP_USERDATA,0);break;

@@ -10,7 +10,9 @@ struct SessionInbox::Shared {
     HostTime origin=0;bool accepting=false;std::uint64_t stale=0;int error=0;
     VideoIngress video;AudioIngress audio;
     HostTime lastVideo=0,lastAudio=0,decodeStart=0,lastDecoded=0;
-    uint64_t decodedFrames=0,receivedBytes=0,framesLost=0,framesRecovered=0;
+    uint64_t decodedFrames=0,receivedBytes=0,framesLost=0,referenceRecoveryEvents=0;
+    bool hardwareDecode=false,decodeFallback=false,decodeConfirmed=false;
+    VideoProfile requestedProfile;
     struct Sample {HostTime time;double value;};
     std::deque<Sample> received,decoded,decodeTimes,ingressWait;
     static void add(std::deque<Sample>& q,HostTime now,double value){
@@ -26,7 +28,8 @@ SessionInbox::Token SessionInbox::begin(HostTime origin){
     if(s.state!=SessionState::Idle)throw std::logic_error("Stop and join previous backend before a new session");
     if(s.generation==std::numeric_limits<Generation>::max())throw std::overflow_error("Session generation exhausted");
     ++s.generation;s.video.begin(s.generation);s.audio.begin(s.generation);s.origin=origin;s.state=SessionState::Connecting;s.accepting=true;s.error=0;
-    s.lastVideo=s.lastAudio=s.decodeStart=s.lastDecoded=0;s.decodedFrames=s.receivedBytes=s.framesLost=s.framesRecovered=0;
+    s.lastVideo=s.lastAudio=s.decodeStart=s.lastDecoded=0;s.decodedFrames=s.receivedBytes=s.framesLost=s.referenceRecoveryEvents=0;
+    s.hardwareDecode=s.decodeFallback=s.decodeConfirmed=false;
     s.received.clear();s.decoded.clear();s.decodeTimes.clear();s.ingressWait.clear();
     return Token{shared_,s.generation};
 }
@@ -46,7 +49,9 @@ SessionInbox::Snapshot SessionInbox::snapshot()const{
     auto& s=*shared_;std::lock_guard l(s.mutex);Snapshot result{s.generation,s.state,s.origin,s.stale,s.error,s.video.stats(),s.audio.stats()};
     const auto now=monotonic100ns();result.lastVideo100ns=s.lastVideo;result.lastAudio100ns=s.lastAudio;
     result.decodeStarted100ns=s.decodeStart;result.lastDecoded100ns=s.lastDecoded;
-    result.decodedFrames=s.decodedFrames;result.receivedBytes=s.receivedBytes;result.framesLost=s.framesLost;result.framesRecovered=s.framesRecovered;
+    result.decodedFrames=s.decodedFrames;result.receivedBytes=s.receivedBytes;result.framesLost=s.framesLost;result.referenceRecoveryEvents=s.referenceRecoveryEvents;
+    result.hardwareDecode=s.hardwareDecode;result.decodeFallback=s.decodeFallback;result.decodeConfirmed=s.decodeConfirmed;
+    result.requestedProfile=s.requestedProfile;
     result.ratesReady=now-s.origin>=10000000;
     for(const auto& v:s.received)if(v.time>now-10000000){++result.receivedFps;result.videoMbps+=v.value*8/1000000;}
     for(const auto& v:s.decoded)if(v.time>now-10000000)++result.decodedFps;
@@ -62,7 +67,7 @@ void SessionInbox::frameDecoded(HostTime now){auto& s=*shared_;std::lock_guard l
 bool SessionInbox::Token::video(VideoSample sample)const noexcept{
     try{auto s=shared_.lock();if(!s)return false;std::lock_guard l(s->mutex);if(!s->current(generation_))return false;
         if(sample.generation!=generation_)return false;
-        if(sample.kind==SampleKind::AccessUnit){s->lastVideo=monotonic100ns();s->receivedBytes+=sample.payload.bytes().size();s->framesLost+=std::max(0,sample.framesLost);s->framesRecovered+=sample.referenceRecovered?1:0;Shared::add(s->received,s->lastVideo,double(sample.payload.bytes().size()));}
+        if(sample.kind==SampleKind::AccessUnit){s->lastVideo=monotonic100ns();s->receivedBytes+=sample.payload.bytes().size();s->framesLost+=std::max(0,sample.framesLost);s->referenceRecoveryEvents+=sample.referenceRecovered?1:0;Shared::add(s->received,s->lastVideo,double(sample.payload.bytes().size()));}
         const auto r=s->video.push(std::move(sample),monotonic100ns());return r==PushStatus::Accepted||r==PushStatus::ConfigStored;
     }catch(...){failed(-1001);return false;}
 }
@@ -83,4 +88,8 @@ void SessionInbox::Token::failed(int code)const noexcept{
         s->error=code;s->state=SessionState::Failed;s->accepting=false;s->video.close();s->audio.close();
     }catch(...){}
 }
+void SessionInbox::decoderBackend(bool hardware,bool fallback){
+    auto& s=*shared_;std::lock_guard lock(s.mutex);s.hardwareDecode=hardware;s.decodeFallback=fallback;s.decodeConfirmed=true;
+}
+void SessionInbox::streamProfile(VideoProfile profile){auto& s=*shared_;std::lock_guard lock(s.mutex);s.requestedProfile=profile;}
 } // namespace veyra::remoteplay

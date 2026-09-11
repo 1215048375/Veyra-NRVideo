@@ -10,12 +10,19 @@
 #include <format>
 #include <limits>
 #include <span>
+#ifdef _WIN32
+#include <d3d12.h>
+#endif
 
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/frame.h>
 #include <libavutil/mem.h>
 #include <libavutil/pixfmt.h>
+#include <libavutil/hwcontext.h>
+#ifdef _WIN32
+#include <libavutil/hwcontext_d3d12va.h>
+#endif
 }
 
 namespace veyra::source {
@@ -34,6 +41,10 @@ std::shared_ptr<AVFrame> cloneFrame(const AVFrame* frame)
 
 pipeline::SourcePixelFormat pixelFormatFromFrame(const AVFrame& frame)
 {
+    if(frame.format==AV_PIX_FMT_D3D12&&frame.hw_frames_ctx){
+        const auto* context=reinterpret_cast<const AVHWFramesContext*>(frame.hw_frames_ctx->data);
+        return context->sw_format==AV_PIX_FMT_NV12?pipeline::SourcePixelFormat::NV12:pipeline::SourcePixelFormat::Unknown;
+    }
     switch (frame.format) {
     case AV_PIX_FMT_NV12: return pipeline::SourcePixelFormat::NV12;
     case AV_PIX_FMT_P010: return pipeline::SourcePixelFormat::P010;
@@ -80,6 +91,7 @@ bool RemotePlaySource::connect(const RemotePlayConnectDesc& desc)
     request_.credentials.accountId = desc.request.credentials.accountId;
     request_.credentials.registrationKey = desc.request.credentials.registrationKey;
     request_.credentials.sessionKey = desc.request.credentials.sessionKey;
+    decodeMode_=desc.decodeMode;decodeDevice_=desc.decodeDevice;hardwareFallback_=false;
 
     origin100ns_ = static_cast<std::uint64_t>(remoteplay::monotonic100ns());
     try {
@@ -90,6 +102,7 @@ bool RemotePlaySource::connect(const RemotePlayConnectDesc& desc)
         return false;
     }
     auto token = inbox_->begin(static_cast<remoteplay::HostTime>(origin100ns_));
+    inbox_->streamProfile(request_.video);
     token_ = token; // Keep a second weak token; backend owns the moved copy.
     const auto started = backend_.start(request_, token);
     if (!started.ok) {
@@ -169,10 +182,38 @@ bool RemotePlaySource::openDecoder(remoteplay::Codec codec, std::uint32_t width,
     codecContext_->max_pixels = 1920LL * 1088;
     codecContext_->thread_count = 1;
     codecContext_->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+#ifdef _WIN32
+    if(decodeMode_!=RemotePlayConnectDesc::DecodeMode::Software&&!hardwareFallback_&&decodeDevice_){
+        AVBufferRef* device=av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D12VA);
+        int result=AVERROR(ENOMEM);
+        if(device){
+            auto* context=reinterpret_cast<AVHWDeviceContext*>(device->data);
+            auto* native=reinterpret_cast<AVD3D12VADeviceContext*>(context->hwctx);
+            native->device=decodeDevice_.get();native->device->AddRef();
+            result=av_hwdevice_ctx_init(device);
+        }
+        if(result>=0){
+            codecContext_->hw_device_ctx=device;
+            codecContext_->get_format=[](AVCodecContext*,const AVPixelFormat* formats){
+                for(auto p=formats;*p!=AV_PIX_FMT_NONE;++p)if(*p==AV_PIX_FMT_D3D12)return *p;
+                return AV_PIX_FMT_NONE;
+            };
+        }else{
+            av_buffer_unref(&device);hardwareFallback_=true;
+            if(decodeMode_==RemotePlayConnectDesc::DecodeMode::Hardware){
+                veyra::log::error("remoteplay-decode",std::format("requested hardware unavailable code={}; choose automatic or software",result));
+                avcodec_free_context(&codecContext_);return false;
+            }
+            veyra::log::warn("remoteplay-decode",std::format("D3D12VA device init failed code={}; falling back to software",result));
+        }
+    }
+#endif
     const int opened = avcodec_open2(codecContext_, decoder, nullptr);
     if (opened < 0) {
         veyra::log::error("remoteplay", std::format("FFmpeg remote decoder open failed code={}", opened));
+        const bool retrySoftware=codecContext_->hw_device_ctx&&!hardwareFallback_&&decodeMode_==RemotePlayConnectDesc::DecodeMode::Automatic;
         avcodec_free_context(&codecContext_);
+        if(retrySoftware){hardwareFallback_=true;return openDecoder(codec,width,height);}
         return false;
     }
     decoderFrame_ = av_frame_alloc();
@@ -183,7 +224,7 @@ bool RemotePlaySource::openDecoder(remoteplay::Codec codec, std::uint32_t width,
     decoderReady_ = true;
     info_.width = width;
     info_.height = height;
-    veyra::log::info("remoteplay", std::format("software decoder opened codec={} {}x{}", decoder->name, width, height));
+    veyra::log::info("remoteplay", std::format("{} decoder opened codec={} {}x{} (active format confirmed on first output)",codecContext_->hw_device_ctx?"D3D12VA":"software", decoder->name, width, height));
     return true;
 }
 
@@ -248,12 +289,17 @@ bool RemotePlaySource::drainDecoder(std::uint64_t sourceIndex, const pipeline::F
             packet.flags |= static_cast<pipeline::FrameFlags>(pipeline::FrameFlagBits::Resize);
         }
         info_.color = packet.colorInfo;
+        const bool hardware=decoderFrame_->format==AV_PIX_FMT_D3D12;
+        if(sequence_==1||info_.hardwareDecodeActive!=hardware)veyra::log::info("remoteplay-decode",std::format("actual={} pixelFormat={} {}x{} fallback={}",hardware?"D3D12VA":"software",decoderFrame_->format,decoderFrame_->width,decoderFrame_->height,hardwareFallback_));
+        info_.hardwareDecodeActive=hardware;
+        inbox_->decoderBackend(hardware,hardwareFallback_);
         packet.color.resource = nullptr;
         // The AU contract is one picture per input. Unknown/reused timestamps
         // are rejected above instead of fabricating timing for extra pictures.
         (void)sourcePacket;
         (void)sourceIndex;
         if (ready_.size() >= 4) return false;
+        packet.decodedHost100ns=remoteplay::monotonic100ns();
         ready_.push_back({std::move(clone), packet});
         inbox_->frameDecoded(remoteplay::monotonic100ns());
     }
@@ -351,6 +397,15 @@ SourceReadStatus RemotePlaySource::read(pipeline::FramePacket& out, const AVFram
     }
     if (!submitPacket(payload, sourceIndex, sourcePacket)) {
         flushDecoder();
+        if(codecContext_&&codecContext_->hw_device_ctx&&!hardwareFallback_){
+            if(decodeMode_==RemotePlayConnectDesc::DecodeMode::Hardware){
+                veyra::log::error("remoteplay-decode","requested hardware decode failed; choose automatic or software");
+                inbox_->decodeFailed(sample.generation);return SourceReadStatus::Error;
+            }
+            hardwareFallback_=true;avcodec_free_context(&codecContext_);decoderReady_=false;
+            info_.hardwareDecodeActive=false;
+            veyra::log::warn("remoteplay-decode","hardware decode failed; switching to software at next keyframe");
+        }
         inbox_->decodeFailed(sample.generation);
         return SourceReadStatus::Waiting;
     }
@@ -437,6 +492,7 @@ void RemotePlaySource::close() noexcept
     av_frame_free(&decoderFrame_);
     avcodec_free_context(&codecContext_);
     decoderReady_ = false;
+    decodeDevice_.reset();
     audioBlock_.reset(); audioAnchorSample_.reset(); audioOffset_ = 0;
     audioNextSample_ = 0; audioRate_ = 0; wireSequence_.reset();
     request_.credentials = remoteplay::PairingCredentials{};

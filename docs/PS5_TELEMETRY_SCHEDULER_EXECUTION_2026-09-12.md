@@ -19,3 +19,23 @@ FrameFlow记录最后GPU就绪、提交和Present；独立monitor每秒输出rem
 真实原版 NR SHA256 符合 AGENTS。产品构建 build-product.cmd 成功（logs/ps5-p1-lookahead-build2.log）。使用 logs/audio-jitter-20260911/4k30fps.mp4（8秒）和实际 RTX5070/NVIDIA runtime，--native --nr --fg-multiplier 2 --no-sr：25秒 smoke 退出0，240源帧、238生成，稳态每秒约60次提交、expiredGenerated=0、播放1.000x。logs/ps5-p1-file4k30-runtime.log。与修前用户4K30样本不是相同媒体，不宣称全部媒体60fps保证。
 
 15秒 --smoke-controls 同参数回归退出0：暂停→暂停seek到1秒→恢复完成，controlsStep=3，稳态提交约60fps，过期0，声音领先最终0.40ms、绝对偏差P95 0.88ms；logs/ps5-p1-controls-runtime.log。尚需长媒体、持续欠速、恢复、单帧EOF与XeSS回归，UI改动正在进行，硬解未实现。
+
+## P1追加：恢复预算、暂停跳转与清理
+
+加入FgRecoveryBudget：原帧耗时、FG追加GPU耗时、恢复预热分开；最近有效成本按墙钟过期并限制64样本，settings revision切换清空，普通时域重置不抹掉吞吐预测。欠速后250ms有界探测，连续两次可达截止时间的机会覆盖预热/有效生成，每次仍检查期限；不强制呈现过期帧。旧同步文件播放分支已删除，只有图片保留单次处理路径。取消原有陈旧混合预测字段。
+
+动态负载回归通过：生产Engine/实际NR+DLSS2X，测试专用owner工作延迟70ms（明确不是测量/伪造GPU耗时），约12呈现fps，56个源预览机会跳过，音频没有新增停机；移除延迟且不改settings revision，恢复至46呈现fps且19生成呈现fps时通过阈值，后续仍继续恢复。logs/ps5-dynamic-recovery.stdout.log，65秒watchdog，实际6.8秒exit0。FgRecoveryBudget确定性9项新增检查通过，logs/ps5-fg-budget-unit.log。
+
+文件欠速完整回归第一次有2项失败：4K输入的SR不执行（源/目标同4K，错误测试夹具），以及暂停seek显示位置未及时发布（产品问题）。改用1080p30→4K保证实际SR，并在Present成功时直接发布位置后，logs/ps5-final-file-overload2.stdout.log全部通过：NR/SR/FG实际执行、音频addedWaits=0、延迟有界、重建/播放seek/暂停seek/恢复/关闭通过。第一次失败保留于logs/ps5-final-file-overload.stdout.log，不能删除失败记录。XeSS原生4K文件音频连续性logs/ps5-final-xess-continuity.stdout.log退出0。
+
+## P2/P3：界面和真实硬解
+
+LiveStatusPanel首屏区分实际呈现、请求目标、软件平均/P95；默认阶段均值，详细产出/过期/等待/计数折叠。PS5输入取独立接收快照，不再用采集卡空计数。独立接收/解码/呈现年龄显示卡在哪一步，暂停和设置重建单独显示。TelemetryWindow也接PS5数据。
+
+PS5连接页新增自动（优先硬解）/CPU软件/D3D12VA硬件，重连生效，本地INI仅存解码选择、不写凭据。自动硬解失败在下一关键帧切CPU；明确选硬解失败报错，用户可改自动/软件，不伪装硬解。使用Engine同一D3D12设备，实际AV_PIX_FMT_D3D12输出进入现有图；每个硬件输入AVFrame由图双槽保留到消费fence完成，避免FFmpeg提前复用。正常路径无CPU像素下载。
+
+Native source H264/H265真实硬解、PTS重排通过；同片段软硬YUV逐像素对照max_error=0，颜色range/matrix/transfer与PTS一致，仅诊断测试允许readback。故意让FFmpeg格式选择失败，自动模式下一关键帧转软件与指定硬解报错分支都通过（预期日志-1094995529）。logs/ps5-p3-fallback-final.stdout.log，45秒上限，实际<1秒exit0。开发中颜色比较首次构建因Rational无operator==失败，改为to100ns比较，logs/ps5-p3-color-build.log保留；首次fallback夹具缺少独立config导致拒绝，补齐真实协议消息顺序后通过，logs/ps5-p3-fallback.stdout.log保留。
+
+生产图导入硬件纹理专项：VEYRA_TEST_FILE_HW_DECODE=1仅测试开关，4K30原生NR+DLSS2X文件，20秒smoke退出0，logs/ps5-p3-hardware-graph-runtime.log，稳态约60呈现/秒、过期0。此结果是本机解码+图验证，不是PS5网络实机硬解验收。旧probe中“descriptor后硬解约8fps”是历史诊断，不能覆盖本次实测。
+
+当前还有最后统一gate、UI快照、source gap/EOF等回归与最终文档存档。用户已追加授权：完成后正常关机，明天由用户实测PS5；不强杀游戏，不push/release。PS5原始冻结未重现，受限恢复与阶段诊断不能宣称彻底根因已确认。

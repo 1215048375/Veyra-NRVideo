@@ -36,6 +36,7 @@ struct PlayerSnapshot {
     uint64_t audioVideoWaits=0;
     bool audioEndpointRecovering=false;HRESULT audioEndpointError=S_OK;uint64_t audioEndpointRecoveries=0;
     double position=0,duration=0,fps=0,lateMs=0,lateP95Ms=0;
+    double nominalSourceFps=0;
     diagnostics::FrameMetrics metrics;
     std::optional<double> submissionFps;
     uint32_t flowPerf=0;int contentFps=0;

@@ -15,7 +15,7 @@ if(VEYRA_RP_FFMPEG_ROOT)
     target_compile_features(veyra_remoteplay_source_tests PRIVATE cxx_std_20)
     target_compile_definitions(veyra_remoteplay_source_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     target_include_directories(veyra_remoteplay_source_tests SYSTEM PRIVATE "${VEYRA_RP_FFMPEG_ROOT}/include")
-    target_link_libraries(veyra_remoteplay_source_tests PRIVATE veyra_remoteplay_chiaki
+    target_link_libraries(veyra_remoteplay_source_tests PRIVATE veyra_remoteplay_chiaki d3d12
         "${VEYRA_RP_FFMPEG_ROOT}/lib/avcodec.lib"
         "${VEYRA_RP_FFMPEG_ROOT}/lib/avutil.lib"
         "${VEYRA_RP_FFMPEG_ROOT}/lib/avformat.lib")

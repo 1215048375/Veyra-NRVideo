@@ -1666,3 +1666,7 @@ build-product/native-source/off-check成功；boundary默认与virtual、H264/H2
 
 ### 2026-09-12 文件FG提前增强节点
 按PS5_TELEMETRY_STALL_FG_DECODE_REPAIR_PLAN实施文件预览容量2的提前增强。实际4K30原生NR+DLSS2X测试和暂停seek回归均退出0，短媒体稳态约60呈现提交/秒，生成过期0，音频约1倍速。详细命令、日志和未验证边界见PS5_TELEMETRY_SCHEDULER_EXECUTION_2026-09-12.md。仍未完成全部修复，不发布。
+
+### 2026-09-12 PS5硬解/遥测与欠速恢复节点
+实现PS5自动/软件/硬解选择、实际D3D12VA纹理输出与GPU消费引用保留，自动失败回退及强制硬解报错；重做实时状态分组与PS5独立接收/解码/呈现统计。实现FG分成本预算、限频连续恢复探测，移除旧同步文件分支。详见PS5_TELEMETRY_SCHEDULER_EXECUTION_2026-09-12.md。
+产品ON/OFF和native source构建通过。真实H264/H265软硬对比max_error=0，故障回退注入通过；NR/SR/FG欠速、动态负载恢复、XeSS连续音频、输入中断与EOF回归通过。45秒4K30原生NR2X：1286源帧、1253生成，absLatenessP95=0.79ms，非所有帧必达目标的承诺。统一gate、最后UI验证和最终用户说明待完成；不发布。用户要求修复结束后正常关机，明天实测PS5。

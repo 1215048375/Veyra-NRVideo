@@ -689,6 +689,12 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     }
     uint32_t slot = 0;
     if (uploadFences_[parity] && !context_.waitForFenceValue(uploadFences_[parity])) return false;
+    hardwareInputFrames_[parity].reset();
+    if(frame->format==AV_PIX_FMT_D3D12){
+        auto* retained=av_frame_clone(frame);
+        if(!retained)return false;
+        hardwareInputFrames_[parity]=std::shared_ptr<AVFrame>(retained,[](AVFrame* value){av_frame_free(&value);});
+    }
     Status st = Status::Ok;
 
     // 1. Source NV12: D3D12VA texture directly (GPU) or CPU upload.
@@ -1282,6 +1288,7 @@ void EnhanceGraph::shutdown()
 {
     if (!initialized_ && !nrAdapter_ && !nvof_ && !srcRgba_) return;
     (void)ring_.drainQueue();(void)ring_.discardRecording();
+    for(auto& input:hardwareInputFrames_)input.reset();
     Status st = Status::Ok;
     if (nv12Ctx_ != nullptr) { sws_freeContext(nv12Ctx_); nv12Ctx_ = nullptr; }
 

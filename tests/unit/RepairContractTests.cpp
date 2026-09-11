@@ -102,6 +102,7 @@ int main(){
     rates.ready(60,true,3,0,7000000);
     const auto counted=rates.snapshot(10000000);
     check(counted.sourceCompletedFps==60&&counted.outputCompletedFps==100&&counted.validGeneratedFps==40&&counted.presentSubmitFps==90,"real60 plus valid40 yields output100 but present90; duplicate completion ignored");
+    check(counted.realPresentFps==60&&counted.generatedPresentFps==30,"source and generated presentation counts are independently measured");
     check(counted.counters.realReady==60&&counted.counters.fgReadyValid==40,"GPU-ready counts are independent of requested multiplier");
     rates.xessSubmitted(2,1,10000000);rates.xessSubmitted(1,0,10000000);
     check(rates.snapshot(10000000).xessSdkSubmitFps==3&&rates.snapshot(10000000).outputCompletedFps==100,"XeSS SDK submissions never enter measured GPU completions");

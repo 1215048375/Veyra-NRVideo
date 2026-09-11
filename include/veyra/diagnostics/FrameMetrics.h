@@ -6,7 +6,7 @@
 namespace veyra::diagnostics {
 enum class GpuStage { Color, Sr, Flow, Nr, Residual, Fg1, Fg2, Fg3, FgBatch, Blit, Count };
 enum class SampleState { NotExecuted, Pending, Measured, Unavailable };
-enum class CpuStage { Decode, Submit, SlotWait, ReadyWait, DeadlineWait, Present, Count };
+enum class CpuStage { Decode, Submit, SlotWait, ReadyWait, DeadlineWait, Present, DecodedQueue, Count };
 enum class PairTiming { ArrivalInterval, GeneratedFromA, GeneratedFromB, Count };
 enum class ResetStage { Drain, Destroy, Create, Warmup, FirstValid, Count };
 enum class ResetOutcome { InProgress, Completed, Failed, RolledBack, Cancelled };
@@ -43,6 +43,7 @@ struct FrameFlowMetrics {
     std::optional<double> slotReuseWaitMs,captureArrivalToPresentReturnMs,gpuReadyWaitMs,deadlineWaitMs;
     uint64_t slotReuseWaitCount=0;
     double validGeneratedFps=0,presentSubmitFps=0,sourceCompletedFps=0,outputCompletedFps=0,xessSdkSubmitFps=0;
+    double realPresentFps=0,generatedPresentFps=0;
     bool rateWindowReady=false;
     std::optional<double> softwareLatencyMs,softwareLatencyP95Ms,slotWaitPerFrameMs;
     uint64_t latencySamples=0;

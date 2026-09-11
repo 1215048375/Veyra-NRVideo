@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <stdexcept>
 #include <cmath>
+#include <d3d12.h>
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavutil/hwcontext.h>
 }
 extern "C" {
 #include <libavformat/avformat.h>
@@ -15,6 +17,7 @@ extern "C" {
 using namespace veyra;
 using namespace veyra::remoteplay;
 using namespace veyra::source;
+static bool testHardware=false;
 namespace veyra::source {
 struct RemotePlaySourceTestAccess {
 static void check(bool ok) { if(!ok) throw std::runtime_error("RemotePlay source regression failed"); }
@@ -22,6 +25,12 @@ static std::vector<uint8_t> bytes(const char* path) {
     std::ifstream f(path,std::ios::binary); return {std::istreambuf_iterator<char>(f),{}};
 }
 static void setup(RemotePlaySource& s) {
+    if(testHardware){
+        ID3D12Device* device=nullptr;
+        check(SUCCEEDED(D3D12CreateDevice(nullptr,D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device))));
+        s.decodeDevice_=std::shared_ptr<ID3D12Device>(device,[](auto* value){value->Release();});
+        s.decodeMode_=RemotePlayConnectDesc::DecodeMode::Hardware;
+    }
     s.origin100ns_=monotonic100ns();
     s.token_=s.inbox_->begin(static_cast<HostTime>(s.origin100ns_));
     s.token_->connected(); s.connected_=true;
@@ -65,6 +74,7 @@ static void splitTest(const char* prefix, Codec codec=Codec::H264) {
     std::cout<<(codec==Codec::H264?"SPLIT_H264":"SPLIT_H265")<<" config_accepted="<<ca<<" au_accepted="<<fa<<" read_status="<<int(r)
         <<" frame="<<bool(frame)<<" session_state="<<int(s.sessionSnapshot().state)<<"\n";
     check(ca && fa && r==SourceReadStatus::Frame && frame && s.sessionSnapshot().state==SessionState::Streaming);
+    if(testHardware){check(frame->format==AV_PIX_FMT_D3D12&&s.info().hardwareDecodeActive);std::cout<<"REAL_D3D12_DECODE_PASS codec="<<int(codec)<<"\n";}
     // Decode across the real 16-bit wrap, retaining a valid increasing PTS.
     const auto firstPts=p.pts.to100ns();
     VideoSample wrapped;wrapped.generation=s.token_->generation();wrapped.width=1280;wrapped.height=720;wrapped.codec=codec;
@@ -105,12 +115,56 @@ static void reorder(const char* path) {
     check(n==12 && outputs==10 && mismatches==0);
     std::cout<<"REORDER input="<<n<<" output_before_eof="<<outputs<<" wrong_pts="<<mismatches<<"\n";
 }
+static void compareDecode(const char* prefix,Codec codec){
+    RemotePlaySource software,hardware;
+    testHardware=false;setup(software);testHardware=true;setup(hardware);
+    const auto config=bytes((std::string(prefix)+"-config.bin").c_str());
+    auto data=config;const auto au=bytes((std::string(prefix)+"-au.bin").c_str());data.insert(data.end(),au.begin(),au.end());
+    pipeline::FramePacket stamp;stamp.pts={0,60};
+    for(auto* source:{&software,&hardware}){
+        check(source->openDecoder(codec,1280,720));stamp.colorInfo=source->info_.color;
+        check(source->submitPacket(data,0,stamp)&&source->ready_.size()==1);
+    }
+    auto* cpu=software.ready_.front().frame.get();auto* gpu=hardware.ready_.front().frame.get();
+    AVFrame* downloaded=av_frame_alloc();check(downloaded&&av_hwframe_transfer_data(downloaded,gpu,0)>=0);
+    // Diagnostic-only readback: compare identical coded YUV before the common
+    // colour shader. Product hardware playback never performs this transfer.
+    check(cpu->width==downloaded->width&&cpu->height==downloaded->height&&downloaded->format==AV_PIX_FMT_NV12&&cpu->format==AV_PIX_FMT_YUV420P);
+    int maxError=0;
+    for(int y=0;y<cpu->height;++y)for(int x=0;x<cpu->width;++x)maxError=std::max(maxError,std::abs(int(cpu->data[0][y*cpu->linesize[0]+x])-int(downloaded->data[0][y*downloaded->linesize[0]+x])));
+    for(int y=0;y<cpu->height/2;++y)for(int x=0;x<cpu->width/2;++x)for(int c=0;c<2;++c)maxError=std::max(maxError,std::abs(int(cpu->data[c+1][y*cpu->linesize[c+1]+x])-int(downloaded->data[1][y*downloaded->linesize[1]+2*x+c])));
+    av_frame_free(&downloaded);check(maxError<=2);
+    check(software.ready_.front().packet.pts.to100ns()==hardware.ready_.front().packet.pts.to100ns());
+    check(software.info_.color.matrix==hardware.info_.color.matrix&&software.info_.color.range==hardware.info_.color.range&&software.info_.color.transfer==hardware.info_.color.transfer);
+    std::cout<<"SOFT_HARD_YUV_COMPARE_PASS codec="<<int(codec)<<" max_error="<<maxError<<" diagnostic_readback_only=1\n";
+}
+static void fallback(const char* prefix){
+    auto data=bytes((std::string(prefix)+"-config.bin").c_str());const auto au=bytes((std::string(prefix)+"-au.bin").c_str());data.insert(data.end(),au.begin(),au.end());
+    for(bool automatic:{true,false}){
+        RemotePlaySource s;testHardware=true;setup(s);s.decodeMode_=automatic?RemotePlayConnectDesc::DecodeMode::Automatic:RemotePlayConnectDesc::DecodeMode::Hardware;
+        check(s.openDecoder(Codec::H264,1280,720));
+        // Force FFmpeg format negotiation to fail, without changing runtime
+        // binaries or adding a product-only fake hardware-success path.
+        s.codecContext_->get_format=[](AVCodecContext*,const AVPixelFormat*){return AV_PIX_FMT_NONE;};
+        VideoSample config;config.generation=s.token_->generation();config.width=1280;config.height=720;config.codec=Codec::H264;config.arrival100ns=monotonic100ns();config.kind=SampleKind::CodecConfig;config.payload=PaddedBytes::copy(bytes((std::string(prefix)+"-config.bin").c_str()));check(s.token_->video(std::move(config)));
+        VideoSample sample;sample.generation=s.token_->generation();sample.width=1280;sample.height=720;sample.codec=Codec::H264;sample.arrival100ns=monotonic100ns();sample.wireFrameIndex=1;sample.payload=PaddedBytes::copy(au);
+        check(s.token_->video(std::move(sample)));pipeline::FramePacket packet;const AVFrame* frame=nullptr;
+        const auto result=s.read(packet,&frame);
+        if(automatic){
+            check(result==SourceReadStatus::Waiting&&s.hardwareFallback_&&!s.codecContext_);
+            check(s.openDecoder(Codec::H264,1280,720)&&!s.codecContext_->hw_device_ctx);
+            packet.pts={1,60};check(s.submitPacket(data,2,packet)&&s.ready_.size()==1&&!s.info_.hardwareDecodeActive);
+        }else check(result==SourceReadStatus::Error);
+        std::cout<<"HARDWARE_FAILURE_POLICY_PASS automatic="<<automatic<<"\n";
+    }
+}
 };
 }
 int main(int argc,char**argv) {
-    if(argc!=3&&argc!=4)return 2;
-    std::cout<<"SOURCE_TEST: real FFmpeg, direct inbox injection; NO PS5/WASAPI/GPU validation\n";
-    try{RemotePlaySourceTestAccess::pcm();RemotePlaySourceTestAccess::splitTest(argv[1]);RemotePlaySourceTestAccess::reorder(argv[2]);if(argc==4)RemotePlaySourceTestAccess::splitTest(argv[3],Codec::H265);}
+    if(argc!=3&&argc!=4&&argc!=5)return 2;
+    testHardware=argc==5&&std::string_view(argv[4])=="--hardware";
+    std::cout<<"SOURCE_TEST: real FFmpeg, direct inbox injection; no PS5/WASAPI/presentation validation; hardware="<<testHardware<<"\n";
+    try{RemotePlaySourceTestAccess::pcm();RemotePlaySourceTestAccess::splitTest(argv[1]);RemotePlaySourceTestAccess::reorder(argv[2]);if(argc>=4)RemotePlaySourceTestAccess::splitTest(argv[3],Codec::H265);if(testHardware){RemotePlaySourceTestAccess::compareDecode(argv[1],Codec::H264);RemotePlaySourceTestAccess::compareDecode(argv[3],Codec::H265);RemotePlaySourceTestAccess::fallback(argv[1]);}}
     catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 2;}
     std::cout<<"REMOTEPLAY_SOURCE_REGRESSIONS_PASS\n"; return 0;
 }

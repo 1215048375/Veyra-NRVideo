@@ -298,6 +298,9 @@ private:
     std::weak_ptr<FrameLease> realLeases_[2],generatedLeases_[6];
     uint32_t nextListSlot_ = 0;
     uint64_t uploadFences_[2] = {};
+    // FFmpeg may recycle a hardware surface as soon as its AVFrame is freed.
+    // Retain each imported surface until our last consumer fence completes.
+    std::shared_ptr<AVFrame> hardwareInputFrames_[2];
     core::SceneCadenceAnalyzer scene_;
     std::vector<uint8_t> previousLuma_;
     double prevPtsMs_ = -1.0;

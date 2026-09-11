@@ -15,10 +15,12 @@ public:
         std::uint64_t staleCallbacks=0;int errorCode=0;
         VideoQueueStats video;AudioQueueStats audio;
         HostTime lastVideo100ns=0,lastAudio100ns=0,decodeStarted100ns=0,lastDecoded100ns=0;
-        uint64_t decodedFrames=0,receivedBytes=0,framesLost=0,framesRecovered=0;
+        uint64_t decodedFrames=0,receivedBytes=0,framesLost=0,referenceRecoveryEvents=0;
         double receivedFps=0,decodedFps=0,videoMbps=0;
         std::optional<double> decodeMeanMs,decodeP95Ms,ingressWaitMeanMs;
         bool ratesReady=false;
+        bool hardwareDecode=false,decodeFallback=false,decodeConfirmed=false;
+        VideoProfile requestedProfile;
     };
     class Token {
     public:
@@ -48,6 +50,8 @@ public:
     void decodeStarted(HostTime now,HostTime arrival);
     void decodeFinished(HostTime now);
     void frameDecoded(HostTime now);
+    void decoderBackend(bool hardware,bool fallback);
+    void streamProfile(VideoProfile profile);
 private:
     std::shared_ptr<Shared> shared_;
 };
