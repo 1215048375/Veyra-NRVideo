@@ -45,7 +45,6 @@ class NgxCoreHost;
 class DlssSrBackend;
 class VideoSrBackend;
 class DlssFgBackend;
-class FrucBackend;
 class DlssNrRuntimeAdapter;
 class NvOfSession;
 }
@@ -283,8 +282,6 @@ private:
     std::unique_ptr<guidance::AmdOpticalFlow> amdOf_;
     std::unique_ptr<ngx::VideoSrBackend> videoSrBackend_;
     std::unique_ptr<ngx::DlssFgBackend> fgBackend_;
-    std::unique_ptr<ngx::FrucBackend> frucBackend_;
-    std::array<bool,6> frucRepeated_{};
     NVSDK_NGX_Parameter* ngxParams_ = nullptr;
     NVSDK_NGX_Handle* nrHandle_ = nullptr;
     uint64_t nrResult_ = 0;

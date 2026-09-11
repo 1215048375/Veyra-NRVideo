@@ -20,7 +20,7 @@ void refresh(){auto s=engine->snapshot();const wchar_t* names[]={L"上传/颜色
     o<<L"\r\n最近一秒链路统计：均值 / P95 ms，n为样本数\r\n";
     for(size_t i=0;i<f.gpuTiming.size();++i){const auto& a=f.gpuTiming[i];o<<names[i]<<L"："<<value(a.mean)<<L" / "<<value(a.p95)<<L" n="<<a.samples<<L"\r\n";}
     o<<L"\r\n当前统计窗口：会话 "<<f.latest.sessionId<<L" / 设置 "<<f.latest.frame.settingsRevision<<L" / epoch "<<f.latest.frame.epoch
-     <<L"\r\nDLSS/FRUC 有效生成 "<<value(f.validGeneratedFps)<<L" fps / Present 提交 "<<value(f.presentSubmitFps)<<L" fps"
+     <<L"\r\n有效生成 "<<value(f.validGeneratedFps)<<L" fps / Present 提交 "<<value(f.presentSubmitFps)<<L" fps"
      <<L"\r\n实际源帧完成 "<<value(f.sourceCompletedFps)<<L" fps / 总处理产出 "<<value(f.outputCompletedFps)<<L" fps"
      <<L"\r\nXeSS SDK送呈现 "<<value(f.xessSdkSubmitFps)<<L" fps（不能与处理产出混加）"
      <<L"\r\n软件首尾延迟均值 "<<value(f.softwareLatencyMs)<<L" / P95 "<<value(f.softwareLatencyP95Ms)<<L" ms；有效样本 "<<f.latencySamples

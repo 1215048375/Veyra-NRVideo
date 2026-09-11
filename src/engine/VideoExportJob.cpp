@@ -22,7 +22,7 @@ namespace { std::string utf8(const std::wstring& s){const int n=WideCharToMultiB
 bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOptions options,bool hevc,std::atomic<bool>& cancel,const std::function<void(double,const std::wstring&)>& progress,unsigned maxFrames,const std::function<bool()>& frameBoundary,const std::function<void(const ExportCounts&)>& counts){
     if(std::filesystem::exists(output)||std::filesystem::exists(output+L".partial")){progress(0,L"目标或partial文件已存在，请使用其他名称");return false;}
     if(options.fg&&options.settings.frameGenerationBackend==FrameGenerationBackend::XeSS){
-        progress(0,L"XeSS 帧生成目前仅支持预览；导出请选择 DLSS、FRUC 或关闭补帧");
+        progress(0,L"XeSS 帧生成目前仅支持预览；导出请选择 DLSS 或关闭补帧");
         veyra::log::warn("export","XeSS FG export rejected: public XeSS swapchain API has no encoder texture output contract");
         return false;
     }

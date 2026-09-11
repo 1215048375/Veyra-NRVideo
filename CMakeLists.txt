@@ -85,17 +85,10 @@ add_library(veyra_ngx STATIC
   src/ngx/DlssSrBackend.cpp
   src/ngx/VideoSrBackend.cpp
   src/ngx/DlssFgBackend.cpp
-  src/ngx/FrucBackend.cpp
 )
   veyra_apply_warnings(veyra_ngx)
   target_compile_features(veyra_ngx PUBLIC cxx_std_20)
   target_link_libraries(veyra_ngx PUBLIC veyra_base veyra_gfx d3d11)
-  add_executable(veyra_fruc_worker src/ngx/FrucWorker.cpp)
-  veyra_apply_warnings(veyra_fruc_worker)
-  target_compile_features(veyra_fruc_worker PRIVATE cxx_std_20)
-  target_link_libraries(veyra_fruc_worker PRIVATE veyra_base d3d11 dxgi)
-  target_include_directories(veyra_fruc_worker PRIVATE "${VEYRA_NVOF_SDK_ROOT}/NvOFFRUC/Interface" "${VEYRA_NVOF_SDK_ROOT}/NvOFFRUC/NvOFFRUCSample/cudart_header")
-  add_dependencies(veyra_ngx veyra_fruc_worker)
   target_include_directories(veyra_ngx PUBLIC
     "${VEYRA_DLSS_SDK_ROOT}/include")
   # NVIDIA ships the static core shim as MT-Release; the _dbg variants match
@@ -487,11 +480,6 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_include_directories(veyra_repair_parameter_tests PRIVATE ${FFMPEG_INCLUDE_DIRS})
   target_compile_definitions(veyra_repair_parameter_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN VEYRA_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(veyra_repair_parameter_tests PRIVATE veyra_pipeline veyra_sinks veyra_nvof)
-  add_executable(veyra_fruc_tests tests/integration/FrucTests.cpp)
-  target_include_directories(veyra_fruc_tests PRIVATE ${FFMPEG_INCLUDE_DIRS})
-  target_compile_features(veyra_fruc_tests PRIVATE cxx_std_20)
-  target_compile_definitions(veyra_fruc_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN VEYRA_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
-  target_link_libraries(veyra_fruc_tests PRIVATE veyra_pipeline veyra_sinks veyra_nvof)
   add_executable(veyra_repair_fg_tests tests/integration/RepairFgTests.cpp)
   add_executable(veyra_motion_validation_tests tests/integration/MotionValidationTests.cpp)
   add_executable(veyra_depth_response_tests tests/integration/DepthResponseTests.cpp)

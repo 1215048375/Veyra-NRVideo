@@ -6,7 +6,7 @@
 #include <string_view>
 #include "veyra/pipeline/ResolutionPlan.h"
 namespace veyra::engine {
-enum class FrameGenerationBackend { Dlss, Fruc, XeSS };
+enum class FrameGenerationBackend { Dlss, XeSS, Fruc = Dlss };
 enum class FlowQuality { Performance, Balanced, Quality };
 enum class OpticalFlowBackend { Nvidia, AmdFidelityFx };
 enum class ContentRate { Transport, Auto, Fps30, Fps50, Fps60, Capture60To30 };
@@ -14,7 +14,6 @@ enum class AudioSyncMode { Automatic, Manual, Off };
 constexpr std::string_view frameGenerationBackendName(FrameGenerationBackend backend) {
     switch(backend) {
     case FrameGenerationBackend::Dlss: return "DLSS";
-    case FrameGenerationBackend::Fruc: return "FRUC";
     case FrameGenerationBackend::XeSS: return "XeSS";
     }
     return "unknown";

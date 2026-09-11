@@ -5,7 +5,7 @@
 #include <optional>
 
 namespace veyra::engine {
-// A pair is indivisible: NGX MFG indices and FRUC instances share history.
+// A pair is indivisible: NGX MFG indices share history.
 // Admit while at least its last generated timestamp can still be useful.
 inline bool admitLiveFg(int64_t now, int64_t lastDeadline, double elapsedMs,
                         std::optional<double> completionP95Ms, double presentP95Ms) {

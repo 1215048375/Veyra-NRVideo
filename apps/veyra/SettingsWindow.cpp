@@ -150,7 +150,7 @@ case WM_CREATE:{window=h;font=makeFont(h);items.clear();displayedBackendWarning.
     button(L"还原默认",211,-1,12,86);
     add(L"STATIC",L"补帧与运动估算",1103,0,1,12,12,-1,30);
     add(L"STATIC",L"补帧方式",1111,0,1,12,50,-1,24);
-    combo(208,1,78,{L"DLSS 帧生成",L"NVIDIA FRUC · 视频补帧",L"Intel XeSS · 实验显示补帧 2X"});
+    combo(208,1,78,{L"DLSS 帧生成",L"Intel XeSS · 实验显示补帧 2X"});
     add(L"STATIC",L"补帧倍率",1112,0,1,12,122,-1,24);
     combo(202,1,150,{L"关闭补帧",L"2X · 一张中间帧",L"3X · 两张中间帧",L"4X · 三张中间帧"});
     add(L"STATIC",L"运动估算",1113,0,1,12,194,-1,24);
@@ -160,7 +160,6 @@ case WM_CREATE:{window=h;font=makeFont(h);items.clear();displayedBackendWarning.
     add(L"STATIC",L"内容节奏",1114,0,1,12,354,-1,24);
     combo(205,1,382,{L"采用源时间戳",L"自动识别内容节奏",L"识别30fps内容节奏",L"识别50fps内容节奏",L"识别60fps内容节奏",L"采集60→30fps处理（PS5 30帧）"});
     add(L"STATIC",L"AMD FidelityFX 为运动估算；不是 AMD NR。XeSS 为实验预览 2X，不支持导出。",1110,0,1,12,426,-1,72);
-    add(L"STATIC",L"FRUC倍率越高，耗时越多。光流档位用于NR/DLSS；FRUC内部自动控制。补帧需等待下一张源帧，倍率不等于实测显示帧率。",1104,0,1,12,506,-1,88);
     add(L"STATIC",L"采集音频同步",1115,0,1,12,608,-1,26);
     combo(216,1,644,{L"自动同步 · 软件估算",L"手动声音偏移",L"关闭补偿"});
     add(L"STATIC",L"声音偏移 ms",1116,0,1,12,692,160,28);
@@ -207,7 +206,7 @@ case WM_COMMAND:{const int id=LOWORD(wp);if(!populating&&((id>=202&&id<=205||id=
 case WM_HSCROLL:{int id=GetDlgCtrlID(reinterpret_cast<HWND>(lp));if(id>=600&&id<612){int index=id-600;float v=float(SendMessageW(reinterpret_cast<HWND>(lp),TBM_GETPOS,0,0))/(index>=4&&index<=6?1:100);if(index==3&&v<0)v=-1;std::wostringstream o;o<<std::setprecision(4)<<v;putText(100+index,o.str().c_str());}return 0;}
 case WM_TIMER:{auto s=controller->snapshot();syncProtection(enhancementEnabled?s.desired.protection:configuredSettings.protection);if(enhancementEnabled&&!dirty&&displayedSettings!=s.desired)populate(s.desired);check(200,enhancementEnabled&&s.desired.nr?BST_CHECKED:BST_UNCHECKED);check(201,enhancementEnabled&&s.desired.sr?BST_CHECKED:BST_UNCHECKED);std::wostringstream o;if(!s.running&&!s.frames&&s.transport!=engine::TransportState::Opening)o<<L"未打开媒体 · 设置待启用\n";else{
     o<<L"期望版本 "<<s.desired.revision<<L" / 已应用 "<<s.applied.revision<<(s.applying?L" · 应用中":L"");
-    const wchar_t* backend=s.applied.frameGenerationBackend==engine::FrameGenerationBackend::XeSS?L"XeSS":s.applied.frameGenerationBackend==engine::FrameGenerationBackend::Fruc?L"FRUC":L"DLSS";
+    const wchar_t* backend=s.applied.frameGenerationBackend==engine::FrameGenerationBackend::XeSS?L"XeSS":L"DLSS";
     o<<L"\n"<<backend<<L" · "<<(s.applied.multiplier<=1?L"补帧关闭":s.fgActive?L"补帧运行":L"等待有效补帧");
     if(!s.backendWarning.empty())message(s.backendWarning);
     else if(!displayedBackendWarning.empty())message(L"设置已应用");

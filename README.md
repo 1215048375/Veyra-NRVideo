@@ -4,14 +4,14 @@ Windows 本地视频播放器与画面增强工作台。它把视频播放、采
 
 Veyra is a native Windows video player and image-enhancement workspace. It combines local playback, capture-card preview, image enhancement, and video export in one application. Daily mode is built for watching; Professional mode exposes enhancement, frame generation, comparison, diagnostics, and export tools.
 
-> 这是 `0.0.1` 的早期实验版本。便携包包含经哈希和签名校验的 Runtime Pack，让兼容 RTX 环境可直接启用对应增强；其中 NR、FRUC 和 DLSSG 属于社区实验运行时，不代表 NVIDIA 官方合作、认证或支持。This is an early experimental build. The portable package includes a hash- and signature-verified Runtime Pack so compatible RTX systems can enable its available enhancements directly. NR, FRUC, and DLSSG are community-experimental runtimes and do not imply NVIDIA endorsement, certification, or support.
+> 这是 `0.0.1` 的早期实验版本。便携包包含经哈希和签名校验的 Runtime Pack，让兼容 RTX 环境可直接启用对应增强；NR 和 DLSSG 属于社区实验运行时，不代表 NVIDIA 官方合作、认证或支持。This is an early experimental build. The portable package includes a hash- and signature-verified Runtime Pack. NR and DLSSG are community-experimental runtimes and do not imply NVIDIA endorsement, certification, or support.
 
 ## 功能 / Features
 
 - 默认日常模式：大画面、底部播放控制、打开媒体、采集卡、音量、字幕和全屏。
 - 专业模式：带展开动画的参数工作台；同一播放会话不中断。
 - H.264 / HEVC 视频、PNG / JPEG 图片、DirectShow / UVC 采集设备。
-- 可选 DLSS SR、RTX Video SR、实验性 NVIDIA NR、NVOF 运动置信度，以及 DLSS / FRUC 补帧后端。
+- 可选 DLSS SR、RTX Video SR、实验性 NVIDIA NR、NVOF 运动置信度，以及 DLSS / XeSS 补帧后端。
 - 实验性 Intel XeSS 显示补帧 2X，以及 AMD FidelityFX 光流运动估算；XeSS 当前只用于预览。
 - 原图与增强结果的即时对比、分屏拖动、专业模式内的画面缩放和性能诊断。
 - PNG / JPEG 图片导出，D3D12 NVENC H.264 / HEVC 视频导出。
@@ -20,7 +20,7 @@ Veyra is a native Windows video player and image-enhancement workspace. It combi
 - Daily mode by default: a large picture area with playback, media opening, capture, volume, subtitles, and fullscreen controls.
 - Professional mode: an expanding settings workspace without interrupting the current session.
 - H.264 / HEVC video, PNG / JPEG images, and DirectShow / UVC capture devices.
-- Optional DLSS SR, RTX Video SR, experimental NVIDIA NR, NVOF motion confidence, plus DLSS and FRUC frame-generation backends.
+- Optional DLSS SR, RTX Video SR, experimental NVIDIA NR, NVOF motion confidence, plus DLSS and XeSS frame-generation backends.
 - Experimental Intel XeSS 2X display frame generation and AMD FidelityFX optical-flow estimation; XeSS is currently preview-only.
 - Same-frame comparison, split view, preview zoom in Professional mode, and performance diagnostics.
 - PNG / JPEG image export and D3D12 NVENC H.264 / HEVC video export.
@@ -42,7 +42,7 @@ Veyra is a native Windows video player and image-enhancement workspace. It combi
 3. In Daily mode, choose Open Video / Image or Capture, then play, pause, adjust volume, or enter fullscreen.
 4. Select Switch to Professional Mode to expand the complete workspace. This is where enhancement, super resolution, frame generation, presets, comparison, and export are configured.
 
-The package includes a version-pinned Runtime Pack in `runtime_local/nvidia`. The release builder generates `release-runtime-manifest.json` and verifies DLL hashes and signatures; NR and FRUC also validate their pinned identities at startup. If driver, hardware, or initialization compatibility fails, Veyra disables only the affected enhancement while the player, capture, and export paths remain available. Do not replace these DLLs or copy files from games, driver caches, or unknown sources.
+The package includes a version-pinned Runtime Pack in `runtime_local/nvidia`. The release builder generates `release-runtime-manifest.json` and verifies DLL hashes and signatures; NR also validates its pinned identity at startup. If driver, hardware, or initialization compatibility fails, Veyra disables only the affected enhancement while the player, capture, and export paths remain available. Do not replace these DLLs or copy files from games, driver caches, or unknown sources.
 
 ### 从源码构建 / Build from source
 
@@ -101,9 +101,9 @@ Video / image / capture card
 
 当前修复以最新用户要求、`AGENTS.md`、对应 `docs` 修复方案和 `docs/WORKLOG.md` 为准。早期 `loop/` 状态、控制哈希与 Phase 队列已归档，不再作为开发前置门禁。Current work follows the latest task, `AGENTS.md`, its repair plan and `docs/WORKLOG.md`; the legacy Loop state and control-hash gates are historical only.
 
-当前修复进度：[后端、帧率、链路延迟与音画同步实施记录](docs/CONTINUATION_REPAIR_IMPLEMENTATION_2026-09-10.md)。开发版已加入集中实时产出统计、XeSS切换修正、受控采集音频同步及FRUC重置后错图修复；高倍率FRUC的性能、AMD NR本体和实体采集验收仍未完成。这里的开发改动尚未更新已发布的0.0.1用户包。
+当前修复进度：[后端、帧率、链路延迟与音画同步实施记录](docs/CONTINUATION_REPAIR_IMPLEMENTATION_2026-09-10.md)。开发版已加入集中实时产出统计、XeSS切换修正及受控采集音频同步；FRUC 已从产品移除，AMD NR 本体和实体采集验收仍未完成。这里的开发改动尚未更新已发布的0.0.1用户包。
 
-Current development progress is recorded in the linked implementation log. Changes include completed-output telemetry, corrected XeSS switching, controlled capture-audio synchronization, and FRUC reset correctness. High-multiplier FRUC performance, AMD NR integration, and physical capture acceptance remain unfinished. These changes have not been published as an update to the 0.0.1 package.
+Current development progress is recorded in the linked implementation log. Changes include completed-output telemetry, corrected XeSS switching, and controlled capture-audio synchronization. FRUC has been removed from the product; AMD NR integration and physical capture acceptance remain unfinished. These changes have not been published as an update to the 0.0.1 package.
 
 | Path | Purpose |
 | --- | --- |

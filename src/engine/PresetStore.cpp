@@ -24,7 +24,10 @@ bool PresetStore::parse(const std::string& data,std::vector<UserPreset>& out,std
         if(version>=2){int enabled;if(!(in>>enabled>>s.protection.featherPixels)||enabled<0||enabled>1)return false;s.protection.enabled=enabled!=0;
             for(auto& q:s.protection.regions)if(!(in>>q.left>>q.top>>q.right>>q.bottom))return false;}
         if(version>=3&&!(in>>s.videoSrQuality))return false;
-        if(version>=4){int backend;if(!(in>>backend)||backend<0||backend>(version>=6?2:1))return false;s.frameGenerationBackend=static_cast<FrameGenerationBackend>(backend);}
+        if(version>=4){int backend;if(!(in>>backend)||backend<0||backend>(version>=6?2:1))return false;
+            // Version 4-5 used value 1 for FRUC; preserve its intent as DLSS after removal.
+            if(version<6 && backend==1) backend=0;
+            s.frameGenerationBackend=static_cast<FrameGenerationBackend>(backend);}
         if(version>=5){uint32_t target;if(!(in>>target))return false;s.srTarget=static_cast<pipeline::SrTarget>(target);}
         if(version>=6){int backend,half;if(!(in>>backend>>half)||half<0||half>1)return false;s.opticalFlowBackend=static_cast<OpticalFlowBackend>(backend);s.amdFlowHalfResolution=half!=0;}
         if(version>=7){int sync;if(!(in>>sync>>s.audioOffsetMs))return false;s.audioSync=static_cast<AudioSyncMode>(sync);}
