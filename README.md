@@ -41,6 +41,8 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片和采集
 升级时先退出旧版，解压到新目录。需要保留设置时，复制旧目录下的 `runtime_local/*.v1` 与 `veyra.ini`；不要用旧目录整体覆盖新版运行组件。
 
 ## 使用教程
+如果这个项目对你有所帮助，欢迎请作者喝杯咖啡！你的支持是持续维护的最大动力
+<img width="828" height="1124" alt="7baf2084b2310a7e685c5355bf9307d3" src="https://github.com/user-attachments/assets/1438c8f7-08b4-46fd-ad5e-6d83c46cdec2" />
 
 ### 视频与图片
 
