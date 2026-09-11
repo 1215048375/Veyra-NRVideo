@@ -9,6 +9,7 @@
 #include "veyra/engine/TimingWindow.h"
 #include "veyra/engine/FrameFlowWindow.h"
 #include "veyra/engine/LiveFgAdmission.h"
+#include "veyra/engine/RealtimePreviewScheduling.h"
 #include "veyra/engine/CaptureHalfRate.h"
 #include "veyra/source/MediaFileSource.h"
 #include "veyra/source/CaptureCardSource.h"
@@ -174,6 +175,16 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             };
             PresentationScheduler liveTimeline;uint64_t submitted=0,expired=0;std::deque<int64_t> submissionTimes;
             DeadlineWait deadlineWait;
+            // Realtime file preview scheduling (P2/P3): expired decoded
+            // candidates lose their enhancement opportunity against the audio
+            // master clock; FG admission predicts pair completion; XeSS-FG
+            // generation is suppressed over stable intervals when sustained
+            // late. Export/images/paused frames never enter these paths.
+            uint64_t previewSkippedTotal=0,previewSkippedSinceSubmit=0;
+            bool previewSkipSinceProcess=false;
+            TimingWindow fileCompletion;uint64_t fileCompletionRevision=0;
+            XessGenerationGate xessGenerationGate;
+            double playbackSpeedLastPts=0;Clock::time_point playbackSpeedLastWall{};
             CaptureHalfRate captureSampler;
             FrameLineageTracker lineageTracker;
             auto completedProcessing=[&](pipeline::FrameIdentity id){std::lock_guard lock(mutex_);if(snapshot_.applied.revision==id.settingsRevision)++snapshot_.processedCompleted;};
@@ -267,7 +278,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             auto drainLivePresentation=[&]{if(liveScheduler){++presentationDrains;liveScheduler->cancel();pollCompletions();pendingCompletions.clear();}};
             auto advanceLive=[&]{if(liveScheduler){pollCompletions();if(stop_||paused_)liveScheduler->cancel();else liveScheduler->advance(host100ns());}};
             auto waitLive=[&]{const auto due=liveScheduler?liveScheduler->wakeAt():0;deadlineWait.slice(due>host100ns()?std::min(1.0,double(due-host100ns())/10000):1.0);};
-            uint64_t metricsRevision=options.settings.revision,metricsEpoch=0,statsSourceBase=0;
+            uint64_t metricsRevision=options.settings.revision,metricsEpoch=0,metricsWindowEpoch=0,statsSourceBase=0;
             uint64_t slotWaitBase=ring.cpuWaitCount(),submitBase=ring.submitCount();double slotWaitMsBase=ring.cpuWaitMilliseconds();
             std::shared_ptr<FrameCompletionRates> completionRates;
             source::CaptureMetrics captureFlowBase{},captureFlowLast{};
@@ -276,6 +287,22 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             OnExit stopPresentation{[&]{liveScheduler.reset();finishReset(stop_?diagnostics::ResetOutcome::Cancelled:diagnostics::ResetOutcome::Failed);std::lock_guard lock(mutex_);if(snapshot_.sessionId==runSessionId){if(frameFlow)snapshot_.metrics.flow=frameFlow->snapshot(host100ns());activeFlow_.reset();}}};
             const bool injectSourceGap=options.captureReplayForTest&&GetEnvironmentVariableW(L"VEYRA_TEST_REPLAY_SOURCE_GAP",nullptr,0)>0;
             std::optional<Clock::time_point> sourceGapUntil;
+            // Master media clock for file playback: the audio device clock when
+            // mapped, a monotonic anchor without audio, and its frozen value
+            // while an endpoint recovers. Steady-state video scheduling reads
+            // this clock; it never waits on audio coverage.
+            auto nowMs=[&](){
+                if(!audioStarted)return anchorMs+std::chrono::duration<double,std::milli>(Clock::now()-anchor).count();
+                publishAudioStatus();const double a=audio.mediaTimeMs();
+                if(std::isfinite(a)){lastAudioClockMs=a;audioClockExhausted=false;return a;}
+                // A disconnected endpoint freezes the shared media clock. Only a
+                // fully exhausted audio stream may hand its tail to the wall clock.
+                if(audioPipe.clockExhausted()){
+                    if(!audioClockExhausted){audioClockExhausted=true;audioTailAnchor=Clock::now();}
+                    return lastAudioClockMs+std::chrono::duration<double,std::milli>(Clock::now()-audioTailAnchor).count();
+                }
+                return lastAudioClockMs;
+            };
             while(!stop_){
                 if(audioStarted)publishAudioStatus();
                 if(audioStarted&&injectFileEndpointLoss&&!fileEndpointLossInjected&&frames>=20){audioPipe.requestEndpointLossForTest();fileEndpointLossInjected=true;}
@@ -411,14 +438,43 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 if(isImage)pkt.sequence=1;
                 if(!rereadCached)++sourceFrames;
                 const double decodeMs=elapsedMs(decodeStart);decodeTimes.add(decodeMs);
-                const double pts=isImage?0:pkt.pts.toDouble()*1000;
+                double pts=isImage?0:pkt.pts.toDouble()*1000;
                 if(isCapture&&frames==0){anchor=Clock::now();anchorMs=pts;}
                 if(pts+0.1<discardBefore)continue;
+                // Realtime preview candidates: decode stays ordered and
+                // reference-lossless; an expired candidate loses only its
+                // enhancement/display opportunity (plan §4.3). The open/seek
+                // anchor, paused seek preview and settings replay never drop.
+                if(!isCapture&&!isImage&&!transaction&&!fileAwaitingVideo&&!seekPreviewPending){
+                    const double previewIntervalMs=double(liveSourceInterval100ns(pkt.duration,activeSource->info().averageFps))/10000.0;
+                    bool previewSourceFailed=false;
+                    while(!stop_&&previewCandidateExpired(nowMs(),pts,previewIntervalMs)){
+                        pipeline::FramePacket next;const AVFrame* raw=nullptr;
+                        const auto rs=activeSource->read(next,&raw);
+                        if(rs==source::SourceReadStatus::Eos)break; // final decoded candidate is kept
+                        if(rs!=source::SourceReadStatus::Frame||next.pts.isUnknown()){previewSourceFailed=true;break;}
+                        const double nextPts=next.pts.toDouble()*1000;
+                        if(nextPts+0.1<discardBefore)continue; // post-seek decode residue keeps dropping
+                        pkt=next;frame=raw;
+                        pts=nextPts;
+                        ++previewSkippedTotal;++previewSkippedSinceSubmit;previewSkipSinceProcess=true;
+                    }
+                    if(previewSourceFailed){status(L"视频解码或时间戳错误",true);break;}
+                }
                 if(frame!=cachedFrame){av_frame_free(&cachedFrame);cachedFrame=av_frame_clone(frame);cachedPacket=pkt;}
                 const auto processStart=Clock::now();
                 const auto captureArrival=pkt.arrivalHost100ns?pkt.arrivalHost100ns:host100ns();
                 const auto sourceArrival=pkt.arrivalHost100ns?pkt.arrivalHost100ns:std::chrono::duration_cast<std::chrono::nanoseconds>(decodeStart.time_since_epoch()).count()/100;
-                const bool historyReset=reset||pipeline::breaksHistory(pkt.flags);
+                // A skipped preview candidate breaks the temporal span the
+                // motion/NR/FG history was built on: the next processed frame
+                // is an explicit history reset (plan §4.4). It is a SOFT
+                // break: metrics windows, completion predictions and reset
+                // lifecycle records continue (only hard resets — open/seek/
+                // pause/discontinuity/settings — reopen them).
+                const bool hardFrameReset=reset||pipeline::breaksHistory(pkt.flags);
+                const bool previewOnlyReset=!hardFrameReset&&previewSkipSinceProcess;
+                if(hardFrameReset)++metricsWindowEpoch;
+                const bool historyReset=hardFrameReset||previewSkipSinceProcess;
                 if(historyReset){++historyResets;++presentationGeneration;}
                 // A mailbox Drop must reset SR/NR/flow/FG history, but draining
                 // the two-batch presenter here discarded completed real frames.
@@ -439,9 +495,25 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                         return admitLiveFg(host100ns(),liveTimeline.deadline(lastGenerated),elapsedMs(processStart),predictionEpoch==batch.identity.epoch?completionP95:std::nullopt,presentP95);
                     };
                 }
+                // File playback: same pair admission, but deadlines are PTS
+                // deadlines on the audio master clock. A pair whose last
+                // generated timestamp can no longer be reached spends no FG
+                // Evaluate; the real frame keeps its normal cadence (plan §4.1).
+                if(!isCapture&&!isImage&&!rereadCached&&!transaction&&options.fg&&options.settings.frameGenerationBackend!=FrameGenerationBackend::XeSS){
+                    const bool predictionValid=fileCompletionRevision==options.settings.revision&&fileCompletion.size()>=8;
+                    const std::optional<double> completionP95=predictionValid?std::optional<double>(fileCompletion.p95()):std::nullopt;
+                    const double presentP95=predictionValid?presentTimes.p95():0.0;
+                    admitFg=[&,historyReset,completionP95,presentP95](const pipeline::FrameBatch& batch){
+                        const auto interval=liveSourceInterval100ns(pkt.duration,activeSource->info().averageFps);
+                        const auto a=(historyReset||batch.b100ns<=batch.a100ns||batch.b100ns-batch.a100ns>10000000)?batch.b100ns-interval:batch.a100ns;
+                        const auto lastGenerated=pipeline::FrameBatch::interpolate(a,batch.b100ns,options.fgMultiplier-1,options.fgMultiplier);
+                        return admitLiveFg(int64_t(nowMs()*10000.0),lastGenerated,elapsedMs(processStart),completionP95,presentP95);
+                    };
+                }
                 uint64_t processWaitBase=0,processSubmitBase=0;double processWaitMsBase=0,processSlotWaitMs=0;
                 if(resetRecord&&resetRecord->epoch==0)resetStageStart=Clock::now();
                 bool processed=false;{processWaitBase=ring.cpuWaitCount();processWaitMsBase=ring.cpuWaitMilliseconds();processSubmitBase=ring.submitCount();processed=!injectedReject&&graph.process(frame,pts,historyReset,out,pkt.sequence,&pkt.colorInfo,comparisonMode_!=0,admitFg);processSlotWaitMs=ring.cpuWaitMilliseconds()-processWaitMsBase;}
+                previewSkipSinceProcess=false;
                 if(!processed){
                     if(transaction){
                         ring.drainQueue();out={};presenter.close();graph.shutdown();options=PlayerOptions::from(previous);
@@ -456,7 +528,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 if(veyra::log::verboseFrameLogs())veyra::log::info("source-identity",std::format("source={} totalRead={} graphProcessed={} cached={} revision={} nvofStandalone={}",pkt.sequence,sourceFrames,frames+1,rereadCached,options.settings.revision,gd.enableNvofStandalone));
                 reset=false;hasOutput=true;
                 const auto processDone=Clock::now();
-                if(!resetRecord&&out.historyReset){
+                if(!resetRecord&&out.historyReset&&!previewOnlyReset){
                     resetStart=processStart;resetStageStart=processStart;
                     resetRecord=diagnostics::FrameFlowMetrics::ResetRecord{};resetRecord->sessionId=runSessionId;resetRecord->settingsRevision=out.batch.identity.settingsRevision;resetRecord->epoch=out.batch.identity.epoch;resetRecord->sourceFrameId=out.batch.identity.sourceFrameId;resetRecord->reason=static_cast<uint8_t>(diagnostics::resetCause(pkt.flags,pendingResetCause,out.detectedReset));
                     resetRecord->stageMs[size_t(diagnostics::ResetStage::Drain)]=0.0;resetRecord->stageMs[size_t(diagnostics::ResetStage::Destroy)]=0.0;resetRecord->stageMs[size_t(diagnostics::ResetStage::Create)]=0.0;
@@ -468,11 +540,16 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     markResetStage(diagnostics::ResetStage::Warmup);
                 }
                 pendingResetCause=pipeline::ResetReason::None;
-                if(!frameFlow||metricsRevision!=options.settings.revision||metricsEpoch!=out.batch.identity.epoch){
+                if(!frameFlow||metricsRevision!=options.settings.revision||metricsEpoch!=metricsWindowEpoch){
                     const bool settingsChanged=metricsRevision!=options.settings.revision;
-                    metricsRevision=options.settings.revision;metricsEpoch=out.batch.identity.epoch;statsStart=Clock::now();statsSourceBase=sourceFrames-uint64_t(!rereadCached);
+                    metricsRevision=options.settings.revision;metricsEpoch=metricsWindowEpoch;statsStart=Clock::now();statsSourceBase=sourceFrames-uint64_t(!rereadCached);
                     slotWaitBase=processWaitBase;slotWaitMsBase=processWaitMsBase;submitBase=processSubmitBase;
                     captureAges.clear();scheduleWaits.clear();processTimes.clear();presentTimes.clear();decodeTimes.clear();gpuReadyTimes.clear();for(auto& window:gpuStageTimes)window.clear();lastGpuSampleEnd={};latenessSamples.clear();submissionTimes.clear();submitted=expired=0;
+                    // Admission predictions and the XeSS gate must not carry
+                    // samples across a settings revision (new backend/dimensions);
+                    // soft preview-skip history breaks do NOT reopen them.
+                    if(settingsChanged){xessGenerationGate.reset();presenter.setXessGenerationSuppressed(false);}
+                    playbackSpeedLastWall={};
                     if(liveScheduler){liveStats={};liveStats.identity=out.batch.identity;liveSubmissions.clear();liveAges.clear();liveWaits.clear();livePresent.clear();liveReady.clear();liveCompletion.clear();}
                     if(settingsChanged||!completionRates)completionRates=std::make_shared<FrameCompletionRates>(host100ns());
                     frameFlow=std::shared_ptr<FrameFlowWindow>(new FrameFlowWindow(runSessionId,out.batch.identity,host100ns(),completionRates),[](FrameFlowWindow* window){logFrameFlow(window->snapshot(monotonic100ns()),"closed");delete window;});
@@ -493,7 +570,8 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 frameFlow->cpu(diagnostics::CpuStage::Decode,decodeMs,host100ns());
                 frameFlow->cpu(diagnostics::CpuStage::Submit,processMs,host100ns());
                 frameFlow->cpu(diagnostics::CpuStage::SlotWait,processSlotWaitMs,host100ns());
-                frameFlow->update([&](auto& m){m.latest.frame=out.batch.identity;m.latest.batchId=out.batch.batchId;m.latest.readyFence=std::max(out.videoFenceValue,out.genFenceValue);m.counters.sourceAccepted+=!rereadCached;++m.counters.realSubmitted;m.counters.fgCandidate+=out.fgCandidates;m.counters.fgEvaluated+=out.fgEvaluated;m.counters.fgSkippedBeforeEval+=out.fgSkippedBeforeEval;if(!out.hasGenerated)m.counters.fgWarmup+=out.fgEvaluated;});
+                frameFlow->update([&](auto& m){m.latest.frame=out.batch.identity;m.latest.batchId=out.batch.batchId;m.latest.readyFence=std::max(out.videoFenceValue,out.genFenceValue);m.counters.sourceAccepted+=!rereadCached;++m.counters.realSubmitted;m.counters.previewSkippedBeforeGraph+=previewSkippedSinceSubmit;m.counters.fgCandidate+=out.fgCandidates;m.counters.fgEvaluated+=out.fgEvaluated;m.counters.fgSkippedBeforeEval+=out.fgSkippedBeforeEval;if(!out.hasGenerated)m.counters.fgWarmup+=out.fgEvaluated;});
+                previewSkippedSinceSubmit=0;
                 if(transaction||frames==0){
                     std::lock_guard lock(mutex_);snapshot_.captureHalfRate=halfRate;
                     veyra::log::info("capture-rate",std::format("revision={} requested60To30={} active={} transportFps={} originalPtsPreserved=true",options.settings.revision,options.settings.content==ContentRate::Capture60To30,halfRate,isCapture?activeSource->info().averageFps:0));
@@ -507,18 +585,6 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     liveTimeline.reset(out.batch.identity.epoch,out.batch.b100ns,captureArrival,options.fg?duration100ns:0,paceSourcePts);
                 }
                 if(!isImage&&!isCapture&&frames==0){anchor=Clock::now();anchorMs=lastAudioClockMs=pts;}
-                auto nowMs=[&](){
-                    if(!audioStarted)return anchorMs+std::chrono::duration<double,std::milli>(Clock::now()-anchor).count();
-                    publishAudioStatus();const double a=audio.mediaTimeMs();
-                    if(std::isfinite(a)){lastAudioClockMs=a;audioClockExhausted=false;return a;}
-                    // A disconnected endpoint freezes the shared media clock. Only a
-                    // fully exhausted audio stream may hand its tail to the wall clock.
-                    if(audioPipe.clockExhausted()){
-                        if(!audioClockExhausted){audioClockExhausted=true;audioTailAnchor=Clock::now();}
-                        return lastAudioClockMs+std::chrono::duration<double,std::milli>(Clock::now()-audioTailAnchor).count();
-                    }
-                    return lastAudioClockMs;
-                };
                 double frameWaitMs=0,framePresentMs=0;
                 double gpuWaitMs=0;
                 if(liveScheduler){
@@ -596,6 +662,14 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 if(!rereadCached&&!isImage)completedProcessing(out.batch.identity);
                 gpuWaitMs=elapsedMs(readyStart);gpuReadyTimes.add(gpuWaitMs);
                 frameFlow->cpu(diagnostics::CpuStage::ReadyWait,gpuWaitMs,host100ns());
+                // Completion-time prediction for the NEXT pair's admission:
+                // samples span submit -> GPU-ready. Cost depends on backend and
+                // dimensions, so the window is keyed to the settings revision
+                // only — not to seek/preview-skip temporal epochs.
+                if(!isImage&&fileCompletionRevision!=options.settings.revision){
+                    fileCompletion.clear();fileCompletionRevision=options.settings.revision;
+                }
+                if(!isImage)fileCompletion.add(elapsedMs(processStart));
                 // WASAPI prefill is allowed before video; device-clock playback
                 // is not. Align only open/seek, never discard audio to catch up
                 // with a slow graph during ordinary playback or settings edits.
@@ -614,6 +688,11 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     if(generated&&item.validity!=pipeline::GenerationValidity::Valid){++handled;continue;}
                     if(generated&&comparisonMode_!=0)continue;
                     if(isCapture&&generated&&liveTimeline.expired(item.pts100ns,host100ns(),100000)){++expired;++handled;frameFlow->update([](auto& m){++m.counters.generatedExpiredAfterEval;});continue;}
+                    // File preview: a generated result whose PTS the master
+                    // clock already passed by the shared 10ms grace replays
+                    // stale media; skip its present but still count it as
+                    // computed-but-not-shown GPU work (plan §4.1).
+                    if(!isCapture&&generated&&comparisonMode_==0&&previewGeneratedExpired(nowMs(),item.pts100ns/10000.0)){++expired;++handled;frameFlow->update([](auto& m){++m.counters.generatedExpiredAfterEval;});continue;}
                     const double itemPtsMs=item.pts100ns/10000.0;
                     if(audioStarted&&!fileAwaitingVideo)audioPipe.videoReady(itemPtsMs);
                     const auto waitStart=Clock::now();
@@ -634,13 +713,22 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                         // XeSS owns generated frames inside its swapchain. The
                         // engine sees only real B frames, so its audio coverage
                         // must last a SOURCE interval, never a hidden subframe.
-                        const bool callerPresentsGenerated=options.fg&&!graph.xessEnabled()&&comparisonMode_==0;
+                        // A pair whose FG was not evaluated/generated covers
+                        // the whole source interval to the next real frame.
+                        const bool callerPresentsGenerated=options.fg&&!graph.xessEnabled()&&comparisonMode_==0&&out.hasGenerated;
                         double nextPtsMs=itemPtsMs+intervalMs/(callerPresentsGenerated?options.fgMultiplier:1);
                         for(uint32_t next=i+1;next<out.batch.count;++next){const auto& candidate=out.batch.frames[next];
                             if(candidate.kind!=pipeline::FrameKind::Generated||(candidate.validity==pipeline::GenerationValidity::Valid&&comparisonMode_==0)){nextPtsMs=candidate.pts100ns/10000.0;break;}}
                         if(audioStarted){audioPipe.videoPresented(nextPtsMs);audioPipe.setPaused(paused_);}
                         if(fileAwaitingVideo)veyra::log::info("audio-sync",std::format("video anchor presented ptsMs={:.3f} audioPtsMs={:.3f} nextPtsMs={:.3f} paused={} (Present return, scanout unmeasured)",itemPtsMs,audio.mediaTimeMs(),nextPtsMs,paused_.load()));
                         fileAwaitingVideo=false;anchor=Clock::now();anchorMs=itemPtsMs;
+                        // Sustained lateness suppresses SDK-owned XeSS-FG
+                        // generation over a stable interval; the presenter's
+                        // history reset covers the later re-enable.
+                        if(graph.xessEnabled()&&presenter.xessActive()&&xessGenerationGate.observe(nowMs()-itemPtsMs,intervalMs)){
+                            presenter.setXessGenerationSuppressed(xessGenerationGate.suppressed());
+                            veyra::log::info("xess-fg-gate",std::format("event={} revision={} lateMs={:.3f} intervalMs={:.3f}",xessGenerationGate.suppressed()?"suppress":"resume",options.settings.revision,nowMs()-itemPtsMs,intervalMs));
+                        }
                     }
                     if(presenter.submittedCount()>before&&!generated&&!rereadCached)frameFlow->latency(std::chrono::duration_cast<std::chrono::nanoseconds>(decodeStart.time_since_epoch()).count()/100,host100ns());
                     if(presenter.submittedCount()>before&&generated&&lineage)frameFlow->generatedLatency(*lineage,host100ns());
@@ -675,6 +763,19 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 measured.sourceFrames=measured.flow.counters.sourceAccepted;measured.validGenerated=measured.flow.counters.fgReadyValid;measured.submitted=measured.flow.counters.realPresented+measured.flow.counters.generatedPresented;measured.expired=measured.flow.counters.generatedExpiredAfterEval;
                 const double ageP95=liveScheduler?completed.ageP95:captureAges.p95(),waitP95=liveScheduler?completed.waitP95:scheduleWaits.p95(),presentP95=liveScheduler?completed.presentP95:presentTimes.p95();
                 ++frames;{std::lock_guard lock(mutex_);snapshot_.metrics=measured;snapshot_.position=pts/1000;snapshot_.frames=sourceFrames;snapshot_.generated=graphStats.fgGeneratedFrames;snapshot_.lateMs=lateness;snapshot_.lateP95Ms=sorted.empty()?0:sorted[size_t((sorted.size()-1)*0.95)];
+                    // Measured playback speed: media-PTS advance per wall time
+                    // over ~1s windows (1.0 = normal speed), resampled on seek.
+                    const auto speedNow=Clock::now();
+                    if(playbackSpeedLastWall==Clock::time_point()||pts+0.5<playbackSpeedLastPts){playbackSpeedLastPts=pts;playbackSpeedLastWall=speedNow;}
+                    else if(std::chrono::duration<double>(speedNow-playbackSpeedLastWall).count()>=0.9){
+                        const double wallS=std::chrono::duration<double>(speedNow-playbackSpeedLastWall).count();
+                        const double mediaS=(pts-playbackSpeedLastPts)/1000.0;
+                        if(mediaS>=0)snapshot_.playbackSpeed=mediaS/wallS;
+                        playbackSpeedLastPts=pts;playbackSpeedLastWall=speedNow;
+                    }
+                    snapshot_.previewSkipped=measured.flow.counters.previewSkippedBeforeGraph;
+                    snapshot_.fgBudgetLimited=measured.flow.counters.fgSkippedBeforeEval>0;
+                    snapshot_.xessGenerationSuppressed=graph.xessEnabled()&&presenter.xessGenerationSuppressed();
                     snapshot_.nrActive=graph.nrEnabled()&&graphStats.nrEvaluateCount>0;
                     snapshot_.audioRebuffering=audioRebuffering;
                     snapshot_.audioVideoWaits=audioPipe.videoWaitCount();
@@ -689,7 +790,8 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 const auto gpuP95=[&](diagnostics::GpuStage stage){return gpuStageTimes[size_t(stage)].p95();};
                 if(Clock::now()>=nextTimingLog){const auto [retained,overwritten]=Logger::instance().frameTraceSize();
                     veyra::log::info("frame-trace",std::format("retained={} capacity=8192 overwritten={} (records available in diagnostic preview)",retained,overwritten));}
-                if(!isCapture&&Clock::now()>=nextTimingLog){veyra::log::info("player-timing",std::format("revision={} decodeP95Ms={:.3f} graphSubmitP95Ms={:.3f} gpuReadyP95Ms={:.3f} presentP95Ms={:.3f} gpuColorP95Ms={:.3f} gpuSrP95Ms={:.3f} gpuFlowP95Ms={:.3f} gpuNrP95Ms={:.3f} gpuResidualP95Ms={:.3f} gpuFgBatchP95Ms={:.3f} gpuBlitP95Ms={:.3f} slotWaits={} slotWaitMs={:.3f} commandSubmits={} displaySubmits={} expiredGenerated={} processed={}",options.settings.revision,decodeTimes.p95(),processTimes.p95(),gpuReadyTimes.p95(),presentTimes.p95(),gpuP95(diagnostics::GpuStage::Color),gpuP95(diagnostics::GpuStage::Sr),gpuP95(diagnostics::GpuStage::Flow),gpuP95(diagnostics::GpuStage::Nr),gpuP95(diagnostics::GpuStage::Residual),gpuP95(diagnostics::GpuStage::FgBatch),gpuP95(diagnostics::GpuStage::Blit),slotWaitCount,slotWaitMilliseconds,commandSubmits,submitted,expired,sourceFrames-statsSourceBase));nextTimingLog=Clock::now()+std::chrono::seconds(1);}
+                if(!isCapture&&Clock::now()>=nextTimingLog){const double playbackSpeedNow=[&]{std::lock_guard lock(mutex_);return snapshot_.playbackSpeed;}();
+                veyra::log::info("player-timing",std::format("revision={} decodeP95Ms={:.3f} graphSubmitP95Ms={:.3f} gpuReadyP95Ms={:.3f} presentP95Ms={:.3f} gpuColorP95Ms={:.3f} gpuSrP95Ms={:.3f} gpuFlowP95Ms={:.3f} gpuNrP95Ms={:.3f} gpuResidualP95Ms={:.3f} gpuFgBatchP95Ms={:.3f} gpuBlitP95Ms={:.3f} slotWaits={} slotWaitMs={:.3f} commandSubmits={} displaySubmits={} expiredGenerated={} previewSkipped={} playbackSpeed={:.3f} processed={}",options.settings.revision,decodeTimes.p95(),processTimes.p95(),gpuReadyTimes.p95(),presentTimes.p95(),gpuP95(diagnostics::GpuStage::Color),gpuP95(diagnostics::GpuStage::Sr),gpuP95(diagnostics::GpuStage::Flow),gpuP95(diagnostics::GpuStage::Nr),gpuP95(diagnostics::GpuStage::Residual),gpuP95(diagnostics::GpuStage::FgBatch),gpuP95(diagnostics::GpuStage::Blit),slotWaitCount,slotWaitMilliseconds,commandSubmits,submitted,expired,measured.flow.counters.previewSkippedBeforeGraph,playbackSpeedNow,sourceFrames-statsSourceBase));nextTimingLog=Clock::now()+std::chrono::seconds(1);}
                 if(isCapture&&Clock::now()>=nextTimingLog){
                     logFrameFlow(measured.flow,"active");
                     const auto rates=snapshot();

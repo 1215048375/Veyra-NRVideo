@@ -61,7 +61,7 @@ bool VideoPresenter::present(gfx::D3D12DeviceContext& ctx,gfx::CommandSlotRing& 
         const float fit=std::min(float(sink_.bufferWidth())/graph.workWidth(),float(sink_.bufferHeight())/graph.workHeight());
         const LONG w=std::max(1L,LONG(std::lround(graph.workWidth()*fit))),h=std::max(1L,LONG(std::lround(graph.workHeight()*fit)));
         const LONG left=(LONG(sink_.bufferWidth())-w)/2,top=(LONG(sink_.bufferHeight())-h)/2;
-        const bool enabled=!generated&&!comparison&&view==PreviewView{}&&graph.presentMotionValid(slot)&&identity.sourceFrameId!=lastXessIdentity_.sourceFrameId;
+        const bool enabled=!generated&&!comparison&&view==PreviewView{}&&graph.presentMotionValid(slot)&&identity.sourceFrameId!=lastXessIdentity_.sourceFrameId&&!xessGenerationSuppressed_;
         const bool reset=!xessWasEnabled_||identity.epoch!=lastXessIdentity_.epoch||identity.settingsRevision!=lastXessIdentity_.settingsRevision||graph.motionPreviousSource(slot)!=lastXessIdentity_.sourceFrameId;
         const float elapsed=lastXessFrame_==std::chrono::steady_clock::time_point{}?0.0f:float(std::chrono::duration<double,std::milli>(now-lastXessFrame_).count());
         auto* motion=graph.presentMotion(slot);

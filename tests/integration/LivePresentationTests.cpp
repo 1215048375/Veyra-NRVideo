@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <fstream>
 #include <regex>
+#include <string>
+#include <vector>
 using namespace veyra;
 using namespace std::chrono_literals;
 int wmain(int argc,wchar_t**argv){
@@ -72,16 +74,26 @@ int wmain(int argc,wchar_t**argv){
         DestroyWindow(window);CoUninitialize();return failures?1:0;
     }
     if(fileOverload){
-        engine.setVolume(0,true);bool held=false,resumed=false;double maxLead=0;
-        check(until([&](const auto& s){held|=s.audioVideoWaits>1;resumed|=held&&!s.audioRebuffering&&s.frames>10;maxLead=std::max(maxLead,s.lateMs);return s.frames>=100;},90),"overloaded file keeps advancing without dropping source frames or deadlocking");
-        check(held&&resumed,"actual GPU overload holds audio and resumes after video catches up");
-        check(maxLead<120,"sustained GPU overload stays within hard audio lead bound plus source/endpoint interval");
+        engine.setVolume(0,true);bool audioAnchorReleased=false;double maxLag=0;
+        check(until([&](const auto& s){audioAnchorReleased|=s.frames>2&&!s.audioRebuffering;maxLag=std::max(maxLag,s.lateMs);return s.frames>=100;},90),"overloaded file keeps advancing without deadlocking");
+        check(audioAnchorReleased,"startup audio anchor releases despite overload");
+        // Sustained-overload steady window: steady-state audio never pauses —
+        // the realtime preview drops enhancement opportunities instead (P1/P2).
+        const auto steadyStart=engine.snapshot();
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        const auto steady=engine.snapshot();const auto& c=steady.metrics.flow.counters;
+        std::cout<<"FILE_OVERLOAD steadyFrames="<<steadyStart.frames<<"->"<<steady.frames<<" addedWaits="<<steady.audioVideoWaits-steadyStart.audioVideoWaits<<" lateMs="<<steady.lateMs<<" startLateMs="<<steadyStart.lateMs<<" previewSkipped="<<c.previewSkippedBeforeGraph<<" fgSkipped="<<c.fgSkippedBeforeEval<<" fgEvaluated="<<c.fgEvaluated<<'\n';
+        check(steady.audioVideoWaits==steadyStart.audioVideoWaits,"sustained overload adds no steady-state audio stops");
+        check(steady.frames>steadyStart.frames+10,"overloaded preview keeps submitting frames");
+        check(steady.lateMs<500&&std::abs(steady.lateMs-steadyStart.lateMs)<250,"overload display lag stays bounded instead of compounding");
+        check(c.previewSkippedBeforeGraph>0||c.fgSkippedBeforeEval>0,"overload reduces work before evaluation (preview skips or FG admission)");
+        std::cout<<"FILE_OVERLOAD maxObservedLagMs="<<maxLag<<'\n';
         check(engine.snapshot().nrEvaluated>50&&engine.snapshot().srActive&&engine.snapshot().generated>0,"sync test actually executes NR, SR and generated frames");
         auto settings=engine.snapshot().desired;settings.multiplier=2;engine.requestSettings(settings);
         check(until([](const auto& s){return !s.applying&&s.applied.multiplier==2&&s.metrics.flow.counters.realPresented>4;},30),"file audio resumes after FG backend rebuild");
-        check(std::abs(engine.snapshot().lateMs)<120,"rebuilt overloaded graph retains the bounded continuity allowance");
+        check(std::abs(engine.snapshot().lateMs)<500,"rebuilt overloaded graph retains bounded continuity lag");
         engine.seek(.3);
-        check(until([](const auto& s){return s.position>=.3&&s.position<.6&&std::abs(s.lateMs)<35;}),"playing seek warms video before releasing audio");
+        check(until([](const auto& s){return s.position>=.3&&s.position<.6&&std::abs(s.lateMs)<60;}),"playing seek warms video before releasing audio");
         const auto before=engine.snapshot();engine.pause(true);engine.seek(.5);
         check(until([](const auto& s){return s.transport==engine::TransportState::Paused&&s.position>=.49&&s.position<.6;}),"paused seek survives an audio overload hold");
         engine.pause(false);check(until([&](const auto& s){return s.frames>before.frames+8;}),"file resumes after overload and seek");
@@ -89,7 +101,19 @@ int wmain(int argc,wchar_t**argv){
         check(until([](const auto& s){return !s.applying&&!s.applied.nr&&!s.applied.sr&&s.applied.multiplier==1&&s.metrics.flow.counters.realPresented>=30;}),"leave overload and restore a sustainable video graph");
         check(std::abs(engine.snapshot().lateMs)<35,"recovered graph has no retained overload offset");
         engine.stop();check(until([&](const auto&){return engine.idle();},5),"file overload shutdown");
-        std::cout<<"FILE_OVERLOAD held="<<held<<" resumed="<<resumed<<" maxObservedLeadMs="<<maxLead<<'\n';
+        // Presented real PTS must cover the played span uniformly: under-rate
+        // drops preview frames spread over time, never a long black stretch.
+        Logger::instance().flush();std::ifstream log(std::filesystem::path(argv[2])/"engine.log");std::string line;
+        std::vector<double> realPts;const std::regex ptsPattern("subframe=0 pts100ns=([0-9]+)");
+        while(std::getline(log,line))if(line.find("[submit]")!=std::string::npos){std::smatch m;if(std::regex_search(line,m,ptsPattern))realPts.push_back(std::stod(m[1])/10000.0);}
+        double maxPresentGap=0;unsigned resyncGaps=0;for(size_t i=1;i<realPts.size();++i){
+            const double gap=realPts[i]-realPts[i-1];
+            if(gap>400){++resyncGaps;continue;} // explicit seek/rebuild resync windows
+            maxPresentGap=std::max(maxPresentGap,gap);
+        }
+        std::cout<<"FILE_OVERLOAD realPresents="<<realPts.size()<<" maxSteadyGapMs="<<maxPresentGap<<" resyncGaps="<<resyncGaps<<'\n';
+        check(realPts.size()>=60,"overload presents a real frame sequence");
+        check(maxPresentGap<200&&resyncGaps<=5,"steady presents cover the timeline without long gaps; only bounded explicit resyncs interrupt");
         DestroyWindow(window);CoUninitialize();return failures?1:0;
     }
     if(overload){

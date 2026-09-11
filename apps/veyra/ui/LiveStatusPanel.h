@@ -34,6 +34,11 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         rows.emplace_back(L"呈现提交",fps(xess?f.xessSdkSubmitFps:f.presentSubmitFps));
         rows.emplace_back(L"源帧处理",fps(f.sourceCompletedFps));
         rows.emplace_back(xess?L"补帧完成":L"有效补帧",xess?L"SDK内部不可测":fps(f.validGeneratedFps));
+        rows.emplace_back(L"正常播放速度",playing?std::format(L"{:.2f} x",s.playbackSpeed):L"未测");
+        if(!s.capture&&!s.image){
+            rows.emplace_back(L"预览状态",!playing?L"未运行":s.previewSkipped?std::format(L"已跳帧 {}",s.previewSkipped):s.fgBudgetLimited?L"补帧预算不足":L"正常");
+            if(s.xessGenerationSuppressed)rows.emplace_back(L"XeSS补帧",L"欠速暂停生成 · 实验");
+        }
         rows.emplace_back(L"输入",s.capture?std::format(L"{:.1f} fps",s.captureFps):L"文件 / 图片");
         rows.emplace_back(L"总延迟 P95",playing?ms(f.softwareLatencyP95Ms):L"未测");
         rows.emplace_back(L"采集覆盖 / 补帧过期",std::format(L"{} / {}",f.counters.mailboxOverwritten,f.counters.generatedExpiredAfterEval));
@@ -66,7 +71,7 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         rows.emplace_back(L"NR内部尺寸",s.applied.nr?std::format(L"{} x {}",s.metrics.resolution.nr.width,s.metrics.resolution.nr.height):L"关闭");
         rows.emplace_back(L"NR运行版本",s.nrActive?(s.applied.nrRuntime==engine::NrRuntime::Community?L"社区兼容 · 实验":L"NVIDIA原版"):L"未运行");
         rows.emplace_back(L"显示模式",s.running?(s.applied.captureCompatible?L"直播兼容 · 实验":L"标准显示"):L"未运行");
-        rows.emplace_back(L"音频同步",s.audioAvailable?(s.capture?(s.captureAudio.running?L"软件估算同步":L"等待视频锚点"):(s.audioEndpointRecovering?L"音频设备恢复中 · 时间线保持":s.audioRebuffering?L"视频过载 · 同步缓冲":L"音频主时钟")):L"无音频");
+        rows.emplace_back(L"音频同步",s.audioAvailable?(s.capture?(s.captureAudio.running?L"软件估算同步":L"等待视频锚点"):(s.audioEndpointRecovering?L"音频设备恢复中 · 时间线保持":s.audioRebuffering?L"重新同步 · 等待视频锚点":L"音频主时钟")):L"无音频");
         if(!s.capture&&s.audioAvailable){
             rows.emplace_back(L"音频设备恢复次数",std::to_wstring(s.audioEndpointRecoveries));
             if(FAILED(s.audioEndpointError))rows.emplace_back(L"最近音频设备错误",std::format(L"0x{:08X}",unsigned(s.audioEndpointError)));

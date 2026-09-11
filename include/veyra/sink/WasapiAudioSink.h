@@ -69,9 +69,11 @@ public:
     void stopThread();
     void setPaused(bool value) { paused_.store(value); }
 
-    // File playback: prefill while held, then let the device clock advance
-    // with a bounded jitter allowance beyond video coverage. Enforced on the audio owner even
-    // while the GPU owner is blocked in feature creation/evaluation.
+    // File playback: audio is the master clock. Prefill while explicitly held
+    // (open/seek/settings rebuild/pause); once released the device clock runs
+    // at one-times speed regardless of video lag — slow enhancement drops
+    // preview frames instead of pausing sound. Coverage is published for
+    // diagnostics only.
     void holdForVideo();
     void videoReady(double ptsMs);
     void videoPresented(double nextPtsMs);

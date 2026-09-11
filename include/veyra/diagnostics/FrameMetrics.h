@@ -27,6 +27,9 @@ struct FrameFlowIdentity {
 struct FrameFlowCounters {
     uint64_t captureReceived=0,mailboxOverwritten=0;
     uint64_t sourceAccepted=0,sourceSkippedBeforeGraph=0,realSubmitted=0;
+    // Realtime file preview only: decoded source frames whose enhancement
+    // opportunity was dropped (PTS window fully passed) before the graph.
+    uint64_t previewSkippedBeforeGraph=0;
     uint64_t fgCandidate=0,fgEvaluated=0,fgSkippedBeforeEval=0,fgReadyValid=0,fgInvalid=0,fgWarmup=0;
     uint64_t xessSdkGenerated=0,xessSdkPresented=0,realReady=0;
     uint64_t realPresented=0,generatedPresented=0,generatedExpiredAfterEval=0,cancelledBeforePresent=0;

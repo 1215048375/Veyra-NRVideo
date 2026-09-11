@@ -19,6 +19,11 @@ public:
     uint64_t xessGeneratedCount() const {return sink_.xess()?sink_.xess()->generatedCount():0;}
     uint64_t xessPresentedCount() const {return sink_.xess()?sink_.xess()->presentedCount():0;}
     bool xessActive() const {return sink_.xess()!=nullptr;}
+    // Sustained under-rate may suppress SDK-owned XeSS-FG generation over a
+    // stable interval (xefgSwapChainSetEnabled); re-enabling goes through the
+    // per-frame history reset, never a per-frame toggle.
+    void setXessGenerationSuppressed(bool v){xessGenerationSuppressed_=v;}
+    bool xessGenerationSuppressed() const {return xessGenerationSuppressed_;}
 diagnostics::GpuSample blitTiming(ID3D12Fence* f,uint64_t revision=0,uint64_t epoch=0){gpuTimer_.collect(f);if((revision&&gpuTimer_.last().identity.settingsRevision!=revision)||(epoch&&gpuTimer_.last().identity.epoch!=epoch)){diagnostics::GpuSample pending;pending.state=diagnostics::SampleState::Pending;return pending;}return gpuTimer_.last().gpu[size_t(diagnostics::GpuStage::Blit)];}
 std::vector<diagnostics::GpuFrameTiming> takeGpuTimings(ID3D12Fence* fence){gpuTimer_.collect(fence);return gpuTimer_.takeCompleted();}
 void recordGpuTimings(){gpuTimer_.recordCompleted();}
@@ -34,6 +39,7 @@ private:
     std::chrono::steady_clock::time_point lastXessFrame_{};
     pipeline::FrameIdentity lastXessIdentity_{};
     bool xessWasEnabled_=false;
+    bool xessGenerationSuppressed_=false;
     void refresh(ID3D12Device*);
 };
 }

@@ -1,5 +1,4 @@
 #include "veyra/sink/AudioGain.h"
-#include "veyra/sink/AudioVideoContinuity.h"
 #include "veyra/sink/WasapiAudioSink.h"
 
 #include <algorithm>
@@ -163,7 +162,8 @@ void AudioPipeline::pushDecoded(const AVFrame* frame)
 
 void AudioPipeline::holdForVideo()
 {
-    videoHold_=true;videoSync_=true;wake_.notify_all();
+    if(!videoHold_.exchange(true))log::info("audio-continuity",std::format("event=hold coverageMs={:.3f}",std::isfinite(videoLimitMs_.load())?videoLimitMs_.load():-1.0));
+    videoSync_=true;wake_.notify_all();
 }
 
 void AudioPipeline::videoReady(double ptsMs)
@@ -177,7 +177,10 @@ void AudioPipeline::videoReady(double ptsMs)
 void AudioPipeline::videoPresented(double nextPtsMs)
 {
     if(!videoSync_||!std::isfinite(nextPtsMs))return;
-    videoLimitMs_=nextPtsMs;videoHold_=false;wake_.notify_all();
+    const bool released=videoHold_.exchange(false);
+    videoLimitMs_=nextPtsMs;
+    if(released)log::info("audio-continuity",std::format("event=release coverageMs={:.3f}",nextPtsMs));
+    wake_.notify_all();
 }
 
 void AudioPipeline::pushConverted(int frames)
@@ -507,14 +510,14 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint)
     bool endpointReady = renderer && (!ownEndpoint || renderer->start());
     double lastClockMs = 0, recoveryTargetMs = 0;
     auto retryAt = t0;
-    AudioVideoContinuity continuity;
-    auto videoBlocked=[&]{
-        const double observed=endpointReady?renderer->mediaTimeMs():lastClockMs;
-        const double current=std::isfinite(observed)?observed:lastClockMs;
-        return videoSync_&&continuity.blocked(videoHold_,current,videoLimitMs_,std::chrono::steady_clock::now());
-    };
+    // Steady-state under-rate must never stop sound: the audio device clock is
+    // the master timeline and slow video enhancement drops preview frames
+    // instead (engine-side, plan P1). Only explicit transport holds — open,
+    // seek, settings rebuild, pause — gate the endpoint here.
+    auto videoBlocked=[&]{return videoSync_&&videoHold_.load();};
     auto shouldPause=[&]{return paused_.load()||videoBlocked();};
     auto publishVideoWait=[&](bool paused){const bool waiting=paused&&videoBlocked();if(videoWaiting_.exchange(waiting)!=waiting&&waiting)++videoWaitCount_;};
+    auto nextContinuitySummary=t0+std::chrono::milliseconds(1000);
     auto recovering = [&](HRESULT error) {
         endpointError_ = FAILED(error) ? error : E_FAIL;
         endpointRecovering_ = true;
@@ -581,6 +584,16 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint)
         if (pauseNow != pauseApplied && endpointReady) renderer->setPaused(pauseNow);
         pauseApplied = pauseNow;
         publishVideoWait(pauseApplied);
+        // Bounded per-second audio state: master clock, video coverage and
+        // lead make steady under-rate observable without per-frame logging.
+        if (videoSync_ && !pauseNow && std::chrono::steady_clock::now() >= nextContinuitySummary) {
+            nextContinuitySummary = std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
+            const double coverage = videoLimitMs_.load();
+            log::info("audio-continuity", std::format("event=summary clockMs={:.3f} coverageMs={:.3f} leadMs={:.3f} hold={} recovering={}",
+                lastClockMs, std::isfinite(coverage) ? coverage : -1.0,
+                std::isfinite(coverage) ? lastClockMs - coverage : -1.0,
+                videoHold_.load(), endpointRecovering_.load()));
+        }
         // Seek request? Atomic re-sequence.
         {
             std::unique_lock<std::mutex> lock(mutex_);

@@ -42,6 +42,12 @@ struct PlayerSnapshot {
     bool captureHalfRate=false;
     double captureFps=0,captureReadAgeMs=0,captureAgeMs=0,captureAgeP95Ms=0;
     double schedulingWaitP95Ms=0,processCpuP95Ms=0,presentCpuP95Ms=0;
+    // Realtime file preview: dropped enhancement opportunities this metrics
+    // window, and measured media-advance / wall-clock playback speed (1.0 =
+    // normal speed). Zero previewSkipped means every decoded frame was enhanced.
+    uint64_t previewSkipped=0;
+    double playbackSpeed=0;
+    bool fgBudgetLimited=false,xessGenerationSuppressed=false;
     bool running=false,failed=false,image=false,capture=false;
 };
 class EngineController {
