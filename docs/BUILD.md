@@ -5,7 +5,7 @@
 ## Requirements
 
 - Windows 11 x64, Visual Studio 2022 C++ tools, Windows SDK, CMake 3.24+, Ninja.
-- Local FFmpeg development libraries matching avcodec63 / avformat63 / avutil61 / swresample7 / swscale10. Release 0.0.2 uses the vcpkg FFmpeg 9.0.1#1 build (LGPL configuration).
+- Local FFmpeg development libraries matching avcodec63 / avformat63 / avutil61 / swresample7 / swscale10. Release 0.0.3 uses the vcpkg FFmpeg 9.0.1#1 build (LGPL configuration).
 - NVIDIA DLSS SDK 310.7.0, Optical Flow SDK 5.0.7, RTX Video SDK 1.1.0, and nv-codec-headers. Prepare these under their respective licenses in ignored local directories.
 - Intel XeSS SDK 3.0.2 for the XeSS presenter; AMD FidelityFX SDK 1.1.4 optical-flow/backend static libraries for the AMD flow option.
 - Local NR runtime and NGX project configuration for experimental NR. The source repository intentionally does not contain them.
@@ -35,7 +35,7 @@ The NGX configuration lives in `runtime_local/config/ngx-local.json` for develop
 
 ## Dependency Sources
 
-Release 0.0.2 includes `Veyra-0.0.2-FFmpeg-source.zip` separately: the patched FFmpeg source, SPDX-verified vcpkg port and patches, notices, and configuration queried from the shipped DLL. It is not needed to run Veyra.
+Release 0.0.3 includes `Veyra-0.0.3-FFmpeg-source.zip` separately: the patched FFmpeg source, SPDX-verified vcpkg port and patches, notices, and configuration queried from the shipped DLL. It is not needed to run Veyra.
 
 - FFmpeg: https://github.com/FFmpeg/FFmpeg/tree/n9.0.1 ; vcpkg port source recorded in the distributed `licenses/FFMPEG-SPDX.json`.
 - vcpkg FFmpeg port: https://github.com/microsoft/vcpkg/tree/55cd8b8a4f19d8e6ba2ad114c8acacc4af5915a0/ports/ffmpeg . Its patches and the LGPL notices are part of the corresponding-source material.
@@ -51,7 +51,7 @@ Veyra and FidelityFX code are compiled into the executable; FFmpeg is dynamicall
 Run targeted tests and `scripts/gates/delivery.ps1`; each individual test must stay below300seconds. Physical capture and screen scanout require separate hardware verification. The legacy Loop gate is not part of the current process.
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/package-portable.ps1 -Root . -Version 0.0.2 -OutputDirectory out/releases/0.0.2
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/package-portable.ps1 -Root . -Version 0.0.3 -OutputDirectory out/releases/0.0.3
 ```
 
 The packager accepts `-BuildDirectory` for an isolated build, checks the publisher's fixed input files, copies an explicit payload, and emits a ZIP, checksums, and component manifests. It refuses to overwrite an existing candidate. This build-time audit does not restrict user DLL replacement. Do not upload SDK headers, samples, libraries, private media, logs, or development archives with the source.

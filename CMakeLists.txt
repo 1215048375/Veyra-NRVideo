@@ -1,6 +1,21 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(veyra VERSION 0.0.2 LANGUAGES CXX RC)
+project(veyra VERSION 0.0.3 LANGUAGES CXX RC)
+
+# Match the compiler's actual bytes, including on localized Windows installs.
+# CMake's cached, decoded prefix can leave Ninja with zero header dependencies.
+if(MSVC AND CMAKE_GENERATOR MATCHES "Ninja")
+  set(VEYRA_INCLUDE_PROBE "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/veyra-include-probe")
+  file(WRITE "${VEYRA_INCLUDE_PROBE}.h" "// Dependency parser probe\n")
+  file(WRITE "${VEYRA_INCLUDE_PROBE}.cpp" "#include \"veyra-include-probe.h\"\n")
+  execute_process(COMMAND "${CMAKE_CXX_COMPILER}" /nologo /utf-8 /showIncludes /c /TP "${VEYRA_INCLUDE_PROBE}.cpp" "/Fo${VEYRA_INCLUDE_PROBE}.obj"
+    OUTPUT_VARIABLE VEYRA_INCLUDE_OUTPUT ERROR_VARIABLE VEYRA_INCLUDE_OUTPUT
+    RESULT_VARIABLE VEYRA_INCLUDE_RESULT ENCODING NONE)
+  if(NOT VEYRA_INCLUDE_RESULT EQUAL 0 OR NOT VEYRA_INCLUDE_OUTPUT MATCHES "(^|[\r\n])([^\r\n]*: )[ ]*[A-Za-z]:[^\r\n]*veyra-include-probe.h")
+    message(FATAL_ERROR "Unable to verify MSVC/Ninja header dependency prefix")
+  endif()
+  set(CMAKE_CL_SHOWINCLUDES_PREFIX "${CMAKE_MATCH_2}")
+endif()
 
 # ---------------------------------------------------------------------------
 # Veyra cache variables and feature switches (Playbook section 5.1).

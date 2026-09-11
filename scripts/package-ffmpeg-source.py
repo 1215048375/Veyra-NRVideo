@@ -12,6 +12,7 @@ parser.add_argument('--prefix', type=Path, required=True)
 parser.add_argument('--vcpkg', type=Path, required=True)
 parser.add_argument('--source', type=Path, required=True)
 parser.add_argument('--output', type=Path, required=True)
+parser.add_argument('--version', default='0.0.3')
 args = parser.parse_args()
 if args.output.exists():
     raise SystemExit('Output exists; choose a new candidate')
@@ -50,7 +51,7 @@ with zipfile.ZipFile(args.output, 'x', compression=zipfile.ZIP_DEFLATED, compres
     archive.writestr('binary-configuration.txt', license_name + '\n\n' + configuration + '\n')
     archive.writestr('source-manifest.json', json.dumps(records, indent=2))
     archive.writestr('README.txt',
-        'FFmpeg 9.0.1#1 corresponding-source material for Veyra 0.0.2.\n'
+        f'FFmpeg 9.0.1#1 corresponding-source material for Veyra {args.version}.\n'
         'Not needed to run the application. No NVIDIA SDK or runtime is included.\n'
         'ffmpeg-patched is the local vcpkg patched n9.0.1 source tree.\n'
         'vcpkg-port contains the build recipe and patches, verified against the shipped SPDX.\n'

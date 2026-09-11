@@ -14,6 +14,7 @@ namespace {
 
 const wchar_t* kWindowClassName = L"VeyraPresentSink";
 
+
 } // namespace
 
 PresentSink::~PresentSink()
@@ -103,7 +104,9 @@ bool PresentSink::initialize(ID3D12Device* device, ID3D12CommandQueue* queue,
     scd.SampleDesc.Count = 1;
     scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     scd.BufferCount = 3;
-    scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    // Opt-in capture experiment; actual capture support depends on the
+    // external capture API. Neither mode changes the pixel format.
+    scd.SwapEffect = desc.captureCompatible ? DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL : DXGI_SWAP_EFFECT_FLIP_DISCARD;
     scd.Flags = tearingSupported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
 
     ComPtr<IDXGISwapChain1> swapChain1;
@@ -143,8 +146,14 @@ bool PresentSink::initialize(ID3D12Device* device, ID3D12CommandQueue* queue,
     bufferExtentW_ = width_;
     bufferExtentH_ = height_;
 
-    log::info("present", std::format("present-sink: window {}x{} flip-discard buffers=3 vsync={} tearing={}",
-        width_, height_, desc_.vsync ? 1 : 0, tearingSupported_ ? 1 : 0));
+    DXGI_SWAP_CHAIN_DESC1 actual{};
+    const HRESULT descResult=swapChain_->GetDesc1(&actual);
+    if(FAILED(descResult)||actual.SwapEffect!=scd.SwapEffect){
+        log::error("present",std::format("swapchain mode rejected hr=0x{:X} requested={} actual={}",unsigned(descResult),unsigned(scd.SwapEffect),unsigned(actual.SwapEffect)));
+        status=Status::WindowFailure;return false;
+    }
+    log::info("present", std::format("present-sink: window {}x{} swapEffect={} buffers=3 vsync={} tearing={} captureCompatible={} (capture not verified)",
+        width_, height_, desc.captureCompatible?"flip-sequential":"flip-discard", desc_.vsync ? 1 : 0, tearingSupported_ ? 1 : 0, desc.captureCompatible));
     return true;
 }
 

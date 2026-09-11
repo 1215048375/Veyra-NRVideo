@@ -21,6 +21,7 @@ $runtimeFiles = @(
   @{ Name='nvngx_dlss.dll'; Folder='runtime/experimental'; Source='runtime_local/nvidia/nvngx_dlss.dll'; Hash='BE6E434A94CA32499515EB62CA0E6C274526055D568D0426E4C652DCDFB6EE6E'; Category='official-dlss-sdk-310.7.0-rel'; Experimental=$false },
   @{ Name='nvngx_dlssg.dll'; Folder='runtime/experimental'; Source='runtime_local/nvidia/nvngx_dlssg.dll'; Hash='135EAF0733C1E37381A8C28ABCF7A862404A54132B81787C04E35D09EFC5E36F'; Category='pinned-dlss-sdk-310.7.0-rel'; Experimental=$true },
   @{ Name='nvngx_dlssnr.dll'; Folder='runtime/experimental'; Source='runtime_local/nvidia/nvngx_dlssnr.dll'; Hash='E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E'; Category='user-provided-pinned-experimental-runtime'; Experimental=$true },
+  @{ Name='nvngx_dlssnr.dll'; Folder='runtime/experimental/nr-community'; Source='runtime_local/nvidia/nr-community/nvngx_dlssnr.dll'; Hash='984BEE0F775C277D5829B8FD6775D53A7B0F75396C852B3AAF06A18375F81014'; Signature='HashMismatch'; Size=165840496; Version='310.8.0.0'; Category='user-provided-community-modified-RTX40-RTX50-runtime'; Experimental=$true },
   @{ Name='nvngx_vsr.dll'; Folder='runtime/experimental'; Source='runtime_local/nvidia/nvngx_vsr.dll'; Hash='C3D88EEA5FF7A548EDEFA66414CF6E77464D0947277C904F324DD23ABF58A1ED'; Category='official-rtx-video-sdk-1.1.0'; Experimental=$false },
   @{ Name='libxell.dll'; Folder='runtime_local/intel/experimental'; Source='runtime_local/intel/experimental/libxell.dll'; Hash='D2030DCD694FDA8F2EC7E044B13E6DB8F0B56D4BA9113A5EFAD334E3F3DED8C7'; Category='official-intel-xess-sdk-3.0.2'; Experimental=$true },
   @{ Name='libxess_fg.dll'; Folder='runtime_local/intel/experimental'; Source='runtime_local/intel/experimental/libxess_fg.dll'; Hash='EC5E0C65E075570C6EDE72618BB666D0BE0C2E10B2EA9762C0FE8CB8E375AB27'; Category='official-intel-xess-sdk-3.0.2'; Experimental=$true }
@@ -30,8 +31,11 @@ $records = foreach ($item in $runtimeFiles) {
   $file = Get-Item -LiteralPath $source
   $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
   $sig = Get-AuthenticodeSignature -LiteralPath $source
-  if ($hash -ne $item.Hash -or $sig.Status -ne 'Valid') { throw "Publisher runtime identity rejected: $($item.Name)" }
+  $expectedSignature = if ($item.ContainsKey('Signature')) { $item.Signature } else { 'Valid' }
+  if ($hash -ne $item.Hash -or $sig.Status.ToString() -ne $expectedSignature) { throw "Publisher runtime identity rejected: $($item.Source)" }
   $v = $file.VersionInfo
+  $versionText = "$($v.FileMajorPart).$($v.FileMinorPart).$($v.FileBuildPart).$($v.FilePrivatePart)"
+  if (($item.ContainsKey('Size') -and $file.Length -ne $item.Size) -or ($item.ContainsKey('Version') -and $versionText -ne $item.Version)) { throw "Publisher runtime metadata rejected: $($item.Source)" }
   [pscustomobject][ordered]@{name=$item.Name;path="$($item.Folder)/$($item.Name)";size=$file.Length;sha256=$hash;fileVersion="$($v.FileMajorPart).$($v.FileMinorPart).$($v.FileBuildPart).$($v.FilePrivatePart)";authenticode=$sig.Status.ToString();signer=$sig.SignerCertificate.Subject;classification=$item.Category;experimental=$item.Experimental;removable=$true;source=$item.Category}
 }
 $allowed = [Collections.Generic.List[string]]::new()
@@ -52,7 +56,7 @@ foreach ($name in @('vcruntime140.dll','vcruntime140_1.dll','msvcp140.dll')) {
   Copy-Payload (Join-Path $crt.FullName "x64/Microsoft.VC143.CRT/$name") $name
 }
 foreach ($name in @('LICENSE','README.md','README_EN.md','THIRD_PARTY_NOTICES.md')) { Copy-Payload (Join-Path $resolvedRoot $name) $name }
-foreach ($name in @('BUILD.md','RUNTIME_COMPONENTS_0.0.2.md')) { Copy-Payload (Join-Path $resolvedRoot "docs/$name") "docs/$name" }
+foreach ($name in @('BUILD.md',"RUNTIME_COMPONENTS_$Version.md","RELEASE_NOTES_$Version.md")) { Copy-Payload (Join-Path $resolvedRoot "docs/$name") "docs/$name" }
 Copy-Payload (Join-Path $resolvedRoot "docs/RELEASE_NOTES_$Version.md") 'RELEASE_NOTES.md'
 foreach ($shader in Get-ChildItem -LiteralPath (Join-Path $bin 'shaders') -File -Filter '*.dxil') { Copy-Payload $shader.FullName "shaders/$($shader.Name)" }
 Copy-Payload (Join-Path $resolvedRoot 'runtime_local/config/ngx-local.json') 'runtime/config/ngx-local.json'

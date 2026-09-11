@@ -1,5 +1,31 @@
 # 2026-09-11 继续修复目标模式执行中
 
+## 最新交付：0.0.3 发布候选通过，开始上传
+
+用户授权更新 `Likely7/Veyra-NRVideo` 源码和0.0.3便携包。中英文README已补OBS窗口采集手动选择Windows 10（1903及以上）的方法；用户实测恢复视频，OBS日志确认由BitBlt改WGC，未继续修改软件提示。0.0.3包含双NR运行版本、直播实验开关、v10预设和中文MSVC/Ninja依赖修复；专业UI大改仍仅为方案。
+
+全新构建174目标通过；最终EXE `D9C7DCCEA7B1538066CC648D7C8E0D5513439A367E0999A70E614556FAB6395C`。CPU81项、预设42组、项目外解压清洁PATH/无manifest五条路线、两种NR实际包内路径、UI切换与回退、XeSS/直播开关、最终delivery23项47.474秒全部通过。NR/DLSSG Create0x1/SEH0，实际GPU执行及4K非黑保存通过。日志 `logs/release-003-portable`、`logs/delivery/cb1f9a5f77524603a6bd29d1d0f630e7`。
+
+包298999496字节，SHA256 `3A37336BF09177A8224AA5F15C2FB9333AF5657F37F3B86411DD4AB0BC9E1D7B`，52文件逐项审计通过。社区DLL按用户本次发布决定列入Release manifest，标明HashMismatch，与原版独立；SDK/DLL/模型不进源码Git。完整命令与范围见 [0.0.3执行记录](RELEASE_0.0.3_EXECUTION.md)。RTX40、真实设备长期/音画/录制节奏未新增验收，远端发布结果另记。
+
+## 最新交付：直播兼容实验开关与专业UI布局方案
+
+按用户最新决定，撤回全局FLIP_SEQUENTIAL和OBS进程检测，默认FLIP_DISCARD；专业参数顶部“还原默认”右侧新增固定“直播兼容 · 实验”开关，勾选切FLIP_SEQUENTIAL。即时设置事务排空/重建，模式GetDesc1实查，总增强关闭仍可单独切换，v10预设保存。实际状态明确显示显示模式；不把开关生效标作第三方捕获成功。专业模式重排只给方案，尚未实施。
+
+标准入口已构建，SHA256 `041A14751E182936B21A8878AE7C3508C96EF9009FA9C1D05171121315A82F74`。CPU81项、预设42组通过；实际RTX5070 NR/DLSSG Create0x1/SEH0，DLSS和XeSS两种UI往返、暂停/全屏/总增强关闭和两尺寸布局通过。delivery23项42.881秒通过，`logs/delivery/e6eb77b2bcc5468781d458f7e5371e77`。命令、失败和未测项见 [直播兼容执行记录](BROADCAST_COMPATIBILITY_PLAN_2026-09-11.md)，[专业UI布局方案](PROFESSIONAL_UI_LAYOUT_PLAN_2026-09-11.md)含六分类、文案和验收标准。
+
+前序“FLIP_DISCARD子窗口就是捕获失败根因”缺乏直接捕获证据，本轮不继续作为事实传播。没有验证外部软件捕获、实卡、社区NR组合和超大图片专项，不宣称已降低占用或已解决捕获故障。下一步用户用同一捕获源切换对照；未push/发布，DLL/SDK仍隔离。
+
+## 最新交付：原版与RTX40/50社区NR运行版本切换
+
+入口补交付：用户截图未见选项，查到两个运行窗口均来自旧 `out/build/x64-release/veyra.exe`，初次仅提供隔离构建链接不够。旧进程随后已退出，未强杀；已清理标准构建目标并完整重建174目标exit0，根目录 `Veyra.cmd` 现在打开新版。标准EXE SHA256 `4AB989BC9223F8EE821CF449CE7A0F2DE14C49F7C3C08E1ECC4299DC411E88D4`，原位置再次实际UI切换/回退/两尺寸布局PASS，`logs/nr-runtime-switch/1789100030646506400/result.json`，构建日志 `logs/nr-runtime-default-entry-build.log`。此条取代下文“旧入口未替换”的初次交付状态，GitHub资产仍未更新。
+
+专业模式增强页新增“NR 运行版本”，默认原版，可手动选择用户提供的RTX40/50社区实验版。两份DLL保留独立目录；设置事务重建和失败回退、预设v9、实际运行状态、播放/采集/分块图片/视频导出已接入。社区文件SHA256 `984BEE0F775C277D5829B8FD6775D53A7B0F75396C852B3AAF06A18375F81014`，签名HashMismatch，原样保存在忽略目录，不称有效签名原版。
+
+本机RTX5070实际社区Init/CreateFeature18 `0x1`、SEH0，播放239次NR且输出非黑；实际UI往返和缺文件回退通过；社区SR+NR+FG导出4K/120fps含12源帧、11生成、1显式CFR补齐；独立worker社区NR导出120帧，前台继续运行。CPU81项、预设36组、delivery23项43.129秒通过。最终EXE SHA256 `6C3723B1E0F3E10BA456905E39F94824A7E650C5E10E28545201DFCE73A75976`，新版入口 `out/build/release-0.0.2-final/veyra.exe`，用户原进程和根目录旧启动入口未替换。
+
+同时修复实际发现的MSVC/Ninja中文头依赖前缀错误：旧增量构建漏编译设置结构使用方导致启动ABI崩溃。改为实际编译探针获取原始前缀后完整重建174目标，最终ExportJobManager记录13个头依赖。完整命令、修改文件、失败记录、日志与边界见 [NR双运行时交付记录](NR_RUNTIME_SWITCH_PLAN_2026-09-11.md)。RTX40真实硬件、实体采集卡及社区超大图片专项未执行，下一步为RTX40实机验收。没有push或替换0.0.2 Release，没有向Git加入DLL/SDK。
+
 ## 最新交付：0.0.2 便携发布与用户DLL替换
 
 已发布：https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.2 。源码提交`a69a9df`及同名标签已推送，四个附件远端SHA256/大小逐项匹配；公开时间`2026-09-11T03:22:48Z`，`isDraft=false`。原`Veyra-DLSS-Video-Player`远端未更新。下文候选阶段的“另记实际结果”由本条闭环，随后仅提交发布记录。

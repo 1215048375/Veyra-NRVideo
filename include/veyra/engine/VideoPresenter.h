@@ -10,7 +10,7 @@ namespace veyra::sink { struct RgbaImage; }
 namespace veyra::engine {
 class VideoPresenter {
 public:
-    bool open(gfx::D3D12DeviceContext&, HWND, pipeline::EnhanceGraph&);
+    bool open(gfx::D3D12DeviceContext&, HWND, pipeline::EnhanceGraph&, bool captureCompatible=false);
     bool present(gfx::D3D12DeviceContext&,gfx::CommandSlotRing&,pipeline::EnhanceGraph&,unsigned slot,bool generated,bool referencesValid=true,int comparison=0,bool baseReference=false,float split=.5f,pipeline::FrameIdentity identity={},PreviewView view={});
     void close();
     // Explicit integration-test capture only; never called by playback/export.

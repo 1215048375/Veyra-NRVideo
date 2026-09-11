@@ -4,10 +4,10 @@
 #include "veyra/gfx/CommandSlotRing.h"
 #include "veyra/sink/ImageExportSink.h"
 namespace veyra::engine {
-bool VideoPresenter::open(gfx::D3D12DeviceContext& ctx,HWND window,pipeline::EnhanceGraph& graph) {
+bool VideoPresenter::open(gfx::D3D12DeviceContext& ctx,HWND window,pipeline::EnhanceGraph& graph,bool captureCompatible) {
     gpuTimer_.initialize(ctx.device(),ctx.directQueue());window_=window;RECT rc{};GetClientRect(window,&rc);
     gfx::PresentSink::Desc d;d.targetWindow=window;d.width=std::max(1L,rc.right);d.height=std::max(1L,rc.bottom);d.vsync=false;
-    d.xess=graph.xessEnabled();lastXessFrame_={};lastXessIdentity_={};xessWasEnabled_=false;
+    d.xess=graph.xessEnabled();d.captureCompatible=captureCompatible;lastXessFrame_={};lastXessIdentity_={};xessWasEnabled_=false;
     Status st=Status::Ok;if(!sink_.initialize(ctx.device(),ctx.directQueue(),d,st))return false;
     std::vector<uint8_t> vs,ps;
     if(!pipeline::loadShaderBytes("PresentBlit_vs.dxil",vs)||!pipeline::loadShaderBytes("PresentBlit_ps.dxil",ps)||!pass_.create(ctx.device(),vs,ps,12))return false;

@@ -1,7 +1,7 @@
 #pragma once
 
 // PresentSink (Playbook P6.3): a Win32 window plus a DXGI flip-model
-// (FLIP_DISCARD, 3-buffer) swapchain used as the display output of the
+// (FLIP_DISCARD by default, optional FLIP_SEQUENTIAL, 3-buffer) swapchain used as the display output of the
 // Veyra engine. The normal path NEVER reads back: the engine blits the
 // finished frame (Feature 18 output, then FG, then UI) into the back buffer
 // and presents. Resize recreates the buffers; vsync can be disabled for
@@ -35,6 +35,7 @@ public:
         uint32_t height = 720;
         bool vsync = true;
         bool xess = false;
+        bool captureCompatible = false;
         // Probe runs create their own window class name per process.
         std::wstring title = L"Veyra";
         HWND targetWindow = nullptr; // borrowed UI-owned child HWND; never destroyed by sink

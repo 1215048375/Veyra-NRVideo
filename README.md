@@ -4,7 +4,7 @@
 
 Windows 视频播放器与采集卡增强工具。支持视频、图片和采集卡实时预览，可组合使用超分辨率、NR 画面增强与补帧。
 
-[下载 0.0.2 免安装版](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.2) · [更新记录](docs/RELEASE_NOTES_0.0.2.md) · [反馈问题](https://github.com/Likely7/Veyra-NRVideo/issues)
+[下载 0.0.3 免安装版](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.3) · [更新记录](docs/RELEASE_NOTES_0.0.3.md) · [反馈问题](https://github.com/Likely7/Veyra-NRVideo/issues)
 
 ## 功能
 
@@ -20,9 +20,11 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片和采集
 
 日常模式以观看为主；专业模式展开增强参数、诊断和导出工具。切换模式不需要重新打开视频。
 
+0.0.3 新增 NR 运行版本切换：NVIDIA 原版默认启用，另附 RTX 40/50 社区兼容实验版。RTX 40 尚未完成实机验证；专业模式布局重排仍在规划中。
+
 ## 下载与运行
 
-1. 在 [Releases](https://github.com/Likely7/Veyra-NRVideo/releases) 下载 **Veyra-0.0.2-win64-portable.zip**，不要下载 Source code。
+1. 在 [Releases](https://github.com/Likely7/Veyra-NRVideo/releases) 下载 **Veyra-0.0.3-win64-portable.zip**，不要下载 Source code。
 2. 完整解压到一个可写文件夹，双击 **Veyra.exe**。无需安装 SDK、Python 或开发工具。
 3. 使用当前显卡驱动。要使用 NVIDIA NR、DLSS、RTX Video SR 和 NVENC，需兼容的 NVIDIA RTX 显卡；本版本主要在 RTX 5070 上验证。
 
@@ -55,6 +57,16 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片和采集
 
 允许自行替换 DLL：退出软件后，NVIDIA 文件放在 `runtime/experimental/`，XeSS / XeLL 放在 `runtime_local/intel/experimental/`，保留文件名。软件不锁定哈希或签名；清单仅记录发布包原件，替换版的接口与硬件兼容性不作保证。卸载整个软件只需退出后删除解压目录。
 
+### NR 运行版本
+
+专业模式 → 增强 → NR 运行版本，可选 NVIDIA 原版或 RTX 40/50 社区兼容版。切换会短暂停顿，失败恢复上一套设置。社区版已随包放在 `runtime/experimental/nr-community/`，无需手动覆盖原版。它是社区修改文件，签名状态为 `HashMismatch`，不是有效 NVIDIA 签名原件；两版目前均在 RTX 5070 验证。
+
+### OBS 直播与录制
+
+添加“窗口采集”，选择 Veyra，并将“捕获方式”手动设为 **Windows 10（1903及以上）**。不要依赖“自动”：它可能选中 BitBlt，导致只捕获 UI、视频区域没有画面。本机已通过切换到该 Windows 捕获方式恢复视频。
+
+软件里的“直播兼容 · 实验”只切换显示交换链，不能解决 BitBlt 捕获问题，默认关闭即可。其他录屏软件优先选 Windows Graphics Capture / WGC；未验证所有录屏软件及补帧输出的捕获节奏。
+
 ## 技术路线与边界
 
 ```text
@@ -67,6 +79,6 @@ NR 与 DLSS 帧生成属于 **community experimental / 社区实验集成**，�
 
 ## 开发与许可
 
-[构建说明](docs/BUILD.md) · [组件清单](docs/RUNTIME_COMPONENTS_0.0.2.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
+[构建说明](docs/BUILD.md) · [组件清单](docs/RUNTIME_COMPONENTS_0.0.3.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
 
 源码采用 [GPLv3](LICENSE)。SDK、模型和运行时不进入源码仓库；Release 组件按各自许可与实验发布范围单独提供。

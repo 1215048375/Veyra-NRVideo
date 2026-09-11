@@ -7,6 +7,14 @@
 #include "veyra/pipeline/ResolutionPlan.h"
 namespace veyra::engine {
 enum class FrameGenerationBackend { Dlss, XeSS };
+enum class NrRuntime { Original, Community };
+constexpr std::string_view nrRuntimeName(NrRuntime runtime) {
+    switch(runtime) {
+    case NrRuntime::Original:return "NVIDIA-original";
+    case NrRuntime::Community:return "community-RTX40-RTX50";
+    }
+    return "unknown";
+}
 enum class FlowQuality { Performance, Balanced, Quality };
 enum class OpticalFlowBackend { Nvidia, AmdFidelityFx };
 enum class ContentRate { Transport, Auto, Fps30, Fps50, Fps60, Capture60To30 };
@@ -57,6 +65,8 @@ struct EnhancementSettings {
     ResidualSettings residual;
     ProtectionSettings protection;
     bool nr=true,sr=false;
+    NrRuntime nrRuntime=NrRuntime::Original;
+    bool captureCompatible=false;
     pipeline::SrTarget srTarget=pipeline::SrTarget::Uhd4K;
     uint32_t videoSrQuality=0; // 0 DLSS SR; 1–4 RTX Video SR
     uint32_t multiplier=1;
@@ -88,6 +98,7 @@ struct EnhancementSettings {
         auto range=[](float v,float hi){return std::isfinite(v)&&v>=0&&v<=hi;};
         if(auto error=protection.validate();!error.empty())return error;
         if(!revision)return "settingsRevision must be nonzero";
+        if(nrRuntime!=NrRuntime::Original&&nrRuntime!=NrRuntime::Community)return "invalid NR runtime";
         if(audioSync<AudioSyncMode::Automatic||audioSync>AudioSyncMode::Off||audioOffsetMs<-250||audioOffsetMs>250)return "invalid audio sync setting";
         if(!range(model.intensity,1)||!range(model.tone,1)||!range(model.structure,1))return "model parameter out of range";
         if(model.skin!=-1&&!range(model.skin,2))return "skin parameter out of range";

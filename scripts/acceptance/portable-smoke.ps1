@@ -15,6 +15,7 @@ try {
     foreach($case in @(
         @{name='empty';args=@('--smoke-empty','--no-nr','--no-sr','--no-fg');modules=@()},
         @{name='baseline';args=@($inputPath,'--no-nr','--no-sr','--no-fg');modules=@()},
+        @{name='community-sr-nr-fg';args=@($inputPath,'--nr-community','--sr','--nr','--fg','--realtime');modules=@('nvngx_dlss.dll','nvngx_dlssnr.dll','nvngx_dlssg.dll')},
         @{name='dlss-sr-nr-fg';args=@($inputPath,'--sr','--nr','--fg','--realtime');modules=@('nvngx_dlss.dll','nvngx_dlssnr.dll','nvngx_dlssg.dll')},
         @{name='video-sr-nr-fg';args=@($inputPath,'--video-sr','1','--nr','--fg','--realtime');modules=@('nvngx_dlssnr.dll','nvngx_dlssg.dll')}
     )) {
@@ -44,6 +45,11 @@ try {
         }
         foreach($module in @('avcodec-63.dll','avformat-63.dll','avutil-61.dll','swresample-7.dll','swscale-10.dll','vcruntime140.dll')+$case.modules){
             if(-not $loaded.ContainsKey($module) -or -not $loaded[$module].StartsWith($package+'\',[StringComparison]::OrdinalIgnoreCase)){throw "$name missing app-local module $module ($($loaded[$module]))"}
+        }
+        if($case.modules -contains 'nvngx_dlssnr.dll'){
+            $nrFolder=if($name -eq 'community-sr-nr-fg'){'runtime/experimental/nr-community'}else{'runtime/experimental'}
+            $expectedNr=[IO.Path]::GetFullPath((Join-Path $package "$nrFolder/nvngx_dlssnr.dll"))
+            if(-not [StringComparer]::OrdinalIgnoreCase.Equals($loaded['nvngx_dlssnr.dll'],$expectedNr)){throw "$name loaded the wrong NR variant"}
         }
         $results.Add(@{name=$name;exit=$p.ExitCode;frames=$frames;generated=$generated;seconds=$timer.Elapsed.TotalSeconds;modules=$loaded})
     }

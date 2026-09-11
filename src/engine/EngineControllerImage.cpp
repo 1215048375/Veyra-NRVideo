@@ -24,7 +24,8 @@ void EngineController::runLargeImage(HWND window,const sink::RgbaImage& original
         gfx::CommandSlotRing& ring;VideoPresenter& presenter;pipeline::EnhanceGraph& graph;
         ~Cleanup(){ring.drainQueue();presenter.close();graph.shutdown();}
     } cleanup{ring,presenter,preview};
-    if(!preview.initialize(previewDesc)||!presenter.open(ctx,window,preview)||!preview.createViews()){status(L"大图预览初始化失败",true);return;}
+    bool captureCompatible=options.settings.captureCompatible;
+    if(!preview.initialize(previewDesc)||!presenter.open(ctx,window,preview,captureCompatible)||!preview.createViews()){status(L"大图预览初始化失败",true);return;}
     const auto freeFrame=[](AVFrame* p){av_frame_free(&p);};std::unique_ptr<AVFrame,decltype(freeFrame)> frame(av_frame_alloc(),freeFrame);
     if(!frame){status(L"大图预览内存不足",true);return;}
     frame->format=AV_PIX_FMT_RGBA;frame->width=width;frame->height=height;
@@ -36,6 +37,21 @@ void EngineController::runLargeImage(HWND window,const sink::RgbaImage& original
     while(!stop_){
         EnhancementSettings requested;std::wstring save;
         {std::lock_guard lock(mutex_);requested=desired_;if(!enhanced.pixels.empty())save.swap(savePath_);}
+        if(requested.captureCompatible!=captureCompatible){
+            if(!ring.drainQueue()){status(L"显示切换排空失败",true);break;}
+            presenter.close();
+            if(!presenter.open(ctx,window,preview,requested.captureCompatible)){
+                presenter.close();
+                if(!presenter.open(ctx,window,preview,captureCompatible)){status(L"显示切换恢复失败",true);break;}
+                std::lock_guard lock(mutex_);desired_.rejectVideoRequest(requested,applied);snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.backendWarning=L"直播兼容模式未能启用，已恢复";continue;
+            }
+            captureCompatible=requested.captureCompatible;
+        }
+        auto contentSettings=requested;contentSettings.captureCompatible=applied.captureCompatible;
+        if(!enhanced.pixels.empty()&&contentSettings.sameVideoConfiguration(applied)){
+            applied=requested;
+            std::lock_guard lock(mutex_);snapshot_.applied=applied;snapshot_.applying=desired_!=applied;
+        }
         if(!save.empty()){
             try {
             auto ext=std::filesystem::path(save).extension().wstring();for(auto& c:ext)c=towlower(c);
@@ -48,7 +64,7 @@ void EngineController::runLargeImage(HWND window,const sink::RgbaImage& original
             std::lock_guard lock(mutex_);snapshot_.applied=applied;snapshot_.applying=desired_!=applied;
         }
         if(requested.revision!=applied.revision){
-            pipeline::EnhanceGraphDesc desc;desc.enableNr=requested.nr;desc.noFeatures=!requested.nr;
+            pipeline::EnhanceGraphDesc desc;desc.enableNr=requested.nr;desc.nrRuntime=requested.nrRuntime;desc.noFeatures=!requested.nr;
             desc.model=requested.model;desc.residual=requested.residual;desc.protection=requested.protection;desc.settingsRevision=requested.revision;
             desc.runtimeAbsPath=runtime::localRuntimeDirectory().wstring();
             sink::RgbaImage candidate;TiledImageProcessor::Stats stats;
