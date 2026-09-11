@@ -1,6 +1,12 @@
 # 0.0.4 发布执行记录
 
-状态：候选构建及发布前验证通过，待推送并公开 Release。用户 2026-09-11 明确要求当前版本更新到 GitHub，版本号 0.0.4。目标为 `Likely7/Veyra-NRVideo` 的 `main` 与 `v0.0.4`，保留旧版标签和资产。
+状态：已发布。用户 2026-09-11 明确要求当前版本更新到 GitHub，版本号 0.0.4。发布至 `Likely7/Veyra-NRVideo`，旧版标签和资产未改。
+
+源码提交 `cecf34e1f88ea3538f650ef38e46e26c56ef469d` 与注解标签 `v0.0.4` 已原子推送。Release ID `386843250`，公开时间 `2026-09-11T07:09:56Z`，`draft=false`、`prerelease=false`，latest 接口确认 `v0.0.4`：[发布页](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.4)。四个附件均 uploaded，远端 digest/大小与本机相同，Release 正文与版本说明一致；证据 `logs/release-0.0.4/github-release-published.json`。
+
+发布命令：`git push --atomic nrvideo HEAD:main refs/tags/v0.0.4`；`gh release create v0.0.4 --repo Likely7/Veyra-NRVideo --verify-tag --draft --title "Veyra 0.0.4" --notes-file docs/RELEASE_NOTES_0.0.4.md`；`gh release upload` 上传两个 ZIP 及各自 SHA 文件；核验后 `gh release edit v0.0.4 --repo Likely7/Veyra-NRVideo --draft=false --latest`。未向旧 origin 仓库发布。
+
+源码暂存检查24个文件，无二进制/SDK/模型/运行目录新增；已跟踪文件和历史名称检查未发现运行 DLL 或模型对象，历史 `third_party_local/depth/manifest.json` 是2118字节的旧文本清单，不是模型。推送后先核对两份 README 的 Git blob 与发布提交一致。上传期间用户在 GitHub 新增 README 提交 `51eb18d`，已快进同步并保留；不覆盖用户改动、不重打包、不移动版本标签。以下发布后记录仅改文档。
 
 ## 范围
 

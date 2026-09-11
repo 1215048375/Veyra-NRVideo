@@ -1566,3 +1566,8 @@ FRUC候选bSkipWarp/延后重建/时间归零/首对预热均未通过新增rese
 `portable-smoke.ps1`清洁PATH、无manifest、包外工作目录的五组检查通过，日志`logs/release-0.0.4/portable-final/result.json`；基础、双NR、DLSS/VideoSR/FG均真实执行，三组分别224/222/227个生成帧。首次测试在最后写报告时Get-FileHash模块无法加载而exit1；显式导入执行宿主Utility后完整重跑成功，保留失败日志，不改产品或断言。先前XeSS各6项PASS被误记7项的文档计数已依stdout纠正。
 
 最终解压EXE的delivery `logs/delivery/f0ab3a10a1ea44e99f8b20e619fbdbdc/result.json`，23 PASS、44.899秒；包含真实NR/NVOF、4K播放/图像/NVENC双编码音轨和完整性。独立发布构建音频完整回归68 PASS、原生4K30 NR＋XeSS连续性6 PASS（额外音频暂停0；3.33333秒媒体/3.33291秒墙钟）、合成采集30/35ms抖动回归exit0。所有单次超时30/60/240/300秒，日志`logs/release-0.0.4/`。未新增实卡声学同步、RTX40或长期直播验证。下一步为原子推送源码/标签、上传并核对四个Release附件后公开发布。
+## 2026-09-11 0.0.4 已发布
+
+源码 `cecf34e1f88ea3538f650ef38e46e26c56ef469d` 和注解标签 `v0.0.4` 已原子推送至 `Likely7/Veyra-NRVideo`。Release ID386843250，2026-09-11T07:09:56Z公开，latest=v0.0.4；四个附件远端state/size/SHA256与本机全部一致，Release正文与版本文档一致。发布页 https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.4 。完整命令/身份/测试/失败/未执行项见 `docs/RELEASE_0.0.4_EXECUTION.md`，远端核验日志 `logs/release-0.0.4/github-release-published.json`。源码检查24个文本/自有源文件，无SDK/DLL/模型新增；旧origin与先前Release未修改。
+
+上传期间用户在GitHub提交README修改 `51eb18d`，已快进同步保留，不覆盖、不移动v0.0.4标签或重建资产。仅追加本发布记录。当前发布任务完成，后续为用户实际播放/采集验收；物理声画测量、长期稳定性和RTX40实机仍未执行。
