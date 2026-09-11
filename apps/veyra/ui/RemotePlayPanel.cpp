@@ -1,5 +1,6 @@
 #include "RemotePlayPanel.h"
 #include "Theme.h"
+#include "veyra/Log.h"
 #include "veyra/remoteplay/ProfileStore.h"
 #include "veyra/remoteplay/Discovery.h"
 #include "veyra/RuntimePaths.h"
@@ -112,7 +113,7 @@ case WM_COMMAND:switch(LOWORD(wp)){
             else out.message=result.canceled||stop.stop_requested()?L"已取消配对":std::format(L"配对失败（{}），检查 PS5 配对码、Account ID 与网络。",result.result.code);return out;});break;}
     case Connect:{if(busy)break;auto saved=remoteplay::loadProfile(profilePath());auto host=ascii(Host);if(!saved||!remoteplay::validHost(host)){SetDlgItemTextW(h,StatusText,L"请先完成配对，并填写有效主机地址。");break;}saved->host=host;saved->video=video();if(!remoteplay::saveProfile(currentProfile,*saved)){SetDlgItemTextW(h,StatusText,L"保存连接设置失败，请检查目录权限。");break;}source::RemotePlayConnectDesc desc;desc.request=std::move(*saved);connect(std::move(desc));watching=true;EnableWindow(GetDlgItem(h,Cancel),TRUE);SetDlgItemTextW(h,StatusText,L"连接已开始。需要登录 PIN 时在下方提交。关闭面板不停止串流。");break;}
     case Cancel:if(busy&&worker.joinable())worker.request_stop();else if(watching)disconnect();break;
-    case Scan:launch([](std::stop_token stop){Outcome out;out.hosts=remoteplay::discoverLocalPs5(stop);out.message=stop.stop_requested()?L"已取消查找":out.hosts.empty()?L"未找到 PS5，可手工填写主机 IP；请检查防火墙和局域网。":L"已填入发现的 PS5 地址。多台主机可手工输入目标 IP。";return out;});break;
+    case Scan:launch([](std::stop_token stop){Outcome out;auto report=remoteplay::discoverLocalPs5(stop);for(const auto& line:report.diagnostics)veyra::log::info("remoteplay-discovery",line);out.hosts=std::move(report.hosts);out.message=stop.stop_requested()?L"已取消查找":out.hosts.empty()?(report.error?std::format(L"主机搜索发生错误（{}），详情见日志；可手填 IP。",report.error):L"搜索完成，未收到 PS5 回应；可手填 IP，检查主机开机和局域网。"):L"已填入发现的 PS5 地址。多台主机可手工输入目标 IP。";return out;});break;
     case Wake:{if(busy)break;auto saved=remoteplay::loadProfile(profilePath());if(!saved){SetDlgItemTextW(h,StatusText,L"需要先配对才能唤醒。");break;}saved->host=ascii(Host);launch([request=std::move(*saved)](std::stop_token stop){Outcome out;if(stop.stop_requested()){out.message=L"已取消唤醒";return out;}auto r=remoteplay::wakeLocalPs5(request);out.message=r.ok?L"已发送唤醒请求，等待 PS5 启动后点击连接。":std::format(L"唤醒请求失败（{}）",r.code);return out;});break;}
     case SendPin:{auto pin=ascii(LoginPin);if(pin.empty()||!std::all_of(pin.begin(),pin.end(),[](char c){return c>='0'&&c<='9';})){SetDlgItemTextW(h,StatusText,L"登录 PIN 必须为数字。");break;}login(std::move(pin));SetDlgItemTextW(h,LoginPin,L"");break;}
     }return 0;

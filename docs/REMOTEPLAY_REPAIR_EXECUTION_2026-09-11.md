@@ -111,3 +111,5 @@ Native/source独立构建入口与fixture命令见上文；每个run-short-test�
 本轮仅本地Git和本机测试，没有push、Release或SDK/runtime上传。源码格式检查排除原样保留的上游许可证和unified patch上下文；暂存列表无DLL/LIB/EXE/模型/凭据。
 
 最后源层收口：FFmpeg max_pixels约束为1920×1088，允许1080p编码填充行，避免仅在解码后检查尺寸；open失败记录实际错误码。product-bounded-build.log/source-bounded-build.log链接成功；source-final-bounded.stdout.log和boundary-bounded.stdout.log均exit0，覆盖真实H264/H265首帧、重排PTS、PCM及owner边界。没有改文件/采集GPU路径。
+
+2026-09-12补充：主机发现已修复并收到真实PS5回应；详见 REMOTEPLAY_DISCOVERY_REPAIR_2026-09-12.md。此前exe哈希仅对应当时版本。

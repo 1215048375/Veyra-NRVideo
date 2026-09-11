@@ -1,5 +1,7 @@
 #include "veyra/source/RemotePlaySessionSource.h"
 #include "veyra/remoteplay/ControllerInput.h"
+#include "veyra/remoteplay/Discovery.h"
+#include <string_view>
 #include <iostream>
 extern "C" {
 #include <libavutil/frame.h>
@@ -22,7 +24,16 @@ static void mailbox(){
 };
 }
 
-int main(){
+int main(int argc,char** argv){
+    if(argc==2&&std::string_view(argv[1])=="--discover"){
+        const auto report=veyra::remoteplay::discoverLocalPs5({});
+        for(const auto& line:report.diagnostics)std::cout<<line<<'\n';
+        for(const auto& host:report.hosts)std::cout<<"PS5_HOST="<<host.host<<" standby="<<host.standby<<'\n';
+        std::cout<<"DISCOVERY_RESULT hosts="<<report.hosts.size()<<" error="<<report.error<<'\n';
+        return report.error&&report.hosts.empty()?5:0;
+    }
+    std::stop_source cancelled;cancelled.request_stop();
+    if(!veyra::remoteplay::discoverLocalPs5(cancelled.get_token()).hosts.empty())return 6;
     veyra::source::RemotePlaySessionSourceTestAccess::mailbox();
     veyra::source::RemotePlaySessionSource source;
     for(int i=0;i<3;++i){
