@@ -152,6 +152,9 @@ remoteplay::SessionInbox::Snapshot RemotePlaySource::sessionSnapshot() const
 
 bool RemotePlaySource::openDecoder(remoteplay::Codec codec, std::uint32_t width, std::uint32_t height)
 {
+    if(decodeMode_==RemotePlayConnectDesc::DecodeMode::Hardware&&!decodeDevice_){
+        veyra::log::error("remoteplay-decode","hardware requested without the engine D3D12 device");return false;
+    }
     if (codecContext_ != nullptr) {
         if (codecContext_->codec_id == (codec == remoteplay::Codec::H264 ? AV_CODEC_ID_H264 : AV_CODEC_ID_HEVC)
             && static_cast<std::uint32_t>(codecContext_->width) == width

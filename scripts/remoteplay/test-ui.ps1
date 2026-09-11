@@ -16,6 +16,12 @@ public static class RpUi {
  [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr h,int id);
  [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr h);
  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
+ [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
+ [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int command);
+ [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h,IntPtr after,int x,int y,int width,int height,uint flags);
+ [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);
+ [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr h,IntPtr dc);
+ [DllImport("gdi32.dll")] public static extern bool BitBlt(IntPtr dst,int x,int y,int w,int h,IntPtr src,int sx,int sy,uint rop);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern bool SetWindowText(IntPtr h,string s);
  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out Rect r);
  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h,IntPtr dc,uint flags);
@@ -23,6 +29,7 @@ public static class RpUi {
  public static string Text(IntPtr h){var s=new StringBuilder(1024);GetWindowText(h,s,1024);return s.ToString();}
  public static IntPtr Find(uint pid,string cls){IntPtr found=IntPtr.Zero;EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);var s=new StringBuilder(128);GetClassName(h,s,128);if(owner==pid&&s.ToString()==cls)found=h;return true;},IntPtr.Zero);return found;}
  public static IntPtr Button(IntPtr root,string text){IntPtr found=IntPtr.Zero;EnumChildWindows(root,(h,p)=>{if(Text(h)==text)found=h;return true;},IntPtr.Zero);return found;}
+ public static IntPtr ChildClass(IntPtr root,string cls){IntPtr found=IntPtr.Zero;EnumChildWindows(root,(h,p)=>{var s=new StringBuilder(128);GetClassName(h,s,128);if(s.ToString()==cls)found=h;return true;},IntPtr.Zero);return found;}
 }
 '@
 $oldLog=$env:VEYRA_LOG_FILE
@@ -41,6 +48,12 @@ try {
   do {$panel=[RpUi]::Find($process.Id,'VeyraRemotePlaySetup');if($panel -eq [IntPtr]::Zero){Start-Sleep -Milliseconds 25}}while($panel -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline)
   if($panel -eq [IntPtr]::Zero){throw 'Remote Play panel missing'}
   foreach($control in @(15,16)){if([RpUi]::GetDlgItem($panel,$control) -eq [IntPtr]::Zero){throw 'Bitrate/profile management missing'}}
+  $decode=[RpUi]::GetDlgItem($panel,19)
+  if($decode -eq [IntPtr]::Zero -or [RpUi]::SendMessage($decode,0x146,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32() -ne 3){throw 'Three decode choices missing'}
+  foreach($choice in @(0,1,2,0)){
+   [RpUi]::SendMessage($decode,0x14e,[IntPtr]$choice,[IntPtr]::Zero)|Out-Null
+   if([RpUi]::SendMessage($decode,0x147,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32() -ne $choice){throw 'Decode choice cannot be selected'}
+  }
   # Invalid local validation only; never contact a console or use a real key.
   foreach($field in @(1,2,3,11)){[RpUi]::SetWindowText([RpUi]::GetDlgItem($panel,$field),'')|Out-Null}
   [RpUi]::PostMessage($panel,0x111,[IntPtr]6,[IntPtr]::Zero)|Out-Null
@@ -64,6 +77,27 @@ try {
  }
  $modeLog=Get-Content (Join-Path $OutputDirectory 'ui-app.log') -Raw
  if(([regex]::Matches($modeLog,'completed; final layout')).Count -lt 20){throw 'Mode animation timer did not complete all transitions'}
+ [RpUi]::PostMessage($main,0x111,[IntPtr]220,[IntPtr]::Zero)|Out-Null
+ Start-Sleep -Milliseconds 350
+ $live=[RpUi]::ChildClass($main,'VeyraLiveStatus')
+ if($live -eq [IntPtr]::Zero){throw 'Live status panel missing'}
+ # Owner-painted child panels do not implement WM_PRINT. Read their actual
+ # UI DC after showing this owned test window without activation.
+ [RpUi]::ShowWindow($main,4)|Out-Null
+ [RpUi]::SetWindowPos($main,[IntPtr](-1),0,0,0,0,0x13)|Out-Null
+ Start-Sleep -Milliseconds 250
+ foreach($view in @('overview','advanced')){
+  if($view -eq 'advanced'){[RpUi]::PostMessage($live,0x202,[IntPtr]::Zero,[IntPtr](12*65536+20))|Out-Null;Start-Sleep -Milliseconds 100}
+  $rect=New-Object RpUi+Rect;[RpUi]::GetWindowRect($live,[ref]$rect)|Out-Null
+  $bitmap=New-Object Drawing.Bitmap(($rect.right-$rect.left),($rect.bottom-$rect.top))
+  $graphics=[Drawing.Graphics]::FromImage($bitmap);$dc=$graphics.GetHdc()
+  $sourceDc=[RpUi]::GetDC($live)
+  try {if(-not [RpUi]::BitBlt($dc,0,0,$bitmap.Width,$bitmap.Height,$sourceDc,0,0,0x00cc0020)){throw 'Live status capture failed'}}finally{[RpUi]::ReleaseDC($live,$sourceDc)|Out-Null;$graphics.ReleaseHdc($dc)}
+  $nonBlack=$false
+  for($y=0;$y -lt $bitmap.Height;$y+=4){for($x=0;$x -lt $bitmap.Width;$x+=4){$pixel=$bitmap.GetPixel($x,$y);if($pixel.R+$pixel.G+$pixel.B -gt 30){$nonBlack=$true;break}};if($nonBlack){break}}
+  if(-not $nonBlack){throw 'Live status capture is black; visual validation unavailable'}
+  $bitmap.Save((Join-Path $OutputDirectory ($view+'.png')));$graphics.Dispose();$bitmap.Dispose()
+ }
  for($cycle=0;$cycle -lt 20;$cycle++){
   $fullscreen=[RpUi]::GetDlgCtrlID([RpUi]::Button($main,'全屏 F11'))
   if($fullscreen -eq 0){$fullscreen=[RpUi]::GetDlgCtrlID([RpUi]::Button($main,'全屏'))}

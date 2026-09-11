@@ -139,6 +139,9 @@ static void compareDecode(const char* prefix,Codec codec){
     std::cout<<"SOFT_HARD_YUV_COMPARE_PASS codec="<<int(codec)<<" max_error="<<maxError<<" diagnostic_readback_only=1\n";
 }
 static void fallback(const char* prefix){
+    RemotePlaySource missing;missing.decodeMode_=RemotePlayConnectDesc::DecodeMode::Hardware;
+    check(!missing.openDecoder(Codec::H264,1280,720));
+    std::cout<<"HARDWARE_WITHOUT_DEVICE_REJECTED\n";
     auto data=bytes((std::string(prefix)+"-config.bin").c_str());const auto au=bytes((std::string(prefix)+"-au.bin").c_str());data.insert(data.end(),au.begin(),au.end());
     for(bool automatic:{true,false}){
         RemotePlaySource s;testHardware=true;setup(s);s.decodeMode_=automatic?RemotePlayConnectDesc::DecodeMode::Automatic:RemotePlayConnectDesc::DecodeMode::Hardware;
