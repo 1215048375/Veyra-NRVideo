@@ -1663,3 +1663,6 @@ build-product/native-source/off-check成功；boundary默认与virtual、H264/H2
 
 ## 2026-09-12 全部修复目标开工：P0独立进度
 开工adff31b，分支codex/ps5-scheduler-telemetry-decode。独立inbox接收/解码窗口、GPU/Present进度、受限关键帧恢复已构建和窄测通过；故障注入尚未验证，其他P1-P3继续。详见docs/PS5_TELEMETRY_SCHEDULER_EXECUTION_2026-09-12.md。目标active，无发布。
+
+### 2026-09-12 文件FG提前增强节点
+按PS5_TELEMETRY_STALL_FG_DECODE_REPAIR_PLAN实施文件预览容量2的提前增强。实际4K30原生NR+DLSS2X测试和暂停seek回归均退出0，短媒体稳态约60呈现提交/秒，生成过期0，音频约1倍速。详细命令、日志和未验证边界见PS5_TELEMETRY_SCHEDULER_EXECUTION_2026-09-12.md。仍未完成全部修复，不发布。

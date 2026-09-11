@@ -37,7 +37,7 @@ struct FrameFlowCounters {
     uint32_t commandSlotsInFlight=0,commandSlotHighWater=0,presentationBatchHighWater=0;
 };
 struct FrameFlowMetrics {
-    int64_t lastReady100ns=0,lastPresent100ns=0,lastSubmit100ns=0;
+    int64_t lastReady100ns=0,lastPresent100ns=0,lastSubmit100ns=0,lastFgRejected100ns=0;
     FrameFlowIdentity latest;
     FrameFlowCounters counters;
     std::optional<double> slotReuseWaitMs,captureArrivalToPresentReturnMs,gpuReadyWaitMs,deadlineWaitMs;
