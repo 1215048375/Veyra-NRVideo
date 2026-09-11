@@ -1571,3 +1571,13 @@ FRUC候选bSkipWarp/延后重建/时间归零/首对预热均未通过新增rese
 源码 `cecf34e1f88ea3538f650ef38e46e26c56ef469d` 和注解标签 `v0.0.4` 已原子推送至 `Likely7/Veyra-NRVideo`。Release ID386843250，2026-09-11T07:09:56Z公开，latest=v0.0.4；四个附件远端state/size/SHA256与本机全部一致，Release正文与版本文档一致。发布页 https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.4 。完整命令/身份/测试/失败/未执行项见 `docs/RELEASE_0.0.4_EXECUTION.md`，远端核验日志 `logs/release-0.0.4/github-release-published.json`。源码检查24个文本/自有源文件，无SDK/DLL/模型新增；旧origin与先前Release未修改。
 
 上传期间用户在GitHub提交README修改 `51eb18d`，已快进同步保留，不覆盖、不移动v0.0.4标签或重建资产。仅追加本发布记录。当前发布任务完成，后续为用户实际播放/采集验收；物理声画测量、长期稳定性和RTX40实机仍未执行。
+## 2026-09-11 RTX4060持续欠速音频反馈（诊断）
+
+用户提供桌面veyra-app.log，反馈60fps开2X不足120时音频卡顿。只读日志+源码核对：主会话是60fps文件，revision11连续32个计数差窗口源推进均值51.45fps/呈现提交102.89fps；revision8不开FG也仅47.39fps。AudioVideoContinuity在持续领先时仍暂停WASAPI，因此0.0.4只覆盖短暂抖动，并未解决持续欠速下的连续音频。普通日志无逐次音频等待事件，不声称已核实暂停次数或4060声学复现。完整事实、统计口径、策略约束与后续验收见 `docs/RTX4060_AUDIO_UNDERRATE_2026-09-11.md`。命令：rg筛选source/settings/player-timing/audio；Python按同revision相邻时间戳计算processed/displaySubmits速率；读取AudioVideoContinuity/WasapiAudioSink/EngineController。原始日志仅复制到忽略的logs/4060-audio-20260911，无产品/测试/运行时修改，无新构建或GPU测试，无push/Release。下一步是实时播放欠速策略与可观察音频事件，不能继续仅扩大音频等待容差。
+## 2026-09-11 连续音频与实时视频调度修复方案（未施工）
+
+按用户要求写成 `docs/REALTIME_AV_SCHEDULING_REPAIR_PLAN_2026-09-11.md`，并为4060诊断及上一版音画同步记录补继续修复入口。方案区分文件提前处理/音频主时钟与采集输入映射/软件延迟补偿；先减少FG提交，原帧处理不足再按PTS分散跳过预览增强，导出完整性保持。明确旧“播放器不得丢源帧”的规则仅拟为实时预览修订，实施时同步，当前未修改AGENTS或产品。
+
+源码核对确认现有FgAdmission是整对布尔准入，当前仅采集使用；XeSS生成属于交换链，其SetEnabled路径需独立验证；MediaFileSource返回借用AVFrame，跨线程候选必须有界持有引用。方案覆盖软历史reset/FG恢复成本、解码参考帧不可乱丢、启动负音频PTS、生命周期、音频事件日志及新欠速验收，P1音频解耦不能脱离P2视频追赶单独交付。量化门槛为待验证目标，未写成实测通过。
+
+实际只运行git status、rg及Get-Content进行文档/源码核对，随后文档链接及git diff --check检查。本轮未构建，未执行RTX runtime、4060/5070或采集实卡测试，未改SDK/DLL/模型，无commit/push/Release。下一条任务P0：明确实时预览契约、补音频事件和0.0.4持续欠速失败回归，再执行P1/P2闭环。
