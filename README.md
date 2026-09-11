@@ -93,7 +93,7 @@ Video / image / capture card
 - Depth is not a shipped default provider. Current motion guidance uses NVOF confidence handling where available.
 - 3X and 4X frame generation are experimental. A selected multiplier does not guarantee that every source-frame pair produces a valid generated frame or that every configuration runs in real time.
 - Actual scanout latency, long-term stability, capture audio behavior, and every GPU / driver combination require further real-device validation.
-- AMD FidelityFX supplies optical-flow estimation only. There is no AMD implementation of DLSS5/NR, DLSS SR, NVIDIA FRUC, DLSS frame generation, NVENC export, or an AMD AMF export backend. On a non-NVIDIA adapter, Veyra disables those NVIDIA paths; XeSS may still initialize when its runtime and device support it.
+- AMD FidelityFX supplies optical-flow estimation only. AMD NR development is on hold. NVIDIA NR, DLSS SR, DLSS frame generation and NVENC require compatible NVIDIA hardware; there is no AMD AMF export backend. XeSS may initialize on other adapters when its runtime and device support it.
 - XeSS 2X diagnostics confirm SDK submissions only. They do not prove scanout frame rate, visual quality, or AMD-GPU compatibility.
 - No NVIDIA runtime, SDK archive, headers, libraries, models, or samples are in this Git repository. The user-authorized Release Runtime Pack is a separate Release-only payload and remains experimental.
 
@@ -101,9 +101,9 @@ Video / image / capture card
 
 当前修复以最新用户要求、`AGENTS.md`、对应 `docs` 修复方案和 `docs/WORKLOG.md` 为准。早期 `loop/` 状态、控制哈希与 Phase 队列已归档，不再作为开发前置门禁。Current work follows the latest task, `AGENTS.md`, its repair plan and `docs/WORKLOG.md`; the legacy Loop state and control-hash gates are historical only.
 
-当前修复进度：[后端、帧率、链路延迟与音画同步实施记录](docs/CONTINUATION_REPAIR_IMPLEMENTATION_2026-09-10.md)。开发版已加入集中实时产出统计、XeSS切换修正及受控采集音频同步；FRUC 已从产品移除，AMD NR 本体和实体采集验收仍未完成。这里的开发改动尚未更新已发布的0.0.1用户包。
+当前修复进度：[FRUC移除与诊断收尾](docs/FRUC_REMOVAL_AND_DIAGNOSTICS_2026-09-11.md)。FRUC 已移除，旧预设迁移、真实产出统计、XeSS切换、受控音频同步和诊断收尾已有软件回归；AMD NR 暂时搁置，实体采集由用户验收。这里的开发改动尚未更新已发布的0.0.1用户包。
 
-Current development progress is recorded in the linked implementation log. Changes include completed-output telemetry, corrected XeSS switching, and controlled capture-audio synchronization. FRUC has been removed from the product; AMD NR integration and physical capture acceptance remain unfinished. These changes have not been published as an update to the 0.0.1 package.
+FRUC removal, legacy preset migration, completed-output telemetry, XeSS switching, controlled audio synchronization and diagnostic changes have software regression evidence in the linked report. AMD NR is on hold; physical capture acceptance belongs to user testing. These changes have not been published as an update to the 0.0.1 package.
 
 | Path | Purpose |
 | --- | --- |

@@ -13,7 +13,7 @@
 int wmain(int argc,wchar_t** argv){
     using namespace veyra;
     if(argc!=5)return 2;
-    const bool fruc=std::wstring(argv[1])==L"fruc";const unsigned multiplier=unsigned(std::stoi(argv[2]));
+    if(std::wstring(argv[1])!=L"dlss")return 2;const unsigned multiplier=unsigned(std::stoi(argv[2]));
     if(multiplier<2||multiplier>4)return 2;
     std::filesystem::create_directories(argv[4]);Logger::instance().openFile((std::filesystem::path(argv[4])/"engine.log").wstring());Logger::instance().setConsoleEnabled(false);
     CoInitializeEx(nullptr,COINIT_MULTITHREADED);
@@ -26,7 +26,7 @@ int wmain(int argc,wchar_t** argv){
     pipeline::EnhanceGraph graph(ctx,ring);pipeline::EnhanceGraphDesc desc;
     desc.sourceWidth=desc.workWidth=source.info().width;desc.sourceHeight=desc.workHeight=source.info().height;
     desc.enableNr=true;desc.enableFg=true;desc.fgMultiplier=multiplier;
-    desc.frameGenerationBackend=fruc?engine::FrameGenerationBackend::Fruc:engine::FrameGenerationBackend::Dlss;
+    desc.frameGenerationBackend=engine::FrameGenerationBackend::Dlss;
     desc.runtimeAbsPath=runtime::localRuntimeDirectory().wstring();
     ok=ok&&graph.initialize(desc)&&graph.createViews();
     unsigned skipped=0,evaluated=0,recoveries=0,generated=0,real=0;
@@ -62,6 +62,6 @@ int wmain(int argc,wchar_t** argv){
     ring.drainQueue();graph.shutdown();source.close();
     unsigned errors=0;if(info)for(UINT64 i=0;i<info->GetNumStoredMessagesAllowedByRetrievalFilter();++i){SIZE_T size=0;info->GetMessage(i,nullptr,&size);std::vector<uint8_t> data(size);auto* m=reinterpret_cast<D3D12_MESSAGE*>(data.data());if(SUCCEEDED(info->GetMessage(i,m,&size))&&m->Severity<=D3D12_MESSAGE_SEVERITY_ERROR){++errors;log::error("debug",m->pDescription);}}
     ok=ok&&errors==0;
-    std::cout<<"FG_ADMISSION backend="<<(fruc?"FRUC":"DLSS")<<" multiplier="<<multiplier<<" real="<<real<<" NR="<<nr<<" skipped="<<skipped<<" evaluated="<<evaluated<<" recoveries="<<recoveries<<" valid="<<generated<<" debugErrors="<<errors<<" pass="<<ok<<std::endl;
+    std::cout<<"FG_ADMISSION backend="<<"DLSS"<<" multiplier="<<multiplier<<" real="<<real<<" NR="<<nr<<" skipped="<<skipped<<" evaluated="<<evaluated<<" recoveries="<<recoveries<<" valid="<<generated<<" debugErrors="<<errors<<" pass="<<ok<<std::endl;
     info.Reset();ring.shutdown();ctx.shutdown();CoUninitialize();return ok?0:1;
 }

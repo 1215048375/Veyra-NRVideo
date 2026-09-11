@@ -182,7 +182,7 @@ with (out / 'stdout.log').open('w') as stdout, (out / 'stderr.log').open('w') as
             u.PostMessageW(backend, 0x201, 1, 10|(10<<16))
             popup = wait_for(lambda: windows('VeyraGlassSelector'))[0]
             listing = u.GetDlgItem(popup, 1)
-            assert send(listing, 0x18B) == 3
+            assert send(listing, 0x18B) == 2
             assert font_height(listing) == int(13*scale+.5), 'popup font has different scale'
             time.sleep(.15)
             ImageGrab.grab(window=popup).save(out / f'{dpi}-selector.png')

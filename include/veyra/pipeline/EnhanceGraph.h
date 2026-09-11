@@ -15,6 +15,7 @@
 // and NGX/NVOF objects are created BEFORE any descriptor view; the FG
 // warm-up evaluate runs before views exist; static views are created last.
 #include <cstdint>
+#include "veyra/pipeline/ResetCoordinator.h"
 #include <functional>
 #include <memory>
 #include <string>
@@ -110,6 +111,7 @@ public:
         FrameBatch batch;
         uint32_t fgCandidates=0,fgEvaluated=0,fgSkippedBeforeEval=0;
         bool historyReset=false,fgRecovery=false;
+        ResetReason detectedReset=ResetReason::None;
         bool contentDuplicate=false;int measuredContentRate=0;
         double ptsMs = 0.0;
         uint32_t videoSlot = 0;            // videoFrame[videoSlot] holds this real frame

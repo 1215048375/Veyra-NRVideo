@@ -1,6 +1,7 @@
 #include "veyra/engine/EnhancementSettings.h"
 #include "veyra/diagnostics/DiagnosticEvent.h"
 #include "veyra/diagnostics/FrameMetrics.h"
+#include "veyra/diagnostics/ResetCause.h"
 #include "veyra/engine/PresentationScheduler.h"
 #include "veyra/engine/LiveFgAdmission.h"
 #include "veyra/engine/FrameFlowWindow.h"
@@ -62,7 +63,7 @@ int main(){
     check(!lineage.observe(skipped,2100000,true,false),"missing A identity is unknown rather than extrapolated");
     check(!lineage.observe(skipped,2400000,true,true),"cached preview cannot seed latency lineage");
     check(!pairFlow.snapshot(13000000).pairTiming[size_t(diagnostics::PairTiming::GeneratedFromA)].mean,"generated latency expires when no new frames are presented");
-    check(engine::frameGenerationBackendName(engine::FrameGenerationBackend::Dlss)=="DLSS"&&engine::frameGenerationBackendName(engine::FrameGenerationBackend::Fruc)=="FRUC"&&engine::frameGenerationBackendName(engine::FrameGenerationBackend::XeSS)=="XeSS","frame-generation backend names identify every backend");
+    check(engine::frameGenerationBackendName(engine::FrameGenerationBackend::Dlss)=="DLSS"&&engine::frameGenerationBackendName(engine::FrameGenerationBackend::XeSS)=="XeSS","frame-generation backend names identify every backend");
     check(engine::opticalFlowBackendName(engine::OpticalFlowBackend::Nvidia)=="NVIDIA_NVOF"&&engine::opticalFlowBackendName(engine::OpticalFlowBackend::AmdFidelityFx)=="AMD_FIDELITYFX_OF","optical-flow backend names identify every backend");
     s.model.intensity=std::numeric_limits<float>::quiet_NaN();check(!s.validate().empty(),"reject NaN transaction");
     s={};s.multiplier=5;check(!s.validate().empty(),"reject unsupported multiplier");
@@ -144,11 +145,29 @@ int main(){
     engine::CfrTimeline ticks(60,1,1.0/60,0);bool exactTicks=true;for(unsigned i=0;i<120;++i)exactTicks &= ticks.accepts(i,i/60.0);check(exactTicks&&!ticks.accepts(120,121.0/60),"one-tick CFR accepted but missing frame rejected");
     std::vector<double> mkv;for(unsigned i=0;i<24;++i)mkv.push_back(std::round(i*1000.0/60)/1000);
     check(engine::CfrTimeline::select(29990,499,.001,mkv)==std::pair<int,int>{60,1},"misdeclared MKV rate selects consistent standard CFR candidate");
+    using Reason=pipeline::ResetReason;
+    check(diagnostics::resetCause(0,Reason::PauseResume,Reason::SceneCut)==Reason::PauseResume&&
+        diagnostics::resetCause(0,Reason::Seek,Reason::None)==Reason::Seek&&
+        diagnostics::resetCause(0,Reason::Settings,Reason::None)==Reason::Settings,"explicit transport/settings reset causes are not invented scene cuts");
+    check(diagnostics::resetCause(unsigned(pipeline::FrameFlagBits::Discontinuity),Reason::None,Reason::None)==Reason::PtsDiscontinuity&&
+        diagnostics::resetCause(0,Reason::None,Reason::CadenceBreak)==Reason::CadenceBreak&&
+        diagnostics::resetCause(0,Reason::None,Reason::None)==Reason::None,"PTS/cadence and unknown reset causes remain distinct");
+    check(diagnostics::resetCause(unsigned(pipeline::FrameFlagBits::DeviceLost),Reason::Seek,Reason::None)==Reason::DeviceLost&&
+        diagnostics::resetCause(unsigned(pipeline::FrameFlagBits::Drop),Reason::None,Reason::SceneCut)==Reason::FrameDrop,"device loss and source drops retain explicit causes");
+    auto trace=std::make_unique<diagnostics::FrameTrace>();
+    for(unsigned i=0;i<diagnostics::FrameTrace::capacity+5;++i)
+        trace->add({int64_t(i),7,{i/100,9,i},i,2*i,int64_t(i)*100,diagnostics::TraceKind::Submitted,0,1,.25});
+    const auto traceCopy=trace->snapshot();
+    check(traceCopy.size()==8192&&trace->overwritten()==5&&traceCopy.front().identity.sourceFrameId==5&&traceCopy.back().identity.sourceFrameId==8196,"trace ring preserves chronological tail and reports overwritten events");
+    trace->add({});check(traceCopy.front().session==7&&traceCopy.back().batch==8196,"diagnostic trace snapshot is independent of later writes");
+    Logger::instance().recordFrame({12345,7,{3,9,55},6,8,100,diagnostics::TraceKind::Ready,0,2,.25});
     Logger::instance().setConsoleEnabled(false);
     log::error("nvof-session","test-only nvOFInit failed status=5");
     log::error("nvof-session","test-only caps failed st=7");
     log::error("ngx","test-only fg-backend failed result=0xBAD00005 seh=0xC0000005");
     const auto report=Logger::instance().diagnosticReport();
+    check(report.find("event=Ready host=12345 session=7 revision=9 epoch=3 source=55 batch=6 fence=8")!=std::string::npos,
+        "existing diagnostic preview exports frame identity and actual completion events");
     check(report.find("NVOF=0x5")!=std::string::npos&&report.find("NVOF=0x7")!=std::string::npos&&report.find("NGX=0xBAD00005")!=std::string::npos&&report.find("SEH=0xC0000005")!=std::string::npos,"diagnostic report retains NVOF aliases and NGX/SEH codes (synthetic errors)");
     std::cout<<checks<<" checks "<<failures<<" failures\n";return failures?1:0;
 }

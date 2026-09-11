@@ -9,21 +9,18 @@ using namespace veyra;
 using namespace std::chrono_literals;
 int wmain(int argc,wchar_t**argv){
     SetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS",L"1");
-    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--fruc")==0||wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--fruc-overload")==0||wcscmp(argv[3],L"--fruc-overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0||wcscmp(argv[3],L"--source-gap")==0||wcscmp(argv[3],L"--file-endpoint")==0||wcscmp(argv[3],L"--reset-rollback")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0||wcscmp(argv[3],L"--source-gap")==0||wcscmp(argv[3],L"--file-endpoint")==0||wcscmp(argv[3],L"--reset-rollback")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     std::filesystem::create_directories(argv[2]);Logger::instance().openFile((std::filesystem::path(argv[2])/"engine.log").wstring());Logger::instance().setConsoleEnabled(false);
     HWND window=CreateWindowExW(0,L"STATIC",L"Live scheduler replay",WS_POPUP,0,0,960,540,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     if(!window)return 3;engine::EngineController engine;engine::PlayerOptions options;options.nr=false;options.fg=false;options.captureReplayForTest=true;
     const bool halfRate=argc==4&&wcscmp(argv[3],L"--half-rate")==0;
     const bool sourceGap=argc==4&&wcscmp(argv[3],L"--source-gap")==0;
     if(sourceGap){SetEnvironmentVariableW(L"VEYRA_TEST_REPLAY_SOURCE_GAP",L"1");options.nr=options.fg=true;options.fgMultiplier=2;}
-    const bool frucOverload=argc==4&&std::wstring(argv[3]).find(L"--fruc-overload")==0;
-    const bool overload=frucOverload||(argc==4&&std::wstring(argv[3]).find(L"--overload")==0);
+    const bool overload=(argc==4&&std::wstring(argv[3]).find(L"--overload")==0);
     const bool fileOverload=argc==4&&wcscmp(argv[3],L"--file-overload")==0;
     const bool fileEndpoint=argc==4&&wcscmp(argv[3],L"--file-endpoint")==0;
     if(fileEndpoint){options.captureReplayForTest=false;SetEnvironmentVariableW(L"VEYRA_TEST_FILE_ENDPOINT_LOSS",L"1");engine.setVolume(0,true);}
-    if(argc==4&&wcscmp(argv[3],L"--fruc")==0)options.settings.frameGenerationBackend=engine::FrameGenerationBackend::Fruc;
     if(overload){options.nr=options.sr=options.fg=true;options.realtime=false;options.fgMultiplier=4;options.settings.videoSrQuality=4;options.captureReplayDisableFgAdmissionForTest=std::wstring(argv[3]).ends_with(L"-baseline");SetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS",nullptr);}
-    if(frucOverload)options.settings.frameGenerationBackend=engine::FrameGenerationBackend::Fruc;
     if(halfRate)options.settings.content=engine::ContentRate::Capture60To30;
     if(fileOverload){options.captureReplayForTest=false;options.nr=options.sr=options.fg=true;options.realtime=false;options.fgMultiplier=4;options.settings.videoSrQuality=4;}
     int failures=0;auto check=[&](bool pass,const char* s){std::cout<<(pass?"PASS ":"FAIL ")<<s<<std::endl;if(!pass)++failures;};
@@ -155,5 +152,10 @@ int wmain(int argc,wchar_t**argv){
     }
     check(liveFresh,"running capture settings process fresh source frame, never cached frame");
     check(pausedCached,"paused settings retain cached-frame preview");
+    const auto report=Logger::instance().diagnosticReport();
+    check(report.find("event=Submitted")!=std::string::npos&&report.find("event=Ready")!=std::string::npos&&
+        report.find("event=Present")!=std::string::npos&&report.find("event=Gpu")!=std::string::npos&&report.find("event=Reset")!=std::string::npos,
+        "diagnostic preview contains real engine submission, completion, presentation, GPU and reset records");
+    {std::ofstream trace(std::filesystem::path(argv[2])/"diagnostics.txt");trace<<report;}
     DestroyWindow(window);CoUninitialize();std::cout<<"failures="<<failures<<" (synthetic file replay, not physical capture)\n";return failures?1:0;
 }

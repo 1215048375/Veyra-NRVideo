@@ -6,7 +6,7 @@
 #include <string_view>
 #include "veyra/pipeline/ResolutionPlan.h"
 namespace veyra::engine {
-enum class FrameGenerationBackend { Dlss, XeSS, Fruc = Dlss };
+enum class FrameGenerationBackend { Dlss, XeSS };
 enum class FlowQuality { Performance, Balanced, Quality };
 enum class OpticalFlowBackend { Nvidia, AmdFidelityFx };
 enum class ContentRate { Transport, Auto, Fps30, Fps50, Fps60, Capture60To30 };

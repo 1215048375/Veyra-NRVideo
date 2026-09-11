@@ -1,5 +1,23 @@
 # 2026-09-11 继续修复目标模式执行中
 
+## 最新交付：FRUC 与诊断收尾完成，等待用户验收
+
+按最新用户六项决定收尾：彻底删除FRUC后端/worker/协议/命令行及旧测试，v8预设显式迁移v4-v7的FRUC和XeSS，打包脚本修复，旧运行DLL/EXE四文件清理。修正之前把暂停恢复/PTS跳变/设置记成切镜或Resize的诊断错误；新增固定8192事件轨迹及覆盖统计，接入现有脱敏诊断预览，不逐帧写磁盘，不改画质/调度和导出检查。
+
+完整命令、修改范围、失败及哈希见 [本次收尾记录](FRUC_REMOVAL_AND_DIAGNOSTICS_2026-09-11.md)。`scripts/build.ps1`最终exit0；合同77项、预设30组、实际RTX引擎28项、DLSS/XeSS UI正常和拒绝回退均通过；delivery `ef265e2874624e6aa6e80f7a8c34f8d8` 23项42.852秒PASS。真实Feature18/DLSSG Create/Evaluate `0x1`/SEH0；应用SHA `E078E0B9348841E8A109E1160E704862F175B43F7C5E07C1ADB1D50F73432804`。初次轨迹编译声明顺序错误与一次脚本数组传参失败保留，修正后最终回归通过。下方da5c1b4缺陷清单已由本次修复覆盖。
+
+AMD NR搁置，性能/UI不继续扩展；实卡、真实设备音画同步/拔插和跨屏DPI未由Agent验收；不打包/push/发布。下一步是用户启动 `Veyra.cmd` 实测，不因旧待办继续扩大任务。
+
+## 2026-09-11 用户搁置 AMD NR / 当前未完成核对
+
+用户最新决定：AMD NR 路线暂时搁置，停止本轮上游调查，不作为当前修复完成门槛。没有实现 AMD NR，不将已有 AMD 光流写成 NR。下方历史的“下一条 AMD provider”不再适用。
+
+当前源码 HEAD `da5c1b4`。FRUC 移除仅有部分代码及文档提交，不能称完整交付：`FrameGenerationBackend` 仍保留 `Fruc = Dlss` 别名与 `--fruc` 路径；UI 回归仍按 FRUC/XeSS/DLSS 三项索引；PresetStore 只迁移 v4/v5，旧 v6/v7 的 FRUC=1 会误解释为 XeSS（倍率过高则拒绝），旧 XeSS=2 被新枚举验证拒绝。schema 仍写 v7，需修正持久化兼容合同。打包脚本第26行删除 FRUC 后留下末尾逗号，PowerShell Parser 实测 `Missing expression after ','`。最新提交尚未完整构建/回归；前序 EXE 与 delivery 通过不能覆盖该提交。项目已有 `scripts/build.ps1` 负责定位 VS/CMake，前序终端 PATH 找不到 cmake 不构成工具链不可用的证明。
+
+剩余当前工作：先完整收尾 FRUC 移除及旧预设迁移，更新关联测试并构建/针对性回归/必要 delivery；随后补齐 reset 原因结构化及有界逐帧性能轨迹。单GPU所有者、实际完成帧率/阶段计时、设置生命周期、文件音频恢复和可控淡出已有前序软件证据，但未证明原生4K NR+SR+高倍率FG的性能问题全部解决或达到对照软件水平。真实采集卡的组合吞吐/节奏/A-V、物理音频设备拔插、真实150%/200%系统跨屏DPI尚待验收。默认音频设备改变而旧端点仍有效时尚不主动迁移。发布包仍未更新，文档历史快照须由当前状态覆盖。
+
+本轮实际只读检查：`git status --short`（开始干净）、`git log -6 --oneline`、读取当前方案/交接/实施记录、检查预设与后端代码、PowerShell Parser 解析打包脚本（上述失败）。未构建，未执行新的 RTX Create/Evaluate、AMD 或实卡测试，未 push/打包/发布。下一条唯一任务：FRUC 移除的兼容性、测试与构建收尾。
+
 最新 reset/rebuild 计时：`FrameFlowMetrics` 增加带 session/revision/epoch/source identity 的设置生命周期记录，区分轻量重置与资源重建，并记录 drain/destroy/create/warmup/first GPU-ready 五段 CPU 观测、完成/回滚/取消/失败结果。真实设置事务、暂停缓存预览、注入失败回滚、停止中取消均已通过 `continuation-reset-final-rollback`（约8.8秒，32项，合成文件回放）。完整 release 构建 `reset-lifecycle-build-final.log` exit0。未执行实体采集卡、真实系统跨DPI或AMD provider；目标仍active。
 普通 open/history boundary 随后接入同一记录，reset counters 改为累计；source-gap/EOF 最终 `continuation-reset-cause-live-final` 62.6秒通过（3600 real frames ready/presented，0 cancelled）。早期20/30秒窗口失败原因是素材在本机需要约一分钟读完，失败日志保留，测试上限调整为90秒（单次 watchdog仍290秒）。
 

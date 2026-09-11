@@ -23,7 +23,7 @@ $runtimeFiles = @(
   @{ Name = 'nvngx_dlss.dll'; Source = (Join-Path $resolvedRoot 'runtime_local/nvidia/nvngx_dlss.dll'); Sha256 = 'BE6E434A94CA32499515EB62CA0E6C274526055D568D0426E4C652DCDFB6EE6E'; Classification = 'official-sdk-runtime'; Experimental = $false },
   @{ Name = 'nvngx_dlssg.dll'; Source = (Join-Path $resolvedRoot 'runtime_local/nvidia/nvngx_dlssg.dll'); Sha256 = '135EAF0733C1E37381A8C28ABCF7A862404A54132B81787C04E35D09EFC5E36F'; Classification = 'community-experimental-runtime'; Experimental = $true },
   @{ Name = 'nvngx_dlssnr.dll'; Source = (Join-Path $resolvedRoot 'runtime_local/nvidia/nvngx_dlssnr.dll'); Sha256 = 'E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E'; Classification = 'community-experimental-runtime'; Experimental = $true },
-  @{ Name = 'nvngx_vsr.dll'; Source = (Join-Path $resolvedRoot 'runtime_local/nvidia/nvngx_vsr.dll'); Sha256 = 'C3D88EEA5FF7A548EDEFA66414CF6E77464D0947277C904F324DD23ABF58A1ED'; Classification = 'official-rtx-video-sdk-runtime'; Experimental = $false },
+  @{ Name = 'nvngx_vsr.dll'; Source = (Join-Path $resolvedRoot 'runtime_local/nvidia/nvngx_vsr.dll'); Sha256 = 'C3D88EEA5FF7A548EDEFA66414CF6E77464D0947277C904F324DD23ABF58A1ED'; Classification = 'official-rtx-video-sdk-runtime'; Experimental = $false }
 )
 foreach ($item in $runtimeFiles) {
   if (-not (Test-Path -LiteralPath $item.Source)) { throw "Missing approved runtime: $($item.Name)" }

@@ -19,6 +19,9 @@ enum class ResetReason : uint8_t {
     SourceSwitch,
     PauseResume,
     DeviceLost,
+    Settings,
+    PtsDiscontinuity,
+    CadenceBreak,
     _Count
 };
 
@@ -32,6 +35,9 @@ inline const char* resetReasonName(ResetReason r) {
     case ResetReason::SourceSwitch: return "SourceSwitch";
     case ResetReason::PauseResume: return "PauseResume";
     case ResetReason::DeviceLost: return "DeviceLost";
+    case ResetReason::Settings: return "Settings";
+    case ResetReason::PtsDiscontinuity: return "PtsDiscontinuity";
+    case ResetReason::CadenceBreak: return "CadenceBreak";
     default: return "None";
     }
 }

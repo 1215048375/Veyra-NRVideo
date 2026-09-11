@@ -5,6 +5,7 @@
 #include <mutex>
 #include <string>
 #include "veyra/diagnostics/DiagnosticEvent.h"
+#include "veyra/diagnostics/FrameTrace.h"
 
 namespace veyra {
 
@@ -42,9 +43,13 @@ public:
     std::string diagnosticReport();
     std::string latestProblem();
     static void diagnosticContext(diagnostics::DiagnosticEvent);
+    void recordFrame(diagnostics::FrameTraceEvent event);
+    std::pair<size_t,uint64_t> frameTraceSize();
 
 private:
     std::mutex mutex_;
+    std::mutex traceMutex_;
+    diagnostics::FrameTrace frameTrace_;
     std::FILE* file_ = nullptr;
     bool consoleEnabled_ = true;
     uint64_t lastFileFlushTick_=0;

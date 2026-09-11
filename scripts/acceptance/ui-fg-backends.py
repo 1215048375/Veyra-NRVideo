@@ -130,7 +130,7 @@ with (out / 'stdout.log').open('w') as stdout, (out / 'stderr.log').open('w') as
         multiplier = u.GetDlgItem(body, 202)
         revision_label = u.GetDlgItem(panel, 400)
         assert backend and title and multiplier, 'missing FG controls'
-        assert send(backend, 0x146) == 3, 'FG selector must expose all three backends'
+        assert send(backend, 0x146) == 2, 'FG selector must expose DLSS and XeSS only'
         for width, height in [(1280, 900), (1040, 540), (1040, 800)]:
             u.SetWindowPos(main, None, 30, 30, width, height, 0x14)
             time.sleep(.2)
@@ -159,17 +159,18 @@ with (out / 'stdout.log').open('w') as stdout, (out / 'stderr.log').open('w') as
             wait_for(lambda: not windows(process.pid, 'VeyraGlassSelector'))
             assert send(control, 0x147) == index, 'popup did not commit choice'
 
-        for index, name in [(1, 'FRUC'), (2, 'XeSS'), (0, 'DLSS')]:
+        def applied():
+            current = text(revision_label)
+            values = re.findall(r'\d+', current.splitlines()[0])
+            return current != previous and len(values) >= 2 and values[0] == values[1]
+
+        for index, name in ([(1, 'XeSS')] if reject_xess else [(1, 'XeSS'), (0, 'DLSS')]):
             previous = text(revision_label)
             choose(backend, index)
             if reject_xess and name == 'XeSS':
-                wait_for(lambda: send(backend, 0x147) == 1 and 'XeSS' in text(u.GetDlgItem(panel, 401)), 18)
-                result['switches'].append('XeSS rejected, FRUC retained')
+                wait_for(lambda: send(backend, 0x147) == 0 and 'XeSS' in text(u.GetDlgItem(panel, 401)), 18)
+                result['switches'].append('XeSS rejected, DLSS retained')
                 continue
-            def applied():
-                current = text(revision_label)
-                values = re.findall(r'\d+', current.splitlines()[0])
-                return current != previous and len(values) >= 2 and values[0] == values[1]
             wait_for(applied, 18)
             result['switches'].append(name)
             assert send(multiplier, 0x146) == (2 if name == 'XeSS' else 4), 'incorrect multiplier choices'
@@ -201,7 +202,7 @@ with (out / 'stdout.log').open('w') as stdout, (out / 'stderr.log').open('w') as
         result['exit'] = process.returncode
         result['appliedBackends'] = re.findall(r'Applied revision=\d+.*?fgBackend=(\w+)', log())
         if result.get('passed'):
-            expected = ['FRUC', 'DLSS'] if reject_xess else ['FRUC', 'XeSS', 'DLSS']
+            expected = ['DLSS'] if reject_xess else ['XeSS', 'DLSS']
             result['passed'] = all(name in result['appliedBackends'] for name in expected)
             if reject_xess:
                 result['passed'] = result['passed'] and 'XeSS' not in result['appliedBackends']

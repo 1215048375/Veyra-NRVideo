@@ -14,6 +14,7 @@
 #include "veyra/source/CaptureCardSource.h"
 #include "veyra/pipeline/EnhanceGraph.h"
 #include "veyra/pipeline/ResetCoordinator.h"
+#include "veyra/diagnostics/ResetCause.h"
 #include "veyra/sink/WasapiAudioSink.h"
 #include "veyra/sink/ImageExportSink.h"
 #include "veyra/gfx/D3D12DeviceContext.h"
@@ -191,6 +192,12 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             };
             std::vector<std::shared_ptr<CompletionWatch>> pendingCompletions;
             std::shared_ptr<FrameFlowWindow> frameFlow;
+            const uint64_t runSessionId=[&]{std::lock_guard lock(mutex_);return snapshot_.sessionId;}();
+            pipeline::ResetReason pendingResetCause=pipeline::ResetReason::Open;
+            auto traceFrame=[&](diagnostics::TraceKind kind,pipeline::FrameIdentity identity,uint64_t batch,
+                uint64_t fence,int64_t pts,uint32_t detail,uint32_t count,double ms){
+                Logger::instance().recordFrame({host100ns(),runSessionId,identity,batch,fence,pts,kind,detail,count,ms});
+            };
             std::optional<diagnostics::FrameFlowMetrics::ResetRecord> resetRecord;
             std::optional<diagnostics::FrameFlowMetrics::ResetRecord> lastResetRecord;
             Clock::time_point resetStart{},resetStageStart{};
@@ -207,6 +214,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 lastResetRecord=resetRecord;
                 if(frameFlow)frameFlow->resetLifecycle(*resetRecord);
                 const auto& r=*resetRecord;const auto ms=[&](diagnostics::ResetStage s){return r.stageMs[size_t(s)].value_or(-1.0);};
+                traceFrame(diagnostics::TraceKind::Reset,{r.epoch,r.settingsRevision,r.sourceFrameId},0,0,0,r.reason,unsigned(outcome),*r.totalMs);
                 veyra::log::info("reset-lifecycle",std::format("session={} revision={} epoch={} source={} reason={} outcome={} drainMs={:.3f} destroyMs={:.3f} createMs={:.3f} warmupSubmitMs={:.3f} firstValidObserveMs={:.3f} totalMs={:.3f} (CPU observed; -1=not measured)",r.sessionId,r.settingsRevision,r.epoch,r.sourceFrameId,unsigned(r.reason),unsigned(r.outcome),ms(diagnostics::ResetStage::Drain),ms(diagnostics::ResetStage::Destroy),ms(diagnostics::ResetStage::Create),ms(diagnostics::ResetStage::Warmup),ms(diagnostics::ResetStage::FirstValid),*r.totalMs));
                 resetRecord.reset();
             };
@@ -215,21 +223,17 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 markResetStage(diagnostics::ResetStage::FirstValid);
                 finishReset(diagnostics::ResetOutcome::Completed);
             };
-            auto historyResetCause=[&](const pipeline::FramePacket& packet)->pipeline::ResetReason{
-                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::Open))return pipeline::ResetReason::Open;
-                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::Seek))return pipeline::ResetReason::Seek;
-                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::Drop))return pipeline::ResetReason::FrameDrop;
-                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::Resize))return pipeline::ResetReason::Resize;
-                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::DeviceLost))return pipeline::ResetReason::DeviceLost;
-                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::PauseResume))return pipeline::ResetReason::PauseResume;
-                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::Discontinuity))return pipeline::ResetReason::FrameDrop;
-                if(pipeline::hasFrameFlag(packet.flags,pipeline::FrameFlagBits::Cut))return pipeline::ResetReason::SceneCut;
-                return pipeline::ResetReason::SceneCut;
-            };
             OnExit resetExit{[&]{finishReset(stop_?diagnostics::ResetOutcome::Cancelled:diagnostics::ResetOutcome::Failed);}};
             auto collectTimings=[&]{
-                for(const auto& sample:graph.takeGpuTimings())if(frameFlow)frameFlow->gpuFrame(sample,host100ns());
-                for(const auto& sample:presenter.takeGpuTimings(ctx.fence()))if(frameFlow)frameFlow->gpuFrame(sample,host100ns());
+                auto record=[&](const diagnostics::GpuFrameTiming& sample){
+                    if(frameFlow)frameFlow->gpuFrame(sample,host100ns());
+                    for(size_t i=0;i<sample.gpu.size();++i){const auto& gpu=sample.gpu[i];
+                        if(gpu.state==diagnostics::SampleState::Measured&&gpu.milliseconds)
+                            traceFrame(diagnostics::TraceKind::Gpu,sample.identity,0,0,0,unsigned(i),1,*gpu.milliseconds);
+                    }
+                };
+                for(const auto& sample:graph.takeGpuTimings())record(sample);
+                for(const auto& sample:presenter.takeGpuTimings(ctx.fence()))record(sample);
             };
             // Shared with the presenter: resolve each batch on this single
             // object so SDK status and generated counts are consumed once.
@@ -242,6 +246,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                         if(batch.batch.frames[i].validity==pipeline::GenerationValidity::Valid)++valid;else ++invalid;
                     }
                     watch.flow->ready(batch.batch.batchId,watch.real,valid,invalid,host100ns());
+                    traceFrame(diagnostics::TraceKind::Ready,batch.batch.identity,batch.batch.batchId,std::max(batch.videoFenceValue,batch.genFenceValue),batch.batch.b100ns,invalid,valid,elapsedMs(watch.processStart));
                     if(watch.real)completedProcessing(batch.batch.identity);
                     {
                         if(liveStats.identity.epoch==batch.batch.identity.epoch&&liveStats.identity.settingsRevision==batch.batch.identity.settingsRevision&&batch.fgEvaluated&&!batch.historyReset&&!batch.fgRecovery){liveCompletion.add(elapsedMs(watch.processStart));lastFgCompletion=host100ns();}
@@ -257,7 +262,6 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             auto waitLive=[&]{const auto due=liveScheduler?liveScheduler->wakeAt():0;deadlineWait.slice(due>host100ns()?std::min(1.0,double(due-host100ns())/10000):1.0);};
             uint64_t metricsRevision=options.settings.revision,metricsEpoch=0,statsSourceBase=0;
             uint64_t slotWaitBase=ring.cpuWaitCount(),submitBase=ring.submitCount();double slotWaitMsBase=ring.cpuWaitMilliseconds();
-            const uint64_t runSessionId=[&]{std::lock_guard lock(mutex_);return snapshot_.sessionId;}();
             std::shared_ptr<FrameCompletionRates> completionRates;
             source::CaptureMetrics captureFlowBase{},captureFlowLast{};
             uint64_t rateSkippedBase=0;
@@ -293,7 +297,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     resetStart=resetStageStart=Clock::now();
                     resetRecord=diagnostics::FrameFlowMetrics::ResetRecord{};
                     resetRecord->sessionId=runSessionId;resetRecord->settingsRevision=requested.revision;
-                    resetRecord->reason=static_cast<uint8_t>(pipeline::ResetReason::Resize);
+                    resetRecord->reason=static_cast<uint8_t>(pipeline::ResetReason::Settings);
                     if(frameFlow)frameFlow->resetLifecycle(*resetRecord);
                     drainLivePresentation();
                     // A drain may outlive several slider notifications. Build
@@ -335,7 +339,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 const double seek=seekSeconds_.exchange(-1);
                 if(seek>=0&&!isImage&&!isCapture){
                     if(!ring.drainQueue()||!activeSource->seek({static_cast<int64_t>(seek*1000000),1000000})){status(L"跳转失败",true);break;}
-                    discardBefore=seek*1000;seekPreviewPending=true;reset=true;anchorMs=discardBefore;anchor=Clock::now();lastAudioClockMs=discardBefore;audioClockExhausted=false;audioRebuffering=false;if(audioStarted){audioPipe.setPaused(paused_);audioPipe.requestSeek(discardBefore);}
+                    discardBefore=seek*1000;seekPreviewPending=true;reset=true;pendingResetCause=pipeline::ResetReason::Seek;anchorMs=discardBefore;anchor=Clock::now();lastAudioClockMs=discardBefore;audioClockExhausted=false;audioRebuffering=false;if(audioStarted){audioPipe.setPaused(paused_);audioPipe.requestSeek(discardBefore);}
                 }
                 if(!transaction&&((paused_&&!seekPreviewPending)||(isImage&&hasOutput))){
                     drainLivePresentation();
@@ -345,7 +349,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     if(hasOutput&&graph.resolveGeneration(out))completeReset(out.batch.identity);
                     std::this_thread::sleep_for(std::chrono::milliseconds(16));continue;
                 }
-                if(wasPaused&&!paused_){audioRebuffering=false;if(audioStarted)audioPipe.setPaused(false);anchor=Clock::now();anchorMs=out.ptsMs;reset=true;wasPaused=false;}
+                if(wasPaused&&!paused_){audioRebuffering=false;if(audioStarted)audioPipe.setPaused(false);anchor=Clock::now();anchorMs=out.ptsMs;reset=true;pendingResetCause=pipeline::ResetReason::PauseResume;wasPaused=false;}
                 // Backpressure before reading the capacity-one source mailbox:
                 // when a lease frees we consume the newest available sample.
                 if(liveScheduler&&!transaction){
@@ -411,7 +415,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 const bool injectedReject=transaction&&!options.nr&&GetEnvironmentVariableW(L"VEYRA_TEST_REJECT_NR_DISABLE",nullptr,0)>0;
                 if(injectedReject)veyra::log::error("settings-test","test-only reject NR-disable transaction before graph process; no driver failure");
                 pipeline::EnhanceGraph::FgAdmission admitFg;
-                // Both graph FG backends can reseed after a skipped pair. XeSS
+                // DLSS can reseed after a skipped pair. XeSS
                 // owns generation inside its presenter and has no graph admission.
                 if(isCapture&&!rereadCached&&useLiveFgAdmission&&options.settings.frameGenerationBackend!=FrameGenerationBackend::XeSS){
                     std::optional<double> completionP95;double presentP95=0;uint64_t predictionEpoch=0;
@@ -443,7 +447,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 const auto processDone=Clock::now();
                 if(!resetRecord&&out.historyReset){
                     resetStart=processStart;resetStageStart=processStart;
-                    resetRecord=diagnostics::FrameFlowMetrics::ResetRecord{};resetRecord->sessionId=runSessionId;resetRecord->settingsRevision=out.batch.identity.settingsRevision;resetRecord->epoch=out.batch.identity.epoch;resetRecord->sourceFrameId=out.batch.identity.sourceFrameId;resetRecord->reason=static_cast<uint8_t>(historyResetCause(pkt));
+                    resetRecord=diagnostics::FrameFlowMetrics::ResetRecord{};resetRecord->sessionId=runSessionId;resetRecord->settingsRevision=out.batch.identity.settingsRevision;resetRecord->epoch=out.batch.identity.epoch;resetRecord->sourceFrameId=out.batch.identity.sourceFrameId;resetRecord->reason=static_cast<uint8_t>(diagnostics::resetCause(pkt.flags,pendingResetCause,out.detectedReset));
                     resetRecord->stageMs[size_t(diagnostics::ResetStage::Drain)]=0.0;resetRecord->stageMs[size_t(diagnostics::ResetStage::Destroy)]=0.0;resetRecord->stageMs[size_t(diagnostics::ResetStage::Create)]=0.0;
                     resetRecord->rebuilt=false;markResetStage(diagnostics::ResetStage::Warmup);
                     if(frameFlow)frameFlow->resetLifecycle(*resetRecord);
@@ -452,6 +456,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     resetRecord->epoch=out.batch.identity.epoch;resetRecord->sourceFrameId=out.batch.identity.sourceFrameId;
                     markResetStage(diagnostics::ResetStage::Warmup);
                 }
+                pendingResetCause=pipeline::ResetReason::None;
                 if(!frameFlow||metricsRevision!=options.settings.revision||metricsEpoch!=out.batch.identity.epoch){
                     const bool settingsChanged=metricsRevision!=options.settings.revision;
                     metricsRevision=options.settings.revision;metricsEpoch=out.batch.identity.epoch;statsStart=Clock::now();statsSourceBase=sourceFrames-uint64_t(!rereadCached);
@@ -473,6 +478,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     if(veyra::log::verboseFrameLogs())veyra::log::info("frame-lineage",std::format("batch={} epoch={} revision={} sourceA={} sourceB={} ptsA={} ptsB={} arrivalA={} arrivalB={} captureCallbacks={}",out.batch.batchId,out.batch.identity.epoch,out.batch.identity.settingsRevision,lineage->a.identity.sourceFrameId,lineage->b.identity.sourceFrameId,lineage->a.pts100ns,lineage->b.pts100ns,lineage->a.host100ns,lineage->b.host100ns,lineage->a.captureCallback&&lineage->b.captureCallback));
                 }
                 processTimes.add(processMs);
+                traceFrame(diagnostics::TraceKind::Submitted,out.batch.identity,out.batch.batchId,std::max(out.videoFenceValue,out.genFenceValue),out.batch.b100ns,out.fgSkippedBeforeEval,out.fgEvaluated,processMs);
                 frameFlow->cpu(diagnostics::CpuStage::Decode,decodeMs,host100ns());
                 frameFlow->cpu(diagnostics::CpuStage::Submit,processMs,host100ns());
                 frameFlow->cpu(diagnostics::CpuStage::SlotWait,processSlotWaitMs,host100ns());
@@ -534,6 +540,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                             const auto xessGenerated=presenter.xessGeneratedCount()-beforeXess,xessPresented=presenter.xessPresentedCount()-beforeXessPresented;
                             item.lease->consumerFence=ring.lastSignaledValue();const bool didPresent=presenter.submittedCount()>before;s.blit=presenter.blitTiming(ctx.fence());
                             const auto elapsed=elapsedMs(begin);s.presentMs+=elapsed;flow->cpu(diagnostics::CpuStage::Present,elapsed,host100ns());
+                            if(didPresent)traceFrame(diagnostics::TraceKind::Present,item.identity,batch.batch.batchId,item.lease->consumerFence,item.pts100ns,item.subframe,1,elapsed);
                             if(xessPresented)flow->xessSubmitted(xessPresented,xessGenerated,host100ns());
                             if(didPresent&&physicalCapture)captureSource.videoPresented(double(item.pts100ns)/10000,host100ns());
                             if(didPresent&&!generated&&!rereadCached)flow->latency(captureArrival,host100ns());
@@ -546,6 +553,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     },[&,watch,step,flow=frameFlow]{
                         const auto& batch=watch->output;const auto& s=*step;
                         if(s.handled<batch.batch.count)++presentationCancelledJobs;
+                        if(s.handled<batch.batch.count)traceFrame(diagnostics::TraceKind::Cancelled,batch.batch.identity,batch.batch.batchId,0,batch.batch.b100ns,0,batch.batch.count-s.handled,0);
                         flow->update([&](auto& m){m.counters.cancelledBeforePresent+=batch.batch.count-s.handled;m.gpuReadyWaitMs=s.readyMs;m.deadlineWaitMs=s.waitMs;if(s.count)m.captureArrivalToPresentReturnMs=s.ageMs;m.counters.generatedExpiredAfterEval+=s.dropped;});
                         if(liveStats.identity.epoch!=batch.batch.identity.epoch||liveStats.identity.settingsRevision!=batch.batch.identity.settingsRevision)return;
                         liveStats.submitted+=s.count;liveStats.expired+=s.dropped;
@@ -566,9 +574,10 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     deadlineWait.slice(.2);
                 }
                 if(stop_)break;
-                if((paused_&&!seekPreviewPending)||seekSeconds_>=0){reset=true;if(veyra::log::verboseFrameLogs())veyra::log::info("submit",std::format("batch={} cancelled before submit (pause/seek)",out.batch.batchId));continue;}
+                if((paused_&&!seekPreviewPending)||seekSeconds_>=0){reset=true;pendingResetCause=seekSeconds_>=0?pipeline::ResetReason::Seek:pipeline::ResetReason::PauseResume;if(veyra::log::verboseFrameLogs())veyra::log::info("submit",std::format("batch={} cancelled before submit (pause/seek)",out.batch.batchId));continue;}
                 unsigned valid=0,invalid=0;for(unsigned i=0;i<out.batch.count;++i)if(out.batch.frames[i].kind==pipeline::FrameKind::Generated){if(out.batch.frames[i].validity==pipeline::GenerationValidity::Valid)++valid;else ++invalid;}
                 frameFlow->ready(out.batch.batchId,!rereadCached&&!isImage,valid,invalid,host100ns());
+                traceFrame(diagnostics::TraceKind::Ready,out.batch.identity,out.batch.batchId,std::max(out.videoFenceValue,out.genFenceValue),out.batch.b100ns,invalid,valid,elapsedMs(processStart));
                 completeReset(out.batch.identity);
                 if(!rereadCached&&!isImage)completedProcessing(out.batch.identity);
                 gpuWaitMs=elapsedMs(readyStart);gpuReadyTimes.add(gpuWaitMs);
@@ -598,13 +607,14 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     frameFlow->cpu(diagnostics::CpuStage::Present,elapsedMs(begin),host100ns());
                     frameFlow->xessSubmitted(presenter.xessPresentedCount()-beforeXessPresented,presenter.xessGeneratedCount()-beforeXess,host100ns());
                     item.lease->consumerFence=ring.lastSignaledValue();
+                    if(presenter.submittedCount()>before)traceFrame(diagnostics::TraceKind::Present,item.identity,out.batch.batchId,item.lease->consumerFence,item.pts100ns,item.subframe,1,elapsedMs(begin));
                     if(presenter.submittedCount()>before){++handled;frameFlow->presented(generated,item.lease->consumerFence,host100ns());}
                     if(presenter.submittedCount()>before&&!generated&&!rereadCached)frameFlow->latency(std::chrono::duration_cast<std::chrono::nanoseconds>(decodeStart.time_since_epoch()).count()/100,host100ns());
                     if(presenter.submittedCount()>before&&generated&&lineage)frameFlow->generatedLatency(*lineage,host100ns());
                     if(presenter.submittedCount()>before){++submitted;const auto time=host100ns();submissionTimes.push_back(time);while(submissionTimes.size()>1&&time-submissionTimes.front()>10000000)submissionTimes.pop_front();if(veyra::log::verboseFrameLogs())veyra::log::info("submit",std::format("batch={} epoch={} revision={} subframe={} pts100ns={} host100ns={} fence={} (submission, display unmeasured)",out.batch.batchId,item.identity.epoch,item.identity.settingsRevision,item.subframe,item.pts100ns,host100ns(),item.lease->consumerFence));}
                 }
                 if(presentFailed){status(L"画面提交失败",true);break;}
-                if(interrupted){reset=true;continue;}
+                if(interrupted){reset=true;pendingResetCause=seekSeconds_>=0?pipeline::ResetReason::Seek:pipeline::ResetReason::PauseResume;continue;}
                 seekPreviewPending=false;
                 }
                 if(!liveScheduler){scheduleWaits.add(frameWaitMs);presentTimes.add(framePresentMs);}
@@ -642,6 +652,8 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     snapshot_.schedulingWaitP95Ms=waitP95;snapshot_.processCpuP95Ms=processTimes.p95();snapshot_.presentCpuP95Ms=presentP95;
                 }
                 const auto gpuP95=[&](diagnostics::GpuStage stage){return gpuStageTimes[size_t(stage)].p95();};
+                if(Clock::now()>=nextTimingLog){const auto [retained,overwritten]=Logger::instance().frameTraceSize();
+                    veyra::log::info("frame-trace",std::format("retained={} capacity=8192 overwritten={} (records available in diagnostic preview)",retained,overwritten));}
                 if(!isCapture&&Clock::now()>=nextTimingLog){veyra::log::info("player-timing",std::format("revision={} decodeP95Ms={:.3f} graphSubmitP95Ms={:.3f} gpuReadyP95Ms={:.3f} presentP95Ms={:.3f} gpuColorP95Ms={:.3f} gpuSrP95Ms={:.3f} gpuFlowP95Ms={:.3f} gpuNrP95Ms={:.3f} gpuResidualP95Ms={:.3f} gpuFgBatchP95Ms={:.3f} gpuBlitP95Ms={:.3f} slotWaits={} slotWaitMs={:.3f} commandSubmits={} displaySubmits={} expiredGenerated={} processed={}",options.settings.revision,decodeTimes.p95(),processTimes.p95(),gpuReadyTimes.p95(),presentTimes.p95(),gpuP95(diagnostics::GpuStage::Color),gpuP95(diagnostics::GpuStage::Sr),gpuP95(diagnostics::GpuStage::Flow),gpuP95(diagnostics::GpuStage::Nr),gpuP95(diagnostics::GpuStage::Residual),gpuP95(diagnostics::GpuStage::FgBatch),gpuP95(diagnostics::GpuStage::Blit),slotWaitCount,slotWaitMilliseconds,commandSubmits,submitted,expired,sourceFrames-statsSourceBase));nextTimingLog=Clock::now()+std::chrono::seconds(1);}
                 if(isCapture&&Clock::now()>=nextTimingLog){
                     logFrameFlow(measured.flow,"active");

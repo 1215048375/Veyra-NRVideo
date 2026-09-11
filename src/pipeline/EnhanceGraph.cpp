@@ -665,6 +665,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     }
     if(std::abs(ptsMs)>9e13){veyra::log::error("timeline","PTS outside representable range");return false;}
     if(prevValid_&&(std::llround(ptsMs*10000)-std::llround(prevPtsMs_*10000)<4||ptsMs-prevPtsMs_>1000)){
+        out.detectedReset=ResetReason::PtsDiscontinuity;
         reset=true;veyra::log::info("timeline","non-monotonic or discontinuous PTS; atomic history reset");
     }
     if (reset) { prevValid_ = false; scene_.reset(); previousLuma_.clear();cadence_.reset(); }
@@ -704,6 +705,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         out.contentDuplicate=desc_.contentRate!=engine::ContentRate::Transport&&previousLuma_.size()==sample.size()&&sad<0.0001;
         const auto analysis=scene_.analyze(realFrameIndex_,hist,sad,static_cast<uint64_t>(std::max(0.0,ptsMs)*1000));
         if(analysis.isSceneCut||analysis.isCadenceBreak){
+            if(out.detectedReset==ResetReason::None)out.detectedReset=analysis.isSceneCut?ResetReason::SceneCut:ResetReason::CadenceBreak;
             reset=true;prevValid_=false;if(analysis.isSceneCut)++metrics_.sceneCutCount;
             veyra::log::info("scene",std::format("history boundary frame={} ptsMs={} cutCandidate={} cadenceBreak={} sad={} histogramDistance={}",
                 realFrameIndex_,ptsMs,analysis.isSceneCut,analysis.isCadenceBreak,analysis.sadScore,analysis.histogramDistance));
@@ -1200,7 +1202,8 @@ bool EnhanceGraph::resolveGeneration(FrameOutputs& out)
     void* data=nullptr;D3D12_RANGE range{0,4};
     HRESULT hr=fgDisableReadback_[frame.lease->slot]->Map(0,&range,&data);
     if(FAILED(hr)){frame.validity=GenerationValidity::Failed;out.hasGenerated=false;veyra::log::error("fg-status",std::format("Map hr=0x{:X}",unsigned(hr)));return true;}
-    const bool rejected=*static_cast<uint8_t*>(data)||out.contentDuplicate;
+    const bool disabled=*static_cast<uint8_t*>(data)!=0;
+    const bool rejected=disabled||out.contentDuplicate;
     D3D12_RANGE written{0,0};fgDisableReadback_[frame.lease->slot]->Unmap(0,&written);
     frame.validity=rejected?GenerationValidity::Disabled:GenerationValidity::Valid;
     anyValid|=!rejected;if(rejected)++metrics_.fgDisabledFrames;else ++metrics_.fgGeneratedFrames;

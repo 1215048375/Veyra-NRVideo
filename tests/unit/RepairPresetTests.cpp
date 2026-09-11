@@ -1,7 +1,48 @@
 #include "veyra/engine/PresetStore.h"
 #include <iostream>
 #include <fstream>
-int main(int argc,char** argv){if(argc!=2)return 2;using namespace veyra::engine;const std::filesystem::path p=argv[1];PresetStore a(p);bool ok=a.load();EnhancementSettings s;s.videoSrQuality=2;s.frameGenerationBackend=FrameGenerationBackend::Fruc;s.opticalFlowBackend=OpticalFlowBackend::AmdFidelityFx;s.amdFlowHalfResolution=true;s.protection.enabled=true;s.protection.featherPixels=3.5f;s.protection.regions[0]={.1f,.2f,.7f,.8f};s.protection.regions[3]={0,0,1,1};s.model.intensity=.375f;s.model.skin=1.5f;s.residual.darken=1.2f;s.multiplier=4;s.flow=FlowQuality::Quality;s.content=ContentRate::Fps50;s.nrPolicy=veyra::pipeline::NrSizePolicy::Native;
+#include <sstream>
+namespace {
+bool legacyBackends(const std::filesystem::path& path) {
+ using namespace veyra::engine;
+ unsigned checks=0;
+ for(int version=4;version<=8;++version)for(int backend=0;backend<=2;++backend)for(int multiplier:{2,4}){
+  std::ostringstream fixture;
+  fixture<<"VEYRA_PRESETS "<<version<<"\n\"legacy\" 1\n\"legacy\" 1 1 1 -1 0 0 0 1 1 1 1 1 1 0 "<<multiplier<<" 0 1 0";
+  fixture<<" 0 0";
+  for(int region=0;region<4;++region)fixture<<" 0 0 0 0";
+  fixture<<" 2 "<<backend;
+  if(version>=5)fixture<<" 1";
+  if(version>=6)fixture<<" 0 0";
+  if(version>=7)fixture<<" 1 137";
+  fixture<<'\n';
+  {std::ofstream file(path);file<<fixture.str();}
+  const bool xess=version<8?backend==2:backend==1;
+  const bool supportedValue=backend<2||(version>=6&&version<=7);
+  const bool expected=supportedValue&&(!xess||multiplier==2);
+  PresetStore store(path);
+  if(store.load()!=expected)return false;
+  if(expected){
+   const auto value=store.defaultSettings();
+   if(value.frameGenerationBackend!=(xess?FrameGenerationBackend::XeSS:FrameGenerationBackend::Dlss)||value.multiplier!=multiplier||value.videoSrQuality!=2)return false;
+   if(version>=7&&(value.audioSync!=AudioSyncMode::Manual||value.audioOffsetMs!=137))return false;
+   if(!store.put(L"legacy",value,true))return false;
+   std::ifstream file(path);std::string magic;int savedVersion=0;file>>magic>>savedVersion;
+   if(magic!="VEYRA_PRESETS"||savedVersion!=8)return false;
+   PresetStore reloaded(path);
+   if(!reloaded.load()||reloaded.defaultSettings()!=value)return false;
+  }else{
+   if(store.put(L"must not overwrite",{}))return false;
+   std::ifstream file(path);std::string unchanged((std::istreambuf_iterator<char>(file)),{});
+   if(unchanged!=fixture.str())return false;
+  }
+  ++checks;
+ }
+ std::cout<<"legacy/current backend migration cases="<<checks<<'\n';
+ return true;
+}
+}
+int main(int argc,char** argv){if(argc!=2)return 2;using namespace veyra::engine;const std::filesystem::path p=argv[1];PresetStore a(p);bool ok=a.load();EnhancementSettings s;s.videoSrQuality=2;s.frameGenerationBackend=FrameGenerationBackend::Dlss;s.opticalFlowBackend=OpticalFlowBackend::AmdFidelityFx;s.amdFlowHalfResolution=true;s.protection.enabled=true;s.protection.featherPixels=3.5f;s.protection.regions[0]={.1f,.2f,.7f,.8f};s.protection.regions[3]={0,0,1,1};s.model.intensity=.375f;s.model.skin=1.5f;s.residual.darken=1.2f;s.multiplier=4;s.flow=FlowQuality::Quality;s.content=ContentRate::Fps50;s.nrPolicy=veyra::pipeline::NrSizePolicy::Native;
  s.srTarget=veyra::pipeline::SrTarget::Uhd8K;
  s.audioSync=AudioSyncMode::Manual;s.audioOffsetMs=137;
  ok=ok&&a.put(L"test",s)&&a.setDefault(0)&&!a.put(L"test",s);PresetStore b(p);ok=ok&&b.load()&&b.defaultSettings()==s&&b.rename(0,L"renamed")&&b.defaultSettings()==s;
@@ -18,4 +59,5 @@ int main(int argc,char** argv){if(argc!=2)return 2;using namespace veyra::engine
  PresetStore old(p);ok=ok&&old.load()&&!old.defaultSettings().protection.enabled&&old.defaultSettings().srTarget==veyra::pipeline::SrTarget::Uhd4K&&old.put(L"v2",s);
  PresetStore upgraded(p);ok=ok&&upgraded.load()&&upgraded.entries().size()==2&&upgraded.entries()[1].settings==s;
  {std::ofstream f(p);f<<"VEYRA_PRESETS 99\ncorrupt mediaPath executable must reject";}PresetStore c(p);ok=ok&&!c.load()&&!c.put(L"override",{});std::ifstream f(p);std::string data((std::istreambuf_iterator<char>(f)),{});ok=ok&&data=="VEYRA_PRESETS 99\ncorrupt mediaPath executable must reject";
+ f.close();ok=legacyBackends(p)&&ok;
  std::cout<<"preset roundtrip, all fields, duplicate, rename-default, delete, validation, unknown schema, corrupt-preservation="<<ok<<'\n';return ok?0:1;}

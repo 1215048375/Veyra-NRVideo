@@ -156,12 +156,25 @@ bool verboseFrameLogs()
 
 void Logger::diagnosticContext(diagnostics::DiagnosticEvent event){threadDiagnosticContext=std::move(event);}
 std::string Logger::latestProblem(){std::lock_guard lock(mutex_);return diagnostics::redact(latestProblem_);}
-std::string Logger::diagnosticReport(){std::lock_guard lock(mutex_);std::ostringstream o;o<<"Veyra 本地诊断（复制前脱敏预览；不会上传）\n";
+void Logger::recordFrame(diagnostics::FrameTraceEvent event){std::lock_guard lock(traceMutex_);frameTrace_.add(event);}
+std::pair<size_t,uint64_t> Logger::frameTraceSize(){std::lock_guard lock(traceMutex_);return {frameTrace_.size(),frameTrace_.overwritten()};}
+std::string Logger::diagnosticReport(){std::ostringstream o;o<<"Veyra 本地诊断（复制前脱敏预览；不会上传）\n";
+    {std::lock_guard lock(mutex_);
     for(size_t i=0;i<diagnostics_.size();++i){const auto& e=diagnostics_.events()[i];const auto& r=e.resolution;
         auto code=[](std::optional<uint64_t> v){return v?std::format("0x{:X}",*v):std::string("未提供");};
         o<<"\n时间="<<e.timestamp<<" 严重级别="<<e.severity<<"\n组件="<<e.component<<" 阶段="<<e.stage<<" 次数="<<e.occurrenceCount<<"\n"<<e.message<<"\nHRESULT="<<code(e.hresult)<<" NGX="<<code(e.ngx)<<" NVOF="<<code(e.nvof)<<" SEH="<<code(e.seh)<<"\n";
         o<<"source="<<r.source.width<<'x'<<r.source.height<<" base="<<r.base.width<<'x'<<r.base.height<<" NR="<<r.nr.width<<'x'<<r.nr.height<<" flow="<<r.flow.width<<'x'<<r.flow.height<<" FG="<<r.fg.width<<'x'<<r.fg.height<<" output="<<r.output.width<<'x'<<r.output.height<<"\nepoch="<<e.identity.epoch<<" frame="<<e.identity.sourceFrameId<<" batch="<<e.batch<<" subframe="<<e.subframe<<" revision="<<e.identity.settingsRevision<<"\nruntime="<<e.runtimeHash<<" flow="<<e.flowApplied<<" fallback="<<e.fallbackReason<<"\n";
-    }return diagnostics::redact(o.str());
+    }}
+    std::vector<diagnostics::FrameTraceEvent> trace;uint64_t overwritten=0;
+    {std::lock_guard lock(traceMutex_);trace=frameTrace_.snapshot();overwritten=frameTrace_.overwritten();}
+    o<<"\nFrame trace: records="<<trace.size()<<" capacity="<<diagnostics::FrameTrace::capacity<<" overwritten="<<overwritten
+     <<"\nHost timestamps are monotonic 100ns; Ready is observed GPU completion, Present is submission, not scanout."
+     <<"\nDetail: Submitted=skipped FG count, Ready=invalid FG count, Present=subframe, Gpu=stage index, Reset=reason enum."
+     <<" Count: Submitted=FG evaluated, Ready=valid FG, Present=1, Reset=outcome enum, Cancelled=unpresented frames.\n";
+    for(const auto& e:trace)o<<"event="<<diagnostics::traceKindName(e.kind)<<" host="<<e.host100ns<<" session="<<e.session
+        <<" revision="<<e.identity.settingsRevision<<" epoch="<<e.identity.epoch<<" source="<<e.identity.sourceFrameId
+        <<" batch="<<e.batch<<" fence="<<e.fence<<" pts="<<e.pts100ns<<" detail="<<e.detail<<" count="<<e.count<<" ms="<<e.milliseconds<<'\n';
+    return diagnostics::redact(o.str());
 }
 void Logger::flush()
 {
