@@ -1,0 +1,3 @@
+
+# Unified dependency patches must remain applicable after a Windows checkout.
+scripts/remoteplay/patches/*.patch text eol=lf

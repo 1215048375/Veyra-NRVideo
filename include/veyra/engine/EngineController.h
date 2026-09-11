@@ -10,6 +10,8 @@
 #include "veyra/diagnostics/FrameMetrics.h"
 #include "veyra/engine/PreviewView.h"
 #include "veyra/sink/CaptureAudioSession.h"
+namespace veyra::source { struct RemotePlayConnectDesc; class RemotePlaySessionSource; }
+namespace veyra::remoteplay { struct ControllerState; }
 namespace veyra::sink { struct RgbaImage; }
 namespace veyra::gfx { class D3D12DeviceContext; class CommandSlotRing; }
 namespace veyra::engine {
@@ -48,7 +50,8 @@ struct PlayerSnapshot {
     uint64_t previewSkipped=0;
     double playbackSpeed=0;
     bool fgBudgetLimited=false,xessGenerationSuppressed=false;
-    bool running=false,failed=false,image=false,capture=false;
+    bool running=false,failed=false,image=false,capture=false,remotePlay=false;
+    int remotePlayState=0; uint64_t remotePlaySkipped=0;
 };
 class EngineController {
 public:
@@ -57,6 +60,11 @@ public:
     bool idle()const;
     bool requestSettings(EnhancementSettings);
     void open(HWND video,const std::wstring& path,PlayerOptions options);
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+    void openRemotePlay(HWND, source::RemotePlayConnectDesc, PlayerOptions);
+    void remotePlayController(const remoteplay::ControllerState&);
+    void remotePlayLoginPin(std::string);
+#endif
     void stop();
     void comparison(int mode,bool base,float split=.5f){comparisonMode_=mode;comparisonBase_=base;comparisonSplit_=std::clamp(split,0.0f,1.0f);}
     void pause(bool p);
@@ -68,7 +76,7 @@ public:
     void startExport(const std::wstring& input,const std::wstring& output,PlayerOptions,bool hevc);
     PlayerSnapshot snapshot()const;
 private:
-    void run(HWND,std::wstring,PlayerOptions);
+    void run(HWND,std::wstring,PlayerOptions,std::shared_ptr<source::RemotePlayConnectDesc> remoteRequest={});
     void runLargeImage(HWND,const sink::RgbaImage&,PlayerOptions,gfx::D3D12DeviceContext&,gfx::CommandSlotRing&);
     void post(std::function<void()>);
     void dispatch();
@@ -76,6 +84,7 @@ private:
     mutable std::mutex mutex_;
     PlayerSnapshot snapshot_;
     std::shared_ptr<FrameFlowWindow> activeFlow_;
+    std::shared_ptr<source::RemotePlaySessionSource> activeRemote_;
     PreviewView previewView_;
     std::wstring savePath_;
     std::thread worker_;

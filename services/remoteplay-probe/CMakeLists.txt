@@ -5,6 +5,9 @@ find_package(Threads REQUIRED)
 get_filename_component(VEYRA_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 option(VEYRA_RP_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(VEYRA_RP_BUILD_NATIVE "Build the REAL pinned Chiaki adapter (requires dependencies)" OFF)
+if(VEYRA_RP_BUILD_NATIVE)
+    include("${VEYRA_ROOT}/cmake/VeyraRemotePlay.cmake")
+else()
 add_library(veyra_remoteplay_core STATIC
     "${VEYRA_ROOT}/src/remoteplay/Validation.cpp"
     "${VEYRA_ROOT}/src/remoteplay/AnnexB.cpp"
@@ -15,6 +18,7 @@ target_include_directories(veyra_remoteplay_core PUBLIC "${VEYRA_ROOT}/include")
 target_compile_features(veyra_remoteplay_core PUBLIC cxx_std_20)
 set_target_properties(veyra_remoteplay_core PROPERTIES CXX_EXTENSIONS OFF)
 target_link_libraries(veyra_remoteplay_core PUBLIC Threads::Threads)
+endif()
 if(MSVC)
     target_compile_options(veyra_remoteplay_core PUBLIC /utf-8 /W4 /WX /permissive-)
 else()

@@ -53,18 +53,25 @@ static void pcm() {
     float large[1920];check(s.pullAudio(large,960,&pts)==480);
     check(s.pullAudio(large,480,&pts)==480 && std::abs(pts-70.0)<0.001);
 }
-static void splitTest(const char* prefix) {
-    RemotePlaySource s;setup(s);auto config=bytes((std::string(prefix)+"-config.bin").c_str());
+static void splitTest(const char* prefix, Codec codec=Codec::H264) {
+    RemotePlaySource s;setup(s);s.request_.video.codec=codec;auto config=bytes((std::string(prefix)+"-config.bin").c_str());
     auto au=bytes((std::string(prefix)+"-au.bin").c_str());
     VideoSample c;c.generation=s.token_->generation();c.width=1280;c.height=720;
-    c.arrival100ns=monotonic100ns();c.kind=SampleKind::CodecConfig;c.payload=PaddedBytes::copy(config);
+    c.codec=codec;c.arrival100ns=monotonic100ns();c.kind=SampleKind::CodecConfig;c.payload=PaddedBytes::copy(config);
     VideoSample f;f.generation=c.generation;f.width=1280;f.height=720;
-    f.arrival100ns=monotonic100ns();f.wireFrameIndex=1;f.payload=PaddedBytes::copy(au);
+    f.codec=codec;f.arrival100ns=monotonic100ns();f.wireFrameIndex=65535;f.payload=PaddedBytes::copy(au);
     const auto ca=s.token_->video(std::move(c));const auto fa=s.token_->video(std::move(f));
     pipeline::FramePacket p;const AVFrame* frame=nullptr;auto r=s.read(p,&frame);
-    std::cout<<"SPLIT_H264 config_accepted="<<ca<<" au_accepted="<<fa<<" read_status="<<int(r)
+    std::cout<<(codec==Codec::H264?"SPLIT_H264":"SPLIT_H265")<<" config_accepted="<<ca<<" au_accepted="<<fa<<" read_status="<<int(r)
         <<" frame="<<bool(frame)<<" session_state="<<int(s.sessionSnapshot().state)<<"\n";
     check(ca && fa && r==SourceReadStatus::Frame && frame && s.sessionSnapshot().state==SessionState::Streaming);
+    // Decode across the real 16-bit wrap, retaining a valid increasing PTS.
+    const auto firstPts=p.pts.to100ns();
+    VideoSample wrapped;wrapped.generation=s.token_->generation();wrapped.width=1280;wrapped.height=720;wrapped.codec=codec;
+    wrapped.arrival100ns=monotonic100ns();wrapped.wireFrameIndex=0;wrapped.payload=PaddedBytes::copy(au);
+    check(s.token_->video(std::move(wrapped)));check(s.read(p,&frame)==SourceReadStatus::Frame);
+    check(!p.pts.isUnknown() && p.pts.to100ns()>firstPts);
+    if(codec==Codec::H265)return;
     // Same actual decoder/stream, with SPS/PPS prepended to AU in one packet.
     RemotePlaySource combined;setup(combined);combined.openDecoder(Codec::H264,1920,1080);
     config.insert(config.end(),au.begin(),au.end());pipeline::FramePacket sp;sp.pts={0,60};sp.colorInfo=combined.info_.color;
@@ -101,9 +108,9 @@ static void reorder(const char* path) {
 };
 }
 int main(int argc,char**argv) {
-    if(argc!=3)return 2;
+    if(argc!=3&&argc!=4)return 2;
     std::cout<<"SOURCE_TEST: real FFmpeg, direct inbox injection; NO PS5/WASAPI/GPU validation\n";
-    try{RemotePlaySourceTestAccess::pcm();RemotePlaySourceTestAccess::splitTest(argv[1]);RemotePlaySourceTestAccess::reorder(argv[2]);}
+    try{RemotePlaySourceTestAccess::pcm();RemotePlaySourceTestAccess::splitTest(argv[1]);RemotePlaySourceTestAccess::reorder(argv[2]);if(argc==4)RemotePlaySourceTestAccess::splitTest(argv[3],Codec::H265);}
     catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 2;}
     std::cout<<"REMOTEPLAY_SOURCE_REGRESSIONS_PASS\n"; return 0;
 }

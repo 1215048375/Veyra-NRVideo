@@ -39,3 +39,37 @@
 5. 完整Veyra构建/delivery、PS5实机声音/画面/输入/增强/重连和延迟验收。
 
 没有关闭用户播放器、占用采集卡、连接PS5、执行NVIDIA runtime或完整产品测试。节点一测试只证明上述真实FFmpeg与离线行为，不证明串流可用。原交接第18节是修复前缺陷账本，当前实现状态以本文节点证据更新。
+
+## 节点二：真实 metadata、共享产品入口与独立 owner（进行中）
+
+已接入代码并在 `out/remoteplay/product-repair` 链接完整 `veyra.exe`；仍等待最终 UI / delivery 检查和用户 PS5 验收。
+
+- `0002-chiaki-video-metadata.patch` 从用户 Code01 变更描述生成，经固定上游对应上下文核对；backend 使用真实 wire frame index / profile 尺寸。没有这份扩展时编译失败。原 MSVC patch 保留。
+- `verify-chiaki-stage.py` 用隔离临时 Git index 从 pin＋两份 patch 重建预期 tree，比较实际完整内容；检查 clean checkout、stage HEAD/index、递归子模块与额外源码。`stage-rejection-test.log` 实际证明：同一允许文件里加一处额外改动会被拒绝，恢复后通过。没有覆盖用户依赖改动。
+- `cmake/VeyraRemotePlay.cmake` 为产品和 native probe 共用构建；根 `VEYRA_ENABLE_REMOTEPLAY` 有显式 OFF/ON，OFF 不编 source/backend；ON 从固定源码编 `chiaki-lib`，不再要求悬空手填 LIB。
+- `RemotePlaySessionSource` 的网络＋FFmpeg owner 持续解码，容量一 mailbox 只覆盖已解码画面并传播历史断点。GPU 继续使用同一个 `EngineController::run` / `EnhanceGraph` / Presenter / LiveGpuScheduler。首次解码后才建实际尺寸资源，尺寸变化排空并重建图。
+- 独立 PCM feeder 消费 source，相对音频 PTS 推进；复用 `CaptureAudioSession` 的通用 PCM/WASAPI owner 和软件呈现补偿，没有创建 DirectShow 音频设备或复制播放器。停止顺序为 feeder join → WASAPI stop/join → Chiaki stop/join → decoder cleanup。
+- `ProfileStore` 使用当前 Windows 用户 DPAPI，加密完整 profile，版本与长度校验、同目录临时文件落盘后原子替换；不写明文凭据、命令行或日志。单个保存 profile 位于 localDataDirectory 的 `remoteplay-profile.dat`。
+- `RemotePlayPanel` 提供手填地址、局域网查找、Account ID、配对码、720p/1080p ×30/60、H264/H265 SDR、配对/取消/连接/唤醒/登录 PIN。工作线程不操作 HWND，定时器接结果；关闭面板不停止已连接串流。
+- SDL3 3.4.14 通过本机 vcpkg 静态构建，仅用于手柄。Win32 UI owner 独立于 GPU 轮询；失焦输出 neutral，网络 owner 对超过100ms未更新输入归零。映射基础按钮/双摇杆/双扳机/PS/触摸板点击；未实现触摸板坐标、陀螺仪、麦克风、自适应扳机/震动反馈。
+- 本次新增代码、两份 patch 与 SDL/Chiaki notices 均为源码/文本；没有 SDK/DLL/LIB/凭据进 Git。SDL 源与安装产物仍在项目外依赖目录。首次 vcpkg 命令因根目录 manifest 模式拒绝单包安装，改到 `C:/veyra-deps` 后安装成功，用时27秒。
+
+### 当前实际证据
+
+日志均在 `logs/remoteplay-audit-20260911/`：
+
+- `metadata-build.log` / `shared-cmake-build.log`：真实修改后 Chiaki、adapter、native/source probe 编译成功；`metadata-source` / `metadata-native` exit0。native 标签改为 `metadata_api_available=1 session_started=0 video_callbacks_observed=0`，不再把接口存在叫回调次数。
+- `product-build.log` 首次全新产品314步成功；`product-engine-build` / `product-panel-build` / `product-input-build` 增量编译链接成功。`product-full-build.log` 经正式 `scripts/build.ps1 -RemotePlay` 全目标追加112步通过，脚本返回exit0并复制既有FFmpeg运行依赖。
+- `hevc-source-fixed.stdout.log`：真实H264/H265均解出首帧并进入Streaming，两种流均覆盖65535→0、PTS仍增长；重排10张输出错配0；PCM检查通过。最初H265合成单帧使用默认B帧编码，正确返回Waiting而使“立即输出”断言失败；将明确首帧用例编码为zerolatency后通过，没有强制改decoder来掩盖B帧延迟。
+- `profile-test.stdout.log`：实际Windows DPAPI roundtrip / replace / ciphertext损坏拒绝 / invalid host拒绝通过；只有合成凭据。
+- `boundary-test.stdout.log`：真实session owner的invalid connect→close→reopen三轮、SDL初始化、失焦neutral通过；后续已追加decoded mailbox真实方法测试，等待新编译回归。
+- `file-source-test.stdout.log`：23 checks / 0 failures；`ui-contract-test.stdout.log`：384布局组合、PCM gain/mute、设置持久化/损坏检查通过。
+
+下一步：补最新 owner mailbox 回归，Remote Play OFF 全新构建、面板实测与完整 delivery；完成后本地Git节点，再交用户PS5连接。实际PS5码流、硬件手柄输入、声音同步与增强性能尚未验证。当前Remote Play解码明确是FFmpeg软件解码，不能声称D3D12硬解已接入。
+
+
+### 节点二收口前追加验证
+
+- `product-mailbox-build.log` 增量8步成功；`boundary-final.stdout.log` 实际调用产品 `publishDecoded`：容量一覆盖计数、交付最新帧、历史断点与消费后不重播通过，连同invalid连接重开和SDL失焦测试全部exit0。
+- `scripts/remoteplay/test-ui.ps1` 实际启动新exe的隔离empty smoke：查找PS5按钮、打开/关闭面板2次、空参数配对被本地拒绝、正常退出，`ui-panel-test.log` PASS；未发送网络请求。截图 `ui-panel/remoteplay-panel.png` 已人工查看，文字/输入/按钮完整、无白底旧控件遮挡；截图前清空Account ID和PIN。
+- 以官方SDK/运行时执行的delivery尚未运行。Remote Play OFF全新目录构建正在执行。上述截图/自动行为不证明PS5连接。

@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Uses chiaki-ng's AGPL-3.0-only + OpenSSL-exception APIs; retain both licenses.
-// NOT compiled/tested in the Linux delivery environment: see the native gate.
+// Windows native initialization and source regression evidence: see execution log.
 #include "veyra/remoteplay/ChiakiBackend.h"
 #include <chiaki/session.h>
+#if !defined(CHIAKI_VEYRA_VIDEO_METADATA_API) || CHIAKI_VEYRA_VIDEO_METADATA_API != 1
+#error The reviewed Chiaki video metadata patch is required
+#endif
 #include <chiaki/opusdecoder.h>
 #include <chiaki/controller.h>
 #include <chiaki/log.h>
@@ -76,18 +79,21 @@ struct ChiakiBackend::Impl {
         }
     }
     static bool videoCallback(std::uint8_t* data,std::size_t size,
-        std::int32_t framesLost,bool frameRecovered,void* user) noexcept {
+        const ChiakiVeyraVideoSampleInfo* info,void* user) noexcept {
         auto& self=*static_cast<Impl*>(user);
-        if(!self.active.load()||!data||!size)return false;
+        if(!self.active.load()||!data||!size||!info)return false;
         try{
             const auto nal=inspectAnnexB({data,size},self.profile.codec);
             if(!nal.valid || (!nal.hasConfig&&!nal.hasPicture))return false;
             VideoSample sample;
             sample.generation=self.token.generation();sample.arrival100ns=monotonic100ns();
             sample.codec=self.profile.codec;
-            sample.kind=nal.hasPicture?SampleKind::AccessUnit:SampleKind::CodecConfig;
-            sample.width=self.profile.width;sample.height=self.profile.height;
-            sample.framesLost=framesLost;sample.referenceRecovered=frameRecovered;
+            sample.kind=info->kind==CHIAKI_VEYRA_SAMPLE_FRAME?SampleKind::AccessUnit:SampleKind::CodecConfig;
+            if((sample.kind==SampleKind::AccessUnit && !nal.hasPicture) ||
+                (sample.kind==SampleKind::CodecConfig && (!nal.hasConfig || nal.hasPicture)))return false;
+            if(info->frame_index_valid)sample.wireFrameIndex=info->frame_index;
+            sample.width=info->width;sample.height=info->height;
+            sample.framesLost=info->frames_lost;sample.referenceRecovered=info->reference_recovered;
             sample.payload=PaddedBytes::copy({data,size});++self.videoCallbacks;
             return self.token.video(std::move(sample));
         }catch(...){self.apiError=-1001;self.token.failed(-1001);return false;}
@@ -152,7 +158,7 @@ BackendResult ChiakiBackend::start(const NativeConnectRequest& request,SessionIn
     chiaki_opus_decoder_set_cb(&s.opus,Impl::opusSettings,Impl::opusFrame,&s);
     ChiakiAudioSink sink{};chiaki_opus_decoder_get_sink(&s.opus,&sink);chiaki_session_set_audio_sink(&s.session,&sink);
     chiaki_session_set_event_cb(&s.session,Impl::eventCallback,&s);
-    chiaki_session_set_video_sample_cb(&s.session,Impl::videoCallback,&s);
+    chiaki_session_set_veyra_video_sample_cb(&s.session,Impl::videoCallback,&s);
     s.active=true;
     const auto startCode=chiaki_session_start(&s.session);
     if(startCode!=CHIAKI_ERR_SUCCESS){auto out=s.record(startCode,"chiaki_session_start");s.active=false;s.token.failed(out.code);(void)stop();return out;}

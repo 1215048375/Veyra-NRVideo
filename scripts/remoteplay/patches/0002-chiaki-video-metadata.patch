@@ -1,0 +1,96 @@
+--- a/lib/include/chiaki/session.h
++++ b/lib/include/chiaki/session.h
+@@ -207,6 +207,21 @@
+  */
+ typedef bool (*ChiakiVideoSampleCallback)(uint8_t *buf, size_t buf_size, int32_t frames_lost, bool frame_recovered, void *user);
+ 
++#define CHIAKI_VEYRA_VIDEO_METADATA_API 1
++typedef enum { CHIAKI_VEYRA_SAMPLE_CONFIG = 0, CHIAKI_VEYRA_SAMPLE_FRAME = 1 } ChiakiVeyraSampleKind;
++typedef struct chiaki_veyra_video_sample_info_t
++{
++	ChiakiVeyraSampleKind kind;
++	bool frame_index_valid;
++	uint16_t frame_index;
++	uint32_t width;
++	uint32_t height;
++	int32_t frames_lost;
++	bool reference_recovered;
++} ChiakiVeyraVideoSampleInfo;
++typedef bool (*ChiakiVeyraVideoSampleCallback)(uint8_t *buf, size_t buf_size, const ChiakiVeyraVideoSampleInfo *info, void *user);
++
++
+ 
+ 
+ typedef struct chiaki_session_t
+@@ -248,6 +263,8 @@
+ 	void *event_cb_user;
+ 	ChiakiVideoSampleCallback video_sample_cb;
+ 	void *video_sample_cb_user;
++	ChiakiVeyraVideoSampleCallback veyra_video_sample_cb;
++	void *veyra_video_sample_cb_user;
+ 	ChiakiAudioSink audio_sink;
+ 	ChiakiAudioSink haptics_sink;
+ 	ChiakiCtrlDisplaySink display_sink;
+@@ -315,6 +332,13 @@
+ /**
+  * @param sink contents are copied
+  */
++
++static inline void chiaki_session_set_veyra_video_sample_cb(ChiakiSession *session, ChiakiVeyraVideoSampleCallback cb, void *user)
++{
++	session->veyra_video_sample_cb = cb;
++	session->veyra_video_sample_cb_user = user;
++}
++
+ static inline void chiaki_session_set_audio_sink(ChiakiSession *session, ChiakiAudioSink *sink)
+ {
+ 	session->audio_sink = *sink;
+--- a/lib/src/videoreceiver.c
++++ b/lib/src/videoreceiver.c
+@@ -137,7 +137,15 @@
+ 
+ 		ChiakiVideoProfile *profile = video_receiver->profiles + video_receiver->profile_cur;
+ 		CHIAKI_LOGI(video_receiver->log, "Switched to profile %d, resolution: %ux%u", video_receiver->profile_cur, profile->width, profile->height);
+-		if(video_receiver->session->video_sample_cb)
++		if(video_receiver->session->veyra_video_sample_cb)
++		{
++			ChiakiVeyraVideoSampleInfo info = { 0 };
++			info.kind = CHIAKI_VEYRA_SAMPLE_CONFIG;
++			info.width = profile->width;
++			info.height = profile->height;
++			video_receiver->session->veyra_video_sample_cb(profile->header, profile->header_sz, &info, video_receiver->session->veyra_video_sample_cb_user);
++		}
++		else if(video_receiver->session->video_sample_cb)
+ 			video_receiver->session->video_sample_cb(profile->header, profile->header_sz, 0, false, video_receiver->session->video_sample_cb_user);
+ 		if(!chiaki_bitstream_header(&video_receiver->bitstream, profile->header, profile->header_sz))
+ 			CHIAKI_LOGW(video_receiver->log, "Failed to parse video header");
+@@ -292,9 +300,26 @@
+ 		}
+ 	}
+ 
+-	if(succ && video_receiver->session->video_sample_cb)
+-	{
+-		bool cb_succ = video_receiver->session->video_sample_cb(frame, frame_size, video_receiver->frames_lost, recovered, video_receiver->session->video_sample_cb_user);
++	if(succ && (video_receiver->session->veyra_video_sample_cb || video_receiver->session->video_sample_cb))
++	{
++		bool cb_succ;
++		if(video_receiver->session->veyra_video_sample_cb)
++		{
++			ChiakiVeyraVideoSampleInfo info = { 0 };
++			info.kind = CHIAKI_VEYRA_SAMPLE_FRAME;
++			info.frame_index_valid = true;
++			info.frame_index = (uint16_t)video_receiver->frame_index_cur;
++			info.frames_lost = video_receiver->frames_lost;
++			info.reference_recovered = recovered;
++			if(video_receiver->profile_cur >= 0 && (size_t)video_receiver->profile_cur < video_receiver->profiles_count)
++			{
++				info.width = video_receiver->profiles[video_receiver->profile_cur].width;
++				info.height = video_receiver->profiles[video_receiver->profile_cur].height;
++			}
++			cb_succ = video_receiver->session->veyra_video_sample_cb(frame, frame_size, &info, video_receiver->session->veyra_video_sample_cb_user);
++		}
++		else
++			cb_succ = video_receiver->session->video_sample_cb(frame, frame_size, video_receiver->frames_lost, recovered, video_receiver->session->video_sample_cb_user);
+ 		chiaki_mutex_lock(&video_receiver->frames_lost_mutex);
+ 		video_receiver->frames_lost = 0;
+ 		chiaki_mutex_unlock(&video_receiver->frames_lost_mutex);

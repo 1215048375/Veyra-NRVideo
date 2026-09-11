@@ -38,6 +38,8 @@ public:
     // connect() and then read(); open() deliberately fails closed.
     bool open(const SourceOpenDesc& desc) override;
     bool connect(const RemotePlayConnectDesc& desc);
+    remoteplay::BackendResult submitController(const remoteplay::ControllerState& state) { return backend_.submitController(state); }
+    remoteplay::BackendResult submitLoginPin(std::string_view pin) { return backend_.submitLoginPin(pin); }
     bool connected() const noexcept { return connected_; }
     remoteplay::SessionInbox::Snapshot sessionSnapshot() const;
 

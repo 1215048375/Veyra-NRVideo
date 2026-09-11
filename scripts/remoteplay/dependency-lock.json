@@ -3,11 +3,33 @@
   "chiaki_repository": "https://github.com/streetpea/chiaki-ng.git",
   "chiaki_commit": "0e16950165f06e5c3291537c2eeba6e852be7120",
   "recursive_submodules": "must match gitlinks in the pinned tree",
-  "native_api": "unmodified chiaki_session_set_video_sample_cb",
-  "native_dependencies": ["Opus", "OpenSSL", "nanopb/protobuf tooling", "Jerasure/gf-complete", "curl", "json-c", "libevent", "miniupnpc"],
+  "native_api": "CHIAKI_VEYRA_VIDEO_METADATA_API=1, reviewed metadata extension",
+  "native_dependencies": [
+    "Opus",
+    "OpenSSL",
+    "nanopb/protobuf tooling",
+    "Jerasure/gf-complete",
+    "curl",
+    "json-c",
+    "libevent",
+    "miniupnpc",
+    "SDL3 3.4.14 static (gamepad input only)"
+  ],
   "ffmpeg": "reuse Veyra's installed version; not needed by patch-01 core or Chiaki-native probe",
   "msvc_compatibility_patch": "patches/0001-chiaki-msvc-vla-compat.patch",
-  "msvc_compatibility_scope": ["lib/src/ctrl.c", "lib/src/regist.c", "lib/src/remote/holepunch.c", "lib/src/remote/rudp.c", "lib/src/session.c"],
-  "native_build_status_at_delivery": "PATCH_READY_REBUILD_PENDING",
-  "no_runtime_dlls_or_vendor_sdks_in_this_package": true
+  "msvc_compatibility_scope": [
+    "lib/src/ctrl.c",
+    "lib/src/regist.c",
+    "lib/src/remote/holepunch.c",
+    "lib/src/remote/rudp.c",
+    "lib/src/session.c"
+  ],
+  "native_build_status_at_delivery": "WINDOWS_PRODUCT_LINKED_OFFLINE_TESTS_PASS_PS5_PENDING",
+  "no_runtime_dlls_or_vendor_sdks_in_this_package": true,
+  "metadata_patch": "patches/0002-chiaki-video-metadata.patch",
+  "sdl3": {
+    "version": "3.4.14",
+    "source": "https://github.com/libsdl-org/SDL/tree/release-3.4.14",
+    "archive_sha512": "6e6f91cde7dffec527af8a9b0162e9fb7997ec2b6770d3002c662cd75e5cd01afd2fb5f5cadfa2496c86e67ed22e876d99ebdf60b9ea7431a3a3caf5686d0f8f"
+  }
 }

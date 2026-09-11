@@ -34,19 +34,22 @@ if (-not (Test-Path -LiteralPath (Join-Path $StageDirectory ".git"))) {
 }
 $stageHead = (& git -C $StageDirectory rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $stageHead -ne $PinnedCommit) { throw "Chiaki staging pin mismatch: $stageHead" }
-$stageStatus = @(& git -C $StageDirectory status --porcelain --untracked-files=no)
-if ($LASTEXITCODE -ne 0) { throw "Unable to inspect Chiaki staging worktree" }
-if ($stageStatus.Count -eq 0) {
-    Invoke-Checked "git" @("-C",$StageDirectory,"apply","--check",$PatchFile)
-    Invoke-Checked "git" @("-C",$StageDirectory,"apply",$PatchFile)
-} else {
-    Invoke-Checked "git" @("-C",$StageDirectory,"apply","--reverse","--check",$PatchFile)
+# Each reviewed patch can be applied once to an existing verified base stage.
+# Full content verification below rejects unrelated changes even in these files.
+foreach ($name in @("0001-chiaki-msvc-vla-compat.patch", "0002-chiaki-video-metadata.patch")) {
+    $patch = Join-Path $Root "scripts/remoteplay/patches/$name"
+    $savedPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue" # reverse-check failure means patch not applied yet
+        & git -C $StageDirectory apply --reverse --check $patch 2>$null
+        $alreadyApplied = $LASTEXITCODE -eq 0
+    } finally { $ErrorActionPreference = $savedPreference }
+    if (-not $alreadyApplied) {
+        Invoke-Checked "git" @("-C",$StageDirectory,"apply","--check",$patch)
+        Invoke-Checked "git" @("-C",$StageDirectory,"apply",$patch)
+    }
 }
-$patchedFiles = @(& git -C $StageDirectory diff --name-only)
-if ($LASTEXITCODE -ne 0 -or ($patchedFiles -join "|") -ne "lib/src/ctrl.c|lib/src/regist.c|lib/src/remote/holepunch.c|lib/src/remote/rudp.c|lib/src/session.c") {
-    throw "Chiaki staging contains changes outside the reviewed MSVC patch: $($patchedFiles -join ', ')"
-}
-Invoke-Checked "git" @("-C",$StageDirectory,"diff","--check")
+Invoke-Checked "python" @((Join-Path $Root "scripts/remoteplay/verify-chiaki-stage.py"),"--stage",$StageDirectory,"--clean",$ChiakiCheckout)
 $Args = @("-S", (Join-Path $Root "services/remoteplay-probe"), "-B", $BuildDirectory,
     "-G", $Generator, "-DCMAKE_BUILD_TYPE=Release", "-DVEYRA_RP_BUILD_NATIVE=ON",
     "-DVEYRA_RP_CHIAKI_SOURCE_DIR=$StageDirectory", "-DVEYRA_RP_CHIAKI_VERIFY_DIR=$ChiakiCheckout",

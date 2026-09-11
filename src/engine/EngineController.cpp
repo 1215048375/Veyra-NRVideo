@@ -13,6 +13,9 @@
 #include "veyra/engine/CaptureHalfRate.h"
 #include "veyra/source/MediaFileSource.h"
 #include "veyra/source/CaptureCardSource.h"
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+#include "veyra/source/RemotePlaySessionSource.h"
+#endif
 #include "veyra/pipeline/EnhanceGraph.h"
 #include "veyra/pipeline/ResetCoordinator.h"
 #include "veyra/diagnostics/ResetCause.h"
@@ -61,6 +64,15 @@ void EngineController::open(HWND video,const std::wstring& path,PlayerOptions op
     opts.captureReplayDisableFgAdmissionForTest=disableAdmission;
     post([this,video,path,opts]{paused_=false;seekSeconds_=-1;run(video,path,opts);});
 }
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+void EngineController::openRemotePlay(HWND window,source::RemotePlayConnectDesc desc,PlayerOptions opts){
+    auto request=std::make_shared<source::RemotePlayConnectDesc>(std::move(desc));
+    {std::lock_guard lock(mutex_);snapshot_={};activeFlow_.reset();previewView_={};snapshot_.sessionId=++sessionId_;snapshot_.transport=TransportState::Opening;snapshot_.remotePlay=true;snapshot_.capture=true;savePath_.clear();desired_=opts.snapshot();desired_.revision=++nextRevision_;snapshot_.desired=desired_;opts=PlayerOptions::from(desired_);}
+    post([this,window,request,opts]{paused_=false;seekSeconds_=-1;run(window,L"remoteplay:",opts,request);});
+}
+void EngineController::remotePlayController(const remoteplay::ControllerState& state){std::lock_guard lock(mutex_);if(activeRemote_)activeRemote_->controller(state);}
+void EngineController::remotePlayLoginPin(std::string pin){std::lock_guard lock(mutex_);if(activeRemote_)activeRemote_->loginPin(std::move(pin));}
+#endif
 void EngineController::stop(){std::lock_guard lock(mutex_);stop_=true;pending_={};snapshot_.transport=busy_?TransportState::Stopping:TransportState::Empty;}
 void EngineController::pause(bool p){paused_=p;std::lock_guard lock(mutex_);if(snapshot_.running)snapshot_.transport=p?TransportState::Paused:TransportState::Playing;}
 void EngineController::setVolume(float gain,bool mute){if(!std::isfinite(gain))return;volume_=std::clamp(gain,0.0f,1.0f);muted_=mute;}
@@ -87,16 +99,26 @@ PlayerSnapshot EngineController::snapshot()const{
     return copy;
 }
 void EngineController::status(const std::wstring& s,bool failed){std::lock_guard lock(mutex_);snapshot_.status=s;snapshot_.failed=failed;if(failed)snapshot_.transport=TransportState::Failed;}
-void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
+void EngineController::run(HWND window,std::wstring path,PlayerOptions options,std::shared_ptr<source::RemotePlayConnectDesc> remoteRequest){
     CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     status(L"正在初始化GPU与本地运行时…");
     gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;source::MediaFileSource source;
     sink::AudioPipeline audioPipe;sink::AudioRenderer audio;VideoPresenter presenter;
     pipeline::EnhanceGraph graph(ctx,ring);AVFrame* imageFrame=nullptr;AVFrame* cachedFrame=nullptr;pipeline::FramePacket cachedPacket;
     source::CaptureCardSource captureSource;const bool physicalCapture=path.rfind(L"capture:",0)==0;
-    const bool isCapture=physicalCapture||options.captureReplayForTest;
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+    auto remote=remoteRequest?std::make_shared<source::RemotePlaySessionSource>():nullptr;
+    const bool isRemote=bool(remote);
+    {std::lock_guard lock(mutex_);activeRemote_=remote;}
+#else
+    (void)remoteRequest;const bool isRemote=false;
+#endif
+    const bool isCapture=physicalCapture||options.captureReplayForTest||isRemote;
     const bool useLiveFgAdmission=!(options.captureReplayForTest&&options.captureReplayDisableFgAdmissionForTest);
     source::IFrameSource* activeSource=physicalCapture?static_cast<source::IFrameSource*>(&captureSource):&source;
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+    if(remote)activeSource=remote.get();
+#endif
     if(options.captureReplayForTest)veyra::log::info("capture-test","file replay exercises live scheduler; no physical capture device or latency measurement");
     bool audioStarted=false;bool failed=false;
     try {
@@ -119,8 +141,25 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 {std::lock_guard lock(mutex_);desired_.multiplier=1;snapshot_.image=true;snapshot_.desired=desired_;}
             }else{
                 source::SourceOpenDesc od;od.path=path;od.preferHardwareDecode=false;
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+                if(remote){
+                    status(L"正在连接 PS5…");
+                    if(!remote->connect(std::move(*remoteRequest))){status(L"PS5 连接失败，请查看诊断",true);break;}
+                    remoteRequest.reset();
+                    while(!stop_){
+                        const AVFrame* first=nullptr;const auto result=remote->read(cachedPacket,&first);
+                        const auto state=remote->sessionSnapshot().state;
+                        {std::lock_guard lock(mutex_);snapshot_.remotePlayState=int(state);}
+                        if(result==source::SourceReadStatus::Frame){cachedFrame=av_frame_clone(first);break;}
+                        if(result==source::SourceReadStatus::Error){status(L"PS5 未返回可解码画面，请检查连接或重新配对",true);break;}
+                        if(state==remoteplay::SessionState::LoginPinRequired)status(L"PS5 要求登录 PIN，请在串流面板输入");
+                        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                    }
+                    if(stop_||!cachedFrame)break;
+                }else
+#endif
                 if(!(physicalCapture?captureSource.configure(od):activeSource->open(od))){status(L"无法打开视频，请查看诊断",true);break;}
-                width=activeSource->info().width;height=activeSource->info().height;duration=activeSource->info().duration.toDouble();
+                width=activeSource->info().width;height=activeSource->info().height;duration=isCapture?0:activeSource->info().duration.toDouble();
             }
             if(!pipeline::Extent{width,height}.valid()){status(L"图像尺寸超出单张GPU纹理能力，需要分块处理",true);break;}
             pipeline::EnhanceGraphDesc gd;gd.sourceWidth=width;gd.sourceHeight=height;
@@ -148,8 +187,9 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
             captureSource.setAudioSync(unsigned(options.settings.audioSync),options.settings.audioOffsetMs);
             if(physicalCapture&&!captureSource.start()){status(L"无法启动采集，请查看诊断",true);break;}
             {std::lock_guard lock(mutex_);snapshot_.duration=duration;snapshot_.running=true;snapshot_.transport=TransportState::Playing;snapshot_.image=isImage;snapshot_.capture=isCapture;snapshot_.applied=options.snapshot();snapshot_.desired=desired_;}
-            status(isImage?L"图片已增强，可保存PNG/JPEG":std::format(L"{} | 输入 {}×{} / 底图 {}×{} / NR {}×{} / 光流 {}×{} / FG与输出 {}×{} | {}",isCapture?L"实时采集":L"播放",width,height,gd.workWidth,gd.workHeight,gd.nrWidth,gd.nrHeight,gd.flowWidth,gd.flowHeight,gd.workWidth,gd.workHeight,gd.nrWidth<gd.workWidth?L"实时内部处理并回填":L"原生NR（性能成本较高）"));
+            status(isImage?L"图片已增强，可保存PNG/JPEG":std::format(L"{} | 输入 {}×{} / 底图 {}×{} / NR {}×{} / 光流 {}×{} / FG与输出 {}×{} | {}",isRemote?L"PS5 串流":isCapture?L"实时采集":L"播放",width,height,gd.workWidth,gd.workHeight,gd.nrWidth,gd.nrHeight,gd.flowWidth,gd.flowHeight,gd.workWidth,gd.workHeight,gd.nrWidth<gd.workWidth?L"实时内部处理并回填":L"原生NR（性能成本较高）"));
             pipeline::EnhanceGraph::FrameOutputs out;bool reset=true,hasOutput=false,audioRebuffering=false,seekPreviewPending=false;
+            bool initialRemoteFramePending=isRemote;
             bool fileAwaitingVideo=true,fileAudioAlignPending=true;std::deque<double> latenessSamples;
             if(!isImage&&!isCapture&&audioPipe.open(path)){
                 audioPipe.holdForVideo();audioPipe.startThread(&audio,true);audioStarted=true;
@@ -310,7 +350,12 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 if(liveScheduler&&liveScheduler->failed()){status(L"采集画面呈现失败，请查看诊断",true);break;}
                 const float gain=muted_?0.0f:volume_.load();audio.setGain(gain);
                 captureSource.setAudioSync(unsigned(options.settings.audioSync),options.settings.audioOffsetMs);
-                if(isCapture){const bool available=captureSource.setAudioGain(gain);const auto audioState=captureSource.audioState();std::lock_guard lock(mutex_);snapshot_.audioAvailable=available;snapshot_.captureAudio=audioState;}
+                if(physicalCapture){const bool available=captureSource.setAudioGain(gain);const auto audioState=captureSource.audioState();std::lock_guard lock(mutex_);snapshot_.audioAvailable=available;snapshot_.captureAudio=audioState;}
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+                if(remote){remote->setAudioGain(gain);remote->setAudioSync(unsigned(options.settings.audioSync),options.settings.audioOffsetMs);
+                    const auto state=remote->audioState();const auto session=remote->sessionSnapshot();
+                    std::lock_guard lock(mutex_);snapshot_.audioAvailable=state.available;snapshot_.captureAudio=state;snapshot_.remotePlayState=int(session.state);snapshot_.remotePlaySkipped=remote->skipped();}
+#endif
                 // Save the latest processed real frame before a settings transaction
                 // invalidates it (live rendering can be one batch behind processing).
                 std::wstring save;EnhancementSettings requested;{std::lock_guard lock(mutex_);requested=desired_;if(hasOutput)save.swap(savePath_);}
@@ -336,6 +381,10 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     if(frameFlow)frameFlow->resetLifecycle(*resetRecord);
                     drainLivePresentation();
                     if(physicalCapture)captureSource.videoReset();
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+                    if(remote)remote->videoReset();
+#endif
+
                     // A drain may outlive several slider notifications. Build
                     // only the latest pending configuration at this boundary.
                     {std::lock_guard lock(mutex_);requested=desired_;}
@@ -380,7 +429,11 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 }
                 if(!transaction&&((paused_&&!seekPreviewPending)||(isImage&&hasOutput))){
                     drainLivePresentation();
-                    if(!wasPaused){holdFileAudio();if(physicalCapture)captureSource.videoReset();}
+                    if(!wasPaused){holdFileAudio();if(physicalCapture)captureSource.videoReset();
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+                    if(remote)remote->videoReset();
+#endif
+}
                     if(audioStarted)audioPipe.setPaused(true);wasPaused=true;
                     const bool referencesValid=hasOutput&&out.batch.count&&out.batch.frames[out.batch.count-1].lease&&out.batch.frames[out.batch.count-1].lease->referencesValid;
                     if(hasOutput&&!presenter.present(ctx,ring,graph,out.videoSlot,false,referencesValid,comparisonMode_,comparisonBase_,comparisonSplit_,out.batch.identity,previewView())){status(L"画面呈现失败",true);break;}
@@ -403,7 +456,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                     if(Clock::now()<*sourceGapUntil){advanceLive();waitLive();continue;}
                 }
                 pipeline::FramePacket pkt;const AVFrame* frame=imageFrame;
-                if(transaction&&cachedFrame&&(!isCapture||paused_)){frame=cachedFrame;pkt=cachedPacket;}
+                if(cachedFrame&&(initialRemoteFramePending||(transaction&&(!isCapture||paused_)))){frame=cachedFrame;pkt=cachedPacket;initialRemoteFramePending=false;}
                 else if(!isImage){
                     auto rs=physicalCapture?captureSource.tryRead(pkt,&frame):activeSource->read(pkt,&frame);
                     // Keep the accepted transaction and rollback state alive until
@@ -422,6 +475,15 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                         collectTimings();seekPreviewPending=false;status(L"视频已播放完毕");paused_=true;{std::lock_guard lock(mutex_);snapshot_.transport=TransportState::Ended;}continue;
                     }
                     if(rs!=source::SourceReadStatus::Frame||pkt.pts.isUnknown()){status(isCapture?L"采集信号中断，请检查设备连接或格式":L"视频解码或时间戳错误",true);break;}
+                }
+                if(isRemote&&frame&&(uint32_t(frame->width)!=width||uint32_t(frame->height)!=height)){
+                    drainLivePresentation();if(!ring.drainQueue()){status(L"串流尺寸切换排空失败",true);break;}
+                    width=uint32_t(frame->width);height=uint32_t(frame->height);
+                    auto plan=pipeline::ResolutionPlan::make({width,height},options.sr,options.settings.nrPolicy,false,options.settings.revision,options.settings.srTarget);
+                    gd.sourceWidth=width;gd.sourceHeight=height;gd.workWidth=plan.base.width;gd.workHeight=plan.base.height;gd.nrWidth=plan.nr.width;gd.nrHeight=plan.nr.height;gd.flowWidth=plan.flow.width;gd.flowHeight=plan.flow.height;
+                    presenter.close();graph.shutdown();out={};hasOutput=false;
+                    if(!graph.initialize(gd)||!presenter.open(ctx,window,graph,options.settings.captureCompatible)||!graph.createViews()){status(L"串流尺寸切换失败",true);break;}
+                    reset=true;pendingResetCause=pipeline::ResetReason::Resize;
                 }
                 const bool rereadCached=transaction&&frame==cachedFrame;
                 const bool halfRate=isCapture&&options.settings.content==ContentRate::Capture60To30&&
@@ -623,6 +685,9 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                             if(didPresent)traceFrame(diagnostics::TraceKind::Present,item.identity,batch.batch.batchId,item.lease->consumerFence,item.pts100ns,item.subframe,1,elapsed);
                             if(xessPresented)flow->xessSubmitted(xessPresented,xessGenerated,host100ns());
                             if(didPresent&&physicalCapture)captureSource.videoPresented(double(item.pts100ns)/10000,host100ns());
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+                            if(didPresent&&remote)remote->videoPresented(double(item.pts100ns)/10000,host100ns());
+#endif
                             if(didPresent&&!generated&&!rereadCached)flow->latency(captureArrival,host100ns());
                             if(didPresent&&generated&&lineage)flow->generatedLatency(*lineage,host100ns());
                             if(didPresent){++s.handled;++s.count;flow->presented(generated,item.lease->consumerFence,host100ns());if(!generated)++presentationCompletedReal;s.ageMs=double(host100ns()-captureArrival)/10000;
@@ -743,7 +808,12 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
                 const double lateness=isCapture?0:nowMs()-pts;
                 if(!paused_&&!isCapture){latenessSamples.push_back(std::abs(lateness));if(latenessSamples.size()>1200)latenessSamples.pop_front();}
                 std::vector<double> sorted(latenessSamples.begin(),latenessSamples.end());std::sort(sorted.begin(),sorted.end());
-                const auto captureStats=isCapture?captureSource.metrics():source::CaptureMetrics{};
+                auto captureStats=physicalCapture?captureSource.metrics():source::CaptureMetrics{};
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+                if(remote){const auto rp=remote->sessionSnapshot();captureStats.received=rp.video.accessUnits;captureStats.dropped=remote->skipped();captureStats.delivered=sourceFrames;
+                    captureStats.readAgeMs=double(std::max<int64_t>(0,host100ns()-pkt.arrivalHost100ns))/10000;
+                }
+#endif
                 diagnostics::FrameMetrics measured;pipeline::EnhanceGraph::Metrics graphStats;uint64_t slotWaitCount=0,commandSubmits=0;double slotWaitMilliseconds=0;uint32_t slotsInFlight=0;
                 {measured=graph.gpuMetrics();graphStats=graph.metrics();measured.gpu[size_t(diagnostics::GpuStage::Blit)]=presenter.blitTiming(ctx.fence(),options.settings.revision,out.batch.identity.epoch);slotWaitCount=ring.cpuWaitCount()-slotWaitBase;slotWaitMilliseconds=ring.cpuWaitMilliseconds()-slotWaitMsBase;commandSubmits=ring.submitCount()-submitBase;slotsInFlight=ring.inFlightCount();
                     collectTimings();
@@ -803,6 +873,10 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options){
         }while(false);
     }catch(const std::exception& e){veyra::log::error("engine",e.what());status(L"引擎异常，请查看诊断",true);failed=true;}
     (void)failed;
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+    {std::lock_guard lock(mutex_);activeRemote_.reset();}
+    if(remote)remote->close();
+#endif
     audioPipe.stopThread();audio.shutdown();ring.drainQueue();presenter.close();graph.shutdown();captureSource.close();source.close();av_frame_free(&cachedFrame);av_frame_free(&imageFrame);ring.shutdown();ctx.shutdown();
     {std::lock_guard lock(mutex_);snapshot_.running=false;snapshot_.audioEndpointRecovering=false;snapshot_.audioRebuffering=false;}
     CoUninitialize();

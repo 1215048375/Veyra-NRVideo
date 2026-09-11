@@ -37,3 +37,22 @@ User-provided official SDK from https://developer.nvidia.com/rtx-video-sdk/getti
 ## NVIDIA FRUC
 
 FRUC was evaluated during development and has been removed from the product. No FRUC runtime, worker, SDK headers, or binaries are built or packaged.
+
+## PS5 Remote Play / chiaki-ng (local integration)
+
+The optional `VEYRA_ENABLE_REMOTEPLAY` build compiles chiaki-ng at
+`0e16950165f06e5c3291537c2eeba6e852be7120` from https://github.com/streetpea/chiaki-ng,
+with the two reviewed patches in `scripts/remoteplay/patches/`. Chiaki code and
+these derived patches retain AGPL-3.0-only with the upstream OpenSSL exception;
+see `licenses/remoteplay/CHIAKI_AGPL3_OPENSSL.txt`. The metadata patch was adapted
+from the user-supplied Code 01 change description and checked against this pin.
+No Chiaki binary or third-party SDK is committed. A future distribution of the
+combined Remote Play executable must provide its corresponding complete source,
+these patches, dependency pins, build instructions and upstream notices; the
+existing Veyra GPL file alone is not the combined program's license record.
+
+Gamepad input uses SDL 3.4.14 (https://github.com/libsdl-org/SDL/tree/release-3.4.14),
+statically built using vcpkg. SDL provides DualSense and other controller device
+support; Veyra maps its public gamepad API to Chiaki semantic input. No SDL audio
+or video playback path is used. Retained notices: `licenses/remoteplay/SDL3_NOTICES.txt`.
+This local integration has not been pushed or released.

@@ -36,6 +36,7 @@ set(VEYRA_CLIP_TOOLS_ROOT "" CACHE PATH "vcpkg-installed x64-windows root with o
 
 option(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR
   "Enable local-only experimental Feature 18 adapter" OFF)
+option(VEYRA_ENABLE_REMOTEPLAY "Build PS5 Remote Play with pinned Chiaki source" OFF)
 option(VEYRA_ENABLE_DLSS_SR "Enable public DLSS SR backend" OFF)
 option(VEYRA_ENABLE_DLSS_FG "Enable public DLSSG backend" OFF)
 option(VEYRA_ENABLE_NVOF "Enable NVIDIA Optical Flow guidance" OFF)
@@ -409,12 +410,6 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
     src/source/NativeCaptureSink.cpp
     src/source/MediaFileSource.cpp
     src/source/CaptureCardSource.cpp
-    src/source/RemotePlaySource.cpp
-    src/remoteplay/Validation.cpp
-    src/remoteplay/AnnexB.cpp
-    src/remoteplay/Timeline.cpp
-    src/remoteplay/VideoIngress.cpp
-    src/remoteplay/SessionInbox.cpp
   )
   veyra_apply_warnings(veyra_sources)
   target_compile_options(veyra_sources PRIVATE /WX-)
@@ -426,16 +421,12 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_link_libraries(veyra_sources PUBLIC veyra_pipeline veyra_media veyra_base)
   target_link_libraries(veyra_sources PRIVATE ${FFMPEG_LIBRARIES} strmiids ole32 oleaut32)
 
-  # Chiaki is an optional source backend.  Keep the normal player build free
-  # of AGPL native symbols unless the caller explicitly provides the pinned
-  # native library/include tree.
-  if(VEYRA_ENABLE_REMOTEPLAY AND VEYRA_REMOTEPLAY_INCLUDE_DIR AND VEYRA_REMOTEPLAY_LIBRARY)
-    target_compile_definitions(veyra_sources PRIVATE VEYRA_ENABLE_REMOTEPLAY=1)
-    target_include_directories(veyra_sources PRIVATE "${VEYRA_REMOTEPLAY_INCLUDE_DIR}")
-    target_link_libraries(veyra_sources PRIVATE "${VEYRA_REMOTEPLAY_LIBRARY}")
-    target_sources(veyra_sources PRIVATE
-      src/remoteplay/ChiakiBackend.cpp
-      src/remoteplay/ChiakiRegistration.cpp)
+  if(VEYRA_ENABLE_REMOTEPLAY)
+    set(VEYRA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
+    include(cmake/VeyraRemotePlay.cmake)
+    target_compile_definitions(veyra_sources PUBLIC VEYRA_ENABLE_REMOTEPLAY=1)
+    target_sources(veyra_sources PRIVATE src/source/RemotePlaySource.cpp src/source/RemotePlaySessionSource.cpp)
+    target_link_libraries(veyra_sources PUBLIC veyra_remoteplay_chiaki)
   endif()
 
   add_executable(veyra_source_tests
@@ -582,6 +573,14 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_compile_definitions(veyra_popup_selector_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
   target_link_libraries(veyra_popup_selector_tests PRIVATE veyra_base comctl32)
   add_executable(veyra WIN32 apps/veyra/main.cpp apps/veyra/ui/AppShell.cpp apps/veyra/ui/CapturePanel.cpp apps/veyra/ui/SubtitleOverlay.cpp apps/veyra/SettingsWindow.cpp apps/veyra/TelemetryWindow.cpp)
+  if(VEYRA_ENABLE_REMOTEPLAY)
+    find_package(SDL3 3.4.14 EXACT CONFIG REQUIRED)
+    target_sources(veyra PRIVATE apps/veyra/ui/RemotePlayPanel.cpp src/remoteplay/ControllerInput.cpp)
+    target_link_libraries(veyra PRIVATE SDL3::SDL3)
+    add_executable(veyra_remoteplay_boundary_tests tests/remoteplay/ProductBoundaryTests.cpp src/remoteplay/ControllerInput.cpp)
+    target_compile_features(veyra_remoteplay_boundary_tests PRIVATE cxx_std_20)
+    target_link_libraries(veyra_remoteplay_boundary_tests PRIVATE veyra_sources SDL3::SDL3)
+  endif()
   target_compile_features(veyra PRIVATE cxx_std_20)
   target_compile_options(veyra PRIVATE /utf-8)
   target_link_libraries(veyra PRIVATE veyra_engine comctl32 comdlg32 shell32)
