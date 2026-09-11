@@ -409,6 +409,12 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
     src/source/NativeCaptureSink.cpp
     src/source/MediaFileSource.cpp
     src/source/CaptureCardSource.cpp
+    src/source/RemotePlaySource.cpp
+    src/remoteplay/Validation.cpp
+    src/remoteplay/AnnexB.cpp
+    src/remoteplay/Timeline.cpp
+    src/remoteplay/VideoIngress.cpp
+    src/remoteplay/SessionInbox.cpp
   )
   veyra_apply_warnings(veyra_sources)
   target_compile_options(veyra_sources PRIVATE /WX-)
@@ -419,6 +425,18 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_include_directories(veyra_sources PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(veyra_sources PUBLIC veyra_pipeline veyra_media veyra_base)
   target_link_libraries(veyra_sources PRIVATE ${FFMPEG_LIBRARIES} strmiids ole32 oleaut32)
+
+  # Chiaki is an optional source backend.  Keep the normal player build free
+  # of AGPL native symbols unless the caller explicitly provides the pinned
+  # native library/include tree.
+  if(VEYRA_ENABLE_REMOTEPLAY AND VEYRA_REMOTEPLAY_INCLUDE_DIR AND VEYRA_REMOTEPLAY_LIBRARY)
+    target_compile_definitions(veyra_sources PRIVATE VEYRA_ENABLE_REMOTEPLAY=1)
+    target_include_directories(veyra_sources PRIVATE "${VEYRA_REMOTEPLAY_INCLUDE_DIR}")
+    target_link_libraries(veyra_sources PRIVATE "${VEYRA_REMOTEPLAY_LIBRARY}")
+    target_sources(veyra_sources PRIVATE
+      src/remoteplay/ChiakiBackend.cpp
+      src/remoteplay/ChiakiRegistration.cpp)
+  endif()
 
   add_executable(veyra_source_tests
     tests/integration/MediaFileSourceTests.cpp

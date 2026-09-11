@@ -1596,3 +1596,29 @@ FRUC候选bSkipWarp/延后重建/时间归零/首对预热均未通过新增rese
 失败与修正保留：file-overload 首跑把 seek(.3→.5) 前跳与暂停窗口计入稳态间隙（maxSteadyGap=200ms 撞界），改为向后跳变后首个前向间隙按显式重同步处理后通过；A/B 期间误用 `git checkout --` 还原未提交的 WasapiAudioSink 修改（下一构建报缺 AudioVideoContinuity.h 暴露），重做修改并立即提交隔离分支；无产品级回退。
 
 未执行/边界：4060 实机复验（用户以相同 60fps 文件与设置复测，日志需能独立说明真实处理速率/媒体速度/停音与跳帧原因）、物理扬声器/屏幕同步测量、长时间直播稳定性、真实采集卡 XeSS 欠速门控触发（本轮仅文件路径与单元验证；30fps 非欠速场景门控正确不动作）。不因本机 5070 通过宣称 4060 通过；不承诺持续 30→15 下 NR/FG 时序画质不变。下一条：用户实机验收与 4060 日志复核。
+
+## 2026-09-11 PS5 Remote Play 集成交接
+
+用户要求把 `C:\Users\123\Desktop\Veyra_RemotePlay_Code_01` 中基于 chiaki-ng 的代码接入 Veyra，并在当前进度上整理给下一位 Agent。当前隔离分支为 `agent/remoteplay-integration`，基线 `0f78cc29f34365589bcd4757e7017236e3ac9cb1`，开工标签 `checkpoint/remoteplay-preintegration-2026-09-11`。完整架构、工作树、依赖、缺陷、施工顺序、命令、验收矩阵和许可证边界已整理到 `docs/REMOTEPLAY_INTEGRATION_HANDOFF_2026-09-11.md`，`docs/remoteplay/NEXT_AGENT.md` 已改为唯一入口跳转。
+
+固定 chiaki-ng 提交 `0e16950165f06e5c3291537c2eeba6e852be7120` 已在 Windows x64/MSVC 下完成 248/248 个真实构建步骤；原生 probe 退出码 0，输出 `REAL_CHIAKI_CORE_INITIALIZED upstream_video_callback=1`，并明确输出 `PS5_CONNECTION_NOT_TESTED VIDEO_DECODE_NOT_TESTED WINDOWS_PLAYER_NOT_TESTED`。Remote Play 离线核心测试 67/67 PASS；现有 `veyra_source_tests.exe` 23 checks、0 failures。上述证据只覆盖协议桥基础和原生初始化，不覆盖 PS5 连接、真码流、音频、手柄、增强、OBS、窗口行为或实际延迟。
+
+当前 `RemotePlaySource` 在接入主程序前有七类必修问题：PCM block 被截断后尾部丢失、音视频 PTS 零点不一致、decoder 重建泄漏旧 AVFrame、首帧未进入 Streaming、IDR 请求未转发、decoder delay/多帧输出会错配输入 PTS、非 48 kHz Opus 与固定 48 kHz AudioRenderer 契约冲突；新增 worker 后还要维持严格停止顺序。`EngineController`、`AppShell`、Remote Play 专用音频 owner、DPAPI profile、discovery/wakeup 和手柄设备服务均未接入。下一条唯一任务是先修这些源层正确性问题及测试，再处理生产 CMake 和主程序接线。
+
+外部依赖位于 `C:\veyra-deps\chiaki-source`、忽略的 `out\remoteplay\chiaki-msvc-stage` 和 `C:\veyra-deps\remoteplay-installed\x64-windows-static`，不得提交。chiaki-ng 为 `AGPL-3.0-only` 并带 OpenSSL exception；未来发布组合程序必须提供与二进制对应的完整源码、固定上游版本和补丁、构建脚本、许可证及归因。本轮只更新交接文档，没有修改产品代码、SDK/DLL/模型或运行时，也没有 commit、push 或 Release。
+
+## 2026-09-11 Remote Play 移植代码二次审计（不修产品，交其他 Agent）
+
+用户要求从开始移植时重新审查所有代码并更新交接。审查基线仍为 `0f78cc29` / `agent/remoteplay-integration`，没有新增产品提交。逐文件比对用户 Code 01 包（统一换行后）、当前未提交代码、固定 Chiaki 上游、本机 MSVC patch 与 Veyra graph/audio 接口；结论和18条分级事项已加入 `docs/REMOTEPLAY_INTEGRATION_HANDOFF_2026-09-11.md` 第18节，并同步更正其第6/8/13/17节及 `docs/remoteplay/{NEXT_AGENT,NATIVE_GATE,SOURCES_CODE01,WORKLOG_CODE01}.md`。未谎称其他 Reviewer 或特定模型路由已确认。
+
+新增实际故障证据：使用本机 MSVC 编译隔离审计程序，编译的实现是当前未改动的 `RemotePlaySource.cpp`（仅隔离shadow header打开访问控制以直接注入合成inbox），链接真实FFmpeg、Veyra base、既有Chiaki/core库，无网络/PS5/WASAPI/GPU调用。合法720p H.264 SPS/PPS独立送入当前source返回 `-1094995529` / `no frame!`，`read_status=2 frame=0`；同数据合并配置与AU成功解出1帧。PCM供应480帧、先拉100再拉380，实际仅得到100；音频PTS是约1.36e8ms绝对时钟。12包带重排H.264解出10帧（没有EOF drain，不能把另两帧列为丢尾），已输出的10帧全部配错PTS。实际帧已交付而session仍WaitingFirstFrame；请求1920宽但实际解码1280宽时SourceInfo未更新。另复现音频同格式重启首样本归零被拒绝，以及16位帧号回绕时PTS unknown（后者当前callback不提供wire index，是恢复metadata后会暴露的潜伏问题）。
+
+修正原交接：不能逐块用 `audioPts(firstSample,rate,currentArrival)`，会把10ms推进算成20ms，需固定段起始锚点+样本差值；现有EnhanceGraph已支持YUV420P且会读取明确VUI，因此不是所有画面颜色都错，但source的720p BT.601 fallback和metadata缺失必须修。移植中的普通回调替换删掉了原包真实帧号/profile元数据，三个metadata脚本/测试未导入；core文本主体仍与用户包一致。其余事项包括IDR未转发、decode error直接终止而非恢复、decoder重建与AVFrame泄漏、stop失败被吞、48k契约、凭据驻留、生产CMake未闭环、解码与GPU解耦未接。完整触发条件和修复验收见主交接，不把代码桩和未接UI冒充功能完成。
+
+实际命令/日志：`python out/remoteplay/audit-20260911/prepare.py`（生成两段本地合成素材，每个ffmpeg60秒上限）；`cmd.exe /d /c out\remoteplay\audit-20260911\build.cmd` 两次诊断构建成功（`build.log/build2.log`）；`scripts/run-short-test.ps1 -Exe <audit.exe> -Arguments <single prefix,reorder.h264> -TimeoutSeconds 30` 输出 `observations[2].stdout/stderr.log`。观察程序exit0只代表记录完成，其中是失败证据，不计产品PASS。另通过同一wrapper、各30秒上限重跑core67/67、native初始化exit0、既有文件source23/23；日志 `core/native/source.stdout.log`。native输出的 `upstream_video_callback=1` 为固定文字，不是真回调计数。
+
+全新CMake配置复现旧交接参数组：`out/remoteplay/audit-20260911/configure.cmd` 使用vcvars64/UTF-8/Windows TEMP，真实exit1 `Could not find protoc`，证据 `configure-from-handoff.log`；交接现补ProtocPath/PkgConfigPath，但修订命令的全量构建尚未执行。当前stage的差异全文与MSVC patch一致，递归子模块版本匹配；脚本的文件名/reverse-apply校验不能证明完整源码身份，已列待修而未声称当前stage被污染。证据全部位于 `logs/remoteplay-audit-20260911/`，包含原包文本比对和审查文件SHA256清单；诊断源/生成物在忽略的out目录。
+
+本轮未修产品、未改SDK/DLL/模型、未连接PS5/占用采集卡/关闭用户程序，没有完整Veyra/delivery/GPU/实机测试，无commit/push/Release。下一条唯一任务：先建立H.264 config/AU真实source失败回归并修首帧，再依第18节完成源层正确性闭环，之后接主程序；不能只补UI或继续重复native probe来宣称移植完成。
+
+收尾检查：`git diff --check` 无格式错误（仅既有LF/CRLF提示）；6份Markdown围栏/相对文件链接检查0错误；按审查SHA256清单复核产品/构建/测试代码改动列表为空；`git ls-files --others --exclude-standard` 按DLL/LIB/EXE/PDB/压缩包/合成媒体后缀扫描无未忽略二进制。用户原有未提交代码完整保留。

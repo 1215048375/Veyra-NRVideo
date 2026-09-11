@@ -1,0 +1,98 @@
+#pragma once
+
+// RemotePlaySource adapts the Chiaki callback stream to the same source
+// contract used by local files and capture cards.  Chiaki owns the network
+// protocol; this class owns FFmpeg decoder state and decoded-frame lifetime.
+#include "veyra/source/IFrameSource.h"
+#include "veyra/remoteplay/ChiakiBackend.h"
+#include "veyra/remoteplay/SessionInbox.h"
+#include "veyra/remoteplay/Timeline.h"
+#include "veyra/sink/AudioPcmSource.h"
+
+#include <cstdint>
+#include <deque>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+
+struct AVCodecContext;
+struct AVFrame;
+
+namespace veyra::source {
+
+struct RemotePlayConnectDesc {
+    remoteplay::NativeConnectRequest request;
+    remoteplay::QueueLimits queueLimits{};
+};
+
+class RemotePlaySource final : public IFrameSource {
+public:
+    RemotePlaySource();
+    ~RemotePlaySource() override;
+
+    RemotePlaySource(const RemotePlaySource&) = delete;
+    RemotePlaySource& operator=(const RemotePlaySource&) = delete;
+
+    // IFrameSource::open cannot carry credentials.  Product callers use
+    // connect() and then read(); open() deliberately fails closed.
+    bool open(const SourceOpenDesc& desc) override;
+    bool connect(const RemotePlayConnectDesc& desc);
+    bool connected() const noexcept { return connected_; }
+    remoteplay::SessionInbox::Snapshot sessionSnapshot() const;
+
+    const SourceInfo& info() const override { return info_; }
+    SourceReadStatus read(pipeline::FramePacket& out, const AVFrame** decodedFrame) override;
+    bool seek(const pipeline::Rational&) override { return false; }
+    void close() noexcept override;
+
+    // Pull decoded Opus PCM for the existing WASAPI AudioPcmSource adapter.
+    std::size_t pullAudio(float* stereo, std::size_t frames, double* firstPtsMs);
+
+private:
+    struct DecodedFrame {
+        std::shared_ptr<AVFrame> frame;
+        pipeline::FramePacket packet;
+    };
+
+    bool openDecoder(remoteplay::Codec codec, std::uint32_t width, std::uint32_t height);
+    bool submitPacket(std::span<const std::uint8_t> bytes, std::uint64_t sourceIndex,
+        const pipeline::FramePacket& sourcePacket);
+    bool drainDecoder(std::uint64_t sourceIndex, const pipeline::FramePacket& sourcePacket);
+    void flushDecoder() noexcept;
+    pipeline::FramePacket makePacket(const remoteplay::VideoSample& sample,
+        std::uint64_t sourceIndex, std::uint64_t epoch, bool reset);
+
+    std::unique_ptr<remoteplay::SessionInbox> inbox_;
+    remoteplay::ChiakiBackend backend_;
+    std::optional<remoteplay::SessionInbox::Token> token_;
+    remoteplay::RemotePlayClock clock_;
+    remoteplay::NativeConnectRequest request_;
+    SourceInfo info_{};
+    AVCodecContext* codecContext_ = nullptr;
+    AVFrame* decoderFrame_ = nullptr;
+    std::deque<DecodedFrame> ready_;
+    std::shared_ptr<AVFrame> lastFrame_;
+    std::uint64_t sequence_ = 0;
+    std::uint64_t fallbackSourceIndex_ = 0;
+    std::uint64_t decoderEpoch_ = 1;
+    std::uint64_t origin100ns_ = 0;
+    bool connected_ = false;
+    bool decoderReady_ = false;
+    bool waitingForFirstFrame_ = true;
+    bool pendingOpenFlag_ = true;
+};
+
+class RemotePlayAudioSource final : public sink::AudioPcmSource {
+public:
+    explicit RemotePlayAudioSource(RemotePlaySource& source) : source_(source) {}
+    std::size_t pull(float* stereo, std::size_t frames, double* firstPtsMs) override;
+    std::optional<double> lastPullEndPtsMs() const override { return lastEndPtsMs_; }
+    bool padUnderruns() const override { return false; }
+
+private:
+    RemotePlaySource& source_;
+    std::optional<double> lastEndPtsMs_;
+};
+
+} // namespace veyra::source

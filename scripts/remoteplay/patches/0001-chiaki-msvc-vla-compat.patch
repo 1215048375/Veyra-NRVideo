@@ -1,0 +1,502 @@
+diff --git a/lib/src/ctrl.c b/lib/src/ctrl.c
+index 6a3b762..1e4dae0 100644
+--- a/lib/src/ctrl.c
++++ b/lib/src/ctrl.c
+@@ -673,14 +673,25 @@ static ChiakiErrorCode ctrl_message_send(ChiakiCtrl *ctrl, uint16_t type, const
+ 
+ 	if(ctrl->session->rudp)
+ 	{
+-		uint8_t buf_size = 8 + payload_size;
+-		uint8_t buf[buf_size];
++		if(payload_size > SIZE_MAX - sizeof(header))
++		{
++			free(enc);
++			return CHIAKI_ERR_INVALID_DATA;
++		}
++		size_t buf_size = sizeof(header) + payload_size;
++		uint8_t *buf = malloc(buf_size);
++		if(!buf)
++		{
++			free(enc);
++			return CHIAKI_ERR_MEMORY;
++		}
+ 		memcpy(buf, header, 8);
+ 		if(enc)
+ 			memcpy(buf + 8, enc, payload_size);
+ 		free(enc);
+ 		ChiakiErrorCode err;
+ 		err = chiaki_rudp_send_ctrl_message(ctrl->session->rudp, buf, buf_size);
++		free(buf);
+ 		if(err != CHIAKI_ERR_SUCCESS)
+ 		{
+ 			CHIAKI_LOGE(ctrl->session->log, "Failed to send Ctrl Message");
+@@ -1172,11 +1183,28 @@ static ChiakiErrorCode ctrl_connect(ChiakiCtrl *ctrl)
+ 			CHIAKI_LOGE(session->log, "CTRL - Failed to init rudp");
+ 			goto error;
+ 		}
++		if(message.data_size < 8)
++		{
++			chiaki_rudp_message_pointers_free(&message);
++			err = CHIAKI_ERR_INVALID_RESPONSE;
++			goto error;
++		}
+ 		size_t init_response_size = message.data_size - 8;
+-		uint8_t init_response[init_response_size];
+-		memcpy(init_response, message.data + 8, init_response_size);
++		uint8_t *init_response = NULL;
++		if(init_response_size > 0)
++		{
++			init_response = malloc(init_response_size);
++			if(!init_response)
++			{
++				chiaki_rudp_message_pointers_free(&message);
++				err = CHIAKI_ERR_MEMORY;
++				goto error;
++			}
++			memcpy(init_response, message.data + 8, init_response_size);
++		}
+ 		chiaki_rudp_message_pointers_free(&message);
+ 		err = chiaki_rudp_send_recv(session->rudp, &message, init_response, init_response_size, 0, COOKIE_REQUEST, COOKIE_RESPONSE, 2, 3);
++		free(init_response);
+ 		if(err != CHIAKI_ERR_SUCCESS)
+ 		{
+ 			CHIAKI_LOGE(session->log, "CTRL - Failed to pass rudp cookie");
+diff --git a/lib/src/regist.c b/lib/src/regist.c
+index 88f3001..a6ee796 100644
+--- a/lib/src/regist.c
++++ b/lib/src/regist.c
+@@ -287,11 +287,28 @@ static void *regist_thread_func(void *user)
+ 			CHIAKI_LOGE(regist->log, "REGIST - Failed to init rudp");
+ 			goto fail;
+ 		}
++		if(message.data_size < 8)
++		{
++			chiaki_rudp_message_pointers_free(&message);
++			err = CHIAKI_ERR_INVALID_RESPONSE;
++			goto fail;
++		}
+ 		size_t init_response_size = message.data_size - 8;
+-		uint8_t init_response[init_response_size];
+-		memcpy(init_response, message.data + 8, init_response_size);
++		uint8_t *init_response = NULL;
++		if(init_response_size > 0)
++		{
++			init_response = malloc(init_response_size);
++			if(!init_response)
++			{
++				chiaki_rudp_message_pointers_free(&message);
++				err = CHIAKI_ERR_MEMORY;
++				goto fail;
++			}
++			memcpy(init_response, message.data + 8, init_response_size);
++		}
+ 		chiaki_rudp_message_pointers_free(&message);
+ 		err = chiaki_rudp_send_recv(regist->info.rudp, &message, init_response, init_response_size, 0, COOKIE_REQUEST, COOKIE_RESPONSE, 2, 3);
++		free(init_response);
+ 		if(err != CHIAKI_ERR_SUCCESS)
+ 		{
+ 			CHIAKI_LOGE(regist->log, "REGIST - Failed to pass rudp cookie");
+diff --git a/lib/src/remote/holepunch.c b/lib/src/remote/holepunch.c
+index 9a5bc69..6cf89d7 100644
+--- a/lib/src/remote/holepunch.c
++++ b/lib/src/remote/holepunch.c
+@@ -3271,12 +3271,35 @@ static ChiakiErrorCode http_send_session_message(Session *session, SessionMessag
+     char *payload_str = NULL;
+     size_t payload_len = 0;
+     if(short_msg)
+-        short_message_serialize(session, message, &payload_str, &payload_len);
++        err = short_message_serialize(session, message, &payload_str, &payload_len);
+     else
+-        session_message_serialize(session, message, &payload_str, &payload_len);
+-    char msg_buf[sizeof(session_message_envelope_fmt) * 2 + payload_len];
++        err = session_message_serialize(session, message, &payload_str, &payload_len);
++    if(err != CHIAKI_ERR_SUCCESS || !payload_str)
++    {
++        free(payload_str);
++        free(response_data.data);
++        return err != CHIAKI_ERR_SUCCESS ? err : CHIAKI_ERR_INVALID_DATA;
++    }
++    int msg_len = snprintf(
++        NULL, 0, session_message_envelope_fmt,
++        payload_str, session->account_id, console_uid_str,
++        session->console_type == CHIAKI_HOLEPUNCH_CONSOLE_TYPE_PS4 ? "PS4" : "PS5"
++    );
++    if(msg_len < 0 || (size_t)msg_len == SIZE_MAX)
++    {
++        free(payload_str);
++        free(response_data.data);
++        return CHIAKI_ERR_INVALID_DATA;
++    }
++    char *msg_buf = malloc((size_t)msg_len + 1);
++    if(!msg_buf)
++    {
++        free(payload_str);
++        free(response_data.data);
++        return CHIAKI_ERR_MEMORY;
++    }
+     snprintf(
+-        msg_buf, sizeof(msg_buf), session_message_envelope_fmt,
++        msg_buf, (size_t)msg_len + 1, session_message_envelope_fmt,
+         payload_str, session->account_id, console_uid_str,
+         session->console_type == CHIAKI_HOLEPUNCH_CONSOLE_TYPE_PS4 ? "PS4" : "PS5"
+     );
+@@ -3284,6 +3307,7 @@ static ChiakiErrorCode http_send_session_message(Session *session, SessionMessag
+     CURL *curl = curl_easy_init();
+     if(!curl)
+     {
++        free(msg_buf);
+         free(payload_str);
+         free(response_data.data);
+         CHIAKI_LOGE(session->log, "Curl could not init");
+@@ -3339,6 +3363,7 @@ static ChiakiErrorCode http_send_session_message(Session *session, SessionMessag
+ 
+ cleanup:
+     curl_easy_cleanup(curl);
++    free(msg_buf);
+     free(payload_str);
+     free(response_data.data);
+     return err;
+@@ -3820,19 +3845,38 @@ static ChiakiErrorCode check_candidates(
+     Candidate *local_candidate = &local_candidates[0];
+     Candidate *remote_candidate = &local_candidates[1];
+ 
++    if(num_candidates == 0 || !candidates_received || num_candidates > SIZE_MAX - EXTRA_CANDIDATE_ADDRESSES)
++        return CHIAKI_ERR_INVALID_DATA;
+     size_t extra_addresses_used = 0;
+-    // Set up addresses for each candidate + extras (use sockaddr_storage and cast bc needs to be at least that big if we get ipv6)
+-    struct sockaddr_storage addrs[num_candidates + EXTRA_CANDIDATE_ADDRESSES];
+-    socklen_t lens[num_candidates + EXTRA_CANDIDATE_ADDRESSES];
+-    Candidate candidates[num_candidates + EXTRA_CANDIDATE_ADDRESSES];
++    size_t candidate_capacity = num_candidates + EXTRA_CANDIDATE_ADDRESSES;
++    if(candidate_capacity > SIZE_MAX / sizeof(struct sockaddr_storage)
++        || candidate_capacity > SIZE_MAX / sizeof(socklen_t)
++        || candidate_capacity > SIZE_MAX / sizeof(Candidate)
++        || candidate_capacity > SIZE_MAX / sizeof(int))
++        return CHIAKI_ERR_INVALID_DATA;
++    // Candidate count comes from the network. Keep these buffers bounded by checked heap allocations.
++    struct sockaddr_storage *addrs = calloc(candidate_capacity, sizeof(*addrs));
++    socklen_t *lens = calloc(candidate_capacity, sizeof(*lens));
++    Candidate *candidates = calloc(candidate_capacity, sizeof(*candidates));
++    int *responses_received = calloc(candidate_capacity, sizeof(*responses_received));
++    if(!addrs || !lens || !candidates || !responses_received)
++    {
++        free(addrs);
++        free(lens);
++        free(candidates);
++        free(responses_received);
++        return CHIAKI_ERR_MEMORY;
++    }
+     memcpy(candidates, candidates_received, num_candidates * sizeof(Candidate));
+-    int responses_received[num_candidates + EXTRA_CANDIDATE_ADDRESSES];
+ #ifdef __SWITCH__
+     // Use poll() on Switch — select() fails when FD numbers >= FD_SETSIZE (256)
+     struct pollfd *pollfds = NULL;
+ #endif
+ #ifdef __ANDROID__
+     fd_set fds;
++#endif
++#if !defined(__SWITCH__) && !defined(__ANDROID__)
++    CandidateEventContext poll_ctx = {0};
+ #endif
+     bool failed = true;
+     char service_remote[6];
+@@ -4019,7 +4063,6 @@ static ChiakiErrorCode check_candidates(
+     bool connecting = false;
+     int retry_counter = 0;
+ #if !defined(__SWITCH__) && !defined(__ANDROID__)
+-    CandidateEventContext poll_ctx = {0};
+     size_t socket_slots = 0;
+     if (!CHIAKI_SOCKET_IS_INVALID(session->ipv4_sock))
+         socket_slots++;
+@@ -4614,6 +4657,10 @@ static ChiakiErrorCode check_candidates(
+     free(pollfds);
+ #endif
+     free(socks);
++    free(addrs);
++    free(lens);
++    free(candidates);
++    free(responses_received);
+     return CHIAKI_ERR_SUCCESS;
+ 
+ cleanup_sockets:
+@@ -4654,6 +4701,10 @@ cleanup_sockets:
+         }
+     }
+     free(socks);
++    free(addrs);
++    free(lens);
++    free(candidates);
++    free(responses_received);
+     return err;
+ }
+ 
+@@ -4966,12 +5017,16 @@ static json_object* session_message_get_payload(ChiakiLog *log, json_object *ses
+         // Insert empty object as key for localPeerAddr key
+         size_t prefix_len = peeraddr_end - json;
+         size_t suffix_len = strlen(peeraddr_end);
+-        char fixed_json[strlen(json) + 3]; // {} + \0
+-        memset(fixed_json, 0, sizeof(fixed_json));
+-        strncpy(fixed_json, json, prefix_len);
++        size_t json_len = strlen(json);
++        if(json_len > SIZE_MAX - 3)
++            return NULL;
++        char *fixed_json = calloc(json_len + 3, 1); // {} + \0
++        if(!fixed_json)
++            return NULL;
++        memcpy(fixed_json, json, prefix_len);
+         fixed_json[prefix_len] = '{';
+         fixed_json[prefix_len + 1] = '}';
+-        strncpy(fixed_json + prefix_len + 2, peeraddr_end, suffix_len);
++        memcpy(fixed_json + prefix_len + 2, peeraddr_end, suffix_len);
+ 
+         message_json = json_tokener_parse(fixed_json);
+         if(message_json == NULL)
+@@ -4979,6 +5034,7 @@ static json_object* session_message_get_payload(ChiakiLog *log, json_object *ses
+             CHIAKI_LOGE(log, "Couldn't parse the following fixed json: %s", fixed_json);
+             CHIAKI_LOGE(log, json_object_to_json_string_ext(payload_json, JSON_C_TO_STRING_PRETTY));
+         }
++        free(fixed_json);
+     }
+         // check if parse fails
+         if(message_json == NULL)
+diff --git a/lib/src/remote/rudp.c b/lib/src/remote/rudp.c
+index d2b9c22..a4f5067 100644
+--- a/lib/src/remote/rudp.c
++++ b/lib/src/remote/rudp.c
+@@ -89,7 +89,7 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_init_message(RudpInstance *rudp)
+     message.type = INIT_REQUEST;
+     message.subMessage = NULL;
+     message.data_size = 14;
+-    uint8_t data[message.data_size];
++    uint8_t data[14];
+     size_t alloc_size = 8 + message.data_size;
+     uint8_t *serialized_msg = malloc(alloc_size * sizeof(uint8_t));
+     if(!serialized_msg)
+@@ -114,6 +114,8 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_init_message(RudpInstance *rudp)
+ 
+ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_cookie_message(RudpInstance *rudp, uint8_t *response_buf, size_t response_size)
+ {
++    if(response_size > 0x0FFFu - 22u || (response_size > 0 && !response_buf))
++        return CHIAKI_ERR_INVALID_DATA;
+     RudpMessage message;
+     uint16_t local_counter = get_then_increase_counter(rudp);
+     message.type = COOKIE_REQUEST;
+@@ -121,14 +123,16 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_cookie_message(RudpInstance *rudp
+     message.data_size = 14 + response_size;
+     size_t alloc_size = 8 + message.data_size;
+     uint8_t *serialized_msg = malloc(alloc_size * sizeof(uint8_t));
+-    if(!serialized_msg)
++    uint8_t *data = malloc(message.data_size);
++    if(!serialized_msg || !data)
+     {
++        free(serialized_msg);
++        free(data);
+         CHIAKI_LOGE(rudp->log, "Error allocating memory for rudp message");
+         return CHIAKI_ERR_MEMORY;
+     }
+     size_t msg_size = 0;
+     message.size = (0xC << 12) | alloc_size;
+-    uint8_t data[message.data_size];
+     const uint8_t after_header[0x2] = { 0x05, 0x82 };
+     const uint8_t after_counter[0x6] = { 0x0B, 0x01, 0x01, 0x00, 0x01, 0x00 };
+     *(chiaki_unaligned_uint16_t *)(data) = htons(local_counter);
+@@ -139,19 +143,24 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_cookie_message(RudpInstance *rudp
+     message.data = data;
+     rudp_message_serialize(&message, serialized_msg, &msg_size);
+     ChiakiErrorCode err = chiaki_rudp_send_raw(rudp, serialized_msg, msg_size);
++    free(data);
+     free(serialized_msg);
+     return err;
+ }
+ 
+ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_session_message(RudpInstance *rudp, uint16_t remote_counter, uint8_t *session_msg, size_t session_msg_size)
+ {
++    if(session_msg_size > 0x0FFFu - 10u || (session_msg_size > 0 && !session_msg))
++        return CHIAKI_ERR_INVALID_DATA;
+     RudpMessage subMessage;
+     uint16_t local_counter = get_then_increase_counter(rudp);
+     subMessage.type = CTRL_MESSAGE;
+     subMessage.subMessage = NULL;
+     subMessage.data_size = 2 + session_msg_size;
+     subMessage.size = (0xC << 12) | (8 + subMessage.data_size);
+-    uint8_t subdata[subMessage.data_size];
++    uint8_t *subdata = malloc(subMessage.data_size);
++    if(!subdata)
++        return CHIAKI_ERR_MEMORY;
+     *(chiaki_unaligned_uint16_t *)(subdata) = htons(local_counter);
+     memcpy(subdata + 2, session_msg, session_msg_size);
+     subMessage.data = subdata;
+@@ -164,17 +173,19 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_session_message(RudpInstance *rud
+     uint8_t *serialized_msg = malloc(alloc_size * sizeof(uint8_t));
+     if(!serialized_msg)
+     {
++        free(subdata);
+         CHIAKI_LOGE(rudp->log, "Error allocating memory for rudp message");
+         return CHIAKI_ERR_MEMORY;
+     }
+     size_t msg_size = 0;
+     message.size = (0xC << 12) | (8 + message.data_size);
+-    uint8_t data[message.data_size];
++    uint8_t data[4];
+     *(chiaki_unaligned_uint16_t *)(data) = htons(local_counter);
+     *(chiaki_unaligned_uint16_t *)(data + 2) = htons(remote_counter);
+     message.data = data;
+     rudp_message_serialize(&message, serialized_msg, &msg_size);
+     ChiakiErrorCode err = chiaki_rudp_send_raw(rudp, serialized_msg, msg_size);
++    free(subdata);
+     free(serialized_msg);
+     return err;
+ }
+@@ -195,7 +206,7 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_ack_message(RudpInstance *rudp, u
+     }
+     size_t msg_size = 0;
+     message.size = (0xC << 12) | alloc_size;
+-    uint8_t data[message.data_size];
++    uint8_t data[6];
+     const uint8_t after_counters[0x2] = { 0x00, 0x92 };
+     *(chiaki_unaligned_uint16_t *)(data) = htons(counter);
+     *(chiaki_unaligned_uint16_t *)(data + 2) = htons(remote_counter);
+@@ -209,6 +220,8 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_ack_message(RudpInstance *rudp, u
+ 
+ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_ctrl_message(RudpInstance *rudp, uint8_t *ctrl_message, size_t ctrl_message_size)
+ {
++    if(ctrl_message_size > 0x0FFFu - 10u || (ctrl_message_size > 0 && !ctrl_message))
++        return CHIAKI_ERR_INVALID_DATA;
+     RudpMessage message;
+     uint16_t counter = get_then_increase_counter(rudp);
+     uint16_t counter_ack = rudp->counter;
+@@ -217,19 +230,22 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_ctrl_message(RudpInstance *rudp,
+     message.data_size = 2 + ctrl_message_size;
+     size_t alloc_size = 8 + message.data_size;
+     uint8_t *serialized_msg = malloc(alloc_size * sizeof(uint8_t));
+-    if(!serialized_msg)
++    uint8_t *data = malloc(message.data_size);
++    if(!serialized_msg || !data)
+     {
++        free(serialized_msg);
++        free(data);
+         CHIAKI_LOGE(rudp->log, "Error allocating memory for rudp message");
+         return CHIAKI_ERR_MEMORY;
+     }
+     size_t msg_size = 0;
+     message.size = (0xC << 12) | alloc_size;
+-    uint8_t data[message.data_size];
+     *(chiaki_unaligned_uint16_t *)(data) = htons(counter);
+     memcpy(data + 2, ctrl_message, ctrl_message_size);
+     message.data = data;
+     rudp_message_serialize(&message, serialized_msg, &msg_size);
+     ChiakiErrorCode err = chiaki_rudp_send_raw(rudp, serialized_msg, msg_size);
++    free(data);
+     if(err != CHIAKI_ERR_SUCCESS)
+     {
+         free(serialized_msg);
+@@ -256,9 +272,9 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_switch_to_stream_connection_messa
+     }
+     size_t msg_size = 0;
+     message.size = (0xC << 12) | alloc_size;
+-    uint8_t data[message.data_size];
++    uint8_t data[26];
+     const size_t buf_size = 16;
+-    uint8_t buf[buf_size];
++    uint8_t buf[16];
+     const uint8_t before_buf[8] = { 0x00, 0x00, 0x00, 0x10, 0x00, 0x0D, 0x00, 0x00 };
+     chiaki_random_bytes_crypt(buf, buf_size);
+     *(chiaki_unaligned_uint16_t *)(data) = htons(counter);
+@@ -393,13 +409,21 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_raw(RudpInstance *rudp, uint8_t *
+ 
+ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_select_recv(RudpInstance *rudp, size_t buf_size,  RudpMessage *message)
+ {
+-    uint8_t buf[buf_size]; 
++	if(buf_size <= 8 || buf_size > 64u * 1024u)
++		return CHIAKI_ERR_INVALID_DATA;
++	uint8_t *buf = malloc(buf_size);
++	if(!buf)
++		return CHIAKI_ERR_MEMORY;
+ 	ChiakiErrorCode err = chiaki_stop_pipe_select_single(&rudp->stop_pipe, rudp->sock, false, RUDP_EXPECT_TIMEOUT_MS);
+ 	if(err == CHIAKI_ERR_TIMEOUT || err == CHIAKI_ERR_CANCELED)
++	{
++		free(buf);
+ 		return err;
++	}
+ 	if(err != CHIAKI_ERR_SUCCESS)
+ 	{
+ 		CHIAKI_LOGE(rudp->log, "Rudp select failed: " CHIAKI_SOCKET_ERROR_FMT, CHIAKI_SOCKET_ERROR_VALUE);
++		free(buf);
+ 		return err;
+ 	}
+ 
+@@ -410,19 +434,25 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_select_recv(RudpInstance *rudp, size_t
+ 			CHIAKI_LOGE(rudp->log, "Rudp recv failed: " CHIAKI_SOCKET_ERROR_FMT, CHIAKI_SOCKET_ERROR_VALUE);
+ 		else
+ 			CHIAKI_LOGE(rudp->log, "Rudp recv returned less than the required 8 byte RUDP header");
++		free(buf);
+ 		return CHIAKI_ERR_NETWORK;
+ 	}
+     CHIAKI_LOGV(rudp->log, "Receiving message:");
+     chiaki_log_hexdump(rudp->log, CHIAKI_LOG_VERBOSE, buf, received_sz);
+ 
+     err = chiaki_rudp_message_parse(buf, received_sz, message);
++	free(buf);
+     
+ 	return err;
+ }
+ 
+ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_recv_only(RudpInstance *rudp, size_t buf_size,  RudpMessage *message)
+ {
+-    uint8_t buf[buf_size];
++	if(buf_size <= 8 || buf_size > 64u * 1024u)
++		return CHIAKI_ERR_INVALID_DATA;
++	uint8_t *buf = malloc(buf_size);
++	if(!buf)
++		return CHIAKI_ERR_MEMORY;
+ 	CHIAKI_SSIZET_TYPE received_sz = recv(rudp->sock, (CHIAKI_SOCKET_BUF_TYPE) buf, buf_size, 0);
+ 	if(received_sz <= 8)
+ 	{
+@@ -430,12 +460,14 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_recv_only(RudpInstance *rudp, size_t b
+ 			CHIAKI_LOGE(rudp->log, "Rudp recv failed: " CHIAKI_SOCKET_ERROR_FMT, CHIAKI_SOCKET_ERROR_VALUE);
+ 		else
+ 			CHIAKI_LOGE(rudp->log, "Rudp recv returned less than the required 8 byte RUDP header");
++		free(buf);
+ 		return CHIAKI_ERR_NETWORK;
+ 	}
+     CHIAKI_LOGV(rudp->log, "Receiving message:");
+     chiaki_log_hexdump(rudp->log, CHIAKI_LOG_VERBOSE, buf, received_sz);
+ 
+     ChiakiErrorCode err = chiaki_rudp_message_parse(buf, received_sz, message);
++	free(buf);
+ 
+ 	return err;
+ }
+diff --git a/lib/src/session.c b/lib/src/session.c
+index 41c6bbf..396df74 100644
+--- a/lib/src/session.c
++++ b/lib/src/session.c
+@@ -771,11 +771,26 @@ static ChiakiErrorCode session_thread_request_session(ChiakiSession *session, Ch
+ 			CHIAKI_LOGE(session->log, "SESSION START THREAD - Failed to init rudp");
+ 			return err;
+ 		}
++		if(message.data_size < 8)
++		{
++			chiaki_rudp_message_pointers_free(&message);
++			return CHIAKI_ERR_INVALID_RESPONSE;
++		}
+ 		size_t init_response_size = message.data_size - 8;
+-		uint8_t init_response[init_response_size];
+-		memcpy(init_response, message.data + 8, init_response_size);
++		uint8_t *init_response = NULL;
++		if(init_response_size > 0)
++		{
++			init_response = malloc(init_response_size);
++			if(!init_response)
++			{
++				chiaki_rudp_message_pointers_free(&message);
++				return CHIAKI_ERR_MEMORY;
++			}
++			memcpy(init_response, message.data + 8, init_response_size);
++		}
+ 		chiaki_rudp_message_pointers_free(&message);
+ 		err = chiaki_rudp_send_recv(session->rudp, &message, init_response, init_response_size, 0, COOKIE_REQUEST, COOKIE_RESPONSE, 2, 3);
++		free(init_response);
+ 		if(err != CHIAKI_ERR_SUCCESS)
+ 		{
+ 			CHIAKI_LOGE(session->log, "SESSION START THREAD - Failed to pass rudp cookie");

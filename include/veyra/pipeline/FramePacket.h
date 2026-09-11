@@ -40,6 +40,7 @@ enum class SourceKind : uint8_t {
     Unknown = 0,
     File,         // FFmpeg demux/decode (player, export)
     CaptureCard,  // physical DirectShow/UVC capture
+    RemotePlay,   // PS5 Remote Play stream (Chiaki transport)
     Image,        // WIC single image
     TestPattern,  // synthetic harness input
 };
@@ -48,6 +49,7 @@ inline const char* sourceKindName(SourceKind k) {
     switch (k) {
     case SourceKind::File: return "File";
     case SourceKind::CaptureCard: return "CaptureCard";
+    case SourceKind::RemotePlay: return "RemotePlay";
     case SourceKind::Image: return "Image";
     case SourceKind::TestPattern: return "TestPattern";
     default: return "Unknown";

@@ -1,0 +1,13 @@
+{
+  "veyra_reviewed_commit": "ff4122befc5909682d7a4df29da086d5f5bb619d",
+  "chiaki_repository": "https://github.com/streetpea/chiaki-ng.git",
+  "chiaki_commit": "0e16950165f06e5c3291537c2eeba6e852be7120",
+  "recursive_submodules": "must match gitlinks in the pinned tree",
+  "native_api": "unmodified chiaki_session_set_video_sample_cb",
+  "native_dependencies": ["Opus", "OpenSSL", "nanopb/protobuf tooling", "Jerasure/gf-complete", "curl", "json-c", "libevent", "miniupnpc"],
+  "ffmpeg": "reuse Veyra's installed version; not needed by patch-01 core or Chiaki-native probe",
+  "msvc_compatibility_patch": "patches/0001-chiaki-msvc-vla-compat.patch",
+  "msvc_compatibility_scope": ["lib/src/ctrl.c", "lib/src/regist.c", "lib/src/remote/holepunch.c", "lib/src/remote/rudp.c", "lib/src/session.c"],
+  "native_build_status_at_delivery": "PATCH_READY_REBUILD_PENDING",
+  "no_runtime_dlls_or_vendor_sdks_in_this_package": true
+}
