@@ -1670,3 +1670,15 @@ build-product/native-source/off-check成功；boundary默认与virtual、H264/H2
 ### 2026-09-12 PS5硬解/遥测与欠速恢复节点
 实现PS5自动/软件/硬解选择、实际D3D12VA纹理输出与GPU消费引用保留，自动失败回退及强制硬解报错；重做实时状态分组与PS5独立接收/解码/呈现统计。实现FG分成本预算、限频连续恢复探测，移除旧同步文件分支。详见PS5_TELEMETRY_SCHEDULER_EXECUTION_2026-09-12.md。
 产品ON/OFF和native source构建通过。真实H264/H265软硬对比max_error=0，故障回退注入通过；NR/SR/FG欠速、动态负载恢复、XeSS连续音频、输入中断与EOF回归通过。45秒4K30原生NR2X：1286源帧、1253生成，absLatenessP95=0.79ms，非所有帧必达目标的承诺。统一gate、最后UI验证和最终用户说明待完成；不发布。用户要求修复结束后正常关机，明天实测PS5。
+
+## 2026-09-12 最终本机交付节点
+
+上述待办已经执行：最终 product 构建通过（logs/ps5-final-product-guard-build.log），Remote Play OFF 构建通过；Native CTest 69/69，文件源23项、调度/呈现/UI/边界回归通过。统一 delivery gate 45.29秒通过，证据 logs/delivery/82d949d48503403495e10de477ce70d8/result.json。最终 EXE SHA256 7AA2452E05E6B423DB1C7A4D3D66B9C9D2BFE41262C337B8D70010EBE301E61A。
+
+45秒4K30原生NR+2X实际长测：1284原帧呈现、1247生成帧呈现、过期5，末段59fps；并非零丢帧或全硬件60fps承诺。400ms源间断恢复后240帧原帧全部呈现、EOF无取消；单帧EOF无挂起；3X、动态欠速恢复、XeSS音频连续性均通过。所有单次测试均小于300秒。软硬H264/H265色值比较最大差0，强制硬解无设备拒绝和自动回退最终回归通过。
+
+UI最终使用真实窗口DC抓取并检查非黑图，已人工查看overview/advanced快照；20次模式切换及20次全屏通过（logs/ps5-final-ui-visible.log）。此前隐藏子窗口PrintWindow黑图仅是无效测试方式，不作为产品通过证据。
+
+新增 docs/PS5_REPAIR_ACCEPTANCE_2026-09-12.md 汇总测试入口、日志与验收边界，中英文README更新开发分支状态。桌面“Veyra PS5 测试版”指向 out/remoteplay/product-repair/veyra.exe，移除smoke/禁用增强启动参数。代码节点3405717。未push、未发布，未提交SDK/DLL/模型/测试媒体。
+
+下一步唯一任务：用户明天实际连接PS5验收新增硬解、负载恢复与偶发停帧。原冻结未复现，原始根因不能断言；本轮没有真实PS5/采集卡复测，不把本地码流测试冒充网络验收。用户授权收尾后正常关机，不使用强制关闭参数。

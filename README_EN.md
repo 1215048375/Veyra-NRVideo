@@ -32,7 +32,7 @@ Version 0.0.4 fixes audio/video drift caused by enhancement processing, audio in
 
 ### Development branch: PS5 Remote Play
 
-The development branch adds LAN PS5 streaming, pairing, encrypted profiles and gamepad input through the existing enhancement pipeline. Console acceptance is pending. **This is not included in the published 0.0.4 Release.** See the [local test guide and scope](docs/REMOTEPLAY_PS5_ACCEPTANCE_2026-09-11.md).
+The development branch supports LAN PS5 streaming, pairing, encrypted profiles and gamepad input; basic connectivity has passed user testing. Recent changes add software/hardware decoder selection, streaming telemetry and playback scheduling fixes, with console acceptance pending for these changes. **These features are not included in the published 0.0.4 Release.** See the [local test guide and scope (Chinese)](docs/PS5_REPAIR_ACCEPTANCE_2026-09-12.md).
 
 ## Download and Run
 
