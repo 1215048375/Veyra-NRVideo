@@ -9,7 +9,7 @@ struct DashboardHistory {
     void sample(const engine::PlayerSnapshot& s){
         if(session!=s.sessionId||revision!=s.applied.revision){points.clear();low=good=0;overloaded=false;session=s.sessionId;revision=s.applied.revision;}
         const bool active=s.running&&!s.image&&s.transport==engine::TransportState::Playing&&!s.applying;
-        auto value=active?s.metrics.flow.cpuTiming[size_t(diagnostics::CpuStage::EnhancementDelayEstimate)].mean:std::optional<double>{};
+        auto value=active?s.metrics.flow.enhancementProcessing.mean:std::optional<double>{};
         points.push_back(value);if(points.size()>120)points.pop_front();
         const bool xess=s.applied.frameGenerationBackend==engine::FrameGenerationBackend::XeSS&&s.applied.multiplier>1;
         const double actual=xess?s.metrics.flow.xessSdkSubmitFps:s.metrics.flow.presentSubmitFps;
@@ -32,7 +32,7 @@ inline void paintDashboard(HWND h,HDC dc,int w,int height,const engine::PlayerSn
     text(L"实时处理状态",12,7,w-100,24,12,textColor);
     const int gap=6,left=10,cw=(w-20-gap*3)/4,top=38;
     const diagnostics::GpuStage stages[]={diagnostics::GpuStage::Flow,diagnostics::GpuStage::Nr,diagnostics::GpuStage::Sr,diagnostics::GpuStage::FgBatch};
-    const wchar_t* names[]={L"光流延迟",L"NR延迟",L"超分延迟",L"帧生成延迟"};
+    const wchar_t* names[]={L"光流耗时",L"NR耗时",L"超分耗时",L"帧生成耗时"};
     for(int i=0;i<4;++i){int x=left+i*(cw+gap);card(x,top,cw,58);text(names[i],x+6,top+7,cw-10,17,9,secondary);
         const auto& a=f.gpuTiming[size_t(stages[i])];std::wstring value=L"—";
         if(active){if(s.metrics.gpu[size_t(stages[i])].state==diagnostics::SampleState::NotExecuted)value=L"未开启";else if(a.mean)value=std::format(L"{:.1f}",*a.mean);}
@@ -41,12 +41,13 @@ inline void paintDashboard(HWND h,HDC dc,int w,int height,const engine::PlayerSn
     }
     const int chartTop=104,chartH=std::max(92,height-188),bottom=chartTop+chartH+8,bw=(w-26)/2;
     card(10,chartTop,w-20,chartH);
-    text(advanced?L"精细数据":L"增强额外延迟",20,chartTop+8,w-100,20,10,secondary);
+    const bool xess=s.applied.multiplier>1&&s.applied.frameGenerationBackend==engine::FrameGenerationBackend::XeSS;
+    text(advanced?L"精细数据":xess?L"增强处理耗时 · 不含XeSS FG":L"总增强处理耗时",20,chartTop+8,w-100,20,10,secondary);
     text(advanced?L"◂":L"▸",w-38,chartTop+5,24,24,14,secondary);
     if(!advanced){
-    const auto extra=active?f.cpuTiming[size_t(diagnostics::CpuStage::EnhancementDelayEstimate)].mean:std::optional<double>{};
+    const auto extra=active?f.enhancementProcessing.mean:std::optional<double>{};
     text(extra?std::format(L"{:.1f}",*extra):L"—",w-103,chartTop+30,85,30,23,textColor);
-    text(L"ms · 总计估计",w-103,chartTop+62,85,18,9,secondary);
+    text(L"ms · 近1秒平均",w-103,chartTop+62,85,18,9,secondary);
     const int x0=20,x1=w-117,y0=chartTop+35,y1=chartTop+chartH-24;
     if(x1>x0&&y1>y0){
         double peak=10;for(const auto& v:history.points)if(v)peak=std::max(peak,*v*1.15);
@@ -61,7 +62,6 @@ inline void paintDashboard(HWND h,HDC dc,int w,int height,const engine::PlayerSn
     }
     card(10,bottom,bw,58);card(16+bw,bottom,bw,58);
     text(L"待输出画面",20,bottom+6,bw-20,18,10,secondary);
-    const bool xess=s.applied.multiplier>1&&s.applied.frameGenerationBackend==engine::FrameGenerationBackend::XeSS;
     text(std::format(L"{} 帧{}",active?f.pendingOutputFrames:0,xess?L" *":L""),20,bottom+27,bw-20,23,17,textColor);
     std::wstring status=L"待机";COLORREF color=RGB(145,151,149);
     if(s.failed){status=L"错误";color=RGB(245,86,86);}
@@ -70,6 +70,6 @@ inline void paintDashboard(HWND h,HDC dc,int w,int height,const engine::PlayerSn
     text(L"当前状态",26+bw,bottom+6,bw-20,18,10,secondary);
     {AlphaGraphics draw(dc);Gdiplus::SolidBrush dot(Gdiplus::Color(255,GetRValue(color),GetGValue(color),GetBValue(color)));draw.get().FillEllipse(&dot,dip(h,27+bw),dip(h,bottom+35),dip(h,8),dip(h,8));}
     text(status,42+bw,bottom+27,bw-38,23,16,textColor);
-    text(xess?L"* 不含SDK内部队列 · 耗时单位ms":L"耗时单位ms · 额外延迟为稳态估计",12,height-18,w-24,16,8,secondary);
+    text(xess?L"* 耗时不含XeSS FG · 队列不含SDK内部":L"增强阶段GPU计时 · 不含音频和呈现等待",12,height-18,w-24,16,8,secondary);
 }
 }

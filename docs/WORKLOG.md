@@ -1749,3 +1749,8 @@ apps/veyra/SettingsWindow.cpp调整布局；apps/veyra/ui/AppShell.cpp新增音�
 
 ## 2026-09-12 文件过载迟到后续修复方案
 用户4060日志显示revision13迟到均值62.649ms、队列2，音频持续推进；revision14另配置迟到0.578ms。静态检查发现源帧过期仅比较当前时钟，未预测增强完成，以及“原帧总呈现”的单批次历史假设与现有容量2不符。新增 FILE_OVERLOAD_LATENCY_REPAIR_PLAN_2026-09-12.md：先澄清文件迟到/实时额外延迟口径，关联测量、预计就绪选帧、有替代结果时跳旧呈现，保持音频连续及导出完整。仅方案与日志/代码审查，未新构建/运行RTX测试/修改产品/发布，不能断言全部60ms可消除。
+
+
+## 2026-09-12 增强处理耗时主面板与应用图标
+用户确认后开工存档7a30b66，分支codex/processing-metrics-and-app-icon。主曲线与大数字改为同帧光流/NR/SR/残差/FG批次GPU区间去重后的处理耗时，排除呈现等待与音频；原有额外显示延迟移到小三角详情第一项。XeSS内部FG缺计时继续明确排除。用户Logo转换为七尺寸ICO，嵌入EXE大/小窗口图标与专业模式品牌位。没有修改音频/跳帧/呈现调度，不能将本次显示修正称为过载迟到已修复。
+构建两次成功，命令cmd /c out/remoteplay/build-extra-delay.cmd；98合同检查通过。180秒4K文件NR+DLSSG短测5275帧、5251生成帧、failed=false；最终构建另用1080色条文件到4K测试视频SR+NR+DLSSG，Create result=0x1/SEH=0、FG warm-up Evaluate=0x1，实际GUI主数字约12.1ms、详情首项迟到约0.5ms，曲线/详情切换及Logo可见。ExtractIconExW确认EXE一组图标；具体命令、文件、范围与日志见docs/PROCESSING_METRICS_ICON_2026-09-12.md。未测试实卡、PS5实机及XeSS内部计时，未发布。下一步由用户体验新版面板；过载调度方案仍单独待实施。

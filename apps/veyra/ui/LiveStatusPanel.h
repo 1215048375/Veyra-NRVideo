@@ -31,10 +31,16 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         auto fps=[&](double value){return playing&&!f.rateWindowReady?std::wstring(L"采样中"):std::format(L"{:.1f} fps",value);};
         const auto& extra=f.cpuTiming[size_t(diagnostics::CpuStage::EnhancementDelayEstimate)];
         std::vector<std::pair<std::wstring,std::wstring>> rows;
+        const bool live=s.capture||s.remotePlay;
+        rows.emplace_back(live?L"额外显示延迟 · 估计":L"画面迟到 · 估计",playing?ms(extra.mean):L"未测");
+        rows.emplace_back(L"估计口径",live?L"解码后至提交，扣基础开销":L"原帧提交时落后播放时钟");
+        rows.emplace_back(L"测量范围",L"非屏幕实测 · 非增强处理耗时");
+        rows.emplace_back(L"增强处理 · 平均 / P95",timing(f.enhancementProcessing));
+        rows.emplace_back(L"处理统计口径",L"同帧光流+NR+SR+残差+FG区间去重");
+        rows.emplace_back(L"处理范围",xess?L"不含XeSS内部FG":L"不含输入颜色、输出、声音和呈现等待");
+        rows.emplace_back(L"平均范围",L"总计按源帧；单项按执行次数");
+        rows.emplace_back(L"光流范围",L"含光流GPU依赖等待");
         rows.emplace_back(L"实际呈现",fps(xess?f.xessSdkSubmitFps:f.presentSubmitFps));
-        rows.emplace_back(L"增强额外延迟估计",playing?ms(extra.mean):L"未测");
-        rows.emplace_back(L"估计口径",s.capture?L"扣除基础显示开销":L"正常播放时序的额外落后");
-        rows.emplace_back(L"测量范围",L"稳态估计 · 不含屏幕扫描");
         rows.emplace_back(L"请求目标（非实测）",s.nominalSourceFps>0?std::format(L"{:.1f} fps",s.nominalSourceFps*(s.captureHalfRate?.5:1)*s.applied.multiplier):L"未确定");
         std::wstring progress=!playing?s.status:s.applying?L"正在应用设置":s.fgBudgetLimited?L"部分补帧未达截止时间":L"播放中";
         if(playing&&!s.applying&&s.remotePlay){
@@ -65,7 +71,7 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         }
         rows.emplace_back(L"⑨ 等待显示时间",timing(f.cpuTiming[size_t(diagnostics::CpuStage::DeadlineWait)]));
         rows.emplace_back(L"⑩ Present提交",timing(f.cpuTiming[size_t(diagnostics::CpuStage::Present)]));
-        rows.emplace_back(L"统计口径",L"并行阶段有重叠，不相加");
+        rows.emplace_back(L"统计口径",L"GPU处理与CPU等待可重叠，不相加");
         if(s.remotePlay){
             const auto& r=s.remoteStream;
             const auto now=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()/100;
@@ -93,7 +99,7 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
             }
         }
         if(state->advanced){
-        rows.emplace_back(L"增强额外延迟估计 · P95",playing?ms(extra.p95):L"未测");
+        rows.emplace_back(live?L"额外显示延迟 · P95":L"画面迟到 · P95",playing?ms(extra.p95):L"未测");
         rows.emplace_back(L"原帧软件驻留 · 平均",playing?ms(f.softwareLatencyMs):L"未测");
         rows.emplace_back(L"原帧软件驻留 · P95",playing?ms(f.softwareLatencyP95Ms):L"未测");
         rows.emplace_back(L"估计基线",L"理想直接播放 · 非双路实测");

@@ -1,5 +1,6 @@
 #pragma once
 #include "veyra/diagnostics/FrameMetrics.h"
+#include "veyra/diagnostics/EnhancementProcessingTime.h"
 #include "veyra/engine/FrameRateWindow.h"
 #include "veyra/engine/FrameLineage.h"
 #include <mutex>
@@ -46,7 +47,7 @@ class FrameFlowWindow {
     mutable std::optional<double> latencyMean_,latencyP95_;
     mutable uint64_t latencyCount_=0;
     struct StageTiming {int64_t time;double ms;unsigned stage;};
-    static constexpr unsigned gpuCount=unsigned(diagnostics::GpuStage::Count),pairBegin=gpuCount+unsigned(diagnostics::CpuStage::Count),stageCount=pairBegin+unsigned(diagnostics::PairTiming::Count);
+    static constexpr unsigned gpuCount=unsigned(diagnostics::GpuStage::Count),pairBegin=gpuCount+unsigned(diagnostics::CpuStage::Count),enhancementIndex=pairBegin+unsigned(diagnostics::PairTiming::Count),stageCount=enhancementIndex+1;
     std::vector<StageTiming> timing_=std::vector<StageTiming>(8192);size_t timingHead_=0,timingSize_=0;
     std::array<uint64_t,gpuCount> lastGpuEnd_{};
     mutable int64_t timingRefresh_=0;
@@ -95,6 +96,7 @@ public:
         // Every dequeued record is delivered once. Different frames may have
         // equal timestamp endpoints, especially empty diagnostic passes.
         for(unsigned i=0;i<gpuCount;++i){const auto& s=frame.gpu[i];if(s.state==diagnostics::SampleState::Measured&&s.milliseconds)stage(i,*s.milliseconds,now);}
+        if(const auto total=diagnostics::enhancementProcessingMs(frame))stage(enhancementIndex,*total,now);
     }
     void ready(uint64_t batch,bool real,unsigned valid,unsigned invalid,int64_t now){
         std::lock_guard lock(mutex_);
@@ -138,6 +140,7 @@ public:
         for(unsigned i=0;i<gpuCount;++i)m.gpuTiming[i]=aggregates_[i];
         for(unsigned i=0;i<unsigned(diagnostics::CpuStage::Count);++i)m.cpuTiming[i]=aggregates_[gpuCount+i];
         for(unsigned i=0;i<unsigned(diagnostics::PairTiming::Count);++i)m.pairTiming[i]=aggregates_[pairBegin+i];
+        m.enhancementProcessing=aggregates_[enhancementIndex];
         m.softwareLatencyMs=latencyMean_;m.softwareLatencyP95Ms=latencyP95_;m.latencySamples=latencyCount_;return m;
     }
 };

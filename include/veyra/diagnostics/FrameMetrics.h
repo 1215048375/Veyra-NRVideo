@@ -49,6 +49,7 @@ struct FrameFlowMetrics {
     uint64_t latencySamples=0;
     uint32_t pendingOutputFrames=0; // valid frame opportunities retained by presenter jobs
     std::array<TimingAggregate,size_t(GpuStage::Count)> gpuTiming;
+    TimingAggregate enhancementProcessing; // same-frame measured enhancement intervals, excluding presentation
     std::array<TimingAggregate,size_t(CpuStage::Count)> cpuTiming;
     std::array<TimingAggregate,size_t(PairTiming::Count)> pairTiming;
     uint64_t pairSourceA=0,pairSourceB=0;
