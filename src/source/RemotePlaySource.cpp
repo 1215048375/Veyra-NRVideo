@@ -143,9 +143,9 @@ bool RemotePlaySource::connect(const RemotePlayConnectDesc& desc)
     decoderReady_ = false;
     waitingForFirstFrame_ = true;
     pendingOpenFlag_ = true;
-    veyra::log::info("remoteplay", std::format("session started host={} profile={}x{}@{} codec={}",
+    veyra::log::info("remoteplay", std::format("session started host={} profile={}x{}@{} codec={} requestedBitrateKbps={} (bandwidth request, not measured throughput)",
         request_.host, request_.video.width, request_.video.height, request_.video.fps,
-        request_.video.codec == remoteplay::Codec::H264 ? "H264" : "H265"));
+        request_.video.codec == remoteplay::Codec::H264 ? "H264" : request_.video.codec == remoteplay::Codec::H265Hdr ? "H265_HDR" : "H265",request_.video.bitrateKbps));
     return true;
 }
 

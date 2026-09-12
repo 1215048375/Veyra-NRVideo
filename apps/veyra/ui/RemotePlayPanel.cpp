@@ -105,8 +105,8 @@ case WM_CREATE:{window=h;closing=false;font=makeFont(h);titleTheme(h);
     for(auto label:{L"自动 · 优先硬解",L"CPU 软件解码",L"D3D12VA 硬件解码"})SendDlgItemMessageW(h,DecodeChoice,CB_ADDSTRING,0,LPARAM(label));
     SendDlgItemMessageW(h,DecodeChoice,CB_SETCURSEL,std::min(2u,GetPrivateProfileIntW(L"RemotePlay",L"DecodeMode",0,(remoteplay::profileDirectory()/L"settings.ini").c_str())),0);
     add(L"STATIC",L"PS5 地址",100,0,20,21,130,25);add(L"STATIC",L"PSN Account ID",101,0,20,65,130,25);
-    add(L"STATIC",L"8 位配对码",102,0,20,109,130,25);add(L"STATIC",L"串流格式",103,0,20,153,130,25);add(L"STATIC",L"登录 PIN（可选）",104,0,20,253,135,25);
-    add(L"STATIC",L"码率",105,0,20,298,130,25);add(L"COMBOBOX",L"",Host,CBS_DROPDOWN|CBS_AUTOHSCROLL|WS_TABSTOP);SendDlgItemMessageW(h,Host,CB_LIMITTEXT,253,0);
+    add(L"STATIC",L"8 位配对码",102,0,20,109,130,25);add(L"STATIC",L"格式（重连生效）",103,0,20,153,130,25);add(L"STATIC",L"登录 PIN（可选）",104,0,20,253,135,25);
+    add(L"STATIC",L"码率请求",105,0,20,298,130,25);add(L"COMBOBOX",L"",Host,CBS_DROPDOWN|CBS_AUTOHSCROLL|WS_TABSTOP);SendDlgItemMessageW(h,Host,CB_LIMITTEXT,253,0);
     for(int id:{Account,PairPin,LoginPin}){add(L"EDIT",L"",id,WS_TABSTOP|ES_AUTOHSCROLL|((id==PairPin||id==LoginPin)?ES_PASSWORD:0));SendDlgItemMessageW(h,id,EM_SETLIMITTEXT,id==Host?253:id==Account?24:8,0);}
     add(L"COMBOBOX",L"",Quality,CBS_DROPDOWNLIST|WS_TABSTOP);for(auto label:{L"720p · 30 fps",L"720p · 60 fps",L"1080p · 30 fps",L"1080p · 60 fps"})SendDlgItemMessageW(h,Quality,CB_ADDSTRING,0,LPARAM(label));SendDlgItemMessageW(h,Quality,CB_SETCURSEL,3,0);
     add(L"COMBOBOX",L"",CodecChoice,CBS_DROPDOWNLIST|WS_TABSTOP);for(auto label:{L"H.264 · SDR",L"H.265 · SDR",L"H.265 · HDR（实验）"})SendDlgItemMessageW(h,CodecChoice,CB_ADDSTRING,0,LPARAM(label));SendDlgItemMessageW(h,CodecChoice,CB_SETCURSEL,0,0);
@@ -131,8 +131,8 @@ case WM_CREATE:{window=h;closing=false;font=makeFont(h);titleTheme(h);
         {Host,L"PS5的局域网IP或已保存主机。找不到时可手填，别把PSN昵称填这里。"},
         {Account,L"配对用的Base64 PSN Account ID，不是在线昵称。名字相同不代表身份证号码相同。"},
         {PairPin,L"PS5远程游玩页面显示的8位配对码，有时效。过期了再领一张票。"},
-        {Quality,L"选择串流分辨率和帧率。请求的是PS5输出，不是增强后目标。"},
-        {CodecChoice,L"H.264兼容性好，H.265通常更省码率。HDR需要PS5实际输出HDR；关闭增强且Windows HDR开启时原生显示，开启增强则先转SDR，别把两种效果认错。"},
+        {Quality,L"选择PS5发送的分辨率和帧率。更改后点击应用设置并重连；当前生效值看下方状态，不要被下拉框骗了。"},
+        {CodecChoice,L"H.264兼容性好，H.265通常更省码率；更改后重连生效。HDR需要PS5实际输出HDR；关闭增强且Windows HDR开启时原生显示，开启增强则先转SDR，别把两种效果认错。"},
         {Pair,L"用账户ID和8位码注册主机，凭据在本机加密保存。"},
         {Connect,L"使用保存的配对信息连接PS5，把画面送进当前增强链路。"},
         {Cancel,L"取消当前操作或断开串流，让连接安静收工。"},
@@ -140,12 +140,12 @@ case WM_CREATE:{window=h;closing=false;font=makeFont(h);titleTheme(h);
         {Wake,L"尝试唤醒待机主机；需要已配对且PS5允许联网唤醒。关机不是待机，叫不醒别硬喊。"},
         {LoginPin,L"主机要求登录PIN时填写。它不是前面的8位配对码。"},
         {SendPin,L"把登录PIN发给当前串流会话。"},
-        {Bitrate,L"串流码率越高，压缩损失通常越少，网络负担也更重。别把Wi-Fi喂撑。"},
+        {Bitrate,L"这是发给PS5的带宽请求，重连后生效。主机会按画面和网络决定实际码率，选100不代表必须跑满100。下方分别显示本次请求和实收视频码率。"},
         {Forget,L"删除本机保存的这台主机配对信息；以后需要重新配对。"},
         {ViewOnly,L"只观看，不向PS5转发电脑手柄输入。不能保证同账号手柄仍能直连主机，这是PS5会话规则。"},
         {Calibrate,L"手柄放稳后校准陀螺仪，让镜头别自己散步。"},
         {DecodeChoice,L"自动优先硬解，失败回软件；强制硬解失败会报错。软件解码主要用CPU，硬解用视频解码单元。重连生效。"}});
-    buttons();arrange();SetTimer(h,1,100,nullptr);
+    watching=connectionStatus().active;buttons();arrange();SetTimer(h,1,100,nullptr);
     if(auto auth=remoteplay::loadPsnAuthorization()){
         psnRefreshAfter=GetTickCount64()+300000;
         const bool fillAccount=currentProfile.empty();
@@ -177,7 +177,7 @@ case WM_TIMER:if(busy&&done){if(worker.joinable())worker.join();busy=false;Outco
         psnRefreshAfter=GetTickCount64()+300000;
         if(remoteplay::loadPsnAuthorization())launch([](std::stop_token stop){auto result=remoteplay::refreshPsn(stop);Outcome out;out.message=result.ok?L"PSN授权已就绪；已配对主机直接连接。":std::format(L"PSN刷新失败（{}）；局域网配对不受影响。",result.error);return out;});
     }
-    if(window&&watching&&!busy){auto state=connectionStatus();SetDlgItemTextW(h,StatusText,state.message.c_str());SetDlgItemTextW(h,Cancel,state.active?L"断开连接":L"取消操作");EnableWindow(GetDlgItem(h,Cancel),state.active);if(!state.active)watching=false;}return 0;
+    if(window&&watching&&!busy){auto state=connectionStatus();SetDlgItemTextW(h,Connect,state.active?L"应用设置并重连":L"连接并观看");SetDlgItemTextW(h,StatusText,state.message.c_str());SetDlgItemTextW(h,Cancel,state.active?L"断开连接":L"取消操作");EnableWindow(GetDlgItem(h,Cancel),state.active);if(!state.active)watching=false;}return 0;
 case WM_COMMAND:switch(LOWORD(wp)){
     case LoginPsn:{if(busy)break;auto url=remoteplay::psnLoginUrl();if(INT_PTR(ShellExecuteW(h,L"open",url.c_str(),nullptr,nullptr,SW_SHOWNORMAL))>32){psnLoginStarted=GetTickCount64();SetDlgItemTextW(h,StatusText,L"在Sony网页完成登录，复制最终回调URL，再点“从剪贴板提交登录结果”。");}else SetDlgItemTextW(h,StatusText,L"无法打开浏览器，请检查默认浏览器设置。");break;}
     case CompletePsn:{

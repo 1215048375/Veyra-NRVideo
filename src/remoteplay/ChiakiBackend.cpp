@@ -17,6 +17,8 @@
 #include <limits>
 #include <mutex>
 #include <thread>
+#include <cstdio>
+#include <cstdlib>
 namespace veyra::remoteplay {
 static_assert(CHIAKI_PSN_ACCOUNT_ID_SIZE == 8);
 static_assert(CHIAKI_SESSION_AUTH_SIZE == 16);
@@ -58,6 +60,8 @@ struct ChiakiBackend::Impl {
     std::atomic<std::uint64_t> warnings=0,errors=0,videoCallbacks=0,audioCallbacks=0;
     std::atomic<int> quitReason=0,apiError=0;
     std::atomic<uint64_t> callbackRejected=0,transportErrors=0,assemblyErrors=0;
+    std::atomic<int64_t> serverTargetBitrate=-1;
+    std::atomic<uint64_t> qualityReports=0;
     // Only the upstream audio/Opus callback thread reads/writes these fields.
     std::uint32_t channels=0,rate=0;
     std::uint64_t sampleIndex=0;
@@ -68,6 +72,10 @@ struct ChiakiBackend::Impl {
 
     static void logCallback(ChiakiLogLevel level,const char* message,void* user) noexcept {
         auto& self=*static_cast<Impl*>(user);
+        if(message&&level==CHIAKI_LOG_VERBOSE){
+            int target=-1;
+            if(std::sscanf(message,"StreamConnection received connection quality: target_bitrate=%d,",&target)==1&&target>=0){self.serverTargetBitrate=target;++self.qualityReports;}
+        }
         // Raw upstream log strings/hexdumps may contain keys. Do not forward them.
         if(level==CHIAKI_LOG_ERROR)++self.errors;
         if(level==CHIAKI_LOG_WARNING)++self.warnings;
@@ -163,7 +171,10 @@ BackendResult ChiakiBackend::start(const NativeConnectRequest& request,SessionIn
     if(!validHost(request.host)||request.video.validate()||token.generation()==0)return {false,-1101,"validate_connect"};
     auto init=initializeChiaki();if(!init.ok)return init;
     p_=std::make_unique<Impl>(std::move(token));auto& s=*p_;s.host=request.host;s.profile=request.video;
-    chiaki_log_init(&s.log,CHIAKI_LOG_WARNING|CHIAKI_LOG_ERROR,Impl::logCallback,&s);
+    // Verbose formatting has per-packet overhead: enable only for explicit diagnostics.
+    // Callback above whitelists numeric quality fields and never forwards raw text.
+    const bool qualityTrace=std::getenv("VEYRA_TEST_PS5_QUALITY_TRACE")!=nullptr;
+    chiaki_log_init(&s.log,CHIAKI_LOG_WARNING|CHIAKI_LOG_ERROR|(qualityTrace?CHIAKI_LOG_VERBOSE:0),Impl::logCallback,&s);
     ChiakiConnectInfo info{};info.ps5=true;info.host=s.host.c_str();
     std::memcpy(info.regist_key,request.credentials.registrationKey.data(),request.credentials.registrationKey.size());
     std::memcpy(info.morning,request.credentials.sessionKey.data(),request.credentials.sessionKey.size());
@@ -265,6 +276,7 @@ NativeSnapshot ChiakiBackend::snapshot()const{
     auto& s=*p_;
     NativeSnapshot out{s.started.load(),s.connected.load(),s.warnings.load(),s.errors.load(),s.videoCallbacks.load(),s.audioCallbacks.load(),s.quitReason.load(),s.apiError.load()};
     out.callbackRejected=s.callbackRejected;out.transportErrors=s.transportErrors;out.assemblyErrors=s.assemblyErrors;
+    out.serverTargetBitrate=s.serverTargetBitrate;out.qualityReports=s.qualityReports;
     // Upstream packet window may reset itself; do not label this cumulative UDP.
     if(s.initialized)chiaki_packet_stats_get(&s.session.stream_connection.packet_stats,false,&out.packetReceived,&out.packetLost);
     // After a stopped session the PS5 may briefly still report RP_IN_USE.

@@ -41,6 +41,8 @@ struct NativeSnapshot {
     uint64_t callbackRejected=0,packetReceived=0,packetLost=0;
     uint64_t transportErrors=0,assemblyErrors=0;
     bool automaticRetryAllowed=true;
+    int64_t serverTargetBitrate=-1; // Raw upstream field; diagnostic opt-in only.
+    uint64_t qualityReports=0;
 };
 BackendResult initializeChiaki();
 class ChiakiBackend {

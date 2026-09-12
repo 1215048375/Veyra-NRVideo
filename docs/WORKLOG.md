@@ -1772,3 +1772,9 @@ apps/veyra/SettingsWindow.cpp调整布局；apps/veyra/ui/AppShell.cpp新增音�
 构建 cmd /c out/remoteplay/build-extra-delay.cmd 成功；cmd /c out/remoteplay/build-clock-tests.cmd 核心73/73；cmd /c out/remoteplay/build-boundary-clock.cmd 后边界通过，合同103/103。实机使用 veyra_live_presentation_tests.exe --last-paired-ps5 <目录> --reconnect：第一轮恢复成功但单点FG性能断言失败；第二轮暴露PS5旧会话短暂RP_IN_USE导致放弃，修成已有恢复预算内继续退避。第三轮50秒PASS：断流前已播放、第二次重连成功、730次恢复后健康采样，NR/SR4K/DLSS2X及WASAPI音频恢复。NR与DLSSG Create=0x1/SEH=0，DLSSG evaluates=1276/Release=0x1。另 --cancel-reconnect PASS，主动停止后idle且不重连。证据 logs/ps5-stream-reconnect3-result.log、对应engine.log及logs/ps5-stream-cancel-result.log；详细失败、命令及修改文件见 docs/PS5_STREAM_RECOVERY_2026-09-13.md。
 
 这是可控断流与自动恢复验证，不是最初自然断流根因已查明，也不等于长时PS5/HDR/手柄触觉验收。没有更换运行DLL、没有提交SDK/配对/日志、未推送发布。下一步用户重开桌面PS5测试版长时游玩，如再断流带新诊断定位上游原因。
+
+## 2026-09-13 PS5 原始码率/画质审计
+
+基线5c3fad0，分支codex/ps5-source-quality。用户允许源头实测，禁用SR/NR/FG：H264 1080p30请求100Mbps，PS5反馈目标97.087Mbps，菜单有效视频均值10.018；H265同请求均值5.956；H264请求15Mbps，主机目标14.563、有效均值5.242。各35秒、硬解、1920×1080，完整帧丢失/回调拒绝/错误均0，保存1:1源图已查看。不是Veyra把100截成15；实际码率为内容/主机决定，不能由未跑满推导画质低，也不能靠菜单证明游戏清晰。已请求用户切换实际游戏场景，游玩模糊尚未定位。
+
+修正PS5面板显示待选值却不提示重连的误导：展示本次真正请求/实收视频码率、明确应用设置并重连、重开面板继续跟踪会话；日志与专业诊断加入请求码率及codec。诊断工具仅显式opt-in读取主机数值品质反馈，正常不启用逐包verbose，无原始上游字符串/密钥输出。构建build-source-quality.cmd与build-extra-delay.cmd成功，合同103/103，diff检查通过。三轮实机命令、PNG、日志路径及待验收边界见docs/PS5_SOURCE_QUALITY_AUDIT_2026-09-13.md。没有改像素算法/运行DLL/用户配对，未执行增强Create/Evaluate、未做UI视觉回归、未推送发布。下一步必须是实际游玩原图与呈现对照，不能宣称画质已修好。

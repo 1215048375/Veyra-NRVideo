@@ -18,6 +18,7 @@ void refresh(){auto s=engine->snapshot();const wchar_t* names[]={L"上传/颜色
     const auto flowName=s.applied.flow==engine::FlowQuality::Performance?L"性能":s.applied.flow==engine::FlowQuality::Balanced?L"平衡":L"质量";
     const auto& f=s.metrics.flow;const auto& c=f.counters;
     if(s.remotePlay){const auto& r=s.remoteStream;
+        o<<L"\r\n本次连接请求："<<r.requestedProfile.width<<L"×"<<r.requestedProfile.height<<L" / "<<r.requestedProfile.fps<<L" fps / "<<(r.requestedProfile.codec==remoteplay::Codec::H264?L"H.264":r.requestedProfile.codec==remoteplay::Codec::H265Hdr?L"H.265 HDR":L"H.265")<<L" / "<<r.requestedProfile.bitrateKbps/1000.0<<L" Mbps（并非固定实际流量）";
         o<<L"\r\nPS5完整视频接收 "<<r.receivedFps<<L" fps / 实际解码 "<<r.decodedFps<<L" fps / 有效码率 "<<r.videoMbps<<L" Mbps"
          <<L"\r\n实际解码路径："<<(!r.decodeConfirmed?L"尚未确认":r.hardwareDecode?L"D3D12VA 硬解":r.decodeFallback?L"CPU软件（硬解回退）":L"CPU软件")
          <<L"\r\n真实解码均值 / P95 "<<value(r.decodeMeanMs)<<L" / "<<value(r.decodeP95Ms)<<L" ms；接收后等待 "<<value(r.ingressWaitMeanMs)

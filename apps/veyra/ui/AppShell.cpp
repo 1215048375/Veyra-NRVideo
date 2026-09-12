@@ -344,6 +344,8 @@ case RemotePlay:veyra::ui::showRemotePlayPanel(hwnd,[](veyra::source::RemotePlay
     result.active=s.remotePlay&&(s.running||s.transport==veyra::engine::TransportState::Opening||s.transport==veyra::engine::TransportState::Stopping);
     result.message=s.failed?s.status:s.remoteRecovering?s.remoteRecoveryMessage:s.remotePlay&&s.running?L"PS5 画面已进入播放；关闭此面板不停止串流。":result.active?s.status:L"PS5 串流已停止，可以重新连接。";
     if(s.remotePlay&&s.running){
+        if(!s.failed&&!s.remoteRecovering){const auto& r=s.remoteStream;const auto& p=r.requestedProfile;
+            result.message=std::format(L"生效：{}p / {} fps / {} / 请求 {} Mbps\n实收视频 {:.1f} Mbps · 格式/码率更改后需点重连",p.height,p.fps,p.codec==veyra::remoteplay::Codec::H264?L"H.264":p.codec==veyra::remoteplay::Codec::H265Hdr?L"H.265 HDR":L"H.265",p.bitrateKbps/1000,r.videoMbps);}
         const auto c=remoteController.capabilities();
         if(remoteViewOnly)result.message+=L"\n仅观看：电脑输入已关闭，手柄由 PS5 处理。";
         else if(!c.connected)result.message+=L"\n未检测到电脑手柄。";
