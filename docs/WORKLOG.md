@@ -1778,3 +1778,11 @@ apps/veyra/SettingsWindow.cpp调整布局；apps/veyra/ui/AppShell.cpp新增音�
 基线5c3fad0，分支codex/ps5-source-quality。用户允许源头实测，禁用SR/NR/FG：H264 1080p30请求100Mbps，PS5反馈目标97.087Mbps，菜单有效视频均值10.018；H265同请求均值5.956；H264请求15Mbps，主机目标14.563、有效均值5.242。各35秒、硬解、1920×1080，完整帧丢失/回调拒绝/错误均0，保存1:1源图已查看。不是Veyra把100截成15；实际码率为内容/主机决定，不能由未跑满推导画质低，也不能靠菜单证明游戏清晰。已请求用户切换实际游戏场景，游玩模糊尚未定位。
 
 修正PS5面板显示待选值却不提示重连的误导：展示本次真正请求/实收视频码率、明确应用设置并重连、重开面板继续跟踪会话；日志与专业诊断加入请求码率及codec。诊断工具仅显式opt-in读取主机数值品质反馈，正常不启用逐包verbose，无原始上游字符串/密钥输出。构建build-source-quality.cmd与build-extra-delay.cmd成功，合同103/103，diff检查通过。三轮实机命令、PNG、日志路径及待验收边界见docs/PS5_SOURCE_QUALITY_AUDIT_2026-09-13.md。没有改像素算法/运行DLL/用户配对，未执行增强Create/Evaluate、未做UI视觉回归、未推送发布。下一步必须是实际游玩原图与呈现对照，不能宣称画质已修好。
+
+## 2026-09-13 PS5 模糊客观链路审计（取代上一条看图/换场景验收要求）
+
+用户明确装备页人物也模糊，Agent不再凭内容识别判断画质，肉眼验收由用户进行，不以退出菜单为前提。基线082db52，仍在codex/ps5-source-quality。检查协议、RemotePlaySource、ResolutionPlan、颜色契约、真实GPU输出和交换链；未发现100Mbps被限15Mbps、关闭增强偷偷降720p或正常1:1额外低通。确认普通缩放为双线性、色度2×2复制且未携带chroma_location；这是本地可改善差异，尚未证明是严重模糊的全部根因。Sony今年Portal新增1080p高质量码率档，但公告未给协议参数；不据此声称已启用或找到无损/4K接口。
+
+新增SourceFidelityTests及CMake目标，build-source-fidelity.cmd成功；真实RTX5070灰阶/细线2组及1:1/1440p/2160p两交换链呈现12组通过，1:1误差0，灰阶最大误差0.584/255，普通缩放匹配独立CPU双线性参考。颜色既有4组通过；普通H264硬解4帧及并发纹理检查误差0。命令与结果logs/source-fidelity-{build,result,color,hw}.log，单项均不足300秒。新诊断无PS5连接、无主机操作；当时chiaki运行，不争抢会话。没有新NR/SR/FG Create/Evaluate，未改产品算法或运行DLL，未重新宣称PS5 H265/HDR实机通过。当前测试仅到呈现缓冲，不包括DWM或显示器。旧实际PS5同AU误差0是此前证据。
+
+修正旧画质审计中的视觉结论和换场景前提，详见docs/PS5_SOURCE_FIDELITY_AUDIT_2026-09-13.md。下一步是色度位置/普通显示采样的独立数值对照与用户肉眼验收，源头编码质量另查同码流元数据/量化，不能用SR掩盖。未推送发布；SDK、DLL、配对、日志与媒体不入Git。
