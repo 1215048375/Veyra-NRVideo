@@ -47,6 +47,7 @@ struct FrameFlowMetrics {
     bool rateWindowReady=false;
     std::optional<double> softwareLatencyMs,softwareLatencyP95Ms,slotWaitPerFrameMs;
     uint64_t latencySamples=0;
+    uint32_t pendingOutputFrames=0; // valid frame opportunities retained by presenter jobs
     std::array<TimingAggregate,size_t(GpuStage::Count)> gpuTiming;
     std::array<TimingAggregate,size_t(CpuStage::Count)> cpuTiming;
     std::array<TimingAggregate,size_t(PairTiming::Count)> pairTiming;

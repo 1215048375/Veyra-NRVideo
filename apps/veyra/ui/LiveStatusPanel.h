@@ -1,17 +1,18 @@
 #pragma once
 #include "WorkspaceChrome.h"
 #include <chrono>
+#include "LiveStatusDashboard.h"
 
 namespace veyra::ui {
 namespace live_status {
-struct State {engine::EngineController* engine;int scroll=0,maxScroll=0;bool advanced=false;};
+struct State {engine::EngineController* engine;int scroll=0,maxScroll=0;bool advanced=false;DashboardHistory history;};
 inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     auto* state=reinterpret_cast<State*>(GetWindowLongPtrW(h,GWLP_USERDATA));
     if(message==WM_NCCREATE){state=new State{static_cast<engine::EngineController*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams)};SetWindowLongPtrW(h,GWLP_USERDATA,LONG_PTR(state));}
     if(!state)return DefWindowProcW(h,message,wp,lp);
     switch(message){
     case WM_CREATE:SetTimer(h,1,250,nullptr);return 0;
-    case WM_TIMER:if(IsWindowVisible(h))InvalidateRect(h,nullptr,FALSE);return 0;
+    case WM_TIMER:state->history.sample(state->engine->snapshot());if(IsWindowVisible(h))InvalidateRect(h,nullptr,FALSE);return 0;
     case WM_SIZE:InvalidateRect(h,nullptr,FALSE);return 0;
     case WM_LBUTTONUP:if(GET_Y_LPARAM(lp)<dip(h,34)){state->advanced=!state->advanced;state->scroll=0;InvalidateRect(h,nullptr,FALSE);}return 0;
     case WM_MOUSEWHEEL:state->scroll=std::clamp(state->scroll-GET_WHEEL_DELTA_WPARAM(wp)/WHEEL_DELTA*50,0,state->maxScroll);InvalidateRect(h,nullptr,FALSE);return 0;
@@ -20,6 +21,7 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         PaintBuffer paint(h);fillSurface(paint.dc,paint.rect,h);
         const int width=MulDiv(paint.rect.right,96,veyra::ui::layoutDpi(h)),height=MulDiv(paint.rect.bottom,96,veyra::ui::layoutDpi(h));
         const auto s=state->engine->snapshot();const auto& f=s.metrics.flow;
+        if(!state->advanced){paintDashboard(h,paint.dc,width,height,s,state->history);return 0;}
         const bool playing=s.running&&!s.image&&s.transport==engine::TransportState::Playing;
         const bool xess=s.applied.frameGenerationBackend==engine::FrameGenerationBackend::XeSS&&s.applied.multiplier>1;
         auto write=[&](const std::wstring& value,int x,int y,int w,int ht,int size,COLORREF color){chromeText(paint.dc,h,value,x,y,w,ht,size,color);};
