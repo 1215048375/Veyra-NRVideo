@@ -100,6 +100,7 @@ PlayerSnapshot EngineController::snapshot()const{
 #ifdef VEYRA_ENABLE_REMOTEPLAY
     if(copy.remotePlay&&activeRemote_){
         const auto s=activeRemote_->sessionSnapshot();copy.remoteStream=s;copy.remotePlayState=int(s.state);
+        const auto recovery=activeRemote_->recoveryStatus();copy.remoteRecovering=recovery.active;copy.remoteReconnectAttempts=recovery.attempts;copy.remoteRecoveryMessage=recovery.message;
         copy.remoteReceivedFps=s.receivedFps;copy.remoteDecodedFps=s.decodedFps;copy.remoteRatesReady=s.ratesReady;
         copy.remoteReceived=s.video.accessUnits;copy.remoteDecoded=s.decodedFrames;copy.remoteIngressDropped=s.video.dropped;
         copy.remotePlaySkipped=activeRemote_->skipped();copy.captureAudio=activeRemote_->audioState();copy.audioAvailable=copy.captureAudio.available;
@@ -509,7 +510,11 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                         if(paused_)continue;
                         collectTimings();seekPreviewPending=false;status(L"视频已播放完毕");paused_=true;{std::lock_guard lock(mutex_);snapshot_.transport=TransportState::Ended;}continue;
                     }
-                    if(rs!=source::SourceReadStatus::Frame||pkt.pts.isUnknown()){status(isCapture?L"采集信号中断，请检查设备连接或格式":L"视频解码或时间戳错误",true);break;}
+                    if(rs!=source::SourceReadStatus::Frame||pkt.pts.isUnknown()){
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+                        if(remote){const auto recovery=remote->recoveryStatus();status(recovery.message.empty()?L"PS5 串流异常，请检查主机状态后重新连接。":recovery.message,true);break;}
+#endif
+                        status(isCapture?L"采集信号中断，请检查设备连接或格式":L"视频解码或时间戳错误",true);break;}
                 }
                 if(isRemote&&frame&&(uint32_t(frame->width)!=width||uint32_t(frame->height)!=height)){
                     drainLivePresentation();if(!ring.drainQueue()){status(L"串流尺寸切换排空失败",true);break;}

@@ -1764,3 +1764,11 @@ apps/veyra/SettingsWindow.cpp调整布局；apps/veyra/ui/AppShell.cpp新增音�
 基线 c68b4b0，分支 codex/ps5-fg-overload-audio。日志证实 DLSS 候选大量被截止时间判定跳过、实际串流约 59.9314 fps 而视频时钟固定除以60、decoded mailbox 覆盖误标 Discontinuity 导致统计窗口不断重开。修正本地估计时钟渐进校准、音频 ingress 映射有限老化、Drop 分类与同配置软历史重置的异步计时保留；PS5 每对新解码输入在增强前确定补帧预算，不用增强完成延后截止时间。UI 不再把已开启但等待执行的 FG 写成未开启。
 构建 cmd /c out/remoteplay/build-clock-product.cmd 成功；离线核心68/68，合同103/103，调度与RemotePlay边界通过。真实WASAPI基础回归及120秒慢钟差通过，P95音画偏差4.254ms、仅启动reset1次、无溢出。前三轮实机回归失败均保留：逐步定位覆盖事件分类、压缩AU锚点和硬解交付抖动。第四轮120秒PS5 H264硬解+4K视频SR+实时NR+DLSS2X通过；115秒有效生成累计5251，末期有效补帧53fps，过载163/163保留计时，音频等待早期64.587/末期57.892ms。NR/DLSSG Create与预热Evaluate=0x1，SEH=0。不能宣称固定120fps或小时级验收。
 证据 logs/ps5-clock-live4-result.log、logs/ps5-clock-live4/engine.log、logs/ps5-clock-audio-drift.log；其余命令、失败边界和修改文件见 docs/PS5_FG_CLOCK_METRICS_REPAIR_2026-09-13.md。运行中的旧EXE重命名保留，最新主程序已构建到原快捷方式路径，用户重开才生效。未改运行DLL，未提交SDK/二进制/凭据/日志，未推送发布。下一步由用户长时游戏体验验收。
+
+## 2026-09-13 PS5 断流自动恢复
+
+基线 b5cb1b5，分支 codex/ps5-stream-recovery。现场日志完整输入/解码停在 7053，队列0、decoder非忙碌，旧三次IDR及30秒等待未恢复。新增1秒/3秒关键帧恢复、6秒后旧会话顺序退出并复用本次内存凭据重连，最多3次且1/2/4秒退避；主动断开可取消。重连首帧重置历史和音频时钟、应用序号连续；界面显示恢复中。增加底层包窗口、回调拒绝、组帧/传输分类与终止码日志，不输出上游原始字符串/密钥。
+
+构建 cmd /c out/remoteplay/build-extra-delay.cmd 成功；cmd /c out/remoteplay/build-clock-tests.cmd 核心73/73；cmd /c out/remoteplay/build-boundary-clock.cmd 后边界通过，合同103/103。实机使用 veyra_live_presentation_tests.exe --last-paired-ps5 <目录> --reconnect：第一轮恢复成功但单点FG性能断言失败；第二轮暴露PS5旧会话短暂RP_IN_USE导致放弃，修成已有恢复预算内继续退避。第三轮50秒PASS：断流前已播放、第二次重连成功、730次恢复后健康采样，NR/SR4K/DLSS2X及WASAPI音频恢复。NR与DLSSG Create=0x1/SEH=0，DLSSG evaluates=1276/Release=0x1。另 --cancel-reconnect PASS，主动停止后idle且不重连。证据 logs/ps5-stream-reconnect3-result.log、对应engine.log及logs/ps5-stream-cancel-result.log；详细失败、命令及修改文件见 docs/PS5_STREAM_RECOVERY_2026-09-13.md。
+
+这是可控断流与自动恢复验证，不是最初自然断流根因已查明，也不等于长时PS5/HDR/手柄触觉验收。没有更换运行DLL、没有提交SDK/配对/日志、未推送发布。下一步用户重开桌面PS5测试版长时游玩，如再断流带新诊断定位上游原因。

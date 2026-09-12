@@ -25,6 +25,8 @@ public:
     uint64_t skipped() const;
     struct Rates {uint64_t received=0,decoded=0,ingressDropped=0;double receivedFps=0,decodedFps=0;bool ready=false;};
     Rates rates() const;
+    struct RecoveryStatus {bool active=false;unsigned attempts=0;std::wstring message;};
+    RecoveryStatus recoveryStatus()const {std::lock_guard lock(mutex_);return recovery_;}
     sink::CaptureAudioState audioState() const { return audio_.snapshot(); }
     void setAudioGain(float value) { audio_.setGain(value); }
     void setAudioSync(unsigned mode, int offset) { audio_.setSync(mode, offset); }
@@ -51,6 +53,8 @@ private:
     std::string pin_;
     uint64_t skipped_=0;
     Rates rates_;
+    RecoveryStatus recovery_;
+    uint64_t publishedSequence_=0;
     remoteplay::ControllerFeedback feedback_;
     sink::CaptureAudioSession audio_;
 };

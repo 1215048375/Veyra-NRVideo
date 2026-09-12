@@ -65,6 +65,7 @@ inline void paintDashboard(HWND h,HDC dc,int w,int height,const engine::PlayerSn
     text(std::format(L"{} 帧{}",active?f.pendingOutputFrames:0,xess?L" *":L""),20,bottom+27,bw-20,23,17,textColor);
     std::wstring status=L"待机";COLORREF color=RGB(145,151,149);
     if(s.failed){status=L"错误";color=RGB(245,86,86);}
+    else if(s.remoteRecovering){status=L"恢复中";color=RGB(242,185,65);}
     else if(active&&!s.applying&&f.rateWindowReady){status=history.overloaded?L"过载":L"正常";color=history.overloaded?RGB(242,185,65):RGB(111,211,127);}
     else if(s.applying&&s.running)status=L"调整中";else if(active)status=L"采样中";else if(s.transport==engine::TransportState::Paused)status=L"已暂停";
     text(L"当前状态",26+bw,bottom+6,bw-20,18,10,secondary);

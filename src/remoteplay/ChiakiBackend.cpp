@@ -57,6 +57,7 @@ struct ChiakiBackend::Impl {
     std::atomic<bool> active=false,started=false,connected=false;
     std::atomic<std::uint64_t> warnings=0,errors=0,videoCallbacks=0,audioCallbacks=0;
     std::atomic<int> quitReason=0,apiError=0;
+    std::atomic<uint64_t> callbackRejected=0,transportErrors=0,assemblyErrors=0;
     // Only the upstream audio/Opus callback thread reads/writes these fields.
     std::uint32_t channels=0,rate=0;
     std::uint64_t sampleIndex=0;
@@ -65,11 +66,17 @@ struct ChiakiBackend::Impl {
     uint64_t lastMotion=0;
     std::mutex feedbackMutex;ControllerFeedback feedback;
 
-    static void logCallback(ChiakiLogLevel level,const char*,void* user) noexcept {
+    static void logCallback(ChiakiLogLevel level,const char* message,void* user) noexcept {
         auto& self=*static_cast<Impl*>(user);
         // Raw upstream log strings/hexdumps may contain keys. Do not forward them.
         if(level==CHIAKI_LOG_ERROR)++self.errors;
         if(level==CHIAKI_LOG_WARNING)++self.warnings;
+        // Classify in memory; no upstream strings or hexdumps leave this callback.
+        if(message&&(level==CHIAKI_LOG_ERROR||level==CHIAKI_LOG_WARNING)){
+            const std::string_view text=message;
+            if(text.find("Takion")!=text.npos||text.find("timeout")!=text.npos)++self.transportErrors;
+            if(text.find("Video")!=text.npos||text.find("video")!=text.npos||text.find("frame")!=text.npos||text.find("FEC")!=text.npos)++self.assemblyErrors;
+        }
     }
     static void eventCallback(ChiakiEvent* event,void* user) noexcept {
         auto& self=*static_cast<Impl*>(user);
@@ -102,18 +109,18 @@ struct ChiakiBackend::Impl {
         if(!self.active.load()||!data||!size||!info)return false;
         try{
             const auto nal=inspectAnnexB({data,size},self.profile.codec);
-            if(!nal.valid || (!nal.hasConfig&&!nal.hasPicture))return false;
+            if(!nal.valid || (!nal.hasConfig&&!nal.hasPicture)){++self.callbackRejected;return false;}
             VideoSample sample;
             sample.generation=self.token.generation();sample.arrival100ns=monotonic100ns();
             sample.codec=self.profile.codec;
             sample.kind=info->kind==CHIAKI_VEYRA_SAMPLE_FRAME?SampleKind::AccessUnit:SampleKind::CodecConfig;
             if((sample.kind==SampleKind::AccessUnit && !nal.hasPicture) ||
-                (sample.kind==SampleKind::CodecConfig && (!nal.hasConfig || nal.hasPicture)))return false;
+                (sample.kind==SampleKind::CodecConfig && (!nal.hasConfig || nal.hasPicture))){++self.callbackRejected;return false;}
             if(info->frame_index_valid)sample.wireFrameIndex=info->frame_index;
             sample.width=info->width;sample.height=info->height;
             sample.framesLost=info->frames_lost;sample.referenceRecovered=info->reference_recovered;
             sample.payload=PaddedBytes::copy({data,size});++self.videoCallbacks;
-            return self.token.video(std::move(sample));
+            const bool accepted=self.token.video(std::move(sample));if(!accepted)++self.callbackRejected;return accepted;
         }catch(...){self.apiError=-1001;self.token.failed(-1001);return false;}
     }
     static void opusSettings(std::uint32_t channels,std::uint32_t rate,void* user) noexcept {
@@ -255,7 +262,15 @@ NativeSnapshot ChiakiBackend::snapshot()const{
     // Like start/stop, pointer ownership requires the owner; the atomic counters
     // themselves may be updated by callbacks. Do not call concurrently with reset.
     if(!p_)return {};
-    const auto& s=*p_;
-    return {s.started.load(),s.connected.load(),s.warnings.load(),s.errors.load(),s.videoCallbacks.load(),s.audioCallbacks.load(),s.quitReason.load(),s.apiError.load()};
+    auto& s=*p_;
+    NativeSnapshot out{s.started.load(),s.connected.load(),s.warnings.load(),s.errors.load(),s.videoCallbacks.load(),s.audioCallbacks.load(),s.quitReason.load(),s.apiError.load()};
+    out.callbackRejected=s.callbackRejected;out.transportErrors=s.transportErrors;out.assemblyErrors=s.assemblyErrors;
+    // Upstream packet window may reset itself; do not label this cumulative UDP.
+    if(s.initialized)chiaki_packet_stats_get(&s.session.stream_connection.packet_stats,false,&out.packetReceived,&out.packetLost);
+    // After a stopped session the PS5 may briefly still report RP_IN_USE.
+    // Retrying this request cannot evict it; the console remains authoritative.
+    // StreamRecovery retries only after this user-started run had real video.
+    out.automaticRetryAllowed=out.lastQuitReason==CHIAKI_QUIT_REASON_NONE||out.lastQuitReason==CHIAKI_QUIT_REASON_CTRL_UNKNOWN||out.lastQuitReason==CHIAKI_QUIT_REASON_CTRL_CONNECT_FAILED||out.lastQuitReason==CHIAKI_QUIT_REASON_STREAM_CONNECTION_UNKNOWN||out.lastQuitReason==CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_IN_USE;
+    return out;
 }
 } // namespace veyra::remoteplay

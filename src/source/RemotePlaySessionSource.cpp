@@ -1,5 +1,6 @@
 #include "veyra/source/RemotePlaySessionSource.h"
 #include "veyra/Log.h"
+#include "veyra/remoteplay/StreamRecovery.h"
 #include <cmath>
 #include <format>
 extern "C" {
@@ -8,7 +9,7 @@ extern "C" {
 namespace veyra::source {
 bool RemotePlaySessionSource::connect(RemotePlayConnectDesc desc) {
     close();
-    { std::lock_guard lock(mutex_); initialized_=started_=failed_=false; skipped_=0; rates_={}; feedback_={}; controller_={}; pendingControllers_.clear(); snapshot_={}; }
+    { std::lock_guard lock(mutex_); initialized_=started_=failed_=false; skipped_=publishedSequence_=0; recovery_={}; rates_={}; feedback_={}; controller_={}; pendingControllers_.clear(); snapshot_={}; }
     owner_=std::jthread([this, request=std::move(desc)](std::stop_token stop) mutable { run(stop,std::move(request)); });
     std::unique_lock lock(mutex_);
     ready_.wait(lock,[&]{return initialized_;});
@@ -17,12 +18,22 @@ bool RemotePlaySessionSource::connect(RemotePlayConnectDesc desc) {
 }
 void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc desc) {
     RemotePlaySource source;
+    remoteplay::StreamRecovery recovery;
+    const auto milliseconds=[] {return remoteplay::monotonic100ns()/10000;};
+    // Keep the existing in-memory credentials only for this user-started run.
+    // Their move-only destructor wipes them; never reread another saved profile.
+    for(;;){
+    recovery.beginAttempt(milliseconds());
+    bool retry=false;
+    uint64_t receivedBase=0,droppedBase=0;
+    {std::lock_guard lock(mutex_);receivedBase=rates_.received;droppedBase=rates_.ingressDropped;}
     std::jthread feeder;
     std::jthread monitor;
     try {
         const bool ok=source.connect(desc);
-        desc.request.credentials=remoteplay::PairingCredentials{};
-        {std::lock_guard lock(mutex_);publishedInfo_=source.info();started_=ok;failed_=!ok;initialized_=true;telemetryInbox_=source.telemetryInbox();}
+        if(!ok)retry=recovery.poll(milliseconds(),false,true)==remoteplay::StreamRecovery::Action::Reconnect;
+        {std::lock_guard lock(mutex_);publishedInfo_=source.info();if(!initialized_)started_=ok;failed_=!ok&&!retry;initialized_=true;telemetryInbox_=source.telemetryInbox();
+            if(failed_)recovery_.message=L"PS5 串流连接失败，请检查主机及网络；已保存的配对无需重输。";}
         ready_.notify_all();
         if(ok) {
             monitor=std::jthread([inbox=source.telemetryInbox()](std::stop_token cancel){
@@ -55,9 +66,13 @@ void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc de
             } else log::error("remoteplay-audio","output initialization failed; video remains available");
             auto lastFrame=std::chrono::steady_clock::now();
             auto nextController=lastFrame;
-            auto rateStart=lastFrame;uint64_t previousReceived=0,previousDecoded=0;
-            unsigned recoveryAttempts=0;
-            auto nextRecovery=lastFrame+std::chrono::seconds(1);
+            auto rateStart=lastFrame;uint64_t previousReceived=receivedBase,previousDecoded=0;
+            {std::lock_guard lock(mutex_);previousDecoded=rates_.decoded;}
+            auto nextNativeLog=lastFrame;
+            remoteplay::NativeSnapshot native;
+            bool firstFrame=true;
+            wchar_t disconnectAfter[24]{};uint64_t testDisconnectFrames=0;bool testDisconnected=false;
+            if(!recovery.reconnects()&&GetEnvironmentVariableW(L"VEYRA_TEST_REMOTEPLAY_DISCONNECT_AFTER_FRAMES",disconnectAfter,24))testDisconnectFrames=std::clamp<uint64_t>(_wtoi64(disconnectAfter),60,3600);
             while(!stop.stop_requested()) {
                 std::string pin;
                 {std::lock_guard lock(mutex_);pin.swap(pin_);}
@@ -77,29 +92,38 @@ void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc de
                 const auto result=source.read(packet,&frame);
                 auto feedback=source.takeFeedback();
                 const auto snapshot=source.sessionSnapshot();
+                if(now>=nextNativeLog||result==SourceReadStatus::Error){native=source.nativeSnapshot();nextNativeLog=now+std::chrono::seconds(1);
+                    log::info("remoteplay-transport",std::format("attempt={} connected={} videoCallbacks={} audioCallbacks={} callbackRejected={} packetWindowReceived={} packetWindowLost={} upstreamWarnings={} upstreamErrors={} transportErrors={} assemblyErrors={} quitReason={} apiError={} (upstream resetting packet window; not cumulative UDP)",recovery.reconnects(),native.connected,native.videoCallbacks,native.audioCallbacks,native.callbackRejected,native.packetReceived,native.packetLost,native.warnings,native.errors,native.transportErrors,native.assemblyErrors,native.lastQuitReason,native.lastApiError));}
                 {std::lock_guard lock(mutex_);snapshot_=snapshot;feedback_.merge(std::move(feedback));
-                    rates_.received=snapshot.video.accessUnits;rates_.ingressDropped=snapshot.video.dropped;
+                    rates_.received=receivedBase+snapshot.video.accessUnits;rates_.ingressDropped=droppedBase+snapshot.video.dropped;
                     const double elapsed=std::chrono::duration<double>(now-rateStart).count();
                     if(elapsed>=1){rates_.receivedFps=double(rates_.received-previousReceived)/elapsed;
                         rates_.decodedFps=double(rates_.decoded-previousDecoded)/elapsed;rates_.ready=true;
                         previousReceived=rates_.received;previousDecoded=rates_.decoded;rateStart=now;}
                 }
-                if(result==SourceReadStatus::Error) {std::lock_guard lock(mutex_);failed_=true;break;}
                 if(result==SourceReadStatus::Frame && frame) {
+                    packet.sourceEpoch+=uint64_t(recovery.reconnects())<<32;
+                    if(firstFrame&&recovery.reconnects())packet.flags|=static_cast<pipeline::FrameFlags>(pipeline::FrameFlagBits::Discontinuity);
+                    if(firstFrame&&recovery.reconnects())log::info("remoteplay-recovery",std::format("reconnected attempt={} first decoded frame; reset video history and audio clock",recovery.reconnects()));
+                    firstFrame=false;
                     publishDecoded(frame,packet,source.info());
                     lastFrame=now;
-                    recoveryAttempts=0;nextRecovery=now+std::chrono::seconds(1);
-                } else {
-                    if(snapshot.state==remoteplay::SessionState::Streaming&&now>=nextRecovery&&recoveryAttempts<3){
-                        ++recoveryAttempts;source.recoverVideo();nextRecovery=now+std::chrono::seconds(2);
-                        log::warn("remoteplay-recovery",std::format("no decoded progress; request keyframe attempt={} received={} decoded={} lastReceiveAgeMs={:.1f}",recoveryAttempts,snapshot.video.accessUnits,snapshot.decodedFrames,snapshot.lastVideo100ns?double(remoteplay::monotonic100ns()-snapshot.lastVideo100ns)/10000:-1));
+                    recovery.frame(milliseconds());
+                    {std::lock_guard lock(mutex_);recovery_.active=false;recovery_.message.clear();}
+                    if(testDisconnectFrames&&!testDisconnected&&snapshot.decodedFrames>=testDisconnectFrames){
+                        testDisconnected=true;const auto r=source.disconnectTransportForTest();
+                        log::warn("remoteplay-recovery-test",std::format("injected owned transport stop ok={} code={} (no console power command)",r.ok,r.code));
                     }
-                    // A missing console or unrecoverable stream must not leave
-                    // a perpetual opening spinner. Login PIN allows more time.
-                    const auto deadline=snapshot.state==remoteplay::SessionState::LoginPinRequired?std::chrono::seconds(120):std::chrono::seconds(30);
-                    if(now-lastFrame>deadline) {
-                        log::error("remoteplay","no decoded frame before recovery deadline");
-                        std::lock_guard lock(mutex_);failed_=true;break;
+                } else {
+                    const auto action=recovery.poll(milliseconds(),snapshot.state==remoteplay::SessionState::LoginPinRequired,result==SourceReadStatus::Error,native.automaticRetryAllowed);
+                    if(action==remoteplay::StreamRecovery::Action::Keyframe){
+                        source.recoverVideo();log::warn("remoteplay-recovery",std::format("request keyframe; received={} decoded={} videoCallbacks={} rejected={} packetReceived={} packetLost={}",snapshot.video.accessUnits,snapshot.decodedFrames,native.videoCallbacks,native.callbackRejected,native.packetReceived,native.packetLost));
+                        std::lock_guard lock(mutex_);recovery_.active=true;recovery_.message=L"画面中断，正在请求关键帧恢复…";
+                    }else if(action==remoteplay::StreamRecovery::Action::Reconnect){retry=true;break;}
+                    else if(action==remoteplay::StreamRecovery::Action::Fail){
+                        log::error("remoteplay-recovery",std::format("recovery stopped attempts={} quitReason={} error={}",recovery.reconnects(),native.lastQuitReason,snapshot.errorCode));
+                        std::lock_guard lock(mutex_);failed_=true;recovery_.active=false;
+                        recovery_.message=snapshot.state==remoteplay::SessionState::LoginPinRequired?L"等待 PS5 登录 PIN 超时，请重新连接。":!native.automaticRetryAllowed?L"PS5 已结束或拒绝串流，请检查主机状态后重新连接。":L"PS5 串流未恢复，请检查主机及网络后点击连接；无需重新配对。";break;
                     }
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 }
@@ -107,18 +131,31 @@ void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc de
         }
     } catch(const std::exception& e) {
         log::error("remoteplay",e.what());
-        {std::lock_guard lock(mutex_);failed_=true;initialized_=true;}
+        retry=false;
+        {std::lock_guard lock(mutex_);failed_=true;initialized_=true;recovery_.message=L"PS5 串流处理异常，已停止自动恢复，请查看日志。";}
         ready_.notify_all();
+    }
+    if(retry&&!stop.stop_requested()){
+        std::lock_guard lock(mutex_);recovery_={true,recovery.reconnects(),std::format(L"串流中断，正在重新连接（{}/3）…",recovery.reconnects())};
+        latest_.reset();pendingControllers_.clear();controller_={};feedback_={};
     }
     if(monitor.joinable()){monitor.request_stop();monitor.join();}
     if(feeder.joinable()){feeder.request_stop();feeder.join();}
     audio_.stop();
     source.close();
+    if(!retry||stop.stop_requested())break;
+    log::warn("remoteplay-recovery",std::format("old session joined; reconnect={} using existing in-memory pairing",recovery.reconnects()));
+    // Interruptible 1/2/4 second backoff; manual Stop prevents the next start.
+    for(unsigned i=0;i<(1u<<(recovery.reconnects()-1))*20&&!stop.stop_requested();++i)std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    if(stop.stop_requested())break;
+    }
+    {std::lock_guard lock(mutex_);recovery_.active=false;}
 }
 void RemotePlaySessionSource::publishDecoded(const AVFrame* frame,pipeline::FramePacket packet,const SourceInfo& info){
     auto* cloned=av_frame_clone(frame);if(!cloned)throw std::bad_alloc();
     Frame item{std::shared_ptr<AVFrame>(cloned,[](AVFrame* p){av_frame_free(&p);}),packet,info};
     std::lock_guard lock(mutex_);
+    item.packet.sequence=++publishedSequence_;
     ++rates_.decoded;
     if(latest_){++skipped_;item.packet.flags|=latest_->packet.flags;
         item.packet.flags|=static_cast<pipeline::FrameFlags>(pipeline::FrameFlagBits::Drop);}

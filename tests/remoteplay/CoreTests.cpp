@@ -6,6 +6,7 @@
 #include "veyra/remoteplay/PacketPump.h"
 #include "veyra/remoteplay/InputGate.h"
 #include "veyra/remoteplay/SessionInbox.h"
+#include "veyra/remoteplay/StreamRecovery.h"
 #include "veyra/engine/PresentationScheduler.h"
 #include "veyra/engine/FgRecoveryBudget.h"
 #include <atomic>
@@ -130,6 +131,36 @@ TEST(inbox_callbacks_race_invalidate){SessionInbox q;auto t=q.begin(monotonic100
 TEST(inbox_failed_requires_backend_join){SessionInbox q;auto t=q.begin(monotonic100ns());t.failed(42);THROWS(q.begin(monotonic100ns()));q.invalidate();q.finishStop();CHECK(q.begin(monotonic100ns()).generation()>t.generation());}
 TEST(input_and_mailbox_zero_generation){InputGate g;THROWS(g.begin(0));LatestMailbox<int> m;THROWS(m.begin(0));VideoIngress v;THROWS(v.begin(0));AudioIngress a;THROWS(a.begin(0));}
 TEST(inbox_real_sample_vs_config_counts){SessionInbox q;auto t=q.begin(monotonic100ns());auto now=monotonic100ns();CHECK(t.video(config(t.generation(),now)));CHECK(q.snapshot().video.accessUnits==0);CHECK(t.video(frame(0,true,monotonic100ns(),t.generation())));CHECK(q.snapshot().video.accessUnits==1);auto v=q.tryVideo(monotonic100ns());CHECK(v&&v->sample.generation==t.generation());}
+}
+TEST(recovery_keyframes_before_reconnect){
+    StreamRecovery r;using A=StreamRecovery::Action;r.beginAttempt(100);r.frame(200);
+    CHECK(r.poll(1199,false,false)==A::Wait);CHECK(r.poll(1200,false,false)==A::Keyframe);
+    CHECK(r.poll(3199,false,false)==A::Wait);CHECK(r.poll(3200,false,false)==A::Keyframe);
+    CHECK(r.poll(6199,false,false)==A::Wait);CHECK(r.poll(6200,false,false)==A::Reconnect);CHECK(r.reconnects()==1);
+}
+TEST(recovery_initial_and_login_deadlines){
+    StreamRecovery r;using A=StreamRecovery::Action;r.beginAttempt(100);
+    CHECK(r.poll(30099,false,false)==A::Wait);CHECK(r.poll(30100,false,false)==A::Fail);CHECK(r.reconnects()==0);
+    r.frame(50000);CHECK(r.poll(169999,true,true,false)==A::Wait);CHECK(r.poll(170000,true,true,false)==A::Fail);
+    CHECK(r.reconnects()==0);
+}
+TEST(recovery_budget_survives_brief_recovery){
+    StreamRecovery r;using A=StreamRecovery::Action;
+    for(int i=0;i<3;++i){r.beginAttempt(i*10000);r.frame(i*10000+100);CHECK(r.poll(i*10000+6100,false,false)==A::Reconnect);CHECK(r.reconnects()==unsigned(i+1));}
+    r.beginAttempt(30000);r.frame(30100);CHECK(r.poll(36100,false,false)==A::Fail);CHECK(r.reconnects()==3);
+}
+TEST(recovery_progress_and_terminal_quit){
+    StreamRecovery r;using A=StreamRecovery::Action;r.beginAttempt(0);r.frame(100);
+    CHECK(r.poll(1100,false,false)==A::Keyframe);r.frame(1500);CHECK(r.poll(2000,false,false)==A::Wait);
+    CHECK(r.poll(2200,false,true,false)==A::Fail);CHECK(r.reconnects()==0);
+    CHECK(r.poll(2200,false,true,true)==A::Reconnect);r.beginAttempt(5000);
+    CHECK(r.poll(10999,false,false)==A::Wait);CHECK(r.poll(11000,false,false)==A::Reconnect);
+}
+TEST(recovery_retryable_busy_requires_prior_video){
+    StreamRecovery r;using A=StreamRecovery::Action;r.beginAttempt(0);
+    CHECK(r.poll(500,false,true,true)==A::Fail);CHECK(r.reconnects()==0);
+    r.frame(1000);CHECK(r.poll(7000,false,false)==A::Reconnect);r.beginAttempt(8000);
+    CHECK(r.poll(8500,false,true,true)==A::Reconnect);CHECK(r.reconnects()==2);
 }
 int main(int argc,char**argv){
     std::string filter;

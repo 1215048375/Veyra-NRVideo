@@ -47,6 +47,8 @@ public:
     remoteplay::BackendResult submitController(const remoteplay::ControllerState& state) { return backend_.submitController(state); }
     remoteplay::BackendResult submitLoginPin(std::string_view pin) { return backend_.submitLoginPin(pin); }
     remoteplay::ControllerFeedback takeFeedback(){return backend_.takeFeedback();}
+    remoteplay::NativeSnapshot nativeSnapshot()const{return backend_.snapshot();} // session owner only
+    remoteplay::BackendResult disconnectTransportForTest(){return backend_.stop();}
     bool connected() const noexcept { return connected_; }
     remoteplay::SessionInbox::Snapshot sessionSnapshot() const;
     std::shared_ptr<const remoteplay::SessionInbox> telemetryInbox()const{return inbox_;}

@@ -17,7 +17,8 @@ int wmain(int argc,wchar_t**argv){
 #ifdef VEYRA_ENABLE_REMOTEPLAY
     // Explicit opt-in; uses existing local pairing without changing it. Runs
     // the actual shared engine, audio endpoint, GPU admission and presenter.
-    if(argc==3&&std::wstring_view(argv[1])==L"--last-paired-ps5"){
+    if((argc==3||(argc==4&&(std::wstring_view(argv[3])==L"--reconnect"||std::wstring_view(argv[3])==L"--cancel-reconnect")))&&std::wstring_view(argv[1])==L"--last-paired-ps5"){
+        const bool reconnect=argc==4,cancelReconnect=reconnect&&std::wstring_view(argv[3])==L"--cancel-reconnect";
         const auto dir=remoteplay::profileDirectory();wchar_t name[80]{};
         GetPrivateProfileStringW(L"RemotePlay",L"LastProfile",L"",name,80,(dir/L"settings.ini").c_str());
         const std::wstring profile=name;if(profile.empty()||profile.find_first_of(L"/\\:")!=profile.npos)return 3;
@@ -28,23 +29,39 @@ int wmain(int argc,wchar_t**argv){
         engine::EngineController engine;engine.setVolume(0,true);
         engine::PlayerOptions options;options.nr=options.sr=options.fg=true;options.fgMultiplier=2;options.settings.videoSrQuality=2;
         source::RemotePlayConnectDesc request;request.request=std::move(*saved);request.request.video={1920,1080,60,80000,remoteplay::Codec::H264};request.decodeMode=source::RemotePlayConnectDesc::DecodeMode::Hardware;
+        if(reconnect)SetEnvironmentVariableW(L"VEYRA_TEST_REMOTEPLAY_DISCONNECT_AFTER_FRAMES",cancelReconnect?L"120":L"600");
         engine.openRemotePlay(window,std::move(request),options);
         const auto start=std::chrono::steady_clock::now();unsigned overloadSamples=0,overloadTimings=0;double early=-1,late=-1;uint64_t maxGenerated=0;bool failed=false;int lastSecond=-1;
-        while(std::chrono::steady_clock::now()-start<120s){
+        bool sawRecovery=false,resumed=false,cancelled=false,playedBefore=false;uint64_t recoveryFrames=0,recoveryGenerated=0;unsigned attempts=0,postHealthySamples=0;
+        while(std::chrono::steady_clock::now()-start<(reconnect?50s:120s)){
             const int second=int(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now()-start).count());
-            SetEnvironmentVariableW(L"VEYRA_TEST_VIDEO_WORK_MS",second>=30&&second<38?L"35":nullptr);
+            SetEnvironmentVariableW(L"VEYRA_TEST_VIDEO_WORK_MS",!reconnect&&second>=30&&second<38?L"35":nullptr);
             MSG msg;while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}
             const auto s=engine.snapshot();if(s.failed){failed=true;char message[1024]{};WideCharToMultiByte(CP_UTF8,0,s.status.c_str(),-1,message,sizeof(message),nullptr,nullptr);std::cout<<"ENGINE_FAILED "<<message<<std::endl;break;}
             maxGenerated=std::max(maxGenerated,s.generated);
+            attempts=std::max(attempts,s.remoteReconnectAttempts);
+            if(!sawRecovery&&s.frames>30&&s.generated>20)playedBefore=true;
+            if(s.remoteRecovering){sawRecovery=true;recoveryFrames=s.frames;recoveryGenerated=s.generated;}
+            if(sawRecovery&&!s.remoteRecovering&&attempts>=1&&attempts<=3&&s.frames>recoveryFrames+60&&s.metrics.flow.validGeneratedFps>10&&s.captureAudio.bufferedMs>0)resumed=true;
+            if(resumed&&s.frames>recoveryFrames+300&&s.generated>recoveryGenerated+100&&s.nrActive&&s.srActive&&s.captureAudio.running&&s.captureAudio.error.empty())++postHealthySamples;
+            if(cancelReconnect&&s.remoteRecovering&&attempts==1){cancelled=true;break;}
             if(second>=33&&second<38){++overloadSamples;overloadTimings+=s.metrics.flow.gpuTiming[size_t(diagnostics::GpuStage::Nr)].mean.has_value();}
             if(second==25)early=s.captureAudio.compensationMs;
             if(second>=110)late=s.captureAudio.compensationMs;
-            if(second!=lastSecond&&second%5==0){lastSecond=second;std::cout<<"PS5 t="<<second<<" presented="<<s.metrics.flow.presentSubmitFps<<" generated="<<s.generated<<" nrMs="<<s.metrics.flow.gpuTiming[size_t(diagnostics::GpuStage::Nr)].mean.value_or(-1)<<" audioDelay="<<s.captureAudio.compensationMs<<" pcm="<<s.captureAudio.bufferedMs<<" resets="<<s.captureAudio.resets<<std::endl;}
+            if(second!=lastSecond&&second%5==0){lastSecond=second;std::cout<<"PS5 t="<<second<<" presented="<<s.metrics.flow.presentSubmitFps<<" generated="<<s.generated<<" nrMs="<<s.metrics.flow.gpuTiming[size_t(diagnostics::GpuStage::Nr)].mean.value_or(-1)<<" audioDelay="<<s.captureAudio.compensationMs<<" pcm="<<s.captureAudio.bufferedMs<<" resets="<<s.captureAudio.resets<<" recovering="<<s.remoteRecovering<<" attempts="<<attempts<<std::endl;}
             std::this_thread::sleep_for(20ms);
         }
         SetEnvironmentVariableW(L"VEYRA_TEST_VIDEO_WORK_MS",nullptr);
+        SetEnvironmentVariableW(L"VEYRA_TEST_REMOTEPLAY_DISCONNECT_AFTER_FRAMES",nullptr);
         const auto final=engine.snapshot();engine.stop();
         const auto stopDeadline=std::chrono::steady_clock::now()+10s;while(!engine.idle()&&std::chrono::steady_clock::now()<stopDeadline)std::this_thread::sleep_for(10ms);
+        if(reconnect){
+            // Observe beyond the first retry backoff: Stop must not reopen the session.
+            if(cancelReconnect)std::this_thread::sleep_for(2s);
+            const bool ok=!failed&&engine.idle()&&sawRecovery&&attempts>=1&&attempts<=3&&(cancelReconnect?cancelled:playedBefore&&resumed&&postHealthySamples>=250&&final.captureAudio.compensationMs<150);
+            std::cout<<(ok?"PASS ":"FAIL ")<<"PS5 owned transport interruption playedBefore="<<playedBefore<<" recovery="<<sawRecovery<<" attempts="<<attempts<<" resumedWithFgAndAudio="<<resumed<<" postHealthySamples="<<postHealthySamples<<" manualCancel="<<cancelled<<" idle="<<engine.idle()<<std::endl;
+            DestroyWindow(window);CoUninitialize();return ok?0:1;
+        }
         const bool ok=!failed&&engine.idle()&&maxGenerated>100&&final.metrics.flow.validGeneratedFps>10&&overloadSamples>0&&overloadTimings*100>=overloadSamples*95&&early>=0&&late>=0&&late<150&&std::abs(late-early)<40;
         std::cout<<(ok?"PASS ":"FAIL ")<<"PS5 actual NR/SR/DLSS 2X, overload timings="<<overloadTimings<<'/'<<overloadSamples<<" earlyAudio="<<early<<" lateAudio="<<late<<" finalValidFgFps="<<final.metrics.flow.validGeneratedFps<<std::endl;
         DestroyWindow(window);CoUninitialize();return ok?0:1;
