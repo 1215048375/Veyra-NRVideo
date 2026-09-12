@@ -1,6 +1,6 @@
 # 0.0.5 发布执行记录
 
-状态：本机合并、构建、打包及检查完成，待推送/上传结果追加。用户 2026-09-12 明确授权主线合并、GitHub 发布、README 与完整便携包，目标 Likely7/Veyra-NRVideo。
+状态：已合并主线、推送并正式发布。用户 2026-09-12 明确授权主线合并、GitHub 发布、README 与完整便携包，目标 Likely7/Veyra-NRVideo。
 
 开工点 826bbff，标签 checkpoint/pre-release-0.0.5-2026-09-12。先将本地 main 快进到远端 ff4122b，再合并 codex/ps5-scheduler-telemetry-decode，合并提交 5bb5c41。保留用户远端 README 的 GIF 说明删除与赞助图片尺寸调整；无 force push，无修改旧版本。
 
@@ -44,3 +44,17 @@ scripts/package-portable.ps1 对0.0.5强制检查 RemotePlay=ON，明确文件�
 每个ZIP附SHA256文件。最终便携ZIP在out/releases/0.0.5/final，两个源码ZIP在out/releases/0.0.5。源码包17710个manifest条目；按已安装SPDX验证六个vcpkg port，保留来源内公开测试证书（不是用户密钥），排除35个开发二进制/测试压缩文件，排除名单写入源码包。不包含NVIDIA/Intel SDK；source Git 跟踪文件及待推送历史扩展名检查未发现DLL/EXE/LIB/PDB/模型/压缩包。
 
 构建和测试日志统一在 logs/release-0.0.5。初次最终ZIP文件计数检查把目录也计作文件而误报，修正检查为非目录条目后逐项哈希通过，未改变包或放宽内容白名单。
+
+
+## GitHub 发布完成
+
+发布提交 7d8e24c，注解标签 v0.0.5 与 main 通过 git push --atomic nrvideo main refs/tags/v0.0.5 推送。两份 README 的远端 Git blob 与发布提交一致。main 已跟踪 nrvideo/main，未推送旧 origin。
+
+gh release create --verify-tag --draft --notes-file 创建草稿；gh release upload 上传上述三个 ZIP 与各自 SHA 文件。GitHub API 返回六项 uploaded，其 size/digest 均与本机一致，正文与 RELEASE_NOTES_0.0.5.md 一致。检查通过后 gh release edit --draft=false --latest。
+
+Release ID 387470534，2026-09-12T05:54:45Z 公开，draft=false、prerelease=false，latest API 返回 v0.0.5。
+发布页：https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.5
+证据：logs/release-0.0.5/github-published.json、github-verify.log、readme-verify.log。
+上传尚未完成时 draft 的 tags API 返回过404，改用已创建草稿的数字ID核验；没有重复建Release或覆盖旧版本。最终tag API正常返回公开记录。
+
+此发布后记录仅更新文档，不移动标签、不重新打包。下一步为用户下载0.0.5进行实际PS5与新增实验功能验收。
