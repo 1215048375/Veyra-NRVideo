@@ -29,8 +29,6 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片、采集
 日常模式以观看为主；专业模式展开增强参数、诊断和导出工具。切换模式不需要重新打开视频。
 
 0.0.5 新增 PS5 局域网串流、手柄与主机保留，更新实时调度、音频连续性、增强延迟面板、低延迟模式和悬停说明。
-技术路线图
-<img width="756" height="931" alt="屏幕截图 2026-09-11 204100" src="https://github.com/user-attachments/assets/12c26892-ce2b-43f8-aefe-70f0a667b33d" />
 
 ## 下载与运行
 
@@ -100,9 +98,8 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片、采集
 
 ## 技术路线与边界
 
-```text
-视频 / 图片 / 采集卡 / PS5 → 颜色处理 → SR → NR → 帧生成 → 显示 / 导出
-```
+<img width="332" height="576" alt="123" src="https://github.com/user-attachments/assets/3cd48fca-2f7b-418a-8b0e-0848f6bde556" />
+
 
 C++20、Win32、D3D12；文件由 FFmpeg 处理，采集使用 DirectShow，视频导出使用 NVENC。各入口共享增强管线，采集保留最新帧，光流提供估算的运动信息。
 
