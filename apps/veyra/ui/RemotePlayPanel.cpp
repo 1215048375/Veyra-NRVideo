@@ -1,5 +1,6 @@
 #include "RemotePlayPanel.h"
 #include "Theme.h"
+#include "SettingHelp.h"
 #include "veyra/Log.h"
 #include "veyra/remoteplay/ProfileStore.h"
 #include "veyra/remoteplay/Discovery.h"
@@ -105,6 +106,24 @@ case WM_CREATE:{window=h;closing=false;font=makeFont(h);titleTheme(h);
     add(L"STATIC",L"首次使用先配对，之后直接连接。",StatusText,0);
     add(L"STATIC",L"PS5：设置 → 系统 → 远程游玩 → 启用远程游玩 → 关联设备。\nAccount ID 填账号数字 ID 或对应 8 字节 Base64，不是昵称或密码。\n电脑与 PS5 先连接同一局域网。配对信息仅在本机加密保存。\n登录 PIN 仅在 PS5 提示时填写；取消操作不会关闭当前视频。",Help,0);
     refreshProfiles();
+    installDialogHelp(h,{
+        {Host,L"PS5的局域网IP或已保存主机。找不到时可手填，别把PSN昵称填这里。"},
+        {Account,L"配对用的Base64 PSN Account ID，不是在线昵称。名字相同不代表身份证号码相同。"},
+        {PairPin,L"PS5远程游玩页面显示的8位配对码，有时效。过期了再领一张票。"},
+        {Quality,L"选择串流分辨率和帧率。请求的是PS5输出，不是增强后目标。"},
+        {CodecChoice,L"H.264兼容性好，H.265通常更省码率。两边都得会说同一种视频语言。"},
+        {Pair,L"用账户ID和8位码注册主机，凭据在本机加密保存。"},
+        {Connect,L"使用保存的配对信息连接PS5，把画面送进当前增强链路。"},
+        {Cancel,L"取消当前操作或断开串流，让连接安静收工。"},
+        {Scan,L"在局域网里寻找主机。同网段、防火墙和PS5设置都可能影响结果。"},
+        {Wake,L"尝试唤醒待机主机；需要已配对且PS5允许联网唤醒。关机不是待机，叫不醒别硬喊。"},
+        {LoginPin,L"主机要求登录PIN时填写。它不是前面的8位配对码。"},
+        {SendPin,L"把登录PIN发给当前串流会话。"},
+        {Bitrate,L"串流码率越高，压缩损失通常越少，网络负担也更重。别把Wi-Fi喂撑。"},
+        {Forget,L"删除本机保存的这台主机配对信息；以后需要重新配对。"},
+        {ViewOnly,L"只观看，不向PS5转发电脑手柄输入。不能保证同账号手柄仍能直连主机，这是PS5会话规则。"},
+        {Calibrate,L"手柄放稳后校准陀螺仪，让镜头别自己散步。"},
+        {DecodeChoice,L"自动优先硬解，失败回软件；强制硬解失败会报错。软件解码主要用CPU，硬解用视频解码单元。重连生效。"}});
     buttons();arrange();SetTimer(h,1,100,nullptr);return 0;}
 case WM_TIMER:if(busy&&done){if(worker.joinable())worker.join();busy=false;Outcome result;{std::lock_guard lock(mutex);result=std::move(outcome);}if(!result.savedPath.empty()){currentProfile=result.savedPath;refreshProfiles();}buttons();SetDlgItemTextW(h,StatusText,result.message.c_str());if(!result.hosts.empty())SetDlgItemTextW(h,Host,std::wstring(result.hosts[0].host.begin(),result.hosts[0].host.end()).c_str());if(closing)DestroyWindow(h);}
     if(window&&watching&&!busy){auto state=connectionStatus();SetDlgItemTextW(h,StatusText,state.message.c_str());SetDlgItemTextW(h,Cancel,state.active?L"断开连接":L"取消操作");EnableWindow(GetDlgItem(h,Cancel),state.active);if(!state.active)watching=false;}return 0;

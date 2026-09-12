@@ -24,15 +24,16 @@ struct ResolutionPlan {
     Extent source,base,nr,flow,fg,output;
     bool srApplied=false;
     uint64_t settingsRevision=0;
-    static ResolutionPlan make(Extent source,bool sr,NrSizePolicy policy,bool exporting,uint64_t revision=0,SrTarget target=SrTarget::Uhd4K) {
+    static ResolutionPlan make(Extent source,bool sr,NrSizePolicy policy,bool exporting,uint64_t revision=0,SrTarget target=SrTarget::Uhd4K,bool nrBeforeSr=false) {
         if(!source.valid())throw std::invalid_argument("invalid SDR source extent");
         if(!validSrTarget(target))throw std::invalid_argument("invalid SR target");
         ResolutionPlan p; p.source=source;p.base=source;
         if(sr){const auto limit=srTargetExtent(target);const double scale=std::min(double(limit.width)/source.width,double(limit.height)/source.height);if(scale>1.0)p.base={std::max(2u,uint32_t(source.width*scale+1e-6)&~1u),std::max(2u,uint32_t(source.height*scale+1e-6)&~1u)};}
         p.srApplied=sr&&p.base!=source;p.nr=p.base;
+        if(nrBeforeSr&&!exporting)p.nr=source;
         if(!exporting&&policy==NrSizePolicy::Realtime) {
-            const double scale=std::min({1.0,1920.0/p.base.width,1080.0/p.base.height});
-            if(scale<1.0)p.nr={std::max(1u,std::min(p.base.width,uint32_t(p.base.width*scale)&~1u)),std::max(1u,std::min(p.base.height,uint32_t(p.base.height*scale)&~1u))};
+            const double scale=std::min({1.0,1920.0/p.nr.width,1080.0/p.nr.height});
+            if(scale<1.0)p.nr={std::max(1u,uint32_t(p.nr.width*scale)&~1u),std::max(1u,uint32_t(p.nr.height*scale)&~1u)};
         }
         p.flow=source;
         // NVOF reads source-space color. In the explicitly labelled realtime

@@ -1,5 +1,6 @@
 #include "CapturePanel.h"
 #include "Theme.h"
+#include "SettingHelp.h"
 #include "veyra/source/CaptureCardSource.h"
 #include <future>
 #include <format>
@@ -18,6 +19,7 @@ case WM_CREATE:{window=h;font=makeFont(h);titleTheme(h);auto add=[&](const wchar
     for(int i=1;i<=3;++i)add(L"COMBOBOX",L"",i,CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP);
     add(L"BUTTON",L"连接并开始观看",4,BS_PUSHBUTTON|WS_TABSTOP);marked(GetDlgItem(h,4));add(L"BUTTON",L"刷新设备",5,BS_PUSHBUTTON|WS_TABSTOP);
     add(L"STATIC",L"视频输入设备",6,0);add(L"STATIC",L"设备实际支持的格式",7,0);add(L"STATIC",L"",8,0);add(L"STATIC",L"HDMI 音频监听",9,0);
+    installDialogHelp(h,{{1,L"选采集卡的视频设备。别把摄像头误请来直播PS5。"},{2,L"选设备真实提供的分辨率、帧率和像素格式。清晰度、带宽和延迟都受它影响。"},{3,L"选择对应的采集音频设备，也可不采声音。画面和声音要认对门。"},{4,L"按当前格式连接采集卡，并应用当前增强设置。"},{5,L"重新扫描设备和格式。设备被其他软件占用时，刷新不一定能抢回来。"}});
     EnableWindow(GetDlgItem(h,4),FALSE);arrange();SetTimer(h,1,100,nullptr);if(!busy)query(-1);return 0;}
 case WM_TIMER:if(busy&&pending.wait_for(std::chrono::seconds(0))==std::future_status::ready){auto result=pending.get();busy=false;EnableWindow(GetDlgItem(h,5),TRUE);EnableWindow(GetDlgItem(h,1),TRUE);if(result.device<0){SendDlgItemMessageW(h,1,CB_RESETCONTENT,0,0);SendDlgItemMessageW(h,2,CB_RESETCONTENT,0,0);SendDlgItemMessageW(h,3,CB_RESETCONTENT,0,0);formats.clear();for(auto& name:result.video)SendDlgItemMessageW(h,1,CB_ADDSTRING,0,LPARAM(name.c_str()));SendDlgItemMessageW(h,3,CB_ADDSTRING,0,LPARAM(L"不监听音频"));for(auto& name:result.audio)SendDlgItemMessageW(h,3,CB_ADDSTRING,0,LPARAM(name.c_str()));SendDlgItemMessageW(h,3,CB_SETCURSEL,0,0);SetDlgItemTextW(h,8,result.video.empty()?L"未找到采集设备。连接后点击刷新。":L"请选择设备以查询实际格式；点击连接前不会中断当前视频。");}
     else{formats=std::move(result.formats);SendDlgItemMessageW(h,2,CB_RESETCONTENT,0,0);for(auto& format:formats)SendDlgItemMessageW(h,2,CB_ADDSTRING,0,LPARAM(format.label.c_str()));if(!formats.empty())SendDlgItemMessageW(h,2,CB_SETCURSEL,0,0);EnableWindow(GetDlgItem(h,4),!formats.empty());SetDlgItemTextW(h,8,formats.empty()?L"未读到有效的4K以内采集格式，或设备正被其他应用占用。":L"连接后使用当前增强设置。格式与音频变更需要重新连接。");}}

@@ -26,13 +26,14 @@ bool legacyBackends(const std::filesystem::path& path) {
   if(store.load()!=expected)return false;
   if(expected){
    const auto value=store.defaultSettings();
+   if(value.lowLatency)return false;
    if(value.captureCompatible!=(version>=10))return false;
    if(value.nrRuntime!=(version>=9?NrRuntime::Community:NrRuntime::Original))return false;
    if(value.frameGenerationBackend!=(xess?FrameGenerationBackend::XeSS:FrameGenerationBackend::Dlss)||value.multiplier!=multiplier||value.videoSrQuality!=2)return false;
    if(version>=7&&(value.audioSync!=AudioSyncMode::Manual||value.audioOffsetMs!=137))return false;
    if(!store.put(L"legacy",value,true))return false;
    std::ifstream file(path);std::string magic;int savedVersion=0;file>>magic>>savedVersion;
-   if(magic!="VEYRA_PRESETS"||savedVersion!=10)return false;
+   if(magic!="VEYRA_PRESETS"||savedVersion!=11)return false;
    PresetStore reloaded(path);
    if(!reloaded.load()||reloaded.defaultSettings()!=value)return false;
   }else{
@@ -49,7 +50,7 @@ bool legacyBackends(const std::filesystem::path& path) {
 int main(int argc,char** argv){if(argc!=2)return 2;using namespace veyra::engine;const std::filesystem::path p=argv[1];PresetStore a(p);bool ok=a.load();EnhancementSettings s;s.videoSrQuality=2;s.frameGenerationBackend=FrameGenerationBackend::Dlss;s.opticalFlowBackend=OpticalFlowBackend::AmdFidelityFx;s.amdFlowHalfResolution=true;s.protection.enabled=true;s.protection.featherPixels=3.5f;s.protection.regions[0]={.1f,.2f,.7f,.8f};s.protection.regions[3]={0,0,1,1};s.model.intensity=.375f;s.model.skin=1.5f;s.residual.darken=1.2f;s.multiplier=4;s.flow=FlowQuality::Quality;s.content=ContentRate::Fps50;s.nrPolicy=veyra::pipeline::NrSizePolicy::Native;
  s.srTarget=veyra::pipeline::SrTarget::Uhd8K;
  s.audioSync=AudioSyncMode::Manual;s.audioOffsetMs=137;
- s.nrRuntime=NrRuntime::Community;s.captureCompatible=true;
+ s.nrRuntime=NrRuntime::Community;s.captureCompatible=true;s.lowLatency=true;
  ok=ok&&a.put(L"test",s)&&a.setDefault(0)&&!a.put(L"test",s);PresetStore b(p);ok=ok&&b.load()&&b.defaultSettings()==s&&b.rename(0,L"renamed")&&b.defaultSettings()==s;
  auto badTarget=s;badTarget.srTarget=static_cast<veyra::pipeline::SrTarget>(3);ok=ok&&!b.put(L"invalid target",badTarget);
  auto xess=s;xess.frameGenerationBackend=FrameGenerationBackend::XeSS;ok=ok&&!b.put(L"XeSS 4X rejected",xess);

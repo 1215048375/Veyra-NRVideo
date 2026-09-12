@@ -11,10 +11,12 @@ using namespace veyra;
 using namespace std::chrono_literals;
 int wmain(int argc,wchar_t**argv){
     SetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS",L"1");
-    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--seek-stress")==0||wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0||wcscmp(argv[3],L"--source-gap")==0||wcscmp(argv[3],L"--file-endpoint")==0||wcscmp(argv[3],L"--file-continuity")==0||wcscmp(argv[3],L"--file-fg-recovery")==0||wcscmp(argv[3],L"--reset-rollback")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--nr-first")==0||wcscmp(argv[3],L"--seek-stress")==0||wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0||wcscmp(argv[3],L"--source-gap")==0||wcscmp(argv[3],L"--file-endpoint")==0||wcscmp(argv[3],L"--file-continuity")==0||wcscmp(argv[3],L"--file-fg-recovery")==0||wcscmp(argv[3],L"--reset-rollback")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     std::filesystem::create_directories(argv[2]);Logger::instance().openFile((std::filesystem::path(argv[2])/"engine.log").wstring());Logger::instance().setConsoleEnabled(false);
     HWND window=CreateWindowExW(0,L"STATIC",L"Live scheduler replay",WS_POPUP,0,0,960,540,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     if(!window)return 3;engine::EngineController engine;engine::PlayerOptions options;options.nr=false;options.fg=false;options.captureReplayForTest=true;
+    const bool nrFirst=argc==4&&wcscmp(argv[3],L"--nr-first")==0;
+    if(nrFirst){options.captureReplayForTest=false;options.nr=options.sr=options.fg=true;options.realtime=false;options.fgMultiplier=2;options.settings.lowLatency=true;options.settings.videoSrQuality=2;engine.setVolume(0,true);}
     const bool seekStress=argc==4&&wcscmp(argv[3],L"--seek-stress")==0;
     if(seekStress){options.captureReplayForTest=false;options.nr=options.fg=true;options.realtime=false;options.fgMultiplier=3;engine.setVolume(0,true);}
     const bool halfRate=argc==4&&wcscmp(argv[3],L"--half-rate")==0;
@@ -34,6 +36,19 @@ int wmain(int argc,wchar_t**argv){
     int failures=0;auto check=[&](bool pass,const char* s){std::cout<<(pass?"PASS ":"FAIL ")<<s<<std::endl;if(!pass)++failures;};
     auto until=[&](auto predicate,int seconds=8){auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(seconds);while(std::chrono::steady_clock::now()<deadline){MSG msg;while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}auto s=engine.snapshot();if(s.failed){std::wcerr<<s.status<<'\n';return false;}if(predicate(s))return true;std::this_thread::sleep_for(5ms);}return false;};
     engine.open(window,argv[1],options);
+    if(nrFirst){
+        check(until([](const auto& s){return s.frames>30&&s.srActive&&s.nrActive&&s.fgActive;},25),"NR-first RTX Video SR and FG execute");
+        auto snapshot=engine.snapshot();check(snapshot.metrics.resolution.nr==snapshot.metrics.resolution.source,"NR processes source extent before SR");
+        engine.saveFrame((std::filesystem::path(argv[2])/"nr-first-video-sr.png").wstring());
+        check(until([&](const auto&){return std::filesystem::exists(std::filesystem::path(argv[2])/"nr-first-video-sr.png");}),"save actual output");
+        auto settings=snapshot.applied;settings.videoSrQuality=0;check(engine.requestSettings(settings),"switch NR-first to DLSS SR");
+        check(until([](const auto& s){return !s.applying&&s.applied.videoSrQuality==0&&s.srActive&&s.frames>60;},25),"NR-first DLSS SR runs");
+        engine.seek(5);const auto request=engine.snapshot().seekRequested;
+        check(until([&](const auto& s){return s.seekPresented==request;},15),"NR-first seek resets history");
+        settings=engine.snapshot().applied;settings.lowLatency=false;check(engine.requestSettings(settings),"restore normal order");
+        check(until([](const auto& s){return !s.applying&&!s.applied.lowLatency&&s.metrics.resolution.nr==s.metrics.resolution.output&&s.srActive;},25),"normal order restores native output NR");
+        engine.stop();check(until([&](const auto&){return engine.idle();},5),"NR-first session closes");DestroyWindow(window);CoUninitialize();return failures?1:0;
+    }
     if(seekStress){
         check(until([](const auto& s){return s.position>1&&s.frames>15;},20),"initial native NR/FG playback");
         for(double target:{344.93,643.709,12.0,450.0,28.0,700.0}){

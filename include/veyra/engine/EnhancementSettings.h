@@ -65,6 +65,7 @@ struct EnhancementSettings {
     ResidualSettings residual;
     ProtectionSettings protection;
     bool nr=true,sr=false;
+    bool lowLatency=false; // preview only: NR before SR, opt-in
     NrRuntime nrRuntime=NrRuntime::Original;
     bool captureCompatible=false;
     pipeline::SrTarget srTarget=pipeline::SrTarget::Uhd4K;

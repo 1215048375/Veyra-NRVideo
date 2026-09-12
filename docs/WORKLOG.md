@@ -1724,3 +1724,6 @@ Engine背压从只检查两个batch容量改为同时检查下一奇偶输出槽
 按用户要求调整UI，不改变增强执行顺序：NR运行版本→实时/原生NR处理档位→超分开关/目标/方式；运动页先光流提供方、性能选项与质量，再补帧方式与倍率；采集/串流音频同步移入独立音频页。页签为增强、运动、音频、预设、导出，旧控制ID及数据绑定保留。
 
 apps/veyra/SettingsWindow.cpp调整布局；apps/veyra/ui/AppShell.cpp新增音频页签（不移动旧枚举ID）、排列和切换。logs/settings-order-build.log构建通过；临时UI检查脚本out/remoteplay/test-settings-order.ps1基于实际HWND矩形确认218<203<201、209<204<208<202，音频页独立可切换，既有专业/全屏切换脚本通过，logs/settings-order-ui.log。纯UI布局调整，未重跑GPU或实机串流性能测试。未发布或push。
+
+## 2026-09-12 NR先行低延迟与悬停帮助
+完成默认关闭的NR→SR→FG实验预览开关、旧预设默认关闭及v11存储，参数/播放/采集/PS5悬停说明。详细代码、测试命令、失败修复与未验证边界见 docs/NR_BEFORE_SR_PREVIEW_2026-09-12.md。90项contract、42组预设迁移、实际两种SR后端+NR+FG与恢复默认9项、统一48.25秒gate及UI通过。无新SDK/运行时，无push/release；实卡及PS5画质由用户验收。

@@ -61,6 +61,7 @@ struct EnhanceGraphDesc {
     uint32_t videoSrQuality=0;
     bool enableSr = false;       // upscale source -> work extent (1:1 bypass otherwise)
     bool enableNr = true;
+    bool nrBeforeSr = false;
     engine::NrRuntime nrRuntime=engine::NrRuntime::Original;
     bool enableFg = true;
     bool validateMotion = true; // disable only in isolated legacy A/B diagnostics

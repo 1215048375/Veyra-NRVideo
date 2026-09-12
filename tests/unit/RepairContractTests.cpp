@@ -18,6 +18,8 @@ int main(){
     using namespace veyra;int failures=0,checks=0;
     auto check=[&](bool ok,const char* name){++checks;if(!ok)++failures;std::cout<<(ok?"PASS ":"FAIL ")<<name<<'\n';};
     sink::AudioFrameTimeline pcmTime;
+    check(pipeline::ResolutionPlan::make({1920,1080},true,pipeline::NrSizePolicy::Native,false,1,pipeline::SrTarget::Uhd4K,true).nr==pipeline::Extent{1920,1080},"NR-first preview uses source resolution");
+    check(pipeline::ResolutionPlan::make({1920,1080},true,pipeline::NrSizePolicy::Native,true,1,pipeline::SrTarget::Uhd4K,true).nr==pipeline::Extent{3840,2160},"export ignores low latency preview order");
     check(engine::enhancementDelayEstimate(true,false,-20)==0,"file prefetch is not added latency");
     check(engine::enhancementDelayEstimate(true,false,12)==12,"file lateness remains visible");
     check(engine::enhancementDelayEstimate(true,true,45,5)==40,"live baseline work excluded");
