@@ -1754,3 +1754,8 @@ apps/veyra/SettingsWindow.cpp调整布局；apps/veyra/ui/AppShell.cpp新增音�
 ## 2026-09-12 增强处理耗时主面板与应用图标
 用户确认后开工存档7a30b66，分支codex/processing-metrics-and-app-icon。主曲线与大数字改为同帧光流/NR/SR/残差/FG批次GPU区间去重后的处理耗时，排除呈现等待与音频；原有额外显示延迟移到小三角详情第一项。XeSS内部FG缺计时继续明确排除。用户Logo转换为七尺寸ICO，嵌入EXE大/小窗口图标与专业模式品牌位。没有修改音频/跳帧/呈现调度，不能将本次显示修正称为过载迟到已修复。
 构建两次成功，命令cmd /c out/remoteplay/build-extra-delay.cmd；98合同检查通过。180秒4K文件NR+DLSSG短测5275帧、5251生成帧、failed=false；最终构建另用1080色条文件到4K测试视频SR+NR+DLSSG，Create result=0x1/SEH=0、FG warm-up Evaluate=0x1，实际GUI主数字约12.1ms、详情首项迟到约0.5ms，曲线/详情切换及Logo可见。ExtractIconExW确认EXE一组图标；具体命令、文件、范围与日志见docs/PROCESSING_METRICS_ICON_2026-09-12.md。未测试实卡、PS5实机及XeSS内部计时，未发布。下一步由用户体验新版面板；过载调度方案仍单独待实施。
+
+## 2026-09-13 PS5 H.264 硬解细条修复
+基线83f90ba，分支codex/ps5-decoded-frame-strip。用户软件解码正常；同真实PS5 AU软/硬解比较定位到FFmpeg n9.0.1 H.264 MAX_SLICES=32，而PS5输入68 slices，硬解在进入增强前已经损坏。外置开源源码容量改256并按原LGPL功能配置重编译；同码流全图误差由167.459变为0，已查看完整装备页，日志ps5-live-decode/ps5-live-patched。另用两张黑白图并发GPU排队复现并修复共享硬解SRV槽覆盖，按已有两槽fence轮转并使用staging，修复后4组错误通道归零。
+产品构建cmd /c out/remoteplay/build-extra-delay.cmd成功（最后ps5-strip-final-build.log）；普通视频软硬解全图、8组HDR颜色/呈现、6组Main10软硬解NR/SR/FG组合、40秒主程序硬解NR（1135次NR，1134次NVOF，failed=false）、UI合同回归通过。NR CreateFeature18=0x1，SEH=0。未将共享Source/Graph实机同AU验证冒充主UI长时PS5/HDR/手柄/音频验收。
+新FFmpeg五DLL更新本机测试目录与默认开发前缀，原件忽略目录备份；新增源码补丁、重编译脚本、双层provenance打包校验及真实全图诊断。对应源码ZIP本地验证通过，未发布；SDK/NVIDIA运行时/依赖DLL/媒体/凭据均未入Git。失败记录包括：诊断缺include、MSYS link遮蔽MSVC、零上下文补丁apply失败，均已修正；最初GPU回读一致但画面仍坏的检查不作通过证明。详情、命令、哈希、日志与后续验收见docs/PS5_HARDWARE_STRIP_REPAIR_2026-09-13.md。用户下一步重开桌面PS5测试版，选自动优先硬解或D3D12VA重连体验。

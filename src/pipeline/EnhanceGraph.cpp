@@ -792,7 +792,9 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             lumaSrv.Texture2D.MipLevels = 1;
             lumaSrv.Texture2D.PlaneSlice = 0;
         }
-        context_.device()->CreateShaderResourceView(nv12Texture, &lumaSrv, cpuHandleOf(yuvPass_, 0));
+        // Slots 0/1 remain the CPU-upload views. Hardware views rotate with
+        // hardwareInputFrames_/uploadFences_; never overwrite an in-flight SRV.
+        stager_.stageSrv(nv12Texture, &lumaSrv, yuvPass_.heap.Get(), 3 + parity * 2);
         D3D12_SHADER_RESOURCE_VIEW_DESC chromaSrv{};
         chromaSrv.Format = nv12Texture->GetDesc().Format==DXGI_FORMAT_P010?DXGI_FORMAT_R16G16_UNORM:DXGI_FORMAT_R8G8_UNORM;
         chromaSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -812,7 +814,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             chromaSrv.Texture2D.MipLevels = 1;
             chromaSrv.Texture2D.PlaneSlice = 1;
         }
-        context_.device()->CreateShaderResourceView(nv12Texture, &chromaSrv, cpuHandleOf(yuvPass_, 1));
+        stager_.stageSrv(nv12Texture, &chromaSrv, yuvPass_.heap.Get(), 4 + parity * 2);
         tracker_.transition(list, nv12Texture, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     } else {
         nv12Ctx_ = sws_getCachedContext(nv12Ctx_, frame->width, frame->height,
@@ -870,7 +872,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             resolved.matrix==YuvMatrix::BT2020NCL?2.0f:resolved.matrix==YuvMatrix::BT601?0.0f:1.0f,
             resolved.transfer==TransferFunction::PQ?4.0f:float(workingTransferCode(resolved)), (nv12Texture?nv12Texture->GetDesc().Format==DXGI_FORMAT_P010:desc_.hdrInput)?1.0f:0.0f,
             uintBits(srcW_), uintBits(srcH_), uintBits(desc_.hdrOutput?1u:0u), 0.0f };
-        yuvPass_.bind(list, constants, gpuHandleOf(yuvPass_, 0).ptr, gpuHandleOf(yuvPass_, 2).ptr);
+        yuvPass_.bind(list, constants, gpuHandleOf(yuvPass_, nv12Texture ? 3 + parity * 2 : 0).ptr, gpuHandleOf(yuvPass_, 2).ptr);
         list->Dispatch((srcW_ + 15) / 16, (srcH_ + 15) / 16, 1);
     }
     tracker_.uavBarrier(list, srcRgba_.Get());

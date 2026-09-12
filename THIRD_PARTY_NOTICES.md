@@ -10,6 +10,8 @@ The nvEncodeAPI.h header itself has NVIDIA's permissive MIT-style notice (Copyri
 
 FFmpeg: dynamically linked 9.0.1#1 vcpkg build. The portable package carries five FFmpeg DLLs, the complete copyright/license notices and SPDX provenance. Corresponding upstream source and the vcpkg patch/build recipe are listed in `docs/BUILD.md`. No FFmpeg command-line executable or test-media toolchain is shipped.
 
+The PS5 H.264 repair build additionally applies `scripts/ffmpeg/ps5-h264-slices.patch` to FFmpeg's LGPL `libavcodec/h264dec.h`, increasing the bounded slice capacity from 32 to 256. This is a Veyra modification, not an upstream release claim. Its corresponding source, patch, configuration and DLL identity record must accompany any future binary release; the previously published 0.0.5 package is unchanged by this local repair.
+
 ## Intel XeSS / XeLL
 
 Official XeSS SDK 3.0.2. Veyra loads `libxess_fg.dll` and `libxell.dll` for experimental preview frame generation. Unmodified binaries may be redistributed under the Intel Simplified Software License; the complete license and `third-party-programs.txt` accompany the package. User DLL replacement is allowed by Veyra without fixed identity locks; compatibility is not guaranteed.

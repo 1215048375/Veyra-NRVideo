@@ -27,6 +27,19 @@ for item in spdx['files']:
     if hashlib.sha256(path.read_bytes()).hexdigest() != expected.lower():
         raise SystemExit(f'Port provenance mismatch: {path.name}')
 records = []
+local_build_path = args.prefix / 'share/ffmpeg/veyra-local-build.json'
+local_build = json.loads(local_build_path.read_text(encoding='utf-8-sig')) if local_build_path.exists() else None
+patches = Path(__file__).resolve().parent / 'ffmpeg'
+if local_build:
+    for item in local_build['files']:
+        if Path(item['name']).name != item['name']:
+            raise SystemExit('Invalid FFmpeg build manifest path')
+        if hashlib.sha256((args.prefix / 'bin' / item['name']).read_bytes()).hexdigest() != item['sha256'].lower():
+            raise SystemExit('FFmpeg binary does not match the local build record')
+    if hashlib.sha256((args.source / 'libavcodec/h264dec.h').read_bytes()).hexdigest() != local_build['h264HeaderSha256'].lower():
+        raise SystemExit('Select the matching Veyra-patched FFmpeg source tree')
+    if hashlib.sha256((patches / 'ps5-h264-slices.patch').read_bytes()).hexdigest() != local_build['patchSha256'].lower():
+        raise SystemExit('FFmpeg patch identity mismatch')
 with os.add_dll_directory(str((args.prefix / 'bin').resolve())):
     lib = ctypes.CDLL(str((args.prefix / 'bin/avcodec-63.dll').resolve()))
     lib.avcodec_configuration.restype = ctypes.c_char_p
@@ -47,13 +60,20 @@ with zipfile.ZipFile(args.output, 'x', compression=zipfile.ZIP_DEFLATED, compres
                 archive.write(path, name)
                 records.append({'path': name, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
     archive.write(spdx_path, 'FFMPEG-SPDX.json')
+    if local_build:
+        archive.write(local_build_path, 'FFMPEG-VEYRA-BUILD.json')
+        for path in sorted(patches.iterdir()):
+            if path.is_file():
+                archive.write(path, 'veyra-patches/' + path.name)
     archive.write(args.vcpkg / 'LICENSE.txt', 'VCPKG-LICENSE.txt')
     archive.writestr('binary-configuration.txt', license_name + '\n\n' + configuration + '\n')
     archive.writestr('source-manifest.json', json.dumps(records, indent=2))
     archive.writestr('README.txt',
         f'FFmpeg 9.0.1#1 corresponding-source material for Veyra {args.version}.\n'
         'Not needed to run the application. No NVIDIA SDK or runtime is included.\n'
-        'ffmpeg-patched is the local vcpkg patched n9.0.1 source tree.\n'
+        'ffmpeg-patched is the matching patched n9.0.1 source tree.\n'
+        'When FFMPEG-VEYRA-BUILD.json exists, also apply the recorded Veyra patch\n'
+        'after the vcpkg port patches; see veyra-patches/README.md for rebuild instructions.\n'
         'vcpkg-port contains the build recipe and patches, verified against the shipped SPDX.\n'
         'binary-configuration.txt is queried from the actual distributed avcodec DLL,\n'
         'not copied from a potentially newer build cache.\n'

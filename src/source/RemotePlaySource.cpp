@@ -306,6 +306,14 @@ bool RemotePlaySource::drainDecoder(std::uint64_t sourceIndex, const pipeline::F
         const bool hardware=decoderFrame_->format==AV_PIX_FMT_D3D12;
         if(sequence_==1||info_.hardwareDecodeActive!=hardware)veyra::log::info("remoteplay-decode",std::format("actual={} pixelFormat={} {}x{} fallback={}",hardware?"D3D12VA":"software",decoderFrame_->format,decoderFrame_->width,decoderFrame_->height,hardwareFallback_));
         info_.hardwareDecodeActive=hardware;
+#ifdef _WIN32
+        if(sequence_==1&&hardware){
+            auto* native=reinterpret_cast<AVD3D12VAFrame*>(decoderFrame_->data[0]);
+            if(native&&native->texture){const auto d=native->texture->GetDesc();
+                veyra::log::info("remoteplay-texture",std::format("visible={}x{} resource={}x{} array={} mip={} slice={} format={} flags=0x{:X} crop={}/{}/{}/{} fence={}",decoderFrame_->width,decoderFrame_->height,d.Width,d.Height,d.DepthOrArraySize,d.MipLevels,native->subresource_index,unsigned(d.Format),unsigned(d.Flags),decoderFrame_->crop_left,decoderFrame_->crop_top,decoderFrame_->crop_right,decoderFrame_->crop_bottom,native->sync_ctx.fence_value));
+            }
+        }
+#endif
         inbox_->decoderBackend(hardware,hardwareFallback_);
         packet.color.resource = nullptr;
         // The AU contract is one picture per input. Unknown/reused timestamps

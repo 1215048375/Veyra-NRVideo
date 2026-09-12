@@ -72,6 +72,15 @@ foreach ($shader in Get-ChildItem -LiteralPath (Join-Path $bin 'shaders') -File 
 Copy-Payload (Join-Path $resolvedRoot 'runtime_local/config/ngx-local.json') 'runtime/config/ngx-local.json'
 Copy-Payload 'C:/veyra-deps/installed/x64-windows/share/ffmpeg/copyright' 'licenses/FFMPEG-COPYRIGHT.txt'
 Copy-Payload 'C:/veyra-deps/installed/x64-windows/share/ffmpeg/vcpkg.spdx.json' 'licenses/FFMPEG-SPDX.json'
+$ffmpegLocalBuild = 'C:/veyra-deps/installed/x64-windows/share/ffmpeg/veyra-local-build.json'
+if (Test-Path -LiteralPath $ffmpegLocalBuild) {
+  $ffmpegBuild = Get-Content -LiteralPath $ffmpegLocalBuild -Raw | ConvertFrom-Json
+  foreach ($file in $ffmpegBuild.files) {
+    if ($file.name -notin $applicationFiles) { throw 'Unexpected FFmpeg build manifest entry' }
+    if ((Get-FileHash -LiteralPath (Join-Path $bin $file.name) -Algorithm SHA256).Hash -ne $file.sha256) { throw "FFmpeg publisher provenance mismatch: $($file.name)" }
+  }
+  Copy-Payload $ffmpegLocalBuild 'licenses/FFMPEG-VEYRA-BUILD.json'
+}
 Copy-Payload (Join-Path $resolvedRoot 'assets/icons/lucide/LICENSE') 'licenses/LUCIDE-LICENSE.txt'
 Copy-Payload (Join-Path $resolvedRoot 'third_party_local/nvidia/DLSS_repo/LICENSE.txt') 'licenses/NVIDIA_RTX_SDK_LICENSE.txt'
 Copy-Payload (Join-Path $resolvedRoot 'third_party_local/nvidia/RTX_Video_SDK_1.1.0/NVIDIA_RTX_Video_SDK_License.pdf') 'licenses/NVIDIA_RTX_VIDEO_SDK_LICENSE.pdf'

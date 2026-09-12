@@ -6,6 +6,7 @@
 
 - Windows 11 x64, Visual Studio 2022 C++ tools, Windows SDK, CMake 3.24+, Ninja.
 - Local FFmpeg development libraries matching avcodec63 / avformat63 / avutil61 / swresample7 / swscale10. Release 0.0.5 uses the vcpkg FFmpeg 9.0.1#1 build (LGPL configuration).
+- The subsequent PS5 H.264 repair requires the additional [slice-capacity patch and matching rebuild](../scripts/ffmpeg/README.md). Stock 9.0.1 D3D12 H.264 has a 32-slice limit; the tested PS5 stream uses 68. Preserve `veyra-local-build.json` alongside the original vcpkg provenance when preparing future corresponding-source packages. Existing 0.0.5 assets have not been replaced by this local repair.
 - NVIDIA DLSS SDK 310.7.0, Optical Flow SDK 5.0.7, RTX Video SDK 1.1.0, and nv-codec-headers. Prepare these under their respective licenses in ignored local directories.
 - Intel XeSS SDK 3.0.2 for the XeSS presenter; AMD FidelityFX SDK 1.1.4 optical-flow/backend static libraries for the AMD flow option.
 - Local NR runtime and NGX project configuration for experimental NR. The source repository intentionally does not contain them.
