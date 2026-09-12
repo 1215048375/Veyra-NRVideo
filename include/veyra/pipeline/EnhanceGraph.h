@@ -132,6 +132,12 @@ public:
     // Returns false on hard failure (run verdict must FAIL).
     using FgAdmission=std::function<bool(const FrameBatch&)>;
     bool process(const AVFrame* frame, double ptsMs, bool reset, FrameOutputs& out, uint64_t sourceFrameId = 0, const ColorDescription* color = nullptr, bool retainReferences = true, const FgAdmission& admitFg = {});
+    bool nextFrameSlotAvailable()const {
+        const unsigned slot=unsigned(realFrameIndex_%2);
+        if(!realLeases_[slot].expired())return false;
+        for(unsigned i=slot;i<6;i+=2)if(!generatedLeases_[i].expired())return false;
+        return true;
+    }
     // Nonblocking. The scheduler polls at a GPU-ready/deadline boundary; no
     // full image readback and no waits inside the graph's individual passes.
     bool resolveGeneration(FrameOutputs& out);

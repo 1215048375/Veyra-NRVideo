@@ -35,6 +35,7 @@ struct PlayerSnapshot {
     bool audioRebuffering=false;
     uint64_t audioVideoWaits=0;
     bool audioEndpointRecovering=false;HRESULT audioEndpointError=S_OK;uint64_t audioEndpointRecoveries=0;
+    uint64_t seekRequested=0,seekPresented=0;double seekTarget=0;
     double position=0,duration=0,fps=0,lateMs=0,lateP95Ms=0;
     double nominalSourceFps=0;
     diagnostics::FrameMetrics metrics;
@@ -76,7 +77,7 @@ public:
     void previewView(PreviewView view){if(!std::isfinite(view.zoom)||!std::isfinite(view.centerX)||!std::isfinite(view.centerY))return;std::lock_guard lock(mutex_);view.zoom=std::clamp(view.zoom,.05f,64.0f);previewView_=view;}
     PreviewView previewView()const{std::lock_guard lock(mutex_);return previewView_;}
     void setVolume(float gain,bool mute);
-    void seek(double seconds){seekSeconds_.store(seconds);}
+    void seek(double seconds){if(!std::isfinite(seconds)||seconds<0)return;std::lock_guard lock(mutex_);snapshot_.seekTarget=seconds;++snapshot_.seekRequested;seekSeconds_.store(seconds);}
     void saveFrame(const std::wstring& path);
     void startExport(const std::wstring& input,const std::wstring& output,PlayerOptions,bool hevc);
     PlayerSnapshot snapshot()const;

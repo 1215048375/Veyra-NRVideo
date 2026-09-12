@@ -208,6 +208,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
             status(isImage?L"图片已增强，可保存PNG/JPEG":std::format(L"{} | 输入 {}×{} / 底图 {}×{} / NR {}×{} / 光流 {}×{} / FG与输出 {}×{} | {}",isRemote?L"PS5 串流":isCapture?L"实时采集":L"播放",width,height,gd.workWidth,gd.workHeight,gd.nrWidth,gd.nrHeight,gd.flowWidth,gd.flowHeight,gd.workWidth,gd.workHeight,gd.nrWidth<gd.workWidth?L"实时内部处理并回填":L"原生NR（性能成本较高）"));
             pipeline::EnhanceGraph::FrameOutputs out;bool reset=true,hasOutput=false,audioRebuffering=false,seekPreviewPending=false;
             bool initialRemoteFramePending=isRemote;
+            uint64_t activeSeekId=0;
             bool fileAwaitingVideo=true,fileAudioAlignPending=true,fileInputEnded=false;double lastFilePresentedMs=0,lastFilePresentLateness=0;std::deque<double> latenessSamples;
             if(!isImage&&!isCapture&&audioPipe.open(path)){
                 audioPipe.holdForVideo();audioPipe.startThread(&audio,true);audioStarted=true;
@@ -438,7 +439,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                         std::lock_guard lock(mutex_);desired_.rejectVideoRequest(requested,previous);snapshot_.desired=desired_;snapshot_.rejectedRevision=requested.revision;snapshot_.applying=desired_!=previous;snapshot_.status=L"设置应用失败，已恢复上一套参数";snapshot_.backendWarning=requested.nrRuntime!=previous.nrRuntime?L"NR运行版本切换失败，已恢复上一套参数":requested.frameGenerationBackend==FrameGenerationBackend::XeSS?L"XeSS 未能启用，已恢复上一套参数":L"后端切换失败，已恢复上一套参数";}
                 }
                 if(stop_)break;
-                const double seek=seekSeconds_.exchange(-1);
+                double seek;{std::lock_guard lock(mutex_);seek=seekSeconds_.exchange(-1);if(seek>=0)activeSeekId=snapshot_.seekRequested;}
                 if(seek>=0&&!isImage&&!isCapture){
                     holdFileAudio();fileAudioAlignPending=true;
                     drainLivePresentation();
@@ -462,11 +463,14 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                 // Backpressure before reading the capacity-one source mailbox:
                 // when a lease frees we consume the newest available sample.
                 if(liveScheduler&&!transaction){
-                    while(liveScheduler->occupancy()>=2&&!stop_&&(!paused_||seekPreviewPending)&&!liveScheduler->failed()){
-                        advanceLive();if(liveScheduler->occupancy()>=2)waitLive();
+                    const auto leaseWaitStart=Clock::now();
+                    while((liveScheduler->occupancy()>=2||!graph.nextFrameSlotAvailable())&&!stop_&&(!paused_||seekPreviewPending)&&!liveScheduler->failed()){
+                        advanceLive();if(seekSeconds_>=0)break;
+                        if(liveScheduler->occupancy()==0&&!graph.nextFrameSlotAvailable()&&elapsedMs(leaseWaitStart)>2000){status(L"等待输出纹理释放超时",true);stop_=true;break;}
+                        if(liveScheduler->occupancy()>=2||!graph.nextFrameSlotAvailable())waitLive();
                         std::lock_guard lock(mutex_);if(desired_.revision!=options.settings.revision)break;
                     }
-                    if(stop_||(paused_&&!seekPreviewPending)||liveScheduler->failed()||liveScheduler->occupancy()>=2)continue;
+                    if(stop_||seekSeconds_>=0||(paused_&&!seekPreviewPending)||liveScheduler->failed()||liveScheduler->occupancy()>=2||!graph.nextFrameSlotAvailable())continue;
                 }
                 const auto decodeStart=Clock::now();
                 if(injectSourceGap&&frames>=12){
@@ -690,11 +694,11 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                     const double sourceIntervalMs=double(liveSourceInterval100ns(pkt.duration,activeSource->info().averageFps))/10000;
                     const auto baselineReady=pkt.decodedHost100ns>0?pkt.decodedHost100ns:captureArrival;
                     const bool delayEnhanced=options.nr||options.sr||options.fg;
-                    if(!liveScheduler->push([&,watch,step,timeline,captureArrival,baselineReady,delayEnhanced,lineage,jobGeneration,rereadCached,sourceIntervalMs,flow=frameFlow](int64_t now)->LiveGpuScheduler::Step{
+                    if(!liveScheduler->push([&,watch,step,timeline,captureArrival,baselineReady,delayEnhanced,activeSeekId,lineage,jobGeneration,rereadCached,sourceIntervalMs,flow=frameFlow](int64_t now)->LiveGpuScheduler::Step{
                         using State=LiveGpuScheduler::State;auto& batch=watch->output;auto& s=*step;
                         auto updatePending=[&](LiveStepState*){
                             unsigned left=0;for(unsigned i=s.next;i<batch.batch.count;++i)if(batch.batch.frames[i].kind!=pipeline::FrameKind::Generated||batch.batch.frames[i].validity==pipeline::GenerationValidity::Valid)++left;
-                            flow->update([&](auto& m){m.pendingOutputFrames-=std::min(m.pendingOutputFrames,s.remaining-left);});s.remaining=left;
+                            flow->update([&](auto& m){if(left>s.remaining)m.pendingOutputFrames+=left-s.remaining;else m.pendingOutputFrames-=std::min(m.pendingOutputFrames,s.remaining-left);});s.remaining=left;
                         };std::unique_ptr<LiveStepState,decltype(updatePending)> pendingUpdate(&s,updatePending);
                         if(!watch->ready){
                             if(elapsedMs(s.readyStart)>2000){veyra::log::error("capture-present","GPU ready timeout");return {State::Failed};}
@@ -735,7 +739,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                             if(xessPresented)flow->xessSubmitted(xessPresented,xessGenerated,host100ns());
                             if(didPresent&&!isCapture){
                                 lastFilePresentedMs=itemPtsMs;lastFilePresentLateness=fileAwaitingVideo?0:nowMs()-itemPtsMs;
-                                {std::lock_guard lock(mutex_);if(snapshot_.sessionId==runSessionId&&snapshot_.applied.revision==item.identity.settingsRevision){snapshot_.position=itemPtsMs/1000;snapshot_.lateMs=lastFilePresentLateness;}}
+                                {std::lock_guard lock(mutex_);if(snapshot_.sessionId==runSessionId&&snapshot_.applied.revision==item.identity.settingsRevision){snapshot_.position=itemPtsMs/1000;snapshot_.lateMs=lastFilePresentLateness;snapshot_.seekPresented=activeSeekId;}}
                                 double nextPts=itemPtsMs+sourceIntervalMs;
                                 for(unsigned next=s.next+1;next<batch.batch.count;++next){const auto& candidate=batch.batch.frames[next];if(candidate.kind!=pipeline::FrameKind::Generated||(candidate.validity==pipeline::GenerationValidity::Valid&&comparisonMode_==0)){nextPts=double(candidate.pts100ns)/10000;break;}}
                                 if(audioStarted){audioPipe.videoPresented(nextPts);audioPipe.setPaused(paused_);}
