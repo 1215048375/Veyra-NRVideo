@@ -14,6 +14,10 @@ $archive = "$stage.zip"
 # Preserve existing candidates and their verification evidence.
 if ((Test-Path -LiteralPath $stage) -or (Test-Path -LiteralPath $archive)) { throw 'Output exists; choose a new staging directory.' }
 $applicationFiles = @('veyra.exe','avcodec-63.dll','avformat-63.dll','avutil-61.dll','swresample-7.dll','swscale-10.dll')
+if ([version]$Version -ge [version]'0.0.5') {
+  $cache = Get-Content -LiteralPath (Join-Path $bin 'CMakeCache.txt') -Raw
+  if ($cache -notmatch 'VEYRA_ENABLE_REMOTEPLAY:BOOL=ON') { throw '0.0.5 package requires the real PS5 backend enabled' }
+}
 $appVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $bin 'veyra.exe'))
 if ($appVersion.ProductVersion -ne $Version) { throw "EXE version $($appVersion.ProductVersion) does not match $Version" }
 # Publisher audit only. The application permits users to replace these DLLs.
@@ -58,6 +62,12 @@ foreach ($name in @('vcruntime140.dll','vcruntime140_1.dll','msvcp140.dll')) {
 foreach ($name in @('LICENSE','README.md','README_EN.md','THIRD_PARTY_NOTICES.md')) { Copy-Payload (Join-Path $resolvedRoot $name) $name }
 foreach ($name in @('BUILD.md',"RUNTIME_COMPONENTS_$Version.md","RELEASE_NOTES_$Version.md")) { Copy-Payload (Join-Path $resolvedRoot "docs/$name") "docs/$name" }
 Copy-Payload (Join-Path $resolvedRoot "docs/RELEASE_NOTES_$Version.md") 'RELEASE_NOTES.md'
+# Remote Play is statically linked. Retain all dependency notices and source instructions.
+foreach ($notice in Get-ChildItem -LiteralPath (Join-Path $resolvedRoot 'licenses/remoteplay') -Recurse -File) {
+  $relative = $notice.FullName.Substring((Join-Path $resolvedRoot 'licenses').Length+1).Replace('\','/')
+  Copy-Payload $notice.FullName "licenses/$relative"
+}
+Copy-Payload (Join-Path $resolvedRoot 'docs/REMOTEPLAY_BUILD_0.0.5.md') 'docs/REMOTEPLAY_BUILD_0.0.5.md'
 foreach ($shader in Get-ChildItem -LiteralPath (Join-Path $bin 'shaders') -File -Filter '*.dxil') { Copy-Payload $shader.FullName "shaders/$($shader.Name)" }
 Copy-Payload (Join-Path $resolvedRoot 'runtime_local/config/ngx-local.json') 'runtime/config/ngx-local.json'
 Copy-Payload 'C:/veyra-deps/installed/x64-windows/share/ffmpeg/copyright' 'licenses/FFMPEG-COPYRIGHT.txt'

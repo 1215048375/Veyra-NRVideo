@@ -1741,3 +1741,6 @@ apps/veyra/SettingsWindow.cpp调整布局；apps/veyra/ui/AppShell.cpp新增音�
 用户反馈悬停没有效果。本轮实际鼠标命中低延迟按钮后验证：旧注册路径 tooltip 可创建但 TTM_GETTOOLCOUNT=0；不是窗口存在就算通过。TOOLINFOW 使用完整 sizeof 在当前 common-controls 环境被拒绝。改为 TTTOOLINFOW_V2_SIZE 后 count=103，实际悬停可见；同时嵌套控件使用直接父窗口和已有静态帮助字符串，避免依赖中间面板转发文字回调。AppShell 与 SettingHelp 共用注册处检查返回值，失败写 ui-help 日志。
 修改 apps/veyra/ui/AppShell.cpp、SettingHelp.h。构建命令 cmd /c out/remoteplay/build-extra-delay.cmd，最终 logs/hover-final-build.log 成功。实际鼠标脚本 out/remoteplay/test-hover-real.ps1，logs/hover-visible-final.log：按钮命中、103项注册、提示 visible=True；logs/hover-visible.png 已查看，中文说明完整、深色背景。此前只验 tooltip HWND 的旧 nr-first-help-ui 不能证明悬停功能通过，本条修正该验证缺口。
 本轮第一次更换父窗口/文字回调后仍失败，第二次尝试显式 relay 仍失败，均保留失败结果；relay 已撤回，真正恢复发生于 V2 结构体尺寸修复。UI回归首次用 Windows PowerShell 5 读取无BOM中文脚本产生解析错误（logs/hover-final-ui.log），改用 pwsh 重跑（logs/hover-final-ui-retry.log）。无增强/音视频管线修改，本轮未执行新 RTX Create/Evaluate 或实机 PS5 测试。
+
+## 2026-09-12 0.0.5 合并与发布准备
+用户授权后，main同步远端README改动并合并PS5开发分支，独立436步构建成功。双语README、Release说明、运行组件/串流许可证与对应源码补齐。外部便携五组、47.046秒统一gate、DPAPI、SDL边界、90项合同及便携PS5 UI通过。最终运行文件与测试哈希一致，71文件白名单通过，未提交SDK/运行时/凭据。资产、命令、日志、真实验收边界见 docs/RELEASE_0.0.5_EXECUTION.md，发布结果待追加。

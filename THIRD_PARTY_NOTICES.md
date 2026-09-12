@@ -38,7 +38,7 @@ User-provided official SDK from https://developer.nvidia.com/rtx-video-sdk/getti
 
 FRUC was evaluated during development and has been removed from the product. No FRUC runtime, worker, SDK headers, or binaries are built or packaged.
 
-## PS5 Remote Play / chiaki-ng (local integration)
+## PS5 Remote Play / chiaki-ng (0.0.5)
 
 The optional `VEYRA_ENABLE_REMOTEPLAY` build compiles chiaki-ng at
 `0e16950165f06e5c3291537c2eeba6e852be7120` from https://github.com/streetpea/chiaki-ng,
@@ -46,16 +46,14 @@ with the two reviewed patches in `scripts/remoteplay/patches/`. Chiaki code and
 these derived patches retain AGPL-3.0-only with the upstream OpenSSL exception;
 see `licenses/remoteplay/CHIAKI_AGPL3_OPENSSL.txt`. The metadata patch was adapted
 from the user-supplied Code 01 change description and checked against this pin.
-No Chiaki binary or third-party SDK is committed. A future distribution of the
-combined Remote Play executable must provide its corresponding complete source,
+No Chiaki binary or third-party SDK is committed. The 0.0.5 distribution provides its corresponding complete source,
 these patches, dependency pins, build instructions and upstream notices; the
 existing Veyra GPL file alone is not the combined program's license record.
 
 Gamepad input uses SDL 3.4.14 (https://github.com/libsdl-org/SDL/tree/release-3.4.14),
 statically built using vcpkg. SDL provides DualSense and other controller device
-support; Veyra maps its public gamepad API to Chiaki semantic input. No SDL audio
-or video playback path is used. Retained notices: `licenses/remoteplay/SDL3_NOTICES.txt`.
-This local integration has not been pushed or released.
+support; Veyra maps its public gamepad API to Chiaki semantic input. SDL also routes DualSense haptic audio; media playback remains in the shared Veyra engine. Retained notices: `licenses/remoteplay/SDL3_NOTICES.txt`.
+The 0.0.5 Release contains the combined executable. Its application source is the release tag; the RemotePlay-source asset supplies pinned upstream sources and build recipes.
 # Remote Play controller additions (2026-09-12)
 
 Veyra calls the pinned Chiaki orientation tracker API (AGPL-3.0-only with OpenSSL exception). DualSense SDL report offsets and 3 kHz stereo to four-channel haptic routing were checked against chiaki-ng gui/src/controllermanager.cpp and streamsession.cpp. Existing Chiaki and SDL license notices apply. No third-party binary was added.
@@ -63,3 +61,5 @@ Veyra calls the pinned Chiaki orientation tracker API (AGPL-3.0-only with OpenSS
 ### PSN browser authorization adapter (2026-09-12)
 
 `src/remoteplay/PsnAuth.cpp` adapts the OAuth request contract and public client identifiers from chiaki-ng, commit `0e16950165f06e5c3291537c2eeba6e852be7120`, `gui/src/psnaccountid.cpp`, `gui/include/psnaccountid.h`, and `gui/src/psntoken.cpp`. Upstream credits the Account ID script to grill2010. License: AGPL-3.0-only with the upstream OpenSSL exception. The Windows HTTP, protected storage and UI integration are Veyra code. This is an unofficial client, not Sony endorsement. json-c remains an existing Chiaki dependency; its license/notice must remain in binary distributions.
+
+Static dependency notices and installed SPDX records: licenses/remoteplay/{json-c,libevent,miniupnpc,openssl,opus,sdl3}/. Upstream curl, nanopb, Jerasure and gf-complete notices are in the same directory. Their corresponding sources and port recipes accompany the RemotePlay-source release asset.
