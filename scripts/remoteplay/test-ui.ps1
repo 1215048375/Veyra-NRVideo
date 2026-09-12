@@ -47,6 +47,8 @@ try {
   $deadline=[DateTime]::UtcNow.AddSeconds(3)
   do {$panel=[RpUi]::Find($process.Id,'VeyraRemotePlaySetup');if($panel -eq [IntPtr]::Zero){Start-Sleep -Milliseconds 25}}while($panel -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline)
   if($panel -eq [IntPtr]::Zero){throw 'Remote Play panel missing'}
+  # Enumeration can see the HWND while WM_CREATE is still creating children.
+  [RpUi]::SendMessage($panel,0,[IntPtr]::Zero,[IntPtr]::Zero)|Out-Null
   foreach($control in @(15,16)){if([RpUi]::GetDlgItem($panel,$control) -eq [IntPtr]::Zero){throw 'Bitrate/profile management missing'}}
   $decode=[RpUi]::GetDlgItem($panel,19)
   if($decode -eq [IntPtr]::Zero -or [RpUi]::SendMessage($decode,0x146,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32() -ne 3){throw 'Three decode choices missing'}

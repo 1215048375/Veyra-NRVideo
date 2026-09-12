@@ -4,6 +4,7 @@
 #include "veyra/engine/LivePresentationTiming.h"
 #include "veyra/engine/PresentationScheduler.h"
 #include "veyra/engine/DeadlineWait.h"
+#include "veyra/engine/EnhancementDelayEstimate.h"
 #include "veyra/engine/LiveGpuScheduler.h"
 #include "veyra/engine/LivePresentationResetPolicy.h"
 #include "veyra/engine/TimingWindow.h"
@@ -686,7 +687,9 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                     };
                     auto step=std::make_shared<LiveStepState>();
                     const double sourceIntervalMs=double(liveSourceInterval100ns(pkt.duration,activeSource->info().averageFps))/10000;
-                    if(!liveScheduler->push([&,watch,step,timeline,captureArrival,lineage,jobGeneration,rereadCached,sourceIntervalMs,flow=frameFlow](int64_t now)->LiveGpuScheduler::Step{
+                    const auto baselineReady=pkt.decodedHost100ns>0?pkt.decodedHost100ns:captureArrival;
+                    const bool delayEnhanced=options.nr||options.sr||options.fg;
+                    if(!liveScheduler->push([&,watch,step,timeline,captureArrival,baselineReady,delayEnhanced,lineage,jobGeneration,rereadCached,sourceIntervalMs,flow=frameFlow](int64_t now)->LiveGpuScheduler::Step{
                         using State=LiveGpuScheduler::State;auto& batch=watch->output;auto& s=*step;
                         if(!watch->ready){
                             if(elapsedMs(s.readyStart)>2000){veyra::log::error("capture-present","GPU ready timeout");return {State::Failed};}
@@ -743,6 +746,16 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                             if(didPresent&&remote)remote->videoPresented(double(item.pts100ns)/10000,host100ns());
 #endif
                             if(didPresent&&!generated&&!rereadCached)flow->latency(captureArrival,host100ns());
+                            if(didPresent&&!generated&&!rereadCached&&!paused_){
+                                const auto stamp=host100ns();const auto stats=flow->snapshot(stamp);
+                                const auto color=stats.gpuTiming[size_t(diagnostics::GpuStage::Color)].mean;
+                                const auto blit=stats.gpuTiming[size_t(diagnostics::GpuStage::Blit)].mean;
+                                std::optional<double> basic;
+                                if(color&&blit)basic=*color+*blit+elapsed;
+                                const auto estimate=enhancementDelayEstimate(delayEnhanced,isCapture,
+                                    isCapture?double(stamp-baselineReady)/10000:lastFilePresentLateness,basic);
+                                if(estimate)flow->cpu(diagnostics::CpuStage::EnhancementDelayEstimate,*estimate,stamp);
+                            }
                             if(didPresent&&generated&&lineage)flow->generatedLatency(*lineage,host100ns());
                             if(didPresent){++s.handled;++s.count;flow->presented(generated,item.lease->consumerFence,host100ns());if(!generated)++presentationCompletedReal;s.ageMs=double(host100ns()-captureArrival)/10000;
                                 if(liveStats.identity.epoch==batch.batch.identity.epoch&&liveStats.identity.settingsRevision==batch.batch.identity.settingsRevision){const auto time=host100ns();liveSubmissions.push_back(time);while(liveSubmissions.size()>1&&time-liveSubmissions.front()>10000000)liveSubmissions.pop_front();}}

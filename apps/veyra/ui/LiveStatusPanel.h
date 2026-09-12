@@ -30,11 +30,13 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         write(state->advanced?L"收起详情 −":L"展开详情 +",width-96,8,84,24,10,secondary);
         const int half=(width-24)/2;
         write(xess?L"呈现提交 · XeSS SDK":L"实际呈现提交",12,36,half,20,10,secondary);
-        write(s.capture?L"软件延迟 · 平均":L"软件驻留 · 平均",12+half,36,half,20,10,secondary);
+        write(L"增强额外延迟 · 估计",12+half,36,half,20,10,secondary);
         write(fps(xess?f.xessSdkSubmitFps:f.presentSubmitFps),12,57,half,28,18,textColor);
-        write(playing?ms(f.softwareLatencyMs):L"未测",12+half,57,half,28,18,textColor);
+        const auto& extra=f.cpuTiming[size_t(diagnostics::CpuStage::EnhancementDelayEstimate)];
+        write(playing?ms(extra.mean):L"未测",12+half,57,half,28,18,textColor);
         std::vector<std::pair<std::wstring,std::wstring>> rows;
-        rows.emplace_back(L"同一延迟 · P95",playing?ms(f.softwareLatencyP95Ms):L"未测");
+        rows.emplace_back(L"估计口径",s.capture?L"扣除基础显示开销":L"正常播放时序的额外落后");
+        rows.emplace_back(L"测量范围",L"稳态估计 · 不含屏幕扫描");
         rows.emplace_back(L"请求目标（非实测）",s.nominalSourceFps>0?std::format(L"{:.1f} fps",s.nominalSourceFps*(s.captureHalfRate?.5:1)*s.applied.multiplier):L"未确定");
         std::wstring progress=!playing?s.status:s.applying?L"正在应用设置":s.fgBudgetLimited?L"部分补帧未达截止时间":L"播放中";
         if(playing&&!s.applying&&s.remotePlay){
@@ -93,6 +95,10 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
             }
         }
         if(state->advanced){
+        rows.emplace_back(L"增强额外延迟估计 · P95",playing?ms(extra.p95):L"未测");
+        rows.emplace_back(L"原帧软件驻留 · 平均",playing?ms(f.softwareLatencyMs):L"未测");
+        rows.emplace_back(L"原帧软件驻留 · P95",playing?ms(f.softwareLatencyP95Ms):L"未测");
+        rows.emplace_back(L"估计基线",L"理想直接播放 · 非双路实测");
         rows.emplace_back(L"GPU完成产出",fps(f.outputCompletedFps));
         rows.emplace_back(L"源帧处理完成",fps(f.sourceCompletedFps));
         rows.emplace_back(L"有效生成（含过期）",xess?L"SDK内部不可测":fps(f.validGeneratedFps));
@@ -161,7 +167,7 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         }
         RestoreDC(paint.dc,saved);
         if(state->maxScroll&&available>0){const int thumb=std::max(18,available*available/(int(rows.size())*rowHeight));const int y=top+(available-thumb)*state->scroll/state->maxScroll;RECT r{dip(h,width-4),dip(h,y),dip(h,width-2),dip(h,y+thumb)};FillRect(paint.dc,&r,panelBrush());}
-        write(s.remotePlay?L"完整视频收到→Present；不含主机/屏幕":xess?L"截止代理Present返回；屏幕扫描未测":L"源帧进入软件至Present返回；非光子延迟",12,height-28,width-24,24,9,secondary);
+        write(xess?L"估计截止SDK提交；内部显示排队未测":L"相对直接播放的估计；启动等待另计",12,height-28,width-24,24,9,secondary);
         return 0;
     }
     case WM_NCDESTROY:KillTimer(h,1);delete state;SetWindowLongPtrW(h,GWLP_USERDATA,0);break;

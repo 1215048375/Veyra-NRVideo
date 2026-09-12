@@ -6,7 +6,7 @@
 namespace veyra::diagnostics {
 enum class GpuStage { Color, Sr, Flow, Nr, Residual, Fg1, Fg2, Fg3, FgBatch, Blit, Count };
 enum class SampleState { NotExecuted, Pending, Measured, Unavailable };
-enum class CpuStage { Decode, Submit, SlotWait, ReadyWait, DeadlineWait, Present, DecodedQueue, Count };
+enum class CpuStage { Decode, Submit, SlotWait, ReadyWait, DeadlineWait, Present, DecodedQueue, EnhancementDelayEstimate, Count };
 enum class PairTiming { ArrivalInterval, GeneratedFromA, GeneratedFromB, Count };
 enum class ResetStage { Drain, Destroy, Create, Warmup, FirstValid, Count };
 enum class ResetOutcome { InProgress, Completed, Failed, RolledBack, Cancelled };
