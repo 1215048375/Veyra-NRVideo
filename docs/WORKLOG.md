@@ -1571,3 +1571,173 @@ FRUC候选bSkipWarp/延后重建/时间归零/首对预热均未通过新增rese
 源码 `cecf34e1f88ea3538f650ef38e46e26c56ef469d` 和注解标签 `v0.0.4` 已原子推送至 `Likely7/Veyra-NRVideo`。Release ID386843250，2026-09-11T07:09:56Z公开，latest=v0.0.4；四个附件远端state/size/SHA256与本机全部一致，Release正文与版本文档一致。发布页 https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.4 。完整命令/身份/测试/失败/未执行项见 `docs/RELEASE_0.0.4_EXECUTION.md`，远端核验日志 `logs/release-0.0.4/github-release-published.json`。源码检查24个文本/自有源文件，无SDK/DLL/模型新增；旧origin与先前Release未修改。
 
 上传期间用户在GitHub提交README修改 `51eb18d`，已快进同步保留，不覆盖、不移动v0.0.4标签或重建资产。仅追加本发布记录。当前发布任务完成，后续为用户实际播放/采集验收；物理声画测量、长期稳定性和RTX40实机仍未执行。
+## 2026-09-11 RTX4060持续欠速音频反馈（诊断）
+
+用户提供桌面veyra-app.log，反馈60fps开2X不足120时音频卡顿。只读日志+源码核对：主会话是60fps文件，revision11连续32个计数差窗口源推进均值51.45fps/呈现提交102.89fps；revision8不开FG也仅47.39fps。AudioVideoContinuity在持续领先时仍暂停WASAPI，因此0.0.4只覆盖短暂抖动，并未解决持续欠速下的连续音频。普通日志无逐次音频等待事件，不声称已核实暂停次数或4060声学复现。完整事实、统计口径、策略约束与后续验收见 `docs/RTX4060_AUDIO_UNDERRATE_2026-09-11.md`。命令：rg筛选source/settings/player-timing/audio；Python按同revision相邻时间戳计算processed/displaySubmits速率；读取AudioVideoContinuity/WasapiAudioSink/EngineController。原始日志仅复制到忽略的logs/4060-audio-20260911，无产品/测试/运行时修改，无新构建或GPU测试，无push/Release。下一步是实时播放欠速策略与可观察音频事件，不能继续仅扩大音频等待容差。
+## 2026-09-11 连续音频与实时视频调度修复方案（未施工）
+
+按用户要求写成 `docs/REALTIME_AV_SCHEDULING_REPAIR_PLAN_2026-09-11.md`，并为4060诊断及上一版音画同步记录补继续修复入口。方案区分文件提前处理/音频主时钟与采集输入映射/软件延迟补偿；先减少FG提交，原帧处理不足再按PTS分散跳过预览增强，导出完整性保持。明确旧“播放器不得丢源帧”的规则仅拟为实时预览修订，实施时同步，当前未修改AGENTS或产品。
+
+源码核对确认现有FgAdmission是整对布尔准入，当前仅采集使用；XeSS生成属于交换链，其SetEnabled路径需独立验证；MediaFileSource返回借用AVFrame，跨线程候选必须有界持有引用。方案覆盖软历史reset/FG恢复成本、解码参考帧不可乱丢、启动负音频PTS、生命周期、音频事件日志及新欠速验收，P1音频解耦不能脱离P2视频追赶单独交付。量化门槛为待验证目标，未写成实测通过。
+
+实际只运行git status、rg及Get-Content进行文档/源码核对，随后文档链接及git diff --check检查。本轮未构建，未执行RTX runtime、4060/5070或采集实卡测试，未改SDK/DLL/模型，无commit/push/Release。下一条任务P0：明确实时预览契约、补音频事件和0.0.4持续欠速失败回归，再执行P1/P2闭环。
+## 2026-09-11 连续音频与实时视频调度修复（隔离分支施工完成）
+
+用户指令接收项目并执行 `docs/REALTIME_AV_SCHEDULING_REPAIR_PLAN_2026-09-11.md`，要求先建存档点、隔离区修复。存档点 `21ce5d3`（tag `checkpoint/av-scheduling-2026-09-11`，与 0.0.4 产品提交 `cecf34e` 无 C++ 差异，`git diff cecf34e 21ce5d3 -- src include apps tests CMakeLists.txt cmake` 为空）；全部修复在隔离分支 `agent/av-scheduling-repair` 提交 `9885759`（P0–P3）与 `5bc91cd`（P4 断言修正），`agent/veyra-v1-loop` 停在存档点，未 push。
+
+实施：P0—AGENTS.md 增补实时预览跳帧契约（仅预览、导出/图片/暂停单帧不跳、PTS 保持真实）；删除 `AudioVideoContinuity.h`；`WasapiAudioSink` 新增 `audio-continuity` hold/release/每秒 summary（clock/coverage/lead）事件。P1—音频 owner 稳态仅显式 hold（open/seek/设置重建/暂停）可停 WASAPI，普通欠速永不停音。P2—新增 `include/veyra/engine/RealtimePreviewScheduling.h` 纯策略（`previewCandidateExpired`/`previewGeneratedExpired`/`XessGenerationGate`）+ `tests/unit/RealtimePreviewSchedulingTests.cpp`；EngineController 文件路径按主时钟流式丢弃过期解码候选（解码顺序与参考帧完整性保持、`previewSkippedBeforeGraph` 计数、软历史断点不重开指标窗口也不伪造 reset 生命周期记录）；文件 DLSS FG 对级准入（主时钟 PTS 截止 + 提交→就绪完成 P95 预测，复用 `admitLiveFg`，样本仅按设置 revision 分界）；完成但过期的生成帧跳过呈现并计入“算完未显示”。P3—XeSS 走 `xefgSwapChainSetEnabled` 迟滞门控（12 帧持续迟到关、60 帧健康恢复，恢复经 presenter 历史重置）；采集生产算法按方案 §3.2 未改动。P4—PlayerSnapshot/实时状态面板新增预览跳帧、播放速度、XeSS 抑制状态，`player-timing` 每秒日志新增 `previewSkipped`/`playbackSpeed`。
+
+构建环境故障与根因：本会话新建 CMake 目录 `CMakeFiles/rules.ninja` 缺失致 ninja 解析失败（checkpoint-build*.log、build1/2/3.log）。逐层定位：MSYS 会话 `TMP/TEMP=/tmp` 与控制台代码页 936 下，CMakeLists include-probe 将 cl.exe `/utf-8` 输出按 GBK 捕获成乱码 `CMAKE_CL_SHOWINCLUDES_PREFIX`（探针复现 `注锟斤拷:...`），Ninja 生成器随后不写 rules.ninja；`chcp 65001` + Windows TEMP 后探针与全量构建均复现修复（build4 起全绿，最小探针项目在 logs 外临时目录验证后删除）。产品构建脚本未改；旧 `out/build/release-0.0.4`（与存档点源码一致）用作 0.0.4 基线二进制。
+
+测试（单次外部上限≤290s，日志均在 `logs/av-scheduling-20260911/`）：单元 `veyra_realtime_preview_tests` 0 失败（30→15 采样间隙=2×帧间隔且覆盖整段、60fps 51/60 欠速延迟有界、极端过载仍持续覆盖、XeSS 门控迟滞/防抖/复位）。A/B—将 0.0.4 版 `WasapiAudioSink.*`+`AudioVideoContinuity.h` 临时检入当前树重编后跑新断言：`underrate-before` 两条稳定失败（600ms 停顿不能一倍速连续、标记 rebuffering）；旧二进制完整套件顺带证实 0.0.4 `stallStartMs=200 stallEndMs=200` 停音。修复后：`underrate-dedicated` PASS（51/60 场景 wallMs=4016 audioMs=3998、额外停音 0、underrun 0）；audio_timeline 完整 68 PASS；`--jitter` 1×/2×/4× 全 0 停音。采集 `veyra_capture_audio_tests` 完整套件首跑 mode=2 meanSkewError=28.2995 边缘超阈（采集代码未改，负载敏感），重跑全过；`--jitter` additionalResets/Underruns=0、P95 20.9137ms。
+
+引擎（RTX 5070 实跑，GPU 空闲 3%）：`--file-continuity`（4K30 XeSS+原生NR）6 PASS，100 帧媒体 3.33333s/墙钟 3.32834s、audioWaits=0、lateMs=0.90ms；`--file-endpoint` 7 PASS；`--file-overload` 17 PASS——持续过载稳态 addedWaits=0、延迟有界（max 47.4ms，窗口末 36.0ms 不增长）、FG 准入 fgSkipped=462/evaluated=12、previewSkipped=173、真实呈现最大稳态间隙 50ms（60fps 源）、playbackSpeed=1.002、FG4→2 重建/播放中 seek/暂停 seek/恢复、退出过载后 lateMs<35ms；`--overload` 采集回放 PASS（skipped=450、command/presentation 上界保持）。delivery gate `logs/delivery/a443858a84cd46539d87f8d41ced4c14/result.json` 23 PASS 46.1s，EXE SHA256 `85BE58B071052B4D015534488B4EB1DACE583FF4A47C300FBC9CDA9FA324B358`，NVENC H264/HEVC 帧数/音轨/时间戳/取消原样通过，`git diff --check` 通过。
+
+失败与修正保留：file-overload 首跑把 seek(.3→.5) 前跳与暂停窗口计入稳态间隙（maxSteadyGap=200ms 撞界），改为向后跳变后首个前向间隙按显式重同步处理后通过；A/B 期间误用 `git checkout --` 还原未提交的 WasapiAudioSink 修改（下一构建报缺 AudioVideoContinuity.h 暴露），重做修改并立即提交隔离分支；无产品级回退。
+
+未执行/边界：4060 实机复验（用户以相同 60fps 文件与设置复测，日志需能独立说明真实处理速率/媒体速度/停音与跳帧原因）、物理扬声器/屏幕同步测量、长时间直播稳定性、真实采集卡 XeSS 欠速门控触发（本轮仅文件路径与单元验证；30fps 非欠速场景门控正确不动作）。不因本机 5070 通过宣称 4060 通过；不承诺持续 30→15 下 NR/FG 时序画质不变。下一条：用户实机验收与 4060 日志复核。
+
+## 2026-09-11 PS5 Remote Play 集成交接
+
+用户要求把 `C:\Users\123\Desktop\Veyra_RemotePlay_Code_01` 中基于 chiaki-ng 的代码接入 Veyra，并在当前进度上整理给下一位 Agent。当前隔离分支为 `agent/remoteplay-integration`，基线 `0f78cc29f34365589bcd4757e7017236e3ac9cb1`，开工标签 `checkpoint/remoteplay-preintegration-2026-09-11`。完整架构、工作树、依赖、缺陷、施工顺序、命令、验收矩阵和许可证边界已整理到 `docs/REMOTEPLAY_INTEGRATION_HANDOFF_2026-09-11.md`，`docs/remoteplay/NEXT_AGENT.md` 已改为唯一入口跳转。
+
+固定 chiaki-ng 提交 `0e16950165f06e5c3291537c2eeba6e852be7120` 已在 Windows x64/MSVC 下完成 248/248 个真实构建步骤；原生 probe 退出码 0，输出 `REAL_CHIAKI_CORE_INITIALIZED upstream_video_callback=1`，并明确输出 `PS5_CONNECTION_NOT_TESTED VIDEO_DECODE_NOT_TESTED WINDOWS_PLAYER_NOT_TESTED`。Remote Play 离线核心测试 67/67 PASS；现有 `veyra_source_tests.exe` 23 checks、0 failures。上述证据只覆盖协议桥基础和原生初始化，不覆盖 PS5 连接、真码流、音频、手柄、增强、OBS、窗口行为或实际延迟。
+
+当前 `RemotePlaySource` 在接入主程序前有七类必修问题：PCM block 被截断后尾部丢失、音视频 PTS 零点不一致、decoder 重建泄漏旧 AVFrame、首帧未进入 Streaming、IDR 请求未转发、decoder delay/多帧输出会错配输入 PTS、非 48 kHz Opus 与固定 48 kHz AudioRenderer 契约冲突；新增 worker 后还要维持严格停止顺序。`EngineController`、`AppShell`、Remote Play 专用音频 owner、DPAPI profile、discovery/wakeup 和手柄设备服务均未接入。下一条唯一任务是先修这些源层正确性问题及测试，再处理生产 CMake 和主程序接线。
+
+外部依赖位于 `C:\veyra-deps\chiaki-source`、忽略的 `out\remoteplay\chiaki-msvc-stage` 和 `C:\veyra-deps\remoteplay-installed\x64-windows-static`，不得提交。chiaki-ng 为 `AGPL-3.0-only` 并带 OpenSSL exception；未来发布组合程序必须提供与二进制对应的完整源码、固定上游版本和补丁、构建脚本、许可证及归因。本轮只更新交接文档，没有修改产品代码、SDK/DLL/模型或运行时，也没有 commit、push 或 Release。
+
+## 2026-09-11 Remote Play 移植代码二次审计（不修产品，交其他 Agent）
+
+用户要求从开始移植时重新审查所有代码并更新交接。审查基线仍为 `0f78cc29` / `agent/remoteplay-integration`，没有新增产品提交。逐文件比对用户 Code 01 包（统一换行后）、当前未提交代码、固定 Chiaki 上游、本机 MSVC patch 与 Veyra graph/audio 接口；结论和18条分级事项已加入 `docs/REMOTEPLAY_INTEGRATION_HANDOFF_2026-09-11.md` 第18节，并同步更正其第6/8/13/17节及 `docs/remoteplay/{NEXT_AGENT,NATIVE_GATE,SOURCES_CODE01,WORKLOG_CODE01}.md`。未谎称其他 Reviewer 或特定模型路由已确认。
+
+新增实际故障证据：使用本机 MSVC 编译隔离审计程序，编译的实现是当前未改动的 `RemotePlaySource.cpp`（仅隔离shadow header打开访问控制以直接注入合成inbox），链接真实FFmpeg、Veyra base、既有Chiaki/core库，无网络/PS5/WASAPI/GPU调用。合法720p H.264 SPS/PPS独立送入当前source返回 `-1094995529` / `no frame!`，`read_status=2 frame=0`；同数据合并配置与AU成功解出1帧。PCM供应480帧、先拉100再拉380，实际仅得到100；音频PTS是约1.36e8ms绝对时钟。12包带重排H.264解出10帧（没有EOF drain，不能把另两帧列为丢尾），已输出的10帧全部配错PTS。实际帧已交付而session仍WaitingFirstFrame；请求1920宽但实际解码1280宽时SourceInfo未更新。另复现音频同格式重启首样本归零被拒绝，以及16位帧号回绕时PTS unknown（后者当前callback不提供wire index，是恢复metadata后会暴露的潜伏问题）。
+
+修正原交接：不能逐块用 `audioPts(firstSample,rate,currentArrival)`，会把10ms推进算成20ms，需固定段起始锚点+样本差值；现有EnhanceGraph已支持YUV420P且会读取明确VUI，因此不是所有画面颜色都错，但source的720p BT.601 fallback和metadata缺失必须修。移植中的普通回调替换删掉了原包真实帧号/profile元数据，三个metadata脚本/测试未导入；core文本主体仍与用户包一致。其余事项包括IDR未转发、decode error直接终止而非恢复、decoder重建与AVFrame泄漏、stop失败被吞、48k契约、凭据驻留、生产CMake未闭环、解码与GPU解耦未接。完整触发条件和修复验收见主交接，不把代码桩和未接UI冒充功能完成。
+
+实际命令/日志：`python out/remoteplay/audit-20260911/prepare.py`（生成两段本地合成素材，每个ffmpeg60秒上限）；`cmd.exe /d /c out\remoteplay\audit-20260911\build.cmd` 两次诊断构建成功（`build.log/build2.log`）；`scripts/run-short-test.ps1 -Exe <audit.exe> -Arguments <single prefix,reorder.h264> -TimeoutSeconds 30` 输出 `observations[2].stdout/stderr.log`。观察程序exit0只代表记录完成，其中是失败证据，不计产品PASS。另通过同一wrapper、各30秒上限重跑core67/67、native初始化exit0、既有文件source23/23；日志 `core/native/source.stdout.log`。native输出的 `upstream_video_callback=1` 为固定文字，不是真回调计数。
+
+全新CMake配置复现旧交接参数组：`out/remoteplay/audit-20260911/configure.cmd` 使用vcvars64/UTF-8/Windows TEMP，真实exit1 `Could not find protoc`，证据 `configure-from-handoff.log`；交接现补ProtocPath/PkgConfigPath，但修订命令的全量构建尚未执行。当前stage的差异全文与MSVC patch一致，递归子模块版本匹配；脚本的文件名/reverse-apply校验不能证明完整源码身份，已列待修而未声称当前stage被污染。证据全部位于 `logs/remoteplay-audit-20260911/`，包含原包文本比对和审查文件SHA256清单；诊断源/生成物在忽略的out目录。
+
+本轮未修产品、未改SDK/DLL/模型、未连接PS5/占用采集卡/关闭用户程序，没有完整Veyra/delivery/GPU/实机测试，无commit/push/Release。下一条唯一任务：先建立H.264 config/AU真实source失败回归并修首帧，再依第18节完成源层正确性闭环，之后接主程序；不能只补UI或继续重复native probe来宣称移植完成。
+
+收尾检查：`git diff --check` 无格式错误（仅既有LF/CRLF提示）；6份Markdown围栏/相对文件链接检查0错误；按审查SHA256清单复核产品/构建/测试代码改动列表为空；`git ls-files --others --exclude-standard` 按DLL/LIB/EXE/PDB/压缩包/合成媒体后缀扫描无未忽略二进制。用户原有未提交代码完整保留。
+
+## 2026-09-11 Remote Play 开工与源层首批修复
+
+用户授权继续完成并在大节点创建Git/更新文档。先存档 `bf21bef`（`checkpoint/remoteplay-audited-2026-09-11`），然后修配置/AU首帧、PCM尾部与固定相对锚点、重排PTS映射、Streaming状态、实际尺寸/颜色、decoder frame释放，并补IDR消费、wire展开、48k/Opus样本序号和stop失败状态。详细文件、实际命令、失败及未测项见 `docs/REMOTEPLAY_REPAIR_EXECUTION_2026-09-11.md`。真实FFmpeg source回归显示480/480样本、首帧成功、重排错配10→0；新目录真实Chiaki/core/source构建通过，core67/67、native初始化exit0，单次测试30秒上限。首建遇第三方头/WX失败，标SYSTEM后通过；保留日志 `logs/remoteplay-audit-20260911/native-source-build*.log`、`source-fixed/core-fixed/native-fixed.stdout.log`。尚未接主程序/PS5/音频设备/GPU；其余审计项和UI/手柄等继续，不声明整体完成。源码/SDK/媒体分离，未push发布。
+
+
+## 2026-09-11 Remote Play 目标模式节点二施工
+
+用户授权继续至可执行交付，重大节点本地Git存档，实机PS5由用户验收；本轮没有push/release授权。已恢复metadata、严格依赖验证，共享生产CMake、独立网络/解码owner及PCM/WASAPI、DPAPI、配对连接UI和SDL手柄输入。源码编译/正式完整产品build成功；H264/H265/回绕、PCM/PTS、DPAPI、原source23与UI384组合回归通过。当前最终UI、OFF build、delivery及最新mailbox测试继续进行，不能据此称PS5完成实测。详情与真实失败修复记录见 `docs/REMOTEPLAY_REPAIR_EXECUTION_2026-09-11.md` 节点二。
+
+
+## 2026-09-11 Remote Play 本机测试版收口
+
+节点 `9e5c034` 已存档，追加连接状态/断开、码率与多主机配对管理、中文实机教程和中英文README开发分支说明。ON/OFF正式构建通过；69项native/core/DPAPI、真H264/H265 source/回绕/PCM/PTS、decoded mailbox与SDL边界、原source23项、UI384组合和实际PS5面板本地操作均通过。完整delivery两次PASS（47.53/46.76秒），后续只调整PS5面板并重新实测UI；证据与exe哈希边界详见修复执行记录最终节。用户尚未连接PS5，下一步由用户验收真实串流；没有宣称真实音画同步、网络恢复或手柄硬件已通过。创建桌面本机测试快捷方式，无远端发布。
+
+最终源层加FFmpeg解码分配上限（允许1080p的1088编码填充行）与open错误码，重新构建产品/source并运行source-final-bounded、boundary-bounded均exit0；最终exe SHA256：E66D01B3E5060EAAB508F35E4DE16FDBF1A08CE179290121EDAEF30B43C41203。实机连接仍交用户验证。
+
+## 2026-09-12 主机发现修复
+补齐IPv4网卡定向广播、6秒可取消搜索、错误分类与受限日志；构建、边界/UI通过。真实搜索找到开机PS5 192.168.6.232（hosts=1 error=0），未执行配对/串流。首次链接被运行中的exe占用，正常关闭后成功。命令和证据见 docs/REMOTEPLAY_DISCOVERY_REPAIR_2026-09-12.md。
+
+## 2026-09-12 PS5颜色/UI/完整手柄排查与计划
+用户确认基本串流、USB和已测增强组合通过；新增发灰、专业状态/模式重绘及全屏手柄故障，要求完整gyro/触摸板与效果，不急发布。静态检查确认AppShell动画/手柄共用timer2及endTransition误停输入；PS5输入FPS仍读captureStats。颜色日志Limited/BT709显式信令，尚未确定发灰根因；核查BT709逆曲线→sRGB显示及范围/alpha链路。ControllerInput/Backend未接gyro/触点/反馈。详见 docs/REMOTEPLAY_COLOR_UI_CONTROLLER_REPAIR_PLAN_2026-09-12.md。仅文档，无产品修改/新实机测试/发布。
+
+## 2026-09-12 目标模式施工节点一
+
+用户已授权施工。timer/真实FPS、PS5显示曲线、sensor/touch/反馈与仅观看初步实现已构建，ON/OFF、69项native、SDL虚拟输入、20+20实际UI切换、GPU灰阶色块及完整delivery47.45秒通过。命令、真实失败、日志、哈希与剩余问题见 docs/REMOTEPLAY_REPAIR_PROGRESS_2026-09-12.md。完整实机、校准/事件与设备路由仍在继续，目标未完成，无发布。
+
+## 2026-09-12 PS5修复收尾与用户验收
+
+补齐SDL触摸事件/传感器批次、120样本静止校准、16项/100ms跨线程输入队列、失焦立即释放、能力状态与音频子系统引用计数修复。用户反馈“可以了，我测试了没问题”；未逐项覆盖的蓝牙/多设备/主机直连账号共存等如实保留。最终校准超时起点修正另经自动测试。
+
+build-product/native-source/off-check成功；boundary默认与virtual、H264/H265 source成功，CTest69/69（0.50s），实际20+20 UI切换通过。运行中的EXE导致LNK1104，正常关闭后重建成功。完整命令、日志、SHA256、用户验收与自动验证边界见 docs/REMOTEPLAY_REPAIR_PROGRESS_2026-09-12.md 节点二。本地Git存档，不push/release；源码无SDK/DLL/模型/凭据。
+
+## 2026-09-12 PS5遥测、停帧与补帧降级再排查（仅方案）
+用户反馈UI可操作但画面停帧、数据面板混乱、30→2X未达目标后回到原帧率，询问软硬解切换。只读核对30694da源码及既有音画调度计划，发现LiveStatusPanel仍读采集FPS、平均/P95标签不明、GPU完成与呈现混淆、累计预算标志常驻；日志一段95张有效FG仅19呈现、76过期，95次warmup。冻结根因和30→60确切场景未复现。日志保存logs/ps5-telemetry-audit-20260912（忽略），完整证据与P0-P3方案见 docs/PS5_TELEMETRY_STALL_FG_DECODE_REPAIR_PLAN_2026-09-12.md。当前只新增文档，无产品修改/构建/新GPU测试/发布。方案初次apply_patch因WORKLOG上下文不匹配未写入，随后重新写入并检查。
+
+### 同日追加：用户复现4K30原生NR＋2X锁原帧率
+新日志revision4确认NR/flow/FG均4K，690次FG候选中682次拒绝、8次Evaluate（1预热＋7有效），7有效全部过期，generatedPresented=0；原帧约30fps且媒体1×。文件一批处理/等待呈现完成后才处理下一批，与插帧中点早于B原帧截止时间的差异形成强疑点。方案P1增加有界提前增强/呈现解耦，不能只调整FG阈值。日志与SHA256见方案补充节；这是用户复现加日志/静态审查，不是Agent新执行的负载测试，产品尚未修改。
+
+## 2026-09-12 全部修复目标开工：P0独立进度
+开工adff31b，分支codex/ps5-scheduler-telemetry-decode。独立inbox接收/解码窗口、GPU/Present进度、受限关键帧恢复已构建和窄测通过；故障注入尚未验证，其他P1-P3继续。详见docs/PS5_TELEMETRY_SCHEDULER_EXECUTION_2026-09-12.md。目标active，无发布。
+
+### 2026-09-12 文件FG提前增强节点
+按PS5_TELEMETRY_STALL_FG_DECODE_REPAIR_PLAN实施文件预览容量2的提前增强。实际4K30原生NR+DLSS2X测试和暂停seek回归均退出0，短媒体稳态约60呈现提交/秒，生成过期0，音频约1倍速。详细命令、日志和未验证边界见PS5_TELEMETRY_SCHEDULER_EXECUTION_2026-09-12.md。仍未完成全部修复，不发布。
+
+### 2026-09-12 PS5硬解/遥测与欠速恢复节点
+实现PS5自动/软件/硬解选择、实际D3D12VA纹理输出与GPU消费引用保留，自动失败回退及强制硬解报错；重做实时状态分组与PS5独立接收/解码/呈现统计。实现FG分成本预算、限频连续恢复探测，移除旧同步文件分支。详见PS5_TELEMETRY_SCHEDULER_EXECUTION_2026-09-12.md。
+产品ON/OFF和native source构建通过。真实H264/H265软硬对比max_error=0，故障回退注入通过；NR/SR/FG欠速、动态负载恢复、XeSS连续音频、输入中断与EOF回归通过。45秒4K30原生NR2X：1286源帧、1253生成，absLatenessP95=0.79ms，非所有帧必达目标的承诺。统一gate、最后UI验证和最终用户说明待完成；不发布。用户要求修复结束后正常关机，明天实测PS5。
+
+## 2026-09-12 最终本机交付节点
+
+上述待办已经执行：最终 product 构建通过（logs/ps5-final-product-guard-build.log），Remote Play OFF 构建通过；Native CTest 69/69，文件源23项、调度/呈现/UI/边界回归通过。统一 delivery gate 45.29秒通过，证据 logs/delivery/82d949d48503403495e10de477ce70d8/result.json。最终 EXE SHA256 7AA2452E05E6B423DB1C7A4D3D66B9C9D2BFE41262C337B8D70010EBE301E61A。
+
+45秒4K30原生NR+2X实际长测：1284原帧呈现、1247生成帧呈现、过期5，末段59fps；并非零丢帧或全硬件60fps承诺。400ms源间断恢复后240帧原帧全部呈现、EOF无取消；单帧EOF无挂起；3X、动态欠速恢复、XeSS音频连续性均通过。所有单次测试均小于300秒。软硬H264/H265色值比较最大差0，强制硬解无设备拒绝和自动回退最终回归通过。
+
+UI最终使用真实窗口DC抓取并检查非黑图，已人工查看overview/advanced快照；20次模式切换及20次全屏通过（logs/ps5-final-ui-visible.log）。此前隐藏子窗口PrintWindow黑图仅是无效测试方式，不作为产品通过证据。
+
+新增 docs/PS5_REPAIR_ACCEPTANCE_2026-09-12.md 汇总测试入口、日志与验收边界，中英文README更新开发分支状态。桌面“Veyra PS5 测试版”指向 out/remoteplay/product-repair/veyra.exe，移除smoke/禁用增强启动参数。代码节点3405717。未push、未发布，未提交SDK/DLL/模型/测试媒体。
+
+下一步唯一任务：用户明天实际连接PS5验收新增硬解、负载恢复与偶发停帧。原冻结未复现，原始根因不能断言；本轮没有真实PS5/采集卡复测，不把本地码流测试冒充网络验收。用户授权收尾后正常关机，不使用强制关闭参数。
+
+## 2026-09-12 增强额外延迟估计
+
+用户确认主面板需要相对无增强播放的新增延迟，允许预估。新增 EnhancementDelayEstimate.h；Engine在实际原帧Present后记录一秒窗口样本。文件使用媒体时钟正向lateness（预处理驻留不计，启动/seek重新锚定不属于稳态）；直播使用已解码时间到Present的帧龄，减去颜色、输出合成及Present基础开销估计。PS5取真实decodedHost，采集无该时间戳时取callback，可能包含基础转换/排队而偏高。没有同源同时无增强A/B标定，不承诺精确因果差值；无增强定义0、基线缺失返回未测，负值夹0。XeSS内部排队/屏幕扫描不可测。故不应称端到端实测。
+
+LiveStatusPanel主数改“增强额外延迟 · 估计”，原驻留均值/P95移至详情。本轮不改变音频、增强、调度策略。单独记录估计样本，不能用不同统计群体的P95相减。
+
+构建 out/remoteplay/build-extra-delay.cmd 通过，logs/extra-delay-final-build.log。repair_contract_tests 88 checks 0 failures（含预读取不计延迟、基线扣除、未知/无效样本检查），logs/extra-delay-contract.log。UI首次脚本过早检查WM_CREATE子控件失败，保留logs/extra-delay-ui.log；加同步WM_NULL等待创建处理完毕后重跑通过，logs/extra-delay-ui-retry.log，overview实际截图已查看。最终仅修改底栏文案后重新构建通过。
+
+用户GTAVI_An_Extended_Look_4K_Native.mp4实测12秒 --native --nr --fg-multiplier 2 --no-sr --smoke-seconds 12，exit0、291原帧/289生成、failed=false、末段约60呈现/秒、absLatenessP95=0.92ms，旧驻留P95=67.022ms；证据logs/extra-delay-4k.log。未执行实卡/PS5新对照测量。软件路径仍 out/remoteplay/product-repair/veyra.exe，桌面PS5测试版指向此处。未发布、未push、无二进制入Git。
+
+## 2026-09-12 状态面板卡片与曲线
+
+按用户图片将默认实时状态面板改为深色圆角卡片：光流/NR/SR/FG四项最近一秒GPU均值；30秒额外延迟估计历史（250ms采样，缺失断线、不填0）；旁边总估计；底部待输出帧数和状态。详情保留旧阶段诊断。代码 apps/veyra/ui/LiveStatusDashboard.h。
+
+FrameFlowMetrics.pendingOutputFrames 接实际呈现作业中尚未消费的有效帧机会（含待GPU完成、待截止时间的原帧/有效生成帧，不把两个batch冒充两帧），正常呈现、过期、取消均扣除；XeSS SDK内部队列不可观测，卡片星号注明不含内部队列。低于请求目标95%持续8个250ms样本判黄过载；达到阈值持续8样本恢复绿正常；failed红错误；待机/暂停/采样/调整灰。95%容差防止59.94相对60等正常抖动报警；无目标不据此推断性能。软件reported failed以外未知故障不能凭低FPS武断标红。
+
+构建logs/dashboard-final-build.log通过；中途scope guard初始化/文本替换两次编译错误修复，保留dashboard-build.log和dashboard-build2.log。UI脚本logs/dashboard-ui.log通过（模式切换/全屏/详情），overview截图实际查看布局完整。修复待机applying残留显示后最终构建通过。repair_contract 88checks0failures，logs/dashboard-contract.log。
+
+用户4K视频原生NR+2X实际12秒smoke退出0，294原帧、292生成、failed=false。logs/dashboard-4k.log，稳态pendingFrames=1，额外延迟估计约0.4–0.5ms，absLatenessP95=0.81ms。仅本地RTX运行验证，未做PS5/采集卡实测和人为故障红灯注入。没有发布、push或二进制入Git；桌面PS5测试版仍指向已更新EXE。
+
+### 曲线卡片内切换精细面板
+
+用户指定只在曲线卡片区域切换。右上小三角切换精细数据/曲线；顶部四卡、底部队列与状态固定。精细列表按卡片高度裁切完整行，滚轮仅在卡片内容区生效；返回曲线保留历史。旧全局标题点击切换已取消。
+
+构建 logs/dashboard-inset-final-build.log 通过，UI脚本按DPI点击新位置、依次抓取overview/advanced/returned，logs/dashboard-inset-final-ui.log通过；实际查看advanced截图，顶部/底部固定且文字未溢出卡片。首次链接被运行中EXE占用，正常关闭后重建；测试脚本首轮坐标变量遗漏，补齐后重跑，上述最终结果为有效证据。未修改播放链路，不重复GPU性能测试；未发布。
+
+## 2026-09-12 拖动进度条回弹及输出槽占用错误
+
+用户日志03:09:30.998 frame-pool slot=1 still leased; refusing overwrite batch=1276。此前两次seek约344.93/643.709秒已完成，再播放时发生。原始日志保留logs/seek-user-original.log。证据证明资源仍被占用；不能仅凭这条日志确定唯一引用持有者。
+
+Engine背压从只检查两个batch容量改为同时检查下一奇偶输出槽所有real/generated弱引用是否释放；推进呈现/完成观测后再取下一帧，不覆盖活跃纹理。跳转请求在背压等待中到达时立即返回外层处理seek，避免旧时间线继续取帧；无作业却长期占槽才超时报错，不把正常低帧率deadline等待当错误。未关闭原frame-pool保护，未增加每帧GPU fence阻塞。
+
+进度条松手后原来立即用旧snapshot.position刷新，导致回弹。现在seek请求和呈现确认有序号，发出后保持最新目标，只有该请求对应的新帧实际Present后才恢复跟随；TB_ENDTRACK不重复发请求，时间文字显示目标及跳转中。暂停连续请求以最后一次为准。顺带修复有效生成帧从Pending到Valid时队列计数增加可能触发unsigned减法的问题。
+
+验证：最终构建logs/seek-ui-final-build.log；repair_contract 88checks0failures。新增LivePresentationTests --seek-stress，实际用户4K长视频、原生NR+3X，六次前后seek（含原日志两位置）、每次后续45原帧、暂停连续32/44/61秒seek、恢复和关闭，16项通过exit0，logs/seek-stress-final.stdout.log与logs/seek-stress-final/engine.log，180秒上限内结束。此前首轮测试分支插入遗漏误入旧测试导致FAIL，logs/seek-stress.stdout.log保留；修正后seek-stress2及最终两轮均通过。UI既有切换脚本logs/seek-ui.log通过；未通过自动鼠标视频测试独立逐帧验证拖动视觉，需用户实测手感。未做新的PS5/采集卡测试、未发布或push。
+
+## 2026-09-12 专业设置阅读顺序
+
+按用户要求调整UI，不改变增强执行顺序：NR运行版本→实时/原生NR处理档位→超分开关/目标/方式；运动页先光流提供方、性能选项与质量，再补帧方式与倍率；采集/串流音频同步移入独立音频页。页签为增强、运动、音频、预设、导出，旧控制ID及数据绑定保留。
+
+apps/veyra/SettingsWindow.cpp调整布局；apps/veyra/ui/AppShell.cpp新增音频页签（不移动旧枚举ID）、排列和切换。logs/settings-order-build.log构建通过；临时UI检查脚本out/remoteplay/test-settings-order.ps1基于实际HWND矩形确认218<203<201、209<204<208<202，音频页独立可切换，既有专业/全屏切换脚本通过，logs/settings-order-ui.log。纯UI布局调整，未重跑GPU或实机串流性能测试。未发布或push。
+
+## 2026-09-12 NR先行低延迟与悬停帮助
+完成默认关闭的NR→SR→FG实验预览开关、旧预设默认关闭及v11存储，参数/播放/采集/PS5悬停说明。详细代码、测试命令、失败修复与未验证边界见 docs/NR_BEFORE_SR_PREVIEW_2026-09-12.md。90项contract、42组预设迁移、实际两种SR后端+NR+FG与恢复默认9项、统一48.25秒gate及UI通过。无新SDK/运行时，无push/release；实卡及PS5画质由用户验收。
+
+## 2026-09-12 PS5 HDR、PSN与主机保留规划
+用户要求先写方案。新增 docs/PS5_HDR_PSN_HOST_PLAN_2026-09-12.md：画质分段定位、实测码率、稳定用户目录及旧配对迁移、PSN浏览器授权/刷新/条件性自动注册、Main10/HDR显示与SDR映射、增强兼容能力矩阵和验收节点。静态检查确认现有配对已DPAPI保存，目录随applicationRoot变化；RemotePlaySource与EnhanceGraph拒绝HDR，不能只增选项。重复配对根因与本次糊灰尚未实测确认；既有BT1886修复不能当作当前无问题的证明。本轮仅文档与代码/官方上游资料核对，无产品修改，无PS5/OAuth/HDR实测，无发布。
+
+## 2026-09-12 PS5 HDR/PSN/主机持久化实施
+
+开工标签checkpoint/ps5-hdr-psn-preimplementation-2026-09-12，方案提交37cfdf4。固定用户目录及DPAPI旧档迁移、稳定主机ID和观看模式、PSN浏览器回调授权/刷新/注销、H265 HDR与Main10输入、HDR原生旁路/SDR映射后增强已经进入产品代码。发现并修复sws_scale目标平面数组只有2项导致新10-bit Full测试访问异常；补齐P010码值、PQ/色域及FP16呈现。详细命令、失败与未完成边界见 docs/PS5_HDR_PSN_EXECUTION_2026-09-12.md。8组HDR GPU/呈现、Main10软硬解各12次真实NR、SDR颜色回归、90项contract及UI通过；42.73秒gate为收尾前二进制，最终按针对性测试报告。真实PS5画质、Sony登录未验收；免PIN自动注册、原生HDR增强不宣称完成。无发布/push/运行时入Git。
+
+收尾HDR组合回归：logs/ps5-hdr-combo.log，软/硬解 × NR单独/标准SR→NR→FG/低延迟NR→SR→FG，共6组通过；组合4K/2X各12次SR、12次NR、11有效生成帧。实际PS5画质与Sony授权仍待用户操作。
+
+## 2026-09-12 悬停说明实际不显示修复
+用户反馈悬停没有效果。本轮实际鼠标命中低延迟按钮后验证：旧注册路径 tooltip 可创建但 TTM_GETTOOLCOUNT=0；不是窗口存在就算通过。TOOLINFOW 使用完整 sizeof 在当前 common-controls 环境被拒绝。改为 TTTOOLINFOW_V2_SIZE 后 count=103，实际悬停可见；同时嵌套控件使用直接父窗口和已有静态帮助字符串，避免依赖中间面板转发文字回调。AppShell 与 SettingHelp 共用注册处检查返回值，失败写 ui-help 日志。
+修改 apps/veyra/ui/AppShell.cpp、SettingHelp.h。构建命令 cmd /c out/remoteplay/build-extra-delay.cmd，最终 logs/hover-final-build.log 成功。实际鼠标脚本 out/remoteplay/test-hover-real.ps1，logs/hover-visible-final.log：按钮命中、103项注册、提示 visible=True；logs/hover-visible.png 已查看，中文说明完整、深色背景。此前只验 tooltip HWND 的旧 nr-first-help-ui 不能证明悬停功能通过，本条修正该验证缺口。
+本轮第一次更换父窗口/文字回调后仍失败，第二次尝试显式 relay 仍失败，均保留失败结果；relay 已撤回，真正恢复发生于 V2 结构体尺寸修复。UI回归首次用 Windows PowerShell 5 读取无BOM中文脚本产生解析错误（logs/hover-final-ui.log），改用 pwsh 重跑（logs/hover-final-ui-retry.log）。无增强/音视频管线修改，本轮未执行新 RTX Create/Evaluate 或实机 PS5 测试。

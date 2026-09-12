@@ -6,7 +6,7 @@
 namespace veyra::diagnostics {
 enum class GpuStage { Color, Sr, Flow, Nr, Residual, Fg1, Fg2, Fg3, FgBatch, Blit, Count };
 enum class SampleState { NotExecuted, Pending, Measured, Unavailable };
-enum class CpuStage { Decode, Submit, SlotWait, ReadyWait, DeadlineWait, Present, Count };
+enum class CpuStage { Decode, Submit, SlotWait, ReadyWait, DeadlineWait, Present, DecodedQueue, EnhancementDelayEstimate, Count };
 enum class PairTiming { ArrivalInterval, GeneratedFromA, GeneratedFromB, Count };
 enum class ResetStage { Drain, Destroy, Create, Warmup, FirstValid, Count };
 enum class ResetOutcome { InProgress, Completed, Failed, RolledBack, Cancelled };
@@ -27,6 +27,9 @@ struct FrameFlowIdentity {
 struct FrameFlowCounters {
     uint64_t captureReceived=0,mailboxOverwritten=0;
     uint64_t sourceAccepted=0,sourceSkippedBeforeGraph=0,realSubmitted=0;
+    // Realtime file preview only: decoded source frames whose enhancement
+    // opportunity was dropped (PTS window fully passed) before the graph.
+    uint64_t previewSkippedBeforeGraph=0;
     uint64_t fgCandidate=0,fgEvaluated=0,fgSkippedBeforeEval=0,fgReadyValid=0,fgInvalid=0,fgWarmup=0;
     uint64_t xessSdkGenerated=0,xessSdkPresented=0,realReady=0;
     uint64_t realPresented=0,generatedPresented=0,generatedExpiredAfterEval=0,cancelledBeforePresent=0;
@@ -34,14 +37,17 @@ struct FrameFlowCounters {
     uint32_t commandSlotsInFlight=0,commandSlotHighWater=0,presentationBatchHighWater=0;
 };
 struct FrameFlowMetrics {
+    int64_t lastReady100ns=0,lastPresent100ns=0,lastSubmit100ns=0,lastFgRejected100ns=0;
     FrameFlowIdentity latest;
     FrameFlowCounters counters;
     std::optional<double> slotReuseWaitMs,captureArrivalToPresentReturnMs,gpuReadyWaitMs,deadlineWaitMs;
     uint64_t slotReuseWaitCount=0;
     double validGeneratedFps=0,presentSubmitFps=0,sourceCompletedFps=0,outputCompletedFps=0,xessSdkSubmitFps=0;
+    double realPresentFps=0,generatedPresentFps=0;
     bool rateWindowReady=false;
     std::optional<double> softwareLatencyMs,softwareLatencyP95Ms,slotWaitPerFrameMs;
     uint64_t latencySamples=0;
+    uint32_t pendingOutputFrames=0; // valid frame opportunities retained by presenter jobs
     std::array<TimingAggregate,size_t(GpuStage::Count)> gpuTiming;
     std::array<TimingAggregate,size_t(CpuStage::Count)> cpuTiming;
     std::array<TimingAggregate,size_t(PairTiming::Count)> pairTiming;

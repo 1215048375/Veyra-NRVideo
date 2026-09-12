@@ -1,5 +1,6 @@
 #include "SettingsWindow.h"
 #include "ui/Theme.h"
+#include "ui/SettingHelp.h"
 #include "veyra/engine/PresetStore.h"
 #include "veyra/RuntimePaths.h"
 #include <filesystem>
@@ -54,7 +55,7 @@ void populate(engine::EnhancementSettings s){
     send(207,CB_SETCURSEL,s.videoSrQuality,0);send(202,CB_SETCURSEL,s.multiplier-1,0);
     send(208,CB_SETCURSEL,int(s.frameGenerationBackend),0);send(203,CB_SETCURSEL,int(s.nrPolicy),0);
     send(218,CB_SETCURSEL,int(s.nrRuntime));
-    check(219,s.captureCompatible?BST_CHECKED:BST_UNCHECKED);
+    check(219,s.captureCompatible?BST_CHECKED:BST_UNCHECKED);check(220,s.lowLatency?BST_CHECKED:BST_UNCHECKED);
     send(204,CB_SETCURSEL,int(s.flow),0);send(205,CB_SETCURSEL,int(s.content),0);
     send(209,CB_SETCURSEL,int(s.opticalFlowBackend),0);
     check(215,s.amdFlowHalfResolution?BST_CHECKED:BST_UNCHECKED);
@@ -73,7 +74,7 @@ bool read(engine::EnhancementSettings& s,bool allPages=false){s=enhancementEnabl
         s.multiplier=uint32_t(multiplier+1);s.frameGenerationBackend=static_cast<engine::FrameGenerationBackend>(generation);s.opticalFlowBackend=static_cast<engine::OpticalFlowBackend>(flowBackend);s.amdFlowHalfResolution=checked(215)==BST_CHECKED;s.flow=static_cast<engine::FlowQuality>(flowQuality);s.content=static_cast<engine::ContentRate>(content);
         s.audioSync=static_cast<engine::AudioSyncMode>(send(216,CB_GETCURSEL));
         s.nrRuntime=static_cast<engine::NrRuntime>(send(218,CB_GETCURSEL));
-        s.captureCompatible=checked(219)==BST_CHECKED;
+        s.captureCompatible=checked(219)==BST_CHECKED;s.lowLatency=checked(220)==BST_CHECKED;
         wchar_t offset[32]{};GetWindowTextW(item(217),offset,32);wchar_t* offsetEnd=nullptr;const auto parsed=wcstol(offset,&offsetEnd,10);
         if(offsetEnd==offset||*offsetEnd||parsed<-250||parsed>250){message(L"声音偏移须为 -250 至 250 ms");return false;}s.audioOffsetMs=int(parsed);
         for(int j=0;j<3;++j)if(GetPropW(item(730+j),L"veyra.selected")){s.srTarget=static_cast<pipeline::SrTarget>(j);break;}
@@ -98,6 +99,7 @@ bool liveField(int id){
         case 205:s.content=static_cast<engine::ContentRate>(send(id,CB_GETCURSEL));break;
         case 208:s.frameGenerationBackend=static_cast<engine::FrameGenerationBackend>(send(id,CB_GETCURSEL));if(s.frameGenerationBackend==engine::FrameGenerationBackend::XeSS)s.multiplier=std::min(s.multiplier,2u);break;
         case 209:s.opticalFlowBackend=static_cast<engine::OpticalFlowBackend>(send(id,CB_GETCURSEL));break;
+        case 220:s.lowLatency=checked(id)==BST_CHECKED;break;
         case 215:s.amdFlowHalfResolution=checked(id)==BST_CHECKED;break;
         case 216:s.audioSync=static_cast<engine::AudioSyncMode>(send(id,CB_GETCURSEL));break;
         case 217:{wchar_t value[32]{};GetWindowTextW(item(id),value,32);wchar_t* end=nullptr;const auto parsed=wcstol(value,&end,10);if(end==value||*end||parsed<-250||parsed>250){message(L"声音偏移须为 -250 至 250 ms");return false;}s.audioOffsetMs=int(parsed);break;}
@@ -136,6 +138,7 @@ HWND add(const wchar_t* cls,const wchar_t* text,int id,DWORD style,int group,int
 void button(const wchar_t* title,int id,int group,int x,int y,int width=-1){add(L"BUTTON",title,id,BS_PUSHBUTTON|WS_TABSTOP,group,x,y,width,36);}
 void combo(int id,int group,int y,std::initializer_list<const wchar_t*> names){auto h=add(L"COMBOBOX",L"",id,CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP,group,12,y,-1,200);for(auto name:names)SendMessageW(h,CB_ADDSTRING,0,LPARAM(name));}
 LRESULT CALLBACK proc(HWND h,UINT msg,WPARAM wp,LPARAM lp){
+    if(msg==WM_COMMAND&&!populating&&LOWORD(wp)==220&&HIWORD(wp)==BN_CLICKED){liveField(220);return 0;}
     if(msg==WM_COMMAND&&!populating&&LOWORD(wp)==219&&HIWORD(wp)==BN_CLICKED){liveField(219);return 0;}
     if(msg==WM_COMMAND&&!populating&&LOWORD(wp)==218&&HIWORD(wp)==CBN_SELCHANGE){liveField(218);return 0;}
     if(msg==WM_COMMAND&&!populating&&((LOWORD(wp)==216&&HIWORD(wp)==CBN_SELCHANGE)||(LOWORD(wp)==217&&HIWORD(wp)==EN_CHANGE))){liveField(LOWORD(wp));return 0;}
@@ -198,6 +201,34 @@ case WM_CREATE:{window=h;font=makeFont(h);items.clear();displayedBackendWarning.
     add(L"STATIC",L"NR 运行版本",1117,0,0,12,56,-1,24);
     combo(218,0,84,{L"NVIDIA 原版 · RTX 50",L"社区兼容 · RTX 40/50 实验"});
     SetPropW(item(218),L"veyra.tip",HANDLE(L"社区版为用户提供的修改版；RTX 40 兼容性需实机验证。切换会重建增强管线。"));
+    // Final layout in reading order; existing control IDs and bindings stay intact.
+    for(auto& entry:items){
+        const int id=GetDlgCtrlID(entry.h);
+        if(id==203)entry.y=128;
+        if(id==201)entry.y=176;
+        if(id>=730&&id<=732)entry.y=220;
+        if(id==207)entry.y=264;
+        switch(id){
+        case 1113:entry.y=50;break;case 209:entry.y=78;break;
+
+        case 215:entry.y=122;break;case 204:entry.y=166;break;
+        case 1111:entry.y=214;break;case 208:entry.y=242;break;
+        case 1112:entry.y=286;break;case 202:entry.y=314;break;
+        case 1114:entry.y=358;break;case 205:entry.y=386;break;
+        case 1110:entry.y=430;break;
+        case 1115:entry.page=4;entry.y=12;break;
+        case 216:entry.page=4;entry.y=50;break;
+        case 1116:case 217:entry.page=4;entry.y=100;break;
+        }
+    }
+    setText(item(1103),L"光流与补帧");
+    setText(item(1113),L"光流 · 运动估算");
+    setText(item(1115),L"采集 / 串流音频同步");
+    add(L"STATIC",L"调整实时输入的声音补偿，不改变补帧倍率。正值让声音更晚；自动模式由软件估算。",1118,0,4,12,148,-1,90);
+    for(auto& entry:items)if(entry.page==0&&entry.y>=176)entry.y+=44;
+    add(L"BUTTON",L"低延迟模式 · 实验",220,BS_AUTOCHECKBOX|WS_TABSTOP,0,12,172,-1,36);
+    SetPropW(item(220),L"veyra.tip",HANDLE(L"默认先超分，再NR（DLSS5）。打开后先NR再超分，最后补帧：少搬点砖，可能更快，也可能多些鬼影或边缘瑕疵。只用于预览；导出不换顺序。需同时开启NR和超分才有作用。"));
+    for(const auto& entry:items)if(auto help=settingHelp(GetDlgCtrlID(entry.h)))SetPropW(entry.h,L"veyra.tip",HANDLE(help));
     loadStore();refreshPresets();populate(controller->snapshot().desired);message(store.error());SetTimer(h,1,250,nullptr);arrange();return 0;}
 case WM_SIZE:arrange();return 0;
 case WM_ERASEBKGND:return 1;
@@ -235,7 +266,7 @@ std::vector<std::wstring> presetNames(){loadStore();std::vector<std::wstring> ou
 bool presetAt(size_t index,engine::EnhancementSettings& out){loadStore();if(index>=store.entries().size())return false;out=store.entries()[index].settings;return true;}
 HWND createSettingsPanel(HWND parent,engine::EngineController& engine,std::function<bool(engine::EnhancementSettings)> callback){controller=&engine;apply=std::move(callback);WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"VeyraInspector";wc.hbrBackground=panelBrush();wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);return CreateWindowExW(WS_EX_CONTROLPARENT,wc.lpszClassName,L"专业参数",WS_CHILD|WS_CLIPCHILDREN,0,0,328,500,parent,nullptr,wc.hInstance,nullptr);}
 void settingsVisibility(bool visible){if(window&&!visible&&IsChild(window,GetFocus()))SetFocus(GetParent(window));}
-void settingsPage(int value){if(window&&IsChild(window,GetFocus()))SetFocus(body);page=std::clamp(value,0,3);scroll=0;arrange();}
+void settingsPage(int value){if(window&&IsChild(window,GetFocus()))SetFocus(body);page=std::clamp(value,0,4);scroll=0;arrange();}
 void settingsEnabled(bool enabled,const engine::EnhancementSettings& configured){enhancementEnabled=enabled;configuredSettings=configured;if(window)syncProtection(enabled?controller->snapshot().desired.protection:configured.protection);if(window&&!enabled&&!dirty&&displayedRevision!=configured.revision)populate(configured);if(window){auto desired=controller->snapshot().desired;check(200,enabled&&desired.nr?BST_CHECKED:BST_UNCHECKED);check(201,enabled&&desired.sr?BST_CHECKED:BST_UNCHECKED);if(!enabled)message(L"增强已关闭。数值修改保存待启用配置；点击 NR / 超分可直接开启。");}}
 void settingsDpi(){if(!window)return;auto old=font;font=makeFont(window);for(auto& item:items)SendMessageW(item.h,WM_SETFONT,WPARAM(font),TRUE);DeleteObject(old);arrange();}
 void exportPanelStatus(const engine::ExportJobSnapshot& job,bool canExport,bool canSave){if(!window)return;setText(item(506),job.state==engine::ExportState::Idle?L"尚无导出任务":job.message+L"\n"+std::to_wstring(int(job.progress*100))+L"% · 源帧 "+std::to_wstring(job.sourceFrames)+L" / 编码 "+std::to_wstring(job.encoded)+L"\n生成 "+std::to_wstring(job.generated)+L" / CFR占位 "+std::to_wstring(job.holds)+L"\n作业 "+std::to_wstring(job.jobId)+L" · 冻结版本 "+std::to_wstring(job.frozenRevision));setText(item(507),job.output.empty()?L"目标由保存窗口选择":L"输出："+std::filesystem::path(job.output).filename().wstring());EnableWindow(item(501),canExport&&!job.active());EnableWindow(item(502),canSave);EnableWindow(item(503),job.state==engine::ExportState::Running||job.state==engine::ExportState::Paused);EnableWindow(item(504),job.active());}

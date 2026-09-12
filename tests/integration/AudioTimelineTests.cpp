@@ -80,10 +80,41 @@ int jitter(const std::filesystem::path& dir) {
     }
     return failures?1:0;
 }
+int underrate(const std::filesystem::path& dir) {
+    // Deterministic sustained under-rate: a 60fps source whose enhancement
+    // completes at only ~51fps — the RTX4060 revision11 log signature.
+    // Presented coverage advances slower than media time while real PCM plays.
+    // The audio master clock must keep one-times continuous playback with no
+    // rebuffer; video must drop preview work instead of pausing sound.
+    const auto file=dir/"video-underrate.wav";fixture(file,48000,8000);
+    AudioPipeline pipe;AudioRenderer renderer;renderer.setGain(0);
+    check(pipe.open(file.wstring()),"open sustained under-rate fixture");
+    pipe.holdForVideo();pipe.startThread(&renderer,true);
+    check(until([&]{return renderer.started()&&!pipe.endpointRecovering()&&pipe.waitingForVideo();}),"prefill held before under-rate replay");
+    const auto waits=pipe.videoWaitCount();
+    const auto begin=std::chrono::steady_clock::now();
+    const double frameCostMs=1000.0/51.0,intervalMs=1000.0/60.0;
+    pipe.videoPresented(intervalMs);
+    for(int n=1;n<=204;++n){
+        std::this_thread::sleep_until(begin+std::chrono::microseconds(int64_t(n*frameCostMs*1000)));
+        const double presentedPts=n*intervalMs;
+        pipe.videoReady(presentedPts);
+        pipe.videoPresented(presentedPts+intervalMs);
+    }
+    const double wall=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-begin).count();
+    const double media=renderer.mediaTimeMs();const auto stops=pipe.videoWaitCount()-waits;
+    std::cout<<"UNDERRATE60 wallMs="<<wall<<" audioMs="<<media<<" additionalVideoPauses="<<stops<<" underruns="<<renderer.underruns()<<'\n';
+    check(stops==0,"51/60 sustained under-rate never stops audio");
+    check(std::abs(media-wall)<35,"audio keeps one-times speed while enhancement under-rates");
+    check(renderer.underruns()==0&&pipe.overruns()==0,"under-rate loses no PCM and inserts no silence");
+    pipe.stopThread();
+    return failures?1:0;
+}
 }
 int wmain(int argc, wchar_t** argv) {
-    if (argc!=2&&!(argc==3&&wcscmp(argv[2],L"--jitter")==0)) return 2;
+    if (argc!=2&&!(argc==3&&(wcscmp(argv[2],L"--jitter")==0||wcscmp(argv[2],L"--underrate")==0))) return 2;
     const std::filesystem::path dir=argv[1]; std::filesystem::create_directories(dir);
+    if(argc==3&&wcscmp(argv[2],L"--underrate")==0)return underrate(dir);
     if(argc==3)return jitter(dir);
     for(uint32_t rate:{48000u,44100u}) { const auto file=dir/(std::to_string(rate)+".wav"); fixture(file,rate); decode(file); }
     AudioRenderer renderer;
@@ -193,14 +224,19 @@ int wmain(int argc, wchar_t** argv) {
     gated.videoReady(0);std::this_thread::sleep_for(350ms);
     check(std::abs(gatedRenderer.mediaTimeMs()-initial)<.1,"350ms NR startup and GPU-ready alone cannot advance sound");
     gated.videoPresented(100);
-    check(until([&]{return gated.waitingForVideo()&&gatedRenderer.mediaTimeMs()>=100;}),"audio owner stops at video coverage while GPU owner is blocked");
-    const double stalled=gatedRenderer.mediaTimeMs();std::this_thread::sleep_for(350ms);
-    std::cout<<"VIDEO_GATE stallStartMs="<<stalled<<" stallEndMs="<<gatedRenderer.mediaTimeMs()<<'\n';
-    check(stalled<=210&&std::abs(gatedRenderer.mediaTimeMs()-stalled)<.1,"long GPU stall stays bounded after jitter grace and clock stops accumulating lead");
-    gated.videoReady(260);
-    check(until([&]{return gatedRenderer.mediaTimeMs()>=260;}),"ready later frame can reach its deadline after missing FG candidates");
-    gated.videoPresented(310);
-    check(until([&]{return gatedRenderer.mediaTimeMs()>=290;}),"actual next video releases audio clock");
+    // Sustained under-rate: the video owner presents nothing for 600ms while
+    // coverage stays at 100ms. The audio master clock keeps playing real PCM
+    // at one-times speed — steady-state video lag never pauses sound (P1).
+    const auto underrateBegin=std::chrono::steady_clock::now();
+    std::this_thread::sleep_for(600ms);
+    const double underrateWall=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-underrateBegin).count();
+    const double underrateMedia=gatedRenderer.mediaTimeMs();
+    std::cout<<"VIDEO_GATE underrateWallMs="<<underrateWall<<" underrateMediaMs="<<underrateMedia<<" coverageMs=100 waits="<<gated.videoWaitCount()<<'\n';
+    check(!gated.waitingForVideo(),"sustained video under-rate never marks audio rebuffering");
+    check(std::abs(underrateMedia-underrateWall)<35,"600ms video stall keeps one-times continuous audio");
+    check(gatedRenderer.underruns()==0,"under-rate does not starve the endpoint or insert silence");
+    gated.videoPresented(1200);
+    check(until([&]{return gatedRenderer.mediaTimeMs()>underrateMedia+50;}),"audio keeps advancing after video coverage catches up");
     gated.holdForVideo();std::this_thread::sleep_for(70ms);
     const double rebuilding=gatedRenderer.mediaTimeMs();std::this_thread::sleep_for(250ms);
     check(std::abs(gatedRenderer.mediaTimeMs()-rebuilding)<.1,"settings rebuild freezes PCM position without skipping samples");
@@ -213,7 +249,7 @@ int wmain(int argc, wchar_t** argv) {
     check(std::abs(gatedRenderer.mediaTimeMs()-1200)<.1,"resume waits for video history warmup");
     gated.videoPresented(1300);
     check(until([&]{return gatedRenderer.mediaTimeMs()>1250;}),"resume uses real retained PCM after video anchor");
-    check(gated.videoWaitCount()>=4&&gated.overruns()==0,"software video holds are observed and PCM queue remains bounded");
+    check(gated.videoWaitCount()>=3&&gated.overruns()==0,"explicit transport holds are observed and PCM queue remains bounded");
     gated.stopThread();
     return failures ? 1 : 0;
 }

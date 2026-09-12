@@ -9,7 +9,7 @@ namespace veyra::pipeline {
 inline ColorDescription resolveFrameColor(const AVFrame& frame,ColorDescription c={}){
     switch(frame.format){
     case AV_PIX_FMT_NV12:c.pixelFormat=SourcePixelFormat::NV12;break;
-    case AV_PIX_FMT_P010:c.pixelFormat=SourcePixelFormat::P010;break;
+    case AV_PIX_FMT_YUV420P10LE:case AV_PIX_FMT_P010:c.pixelFormat=SourcePixelFormat::P010;break;
     case AV_PIX_FMT_YUV420P:case AV_PIX_FMT_YUVJ420P:c.pixelFormat=SourcePixelFormat::Yuv420P;break;
     case AV_PIX_FMT_YUYV422:c.pixelFormat=SourcePixelFormat::Yuy2;break;
     case AV_PIX_FMT_BGRA:case AV_PIX_FMT_BGR0:c.pixelFormat=SourcePixelFormat::Bgra8;break;
@@ -29,7 +29,14 @@ inline ColorDescription resolveFrameColor(const AVFrame& frame,ColorDescription 
     case AVCOL_SPC_BT2020_CL:c.matrix=YuvMatrix::BT2020CL;c.matrixAssumed=false;break;
     default:break;
     }
+    switch(frame.color_primaries){
+    case AVCOL_PRI_BT709:c.primaries=ColorPrimaries::BT709;c.primariesAssumed=false;break;
+    case AVCOL_PRI_BT2020:c.primaries=ColorPrimaries::BT2020;c.primariesAssumed=false;break;
+    default:break;
+    }
     switch(frame.color_trc){
+    case AVCOL_TRC_SMPTE2084:c.transfer=TransferFunction::PQ;c.transferAssumed=false;break;
+    case AVCOL_TRC_ARIB_STD_B67:c.transfer=TransferFunction::HLG;c.transferAssumed=false;break;
     case AVCOL_TRC_BT709:case AVCOL_TRC_SMPTE170M:c.transfer=TransferFunction::BT709;c.transferAssumed=false;break;
     case AVCOL_TRC_IEC61966_2_1:c.transfer=TransferFunction::SRGB;c.transferAssumed=false;break;
     case AVCOL_TRC_LINEAR:c.transfer=TransferFunction::Linear;c.transferAssumed=false;break;
@@ -44,4 +51,6 @@ inline ColorDescription resolveFrameColor(const AVFrame& frame,ColorDescription 
     return c;
 }
 inline uint32_t transferCode(TransferFunction t){return t==TransferFunction::Linear?0u:t==TransferFunction::BT709?2u:1u;}
+inline uint32_t workingTransferCode(const ColorDescription& c){return c.displayReferred709&&c.transfer==TransferFunction::BT709?3u:transferCode(c.transfer);}
+
 }

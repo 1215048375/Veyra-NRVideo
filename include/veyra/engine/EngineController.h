@@ -10,6 +10,9 @@
 #include "veyra/diagnostics/FrameMetrics.h"
 #include "veyra/engine/PreviewView.h"
 #include "veyra/sink/CaptureAudioSession.h"
+#include "veyra/remoteplay/SessionInbox.h"
+namespace veyra::source { struct RemotePlayConnectDesc; class RemotePlaySessionSource; }
+namespace veyra::remoteplay { struct ControllerState;struct ControllerFeedback; }
 namespace veyra::sink { struct RgbaImage; }
 namespace veyra::gfx { class D3D12DeviceContext; class CommandSlotRing; }
 namespace veyra::engine {
@@ -32,7 +35,9 @@ struct PlayerSnapshot {
     bool audioRebuffering=false;
     uint64_t audioVideoWaits=0;
     bool audioEndpointRecovering=false;HRESULT audioEndpointError=S_OK;uint64_t audioEndpointRecoveries=0;
+    uint64_t seekRequested=0,seekPresented=0;double seekTarget=0;
     double position=0,duration=0,fps=0,lateMs=0,lateP95Ms=0;
+    double nominalSourceFps=0;
     diagnostics::FrameMetrics metrics;
     std::optional<double> submissionFps;
     uint32_t flowPerf=0;int contentFps=0;
@@ -42,7 +47,16 @@ struct PlayerSnapshot {
     bool captureHalfRate=false;
     double captureFps=0,captureReadAgeMs=0,captureAgeMs=0,captureAgeP95Ms=0;
     double schedulingWaitP95Ms=0,processCpuP95Ms=0,presentCpuP95Ms=0;
-    bool running=false,failed=false,image=false,capture=false;
+    // Realtime file preview: dropped enhancement opportunities this metrics
+    // window, and measured media-advance / wall-clock playback speed (1.0 =
+    // normal speed). Zero previewSkipped means every decoded frame was enhanced.
+    uint64_t previewSkipped=0;
+    double playbackSpeed=0;
+    bool fgBudgetLimited=false,xessGenerationSuppressed=false;
+    bool running=false,failed=false,image=false,capture=false,remotePlay=false;
+    int remotePlayState=0; uint64_t remotePlaySkipped=0;
+    remoteplay::SessionInbox::Snapshot remoteStream;
+    double remoteReceivedFps=0,remoteDecodedFps=0;bool remoteRatesReady=false;uint64_t remoteReceived=0,remoteDecoded=0,remoteIngressDropped=0;
 };
 class EngineController {
 public:
@@ -51,18 +65,24 @@ public:
     bool idle()const;
     bool requestSettings(EnhancementSettings);
     void open(HWND video,const std::wstring& path,PlayerOptions options);
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+    void openRemotePlay(HWND, source::RemotePlayConnectDesc, PlayerOptions);
+    remoteplay::ControllerFeedback remotePlayFeedback();
+    void remotePlayController(const remoteplay::ControllerState&);
+    void remotePlayLoginPin(std::string);
+#endif
     void stop();
     void comparison(int mode,bool base,float split=.5f){comparisonMode_=mode;comparisonBase_=base;comparisonSplit_=std::clamp(split,0.0f,1.0f);}
     void pause(bool p);
     void previewView(PreviewView view){if(!std::isfinite(view.zoom)||!std::isfinite(view.centerX)||!std::isfinite(view.centerY))return;std::lock_guard lock(mutex_);view.zoom=std::clamp(view.zoom,.05f,64.0f);previewView_=view;}
     PreviewView previewView()const{std::lock_guard lock(mutex_);return previewView_;}
     void setVolume(float gain,bool mute);
-    void seek(double seconds){seekSeconds_.store(seconds);}
+    void seek(double seconds){if(!std::isfinite(seconds)||seconds<0)return;std::lock_guard lock(mutex_);snapshot_.seekTarget=seconds;++snapshot_.seekRequested;seekSeconds_.store(seconds);}
     void saveFrame(const std::wstring& path);
     void startExport(const std::wstring& input,const std::wstring& output,PlayerOptions,bool hevc);
     PlayerSnapshot snapshot()const;
 private:
-    void run(HWND,std::wstring,PlayerOptions);
+    void run(HWND,std::wstring,PlayerOptions,std::shared_ptr<source::RemotePlayConnectDesc> remoteRequest={});
     void runLargeImage(HWND,const sink::RgbaImage&,PlayerOptions,gfx::D3D12DeviceContext&,gfx::CommandSlotRing&);
     void post(std::function<void()>);
     void dispatch();
@@ -70,6 +90,7 @@ private:
     mutable std::mutex mutex_;
     PlayerSnapshot snapshot_;
     std::shared_ptr<FrameFlowWindow> activeFlow_;
+    std::shared_ptr<source::RemotePlaySessionSource> activeRemote_;
     PreviewView previewView_;
     std::wstring savePath_;
     std::thread worker_;

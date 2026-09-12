@@ -17,6 +17,17 @@ const wchar_t* kWindowClassName = L"VeyraPresentSink";
 
 } // namespace
 
+bool PresentSink::hdrDisplayActive(HWND window){
+    const auto monitor=MonitorFromWindow(window,MONITOR_DEFAULTTONEAREST);
+    ComPtr<IDXGIFactory1> factory;if(FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))return false;
+    for(UINT a=0;;++a){ComPtr<IDXGIAdapter1> adapter;if(factory->EnumAdapters1(a,&adapter)==DXGI_ERROR_NOT_FOUND)break;if(!adapter)break;
+        for(UINT i=0;;++i){ComPtr<IDXGIOutput> output;if(adapter->EnumOutputs(i,&output)==DXGI_ERROR_NOT_FOUND)break;if(!output)break;
+            ComPtr<IDXGIOutput6> advanced;if(FAILED(output.As(&advanced)))continue;DXGI_OUTPUT_DESC1 desc{};
+            if(SUCCEEDED(advanced->GetDesc1(&desc))&&desc.Monitor==monitor)return desc.ColorSpace==DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+        }
+    }return false;
+}
+
 PresentSink::~PresentSink()
 {
     shutdown();
@@ -100,7 +111,7 @@ bool PresentSink::initialize(ID3D12Device* device, ID3D12CommandQueue* queue,
     DXGI_SWAP_CHAIN_DESC1 scd{};
     scd.Width = width_;
     scd.Height = height_;
-    scd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    scd.Format = desc.hdr?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM;
     scd.SampleDesc.Count = 1;
     scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     scd.BufferCount = 3;
@@ -132,6 +143,10 @@ bool PresentSink::initialize(ID3D12Device* device, ID3D12CommandQueue* queue,
         return false;
     }
     }
+    const auto space=desc.hdr?DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709:DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+    UINT support=0;const auto check=swapChain_->CheckColorSpaceSupport(space,&support);
+    if(FAILED(check)||!(support&DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT)||FAILED(swapChain_->SetColorSpace1(space))){log::error("present","Requested output color space is unavailable");status=Status::WindowFailure;return false;}
+    log::info("present",desc.hdr?"output=scRGB FP16 (1=80 nits)":"output=SDR RGB G22");
     // Block ALT+ENTER; the engine owns mode changes.
     (void)factory_->MakeWindowAssociation(hwnd_, DXGI_MWA_NO_WINDOW_CHANGES | DXGI_MWA_NO_ALT_ENTER);
     queue_ = queue;
@@ -284,7 +299,7 @@ void PresentSink::resize(uint32_t width, uint32_t height)
     if (!waitForQueueIdle()) return;
     for (auto& b : backBuffers_) b.Reset();
     HRESULT hr = swapChain_->ResizeBuffers(3, width, height,
-        DXGI_FORMAT_R8G8B8A8_UNORM, flags);
+        desc_.hdr?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, flags);
     if (FAILED(hr)) {
         log::error("present", std::format("ResizeBuffers FAILED hr=0x{:X} (queue idle, buffers released)",
             static_cast<unsigned>(hr)));

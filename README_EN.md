@@ -30,6 +30,10 @@ Daily mode focuses on watching. Professional mode expands the controls, diagnost
 
 Version 0.0.4 fixes audio/video drift caused by enhancement processing, audio interruptions during small NR timing fluctuations, and audio scheduling with XeSS frame generation.
 
+### Development branch: PS5 Remote Play
+
+The development branch supports LAN PS5 streaming, pairing, encrypted profiles and gamepad input; basic connectivity has passed user testing. Recent changes add software/hardware decoder selection, streaming telemetry and playback scheduling fixes, with console acceptance pending for these changes. **These features are not included in the published 0.0.4 Release.** The development build also adds persistent per-user console profiles, browser-based PSN authorization, and experimental H.265 HDR. Native HDR passthrough and HDR-to-SDR enhancement are labeled separately; real PS5 and Sony login acceptance remains pending. See the [implementation record](docs/PS5_HDR_PSN_EXECUTION_2026-09-12.md). See the [local test guide and scope (Chinese)](docs/PS5_REPAIR_ACCEPTANCE_2026-09-12.md).
+
 ## Download and Run
 
 1. Download **Veyra-0.0.4-win64-portable.zip** from [Releases](https://github.com/Likely7/Veyra-NRVideo/releases). The Source code archives are for developers.

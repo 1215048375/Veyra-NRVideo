@@ -61,12 +61,15 @@ struct EnhanceGraphDesc {
     uint32_t videoSrQuality=0;
     bool enableSr = false;       // upscale source -> work extent (1:1 bypass otherwise)
     bool enableNr = true;
+    bool nrBeforeSr = false;
     engine::NrRuntime nrRuntime=engine::NrRuntime::Original;
     bool enableFg = true;
     bool validateMotion = true; // disable only in isolated legacy A/B diagnostics
     bool enableNvofStandalone = false; // run NVOF+densify per frame without FG (quality core)
     bool noFeatures = false;     // VEYRA_NO_FEATURES: NVOF/NGX objects skipped
     bool noNgx = false;          // VEYRA_NO_NGX: core/features skipped, NVOF only
+    bool hdrInput = false;       // PS5 Main10 ingress; explicit SDR mapping unless hdrOutput.
+    bool hdrOutput = false;      // Native scRGB passthrough, no SDR-only enhancement.
     bool rgbInput = false;       // allocate direct RGBA ingestion before NGX creation
     bool yuy2Input = false;      // packed Y0 U Y1 V -> linear FP16; never subsample to NV12
     bool stillImage = false;     // no temporal motion/FG history for a single image
@@ -132,6 +135,12 @@ public:
     // Returns false on hard failure (run verdict must FAIL).
     using FgAdmission=std::function<bool(const FrameBatch&)>;
     bool process(const AVFrame* frame, double ptsMs, bool reset, FrameOutputs& out, uint64_t sourceFrameId = 0, const ColorDescription* color = nullptr, bool retainReferences = true, const FgAdmission& admitFg = {});
+    bool nextFrameSlotAvailable()const {
+        const unsigned slot=unsigned(realFrameIndex_%2);
+        if(!realLeases_[slot].expired())return false;
+        for(unsigned i=slot;i<6;i+=2)if(!generatedLeases_[i].expired())return false;
+        return true;
+    }
     // Nonblocking. The scheduler polls at a GPU-ready/deadline boundary; no
     // full image readback and no waits inside the graph's individual passes.
     bool resolveGeneration(FrameOutputs& out);
@@ -175,6 +184,7 @@ public:
     bool srEnabled() const { return srEnabled_; }
     bool nrEnabled() const { return nrEnabled_; }
     bool fgEnabled() const { return fgEnabled_; }
+    bool hdrOutput() const { return desc_.hdrOutput; }
     bool xessEnabled() const { return desc_.enableFg && !desc_.noFeatures && !desc_.stillImage && desc_.frameGenerationBackend==engine::FrameGenerationBackend::XeSS; }
     ID3D12Resource* presentMotion(uint32_t slot) const { return presentMotion_[slot%2].Get(); }
     ID3D12Resource* presentDepth() const { return depthTex_.Get(); }
@@ -298,6 +308,9 @@ private:
     std::weak_ptr<FrameLease> realLeases_[2],generatedLeases_[6];
     uint32_t nextListSlot_ = 0;
     uint64_t uploadFences_[2] = {};
+    // FFmpeg may recycle a hardware surface as soon as its AVFrame is freed.
+    // Retain each imported surface until our last consumer fence completes.
+    std::shared_ptr<AVFrame> hardwareInputFrames_[2];
     core::SceneCadenceAnalyzer scene_;
     std::vector<uint8_t> previousLuma_;
     double prevPtsMs_ = -1.0;

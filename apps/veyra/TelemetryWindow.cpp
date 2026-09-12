@@ -17,6 +17,14 @@ void refresh(){auto s=engine->snapshot();const wchar_t* names[]={L"上传/颜色
     o<<L"\r\nCPU与调度（毫秒，独立于GPU）：取帧 "<<value(s.metrics.decodeCpuMs)<<L" / 图提交 "<<value(s.metrics.submitCpuMs)<<L" / GPU就绪等待 "<<value(s.metrics.gpuWaitCpuMs)<<L"\r\n截止时间等待 "<<value(s.metrics.deadlineWaitCpuMs)<<L" / Present调用 "<<value(s.metrics.presentCpuMs)<<L"\r\n源帧 "<<s.metrics.sourceFrames<<L" / 有效生成 "<<s.metrics.validGenerated<<L" / 实际提交 "<<s.metrics.submitted<<L" / 过期补帧 "<<s.metrics.expired<<L"\r\n当前批次容量 "<<s.metrics.queueWatermark<<L"（上限4）；采集入口容量1；采集丢弃 "<<s.captureDropped<<L"\r\n实际提交频率（最近1秒观察）："<<value(s.submissionFps)<<L"fps；实际显示扫描率/光子延迟：未测\r\n";
     const auto flowName=s.applied.flow==engine::FlowQuality::Performance?L"性能":s.applied.flow==engine::FlowQuality::Balanced?L"平衡":L"质量";
     const auto& f=s.metrics.flow;const auto& c=f.counters;
+    if(s.remotePlay){const auto& r=s.remoteStream;
+        o<<L"\r\nPS5完整视频接收 "<<r.receivedFps<<L" fps / 实际解码 "<<r.decodedFps<<L" fps / 有效码率 "<<r.videoMbps<<L" Mbps"
+         <<L"\r\n实际解码路径："<<(!r.decodeConfirmed?L"尚未确认":r.hardwareDecode?L"D3D12VA 硬解":r.decodeFallback?L"CPU软件（硬解回退）":L"CPU软件")
+         <<L"\r\n真实解码均值 / P95 "<<value(r.decodeMeanMs)<<L" / "<<value(r.decodeP95Ms)<<L" ms；接收后等待 "<<value(r.ingressWaitMeanMs)
+         <<L"\r\n原帧 / 生成呈现 "<<f.realPresentFps<<L" / "<<f.generatedPresentFps<<L" fps"
+         <<L"\r\n关键帧请求 "<<r.video.idrRequests<<L"；压缩队列丢弃 "<<r.video.dropped<<L"；解码邮箱覆盖 "<<s.remotePlaySkipped
+         <<L"\r\n延迟口径：完整视频收到→原帧Present返回，不含PS5渲染、编码、单程网络和显示扫描。实时RTT/端到端延迟未测。\r\n";
+    }
     o<<L"\r\n最近一秒链路统计：均值 / P95 ms，n为样本数\r\n";
     for(size_t i=0;i<f.gpuTiming.size();++i){const auto& a=f.gpuTiming[i];o<<names[i]<<L"："<<value(a.mean)<<L" / "<<value(a.p95)<<L" n="<<a.samples<<L"\r\n";}
     o<<L"\r\n当前统计窗口：会话 "<<f.latest.sessionId<<L" / 设置 "<<f.latest.frame.settingsRevision<<L" / epoch "<<f.latest.frame.epoch

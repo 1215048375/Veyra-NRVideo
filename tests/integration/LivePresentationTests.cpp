@@ -5,20 +5,28 @@
 #include <filesystem>
 #include <fstream>
 #include <regex>
+#include <string>
+#include <vector>
 using namespace veyra;
 using namespace std::chrono_literals;
 int wmain(int argc,wchar_t**argv){
     SetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS",L"1");
-    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0||wcscmp(argv[3],L"--source-gap")==0||wcscmp(argv[3],L"--file-endpoint")==0||wcscmp(argv[3],L"--file-continuity")==0||wcscmp(argv[3],L"--reset-rollback")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+    if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--nr-first")==0||wcscmp(argv[3],L"--seek-stress")==0||wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0||wcscmp(argv[3],L"--source-gap")==0||wcscmp(argv[3],L"--file-endpoint")==0||wcscmp(argv[3],L"--file-continuity")==0||wcscmp(argv[3],L"--file-fg-recovery")==0||wcscmp(argv[3],L"--reset-rollback")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     std::filesystem::create_directories(argv[2]);Logger::instance().openFile((std::filesystem::path(argv[2])/"engine.log").wstring());Logger::instance().setConsoleEnabled(false);
     HWND window=CreateWindowExW(0,L"STATIC",L"Live scheduler replay",WS_POPUP,0,0,960,540,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     if(!window)return 3;engine::EngineController engine;engine::PlayerOptions options;options.nr=false;options.fg=false;options.captureReplayForTest=true;
+    const bool nrFirst=argc==4&&wcscmp(argv[3],L"--nr-first")==0;
+    if(nrFirst){options.captureReplayForTest=false;options.nr=options.sr=options.fg=true;options.realtime=false;options.fgMultiplier=2;options.settings.lowLatency=true;options.settings.videoSrQuality=2;engine.setVolume(0,true);}
+    const bool seekStress=argc==4&&wcscmp(argv[3],L"--seek-stress")==0;
+    if(seekStress){options.captureReplayForTest=false;options.nr=options.fg=true;options.realtime=false;options.fgMultiplier=3;engine.setVolume(0,true);}
     const bool halfRate=argc==4&&wcscmp(argv[3],L"--half-rate")==0;
     const bool sourceGap=argc==4&&wcscmp(argv[3],L"--source-gap")==0;
     if(sourceGap){SetEnvironmentVariableW(L"VEYRA_TEST_REPLAY_SOURCE_GAP",L"1");options.nr=options.fg=true;options.fgMultiplier=2;}
     const bool overload=(argc==4&&std::wstring(argv[3]).find(L"--overload")==0);
     const bool fileOverload=argc==4&&wcscmp(argv[3],L"--file-overload")==0;
     const bool fileEndpoint=argc==4&&wcscmp(argv[3],L"--file-endpoint")==0;
+    const bool fileRecovery=argc==4&&wcscmp(argv[3],L"--file-fg-recovery")==0;
+    if(fileRecovery){options.captureReplayForTest=false;options.nr=options.fg=true;options.fgMultiplier=2;engine.setVolume(0,true);}
     const bool fileContinuity=argc==4&&wcscmp(argv[3],L"--file-continuity")==0;
     if(fileContinuity){options.captureReplayForTest=false;options.nr=options.fg=true;options.realtime=false;options.settings.frameGenerationBackend=engine::FrameGenerationBackend::XeSS;engine.setVolume(0,true);}
     if(fileEndpoint){options.captureReplayForTest=false;SetEnvironmentVariableW(L"VEYRA_TEST_FILE_ENDPOINT_LOSS",L"1");engine.setVolume(0,true);}
@@ -28,6 +36,48 @@ int wmain(int argc,wchar_t**argv){
     int failures=0;auto check=[&](bool pass,const char* s){std::cout<<(pass?"PASS ":"FAIL ")<<s<<std::endl;if(!pass)++failures;};
     auto until=[&](auto predicate,int seconds=8){auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(seconds);while(std::chrono::steady_clock::now()<deadline){MSG msg;while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}auto s=engine.snapshot();if(s.failed){std::wcerr<<s.status<<'\n';return false;}if(predicate(s))return true;std::this_thread::sleep_for(5ms);}return false;};
     engine.open(window,argv[1],options);
+    if(nrFirst){
+        check(until([](const auto& s){return s.frames>30&&s.srActive&&s.nrActive&&s.fgActive;},25),"NR-first RTX Video SR and FG execute");
+        auto snapshot=engine.snapshot();check(snapshot.metrics.resolution.nr==snapshot.metrics.resolution.source,"NR processes source extent before SR");
+        engine.saveFrame((std::filesystem::path(argv[2])/"nr-first-video-sr.png").wstring());
+        check(until([&](const auto&){return std::filesystem::exists(std::filesystem::path(argv[2])/"nr-first-video-sr.png");}),"save actual output");
+        auto settings=snapshot.applied;settings.videoSrQuality=0;check(engine.requestSettings(settings),"switch NR-first to DLSS SR");
+        check(until([](const auto& s){return !s.applying&&s.applied.videoSrQuality==0&&s.srActive&&s.frames>60;},25),"NR-first DLSS SR runs");
+        engine.seek(5);const auto request=engine.snapshot().seekRequested;
+        check(until([&](const auto& s){return s.seekPresented==request;},15),"NR-first seek resets history");
+        settings=engine.snapshot().applied;settings.lowLatency=false;check(engine.requestSettings(settings),"restore normal order");
+        check(until([](const auto& s){return !s.applying&&!s.applied.lowLatency&&s.metrics.resolution.nr==s.metrics.resolution.output&&s.srActive;},25),"normal order restores native output NR");
+        engine.stop();check(until([&](const auto&){return engine.idle();},5),"NR-first session closes");DestroyWindow(window);CoUninitialize();return failures?1:0;
+    }
+    if(seekStress){
+        check(until([](const auto& s){return s.position>1&&s.frames>15;},20),"initial native NR/FG playback");
+        for(double target:{344.93,643.709,12.0,450.0,28.0,700.0}){
+            engine.seek(target);const auto requested=engine.snapshot().seekRequested;
+            check(until([&](const auto& s){return s.seekPresented==requested&&s.position>=target-.1;},12),"seek acknowledged by new presented frame");
+            const auto base=engine.snapshot().metrics.flow.counters.realPresented;
+            check(until([&](const auto& s){return s.metrics.flow.counters.realPresented>=base+45;},8),"continued playback releases output leases");
+        }
+        engine.pause(true);std::this_thread::sleep_for(100ms);engine.seek(32);engine.seek(44);engine.seek(61);
+        const auto requested=engine.snapshot().seekRequested;
+        check(until([&](const auto& s){return s.seekPresented==requested&&s.position>=60.9;},12),"paused rapid seeks keep latest request");
+        engine.pause(false);check(until([](const auto& s){return s.position>62;},8),"resume after paused seek");
+        engine.stop();check(until([&](const auto&){return engine.idle();},5),"seek session closes");DestroyWindow(window);CoUninitialize();return failures?1:0;
+    }
+    if(fileRecovery){
+        check(until([](const auto& s){return s.metrics.flow.generatedPresentFps>15&&s.metrics.flow.presentSubmitFps>45;},15),"NR plus 2X starts with real generated presentation");
+        const auto before=engine.snapshot();const auto wallStart=std::chrono::steady_clock::now();
+        SetEnvironmentVariableW(L"VEYRA_TEST_VIDEO_WORK_MS",L"70");
+        check(until([&](const auto& s){return s.processedCompleted>=before.processedCompleted+40;},15),"slow owner still advances source output");
+        const auto slow=engine.snapshot();const auto seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-wallStart).count();
+        check(slow.audioVideoWaits==before.audioVideoWaits,"insufficient output rate never stops steady audio");
+        check(std::abs(slow.position-before.position-seconds)<.3,"slow preview follows one-times media timeline");
+        check(slow.previewSkipped>0&&slow.lateMs<250,"overload skips distributed source opportunities and bounds latency");
+        SetEnvironmentVariableW(L"VEYRA_TEST_VIDEO_WORK_MS",nullptr);
+        check(until([&](const auto& s){return s.applied.revision==before.applied.revision&&s.metrics.flow.generatedPresentFps>15&&s.metrics.flow.presentSubmitFps>45;},12),"FG recovers without changing settings or restarting audio");
+        const auto recovered=engine.snapshot();check(recovered.audioVideoWaits==before.audioVideoWaits,"recovery retains continuous audio");
+        std::cout<<"FILE_RECOVERY slowPresent="<<slow.metrics.flow.presentSubmitFps<<" recoveredPresent="<<recovered.metrics.flow.presentSubmitFps<<" generatedPresent="<<recovered.metrics.flow.generatedPresentFps<<" skipped="<<slow.previewSkipped<<"\n";
+        engine.stop();check(until([&](const auto&){return engine.idle();},5),"recovery session drains");DestroyWindow(window);CoUninitialize();return failures?1:0;
+    }
     if(fileContinuity){
         check(until([](const auto& s){return s.frames>=20;}),"XeSS/NR file starts with actual audio");
         const auto before=engine.snapshot();const auto begin=std::chrono::steady_clock::now();
@@ -72,16 +122,26 @@ int wmain(int argc,wchar_t**argv){
         DestroyWindow(window);CoUninitialize();return failures?1:0;
     }
     if(fileOverload){
-        engine.setVolume(0,true);bool held=false,resumed=false;double maxLead=0;
-        check(until([&](const auto& s){held|=s.audioVideoWaits>1;resumed|=held&&!s.audioRebuffering&&s.frames>10;maxLead=std::max(maxLead,s.lateMs);return s.frames>=100;},90),"overloaded file keeps advancing without dropping source frames or deadlocking");
-        check(held&&resumed,"actual GPU overload holds audio and resumes after video catches up");
-        check(maxLead<120,"sustained GPU overload stays within hard audio lead bound plus source/endpoint interval");
+        engine.setVolume(0,true);bool audioAnchorReleased=false;double maxLag=0;
+        check(until([&](const auto& s){audioAnchorReleased|=s.frames>2&&!s.audioRebuffering;maxLag=std::max(maxLag,s.lateMs);return s.frames>=100;},90),"overloaded file keeps advancing without deadlocking");
+        check(audioAnchorReleased,"startup audio anchor releases despite overload");
+        // Sustained-overload steady window: steady-state audio never pauses —
+        // the realtime preview drops enhancement opportunities instead (P1/P2).
+        const auto steadyStart=engine.snapshot();
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        const auto steady=engine.snapshot();const auto& c=steady.metrics.flow.counters;
+        std::cout<<"FILE_OVERLOAD steadyFrames="<<steadyStart.frames<<"->"<<steady.frames<<" addedWaits="<<steady.audioVideoWaits-steadyStart.audioVideoWaits<<" lateMs="<<steady.lateMs<<" startLateMs="<<steadyStart.lateMs<<" previewSkipped="<<c.previewSkippedBeforeGraph<<" fgSkipped="<<c.fgSkippedBeforeEval<<" fgEvaluated="<<c.fgEvaluated<<'\n';
+        check(steady.audioVideoWaits==steadyStart.audioVideoWaits,"sustained overload adds no steady-state audio stops");
+        check(steady.frames>steadyStart.frames+10,"overloaded preview keeps submitting frames");
+        check(steady.lateMs<500&&std::abs(steady.lateMs-steadyStart.lateMs)<250,"overload display lag stays bounded instead of compounding");
+        check(c.previewSkippedBeforeGraph>0||c.fgSkippedBeforeEval>0,"overload reduces work before evaluation (preview skips or FG admission)");
+        std::cout<<"FILE_OVERLOAD maxObservedLagMs="<<maxLag<<'\n';
         check(engine.snapshot().nrEvaluated>50&&engine.snapshot().srActive&&engine.snapshot().generated>0,"sync test actually executes NR, SR and generated frames");
         auto settings=engine.snapshot().desired;settings.multiplier=2;engine.requestSettings(settings);
         check(until([](const auto& s){return !s.applying&&s.applied.multiplier==2&&s.metrics.flow.counters.realPresented>4;},30),"file audio resumes after FG backend rebuild");
-        check(std::abs(engine.snapshot().lateMs)<120,"rebuilt overloaded graph retains the bounded continuity allowance");
+        check(std::abs(engine.snapshot().lateMs)<500,"rebuilt overloaded graph retains bounded continuity lag");
         engine.seek(.3);
-        check(until([](const auto& s){return s.position>=.3&&s.position<.6&&std::abs(s.lateMs)<35;}),"playing seek warms video before releasing audio");
+        check(until([](const auto& s){return s.position>=.3&&s.position<.6&&std::abs(s.lateMs)<60;}),"playing seek warms video before releasing audio");
         const auto before=engine.snapshot();engine.pause(true);engine.seek(.5);
         check(until([](const auto& s){return s.transport==engine::TransportState::Paused&&s.position>=.49&&s.position<.6;}),"paused seek survives an audio overload hold");
         engine.pause(false);check(until([&](const auto& s){return s.frames>before.frames+8;}),"file resumes after overload and seek");
@@ -89,7 +149,21 @@ int wmain(int argc,wchar_t**argv){
         check(until([](const auto& s){return !s.applying&&!s.applied.nr&&!s.applied.sr&&s.applied.multiplier==1&&s.metrics.flow.counters.realPresented>=30;}),"leave overload and restore a sustainable video graph");
         check(std::abs(engine.snapshot().lateMs)<35,"recovered graph has no retained overload offset");
         engine.stop();check(until([&](const auto&){return engine.idle();},5),"file overload shutdown");
-        std::cout<<"FILE_OVERLOAD held="<<held<<" resumed="<<resumed<<" maxObservedLeadMs="<<maxLead<<'\n';
+        // Presented real PTS must cover the played span uniformly: under-rate
+        // drops preview frames spread over time, never a long black stretch.
+        Logger::instance().flush();std::ifstream log(std::filesystem::path(argv[2])/"engine.log");std::string line;
+        std::vector<double> realPts;const std::regex ptsPattern("subframe=0 pts100ns=([0-9]+)");
+        while(std::getline(log,line))if(line.find("[submit]")!=std::string::npos){std::smatch m;if(std::regex_search(line,m,ptsPattern))realPts.push_back(std::stod(m[1])/10000.0);}
+        double maxPresentGap=0;unsigned resyncGaps=0;bool afterSeek=false;for(size_t i=1;i<realPts.size();++i){
+            if(realPts[i]<realPts[i-1]){afterSeek=true;continue;} // backward seek boundary
+            const double gap=realPts[i]-realPts[i-1];
+            if(afterSeek){afterSeek=false;continue;} // seek forward-jump/resync window is explicit
+            if(gap>400){++resyncGaps;continue;} // explicit rebuild/pause resync windows
+            maxPresentGap=std::max(maxPresentGap,gap);
+        }
+        std::cout<<"FILE_OVERLOAD realPresents="<<realPts.size()<<" maxSteadyGapMs="<<maxPresentGap<<" resyncGaps="<<resyncGaps<<'\n';
+        check(realPts.size()>=60,"overload presents a real frame sequence");
+        check(maxPresentGap<200&&resyncGaps<=5,"steady presents cover the timeline without long gaps; only bounded explicit resyncs interrupt");
         DestroyWindow(window);CoUninitialize();return failures?1:0;
     }
     if(overload){

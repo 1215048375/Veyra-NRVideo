@@ -285,7 +285,7 @@ struct GraphicsPass {
     UINT increment = 0;
 
     bool create(ID3D12Device* device, const std::vector<uint8_t>& vs,
-                const std::vector<uint8_t>& ps, UINT heapSlots)
+                const std::vector<uint8_t>& ps, UINT heapSlots, DXGI_FORMAT outputFormat=DXGI_FORMAT_R8G8B8A8_UNORM)
     {
         D3D12_DESCRIPTOR_RANGE1 srvRange{};
         srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
@@ -330,7 +330,7 @@ struct GraphicsPass {
         pd.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
         pd.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         pd.NumRenderTargets = 1;
-        pd.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        pd.RTVFormats[0] = outputFormat;
         pd.SampleDesc.Count = 1;
         if (FAILED(device->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&pso)))) return false;
         D3D12_DESCRIPTOR_HEAP_DESC hd{};

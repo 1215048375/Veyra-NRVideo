@@ -40,6 +40,7 @@ enum class SourceKind : uint8_t {
     Unknown = 0,
     File,         // FFmpeg demux/decode (player, export)
     CaptureCard,  // physical DirectShow/UVC capture
+    RemotePlay,   // PS5 Remote Play stream (Chiaki transport)
     Image,        // WIC single image
     TestPattern,  // synthetic harness input
 };
@@ -48,6 +49,7 @@ inline const char* sourceKindName(SourceKind k) {
     switch (k) {
     case SourceKind::File: return "File";
     case SourceKind::CaptureCard: return "CaptureCard";
+    case SourceKind::RemotePlay: return "RemotePlay";
     case SourceKind::Image: return "Image";
     case SourceKind::TestPattern: return "TestPattern";
     default: return "Unknown";
@@ -66,7 +68,7 @@ enum class SourcePixelFormat : uint8_t {
 
 enum class ColorRange : uint8_t { Unknown = 0, Limited, Full };
 enum class YuvMatrix : uint8_t { Unknown = 0, BT601, BT709, BT2020NCL, BT2020CL };
-enum class TransferFunction : uint8_t { Unknown = 0, SRGB, BT709, BT2020_10, Linear };
+enum class TransferFunction : uint8_t { Unknown = 0, SRGB, BT709, BT2020_10, Linear, PQ, HLG };
 enum class ColorPrimaries : uint8_t { Unknown = 0, BT601_525, BT601_625, BT709, BT2020 };
 
 struct SampleAspectRatio {
@@ -86,13 +88,16 @@ struct ColorDescription {
     uint16_t rotationDegrees = 0;       // 0 / 90 / 180 / 270
     SampleAspectRatio sar;
 
+    // Display intent is separate from source VUI. PS5 SDR is displayed with
+    // BT.1886 (ideal black), not inverse camera OETF, before sRGB presentation.
+    bool displayReferred709 = false;
     bool rangeAssumed = false;
     bool matrixAssumed = false;
     bool transferAssumed = false;
     bool primariesAssumed = false;
 
     bool isHdrPath() const {
-        return pixelFormat == SourcePixelFormat::P010
+        return transfer == TransferFunction::PQ || transfer == TransferFunction::HLG || pixelFormat == SourcePixelFormat::P010
             || transfer == TransferFunction::BT2020_10;
     }
 };
@@ -156,6 +161,7 @@ struct FramePacket {
     ColorDescription colorInfo;
     uint64_t sourceEpoch = 1;     // ResetCoordinator epoch at frame boundary
     int64_t arrivalHost100ns = 0; // capture callback steady_clock; 0 when unavailable
+    int64_t decodedHost100ns = 0; // actual remote decoder output; same local clock
 
     GpuTextureHandle color;       // canonical linear RGBA16F working texture
 

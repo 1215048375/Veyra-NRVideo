@@ -5,6 +5,7 @@
 #include "veyra/engine/PresentationScheduler.h"
 #include "veyra/engine/LiveFgAdmission.h"
 #include "veyra/engine/FrameFlowWindow.h"
+#include "veyra/engine/EnhancementDelayEstimate.h"
 #include <iostream>
 #include "veyra/engine/ContentCadence.h"
 #include "veyra/diagnostics/Redaction.h"
@@ -17,6 +18,14 @@ int main(){
     using namespace veyra;int failures=0,checks=0;
     auto check=[&](bool ok,const char* name){++checks;if(!ok)++failures;std::cout<<(ok?"PASS ":"FAIL ")<<name<<'\n';};
     sink::AudioFrameTimeline pcmTime;
+    check(pipeline::ResolutionPlan::make({1920,1080},true,pipeline::NrSizePolicy::Native,false,1,pipeline::SrTarget::Uhd4K,true).nr==pipeline::Extent{1920,1080},"NR-first preview uses source resolution");
+    check(pipeline::ResolutionPlan::make({1920,1080},true,pipeline::NrSizePolicy::Native,true,1,pipeline::SrTarget::Uhd4K,true).nr==pipeline::Extent{3840,2160},"export ignores low latency preview order");
+    check(engine::enhancementDelayEstimate(true,false,-20)==0,"file prefetch is not added latency");
+    check(engine::enhancementDelayEstimate(true,false,12)==12,"file lateness remains visible");
+    check(engine::enhancementDelayEstimate(true,true,45,5)==40,"live baseline work excluded");
+    check(engine::enhancementDelayEstimate(false,true,45)==0,"disabled enhancement defines zero baseline");
+    check(!engine::enhancementDelayEstimate(true,true,45),"unknown live baseline is not fabricated");
+    check(!engine::enhancementDelayEstimate(true,false,std::numeric_limits<double>::quiet_NaN()),"invalid clock rejected");
     pcmTime.append(0,480,100,105);pcmTime.append(480,480,105,120);
     check(pcmTime.at(240)==102.5&&pcmTime.at(720)==112.5,"resampled PCM maps each span at its actual media rate");
     check(!pcmTime.at(1000),"unwritten or silent output has no invented media clock");
@@ -102,6 +111,7 @@ int main(){
     rates.ready(60,true,3,0,7000000);
     const auto counted=rates.snapshot(10000000);
     check(counted.sourceCompletedFps==60&&counted.outputCompletedFps==100&&counted.validGeneratedFps==40&&counted.presentSubmitFps==90,"real60 plus valid40 yields output100 but present90; duplicate completion ignored");
+    check(counted.realPresentFps==60&&counted.generatedPresentFps==30,"source and generated presentation counts are independently measured");
     check(counted.counters.realReady==60&&counted.counters.fgReadyValid==40,"GPU-ready counts are independent of requested multiplier");
     rates.xessSubmitted(2,1,10000000);rates.xessSubmitted(1,0,10000000);
     check(rates.snapshot(10000000).xessSdkSubmitFps==3&&rates.snapshot(10000000).outputCompletedFps==100,"XeSS SDK submissions never enter measured GPU completions");
