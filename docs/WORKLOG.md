@@ -1736,3 +1736,8 @@ apps/veyra/SettingsWindow.cpp调整布局；apps/veyra/ui/AppShell.cpp新增音�
 开工标签checkpoint/ps5-hdr-psn-preimplementation-2026-09-12，方案提交37cfdf4。固定用户目录及DPAPI旧档迁移、稳定主机ID和观看模式、PSN浏览器回调授权/刷新/注销、H265 HDR与Main10输入、HDR原生旁路/SDR映射后增强已经进入产品代码。发现并修复sws_scale目标平面数组只有2项导致新10-bit Full测试访问异常；补齐P010码值、PQ/色域及FP16呈现。详细命令、失败与未完成边界见 docs/PS5_HDR_PSN_EXECUTION_2026-09-12.md。8组HDR GPU/呈现、Main10软硬解各12次真实NR、SDR颜色回归、90项contract及UI通过；42.73秒gate为收尾前二进制，最终按针对性测试报告。真实PS5画质、Sony登录未验收；免PIN自动注册、原生HDR增强不宣称完成。无发布/push/运行时入Git。
 
 收尾HDR组合回归：logs/ps5-hdr-combo.log，软/硬解 × NR单独/标准SR→NR→FG/低延迟NR→SR→FG，共6组通过；组合4K/2X各12次SR、12次NR、11有效生成帧。实际PS5画质与Sony授权仍待用户操作。
+
+## 2026-09-12 悬停说明实际不显示修复
+用户反馈悬停没有效果。本轮实际鼠标命中低延迟按钮后验证：旧注册路径 tooltip 可创建但 TTM_GETTOOLCOUNT=0；不是窗口存在就算通过。TOOLINFOW 使用完整 sizeof 在当前 common-controls 环境被拒绝。改为 TTTOOLINFOW_V2_SIZE 后 count=103，实际悬停可见；同时嵌套控件使用直接父窗口和已有静态帮助字符串，避免依赖中间面板转发文字回调。AppShell 与 SettingHelp 共用注册处检查返回值，失败写 ui-help 日志。
+修改 apps/veyra/ui/AppShell.cpp、SettingHelp.h。构建命令 cmd /c out/remoteplay/build-extra-delay.cmd，最终 logs/hover-final-build.log 成功。实际鼠标脚本 out/remoteplay/test-hover-real.ps1，logs/hover-visible-final.log：按钮命中、103项注册、提示 visible=True；logs/hover-visible.png 已查看，中文说明完整、深色背景。此前只验 tooltip HWND 的旧 nr-first-help-ui 不能证明悬停功能通过，本条修正该验证缺口。
+本轮第一次更换父窗口/文字回调后仍失败，第二次尝试显式 relay 仍失败，均保留失败结果；relay 已撤回，真正恢复发生于 V2 结构体尺寸修复。UI回归首次用 Windows PowerShell 5 读取无BOM中文脚本产生解析错误（logs/hover-final-ui.log），改用 pwsh 重跑（logs/hover-final-ui-retry.log）。无增强/音视频管线修改，本轮未执行新 RTX Create/Evaluate 或实机 PS5 测试。

@@ -35,3 +35,6 @@
 统一回归 `scripts/gates/delivery.ps1 -Root $PWD -BuildDirectory out/remoteplay/product-repair -PlayerExe out/remoteplay/product-repair/veyra.exe` 48.25秒PASS，`logs/delivery/2cb7655434ef4cf6a5d71dfad282a8e4/result.json`：默认NR/NVOF/GBV/颜色/播放/图片/视频音轨导出通过。之后只补充串流动态尺寸时的路线更新及状态文案，最终重建和UI检查通过；没有用旧gate哈希冒充最终EXE哈希。
 
 UI检查 `out/remoteplay/test-low-help.ps1` 通过，`logs/nr-first-help-ui.log`：低延迟控件存在且默认关闭，tooltip窗口存在，原模式/全屏/PS5面板与精细面板切换通过。未对每条提示逐条截图；未做真实PS5、采集卡、新路线8K或长期画质对照。本轮下一步为用户实际低延迟开关A/B验收，不发布、不上传SDK/DLL。
+
+## 悬停注册修复（2026-09-12）
+用户实测发现无说明。旧测试只确认窗口存在，未验证注册或实际弹出；当前环境完整 TOOLINFOW 大小被拒绝，工具数为0。改用兼容 V2 大小，嵌套控件直接父窗口及静态文字，失败记录日志。最终实际鼠标悬停低延迟控件，工具数103、浮窗可见，中文截图已检查。构建 logs/hover-final-build.log；悬停 logs/hover-visible-final.log 与 hover-visible.png；详见 WORKLOG 同日修复记录。未逐一截图所有设置。
