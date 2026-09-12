@@ -1718,3 +1718,9 @@ Engine背压从只检查两个batch容量改为同时检查下一奇偶输出槽
 进度条松手后原来立即用旧snapshot.position刷新，导致回弹。现在seek请求和呈现确认有序号，发出后保持最新目标，只有该请求对应的新帧实际Present后才恢复跟随；TB_ENDTRACK不重复发请求，时间文字显示目标及跳转中。暂停连续请求以最后一次为准。顺带修复有效生成帧从Pending到Valid时队列计数增加可能触发unsigned减法的问题。
 
 验证：最终构建logs/seek-ui-final-build.log；repair_contract 88checks0failures。新增LivePresentationTests --seek-stress，实际用户4K长视频、原生NR+3X，六次前后seek（含原日志两位置）、每次后续45原帧、暂停连续32/44/61秒seek、恢复和关闭，16项通过exit0，logs/seek-stress-final.stdout.log与logs/seek-stress-final/engine.log，180秒上限内结束。此前首轮测试分支插入遗漏误入旧测试导致FAIL，logs/seek-stress.stdout.log保留；修正后seek-stress2及最终两轮均通过。UI既有切换脚本logs/seek-ui.log通过；未通过自动鼠标视频测试独立逐帧验证拖动视觉，需用户实测手感。未做新的PS5/采集卡测试、未发布或push。
+
+## 2026-09-12 专业设置阅读顺序
+
+按用户要求调整UI，不改变增强执行顺序：NR运行版本→实时/原生NR处理档位→超分开关/目标/方式；运动页先光流提供方、性能选项与质量，再补帧方式与倍率；采集/串流音频同步移入独立音频页。页签为增强、运动、音频、预设、导出，旧控制ID及数据绑定保留。
+
+apps/veyra/SettingsWindow.cpp调整布局；apps/veyra/ui/AppShell.cpp新增音频页签（不移动旧枚举ID）、排列和切换。logs/settings-order-build.log构建通过；临时UI检查脚本out/remoteplay/test-settings-order.ps1基于实际HWND矩形确认218<203<201、209<204<208<202，音频页独立可切换，既有专业/全屏切换脚本通过，logs/settings-order-ui.log。纯UI布局调整，未重跑GPU或实机串流性能测试。未发布或push。

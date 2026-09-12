@@ -198,6 +198,29 @@ case WM_CREATE:{window=h;font=makeFont(h);items.clear();displayedBackendWarning.
     add(L"STATIC",L"NR 运行版本",1117,0,0,12,56,-1,24);
     combo(218,0,84,{L"NVIDIA 原版 · RTX 50",L"社区兼容 · RTX 40/50 实验"});
     SetPropW(item(218),L"veyra.tip",HANDLE(L"社区版为用户提供的修改版；RTX 40 兼容性需实机验证。切换会重建增强管线。"));
+    // Final layout in reading order; existing control IDs and bindings stay intact.
+    for(auto& entry:items){
+        const int id=GetDlgCtrlID(entry.h);
+        if(id==203)entry.y=128;
+        if(id==201)entry.y=176;
+        if(id>=730&&id<=732)entry.y=220;
+        if(id==207)entry.y=264;
+        switch(id){
+        case 1113:entry.y=50;break;case 209:entry.y=78;break;
+        case 215:entry.y=122;break;case 204:entry.y=166;break;
+        case 1111:entry.y=214;break;case 208:entry.y=242;break;
+        case 1112:entry.y=286;break;case 202:entry.y=314;break;
+        case 1114:entry.y=358;break;case 205:entry.y=386;break;
+        case 1110:entry.y=430;break;
+        case 1115:entry.page=4;entry.y=12;break;
+        case 216:entry.page=4;entry.y=50;break;
+        case 1116:case 217:entry.page=4;entry.y=100;break;
+        }
+    }
+    setText(item(1103),L"光流与补帧");
+    setText(item(1113),L"光流 · 运动估算");
+    setText(item(1115),L"采集 / 串流音频同步");
+    add(L"STATIC",L"调整实时输入的声音补偿，不改变补帧倍率。正值让声音更晚；自动模式由软件估算。",1118,0,4,12,148,-1,90);
     loadStore();refreshPresets();populate(controller->snapshot().desired);message(store.error());SetTimer(h,1,250,nullptr);arrange();return 0;}
 case WM_SIZE:arrange();return 0;
 case WM_ERASEBKGND:return 1;
@@ -235,7 +258,7 @@ std::vector<std::wstring> presetNames(){loadStore();std::vector<std::wstring> ou
 bool presetAt(size_t index,engine::EnhancementSettings& out){loadStore();if(index>=store.entries().size())return false;out=store.entries()[index].settings;return true;}
 HWND createSettingsPanel(HWND parent,engine::EngineController& engine,std::function<bool(engine::EnhancementSettings)> callback){controller=&engine;apply=std::move(callback);WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"VeyraInspector";wc.hbrBackground=panelBrush();wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);return CreateWindowExW(WS_EX_CONTROLPARENT,wc.lpszClassName,L"专业参数",WS_CHILD|WS_CLIPCHILDREN,0,0,328,500,parent,nullptr,wc.hInstance,nullptr);}
 void settingsVisibility(bool visible){if(window&&!visible&&IsChild(window,GetFocus()))SetFocus(GetParent(window));}
-void settingsPage(int value){if(window&&IsChild(window,GetFocus()))SetFocus(body);page=std::clamp(value,0,3);scroll=0;arrange();}
+void settingsPage(int value){if(window&&IsChild(window,GetFocus()))SetFocus(body);page=std::clamp(value,0,4);scroll=0;arrange();}
 void settingsEnabled(bool enabled,const engine::EnhancementSettings& configured){enhancementEnabled=enabled;configuredSettings=configured;if(window)syncProtection(enabled?controller->snapshot().desired.protection:configured.protection);if(window&&!enabled&&!dirty&&displayedRevision!=configured.revision)populate(configured);if(window){auto desired=controller->snapshot().desired;check(200,enabled&&desired.nr?BST_CHECKED:BST_UNCHECKED);check(201,enabled&&desired.sr?BST_CHECKED:BST_UNCHECKED);if(!enabled)message(L"增强已关闭。数值修改保存待启用配置；点击 NR / 超分可直接开启。");}}
 void settingsDpi(){if(!window)return;auto old=font;font=makeFont(window);for(auto& item:items)SendMessageW(item.h,WM_SETFONT,WPARAM(font),TRUE);DeleteObject(old);arrange();}
 void exportPanelStatus(const engine::ExportJobSnapshot& job,bool canExport,bool canSave){if(!window)return;setText(item(506),job.state==engine::ExportState::Idle?L"尚无导出任务":job.message+L"\n"+std::to_wstring(int(job.progress*100))+L"% · 源帧 "+std::to_wstring(job.sourceFrames)+L" / 编码 "+std::to_wstring(job.encoded)+L"\n生成 "+std::to_wstring(job.generated)+L" / CFR占位 "+std::to_wstring(job.holds)+L"\n作业 "+std::to_wstring(job.jobId)+L" · 冻结版本 "+std::to_wstring(job.frozenRevision));setText(item(507),job.output.empty()?L"目标由保存窗口选择":L"输出："+std::filesystem::path(job.output).filename().wstring());EnableWindow(item(501),canExport&&!job.active());EnableWindow(item(502),canSave);EnableWindow(item(503),job.state==engine::ExportState::Running||job.state==engine::ExportState::Paused);EnableWindow(item(504),job.active());}
