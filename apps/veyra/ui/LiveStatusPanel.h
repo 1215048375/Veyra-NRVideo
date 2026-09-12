@@ -14,29 +14,25 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
     case WM_CREATE:SetTimer(h,1,250,nullptr);return 0;
     case WM_TIMER:state->history.sample(state->engine->snapshot());if(IsWindowVisible(h))InvalidateRect(h,nullptr,FALSE);return 0;
     case WM_SIZE:InvalidateRect(h,nullptr,FALSE);return 0;
-    case WM_LBUTTONUP:if(GET_Y_LPARAM(lp)<dip(h,34)){state->advanced=!state->advanced;state->scroll=0;InvalidateRect(h,nullptr,FALSE);}return 0;
-    case WM_MOUSEWHEEL:state->scroll=std::clamp(state->scroll-GET_WHEEL_DELTA_WPARAM(wp)/WHEEL_DELTA*50,0,state->maxScroll);InvalidateRect(h,nullptr,FALSE);return 0;
+    case WM_LBUTTONUP:if(GET_Y_LPARAM(lp)>=dip(h,109)&&GET_Y_LPARAM(lp)<dip(h,133)&&GET_X_LPARAM(lp)>=([&]{RECT r{};GetClientRect(h,&r);return r.right-dip(h,42);}())){state->advanced=!state->advanced;state->scroll=0;InvalidateRect(h,nullptr,FALSE);}return 0;
+    case WM_MOUSEWHEEL:{POINT at{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};ScreenToClient(h,&at);RECT r{};GetClientRect(h,&r);const int bottom=dip(h,104+std::max(92,MulDiv(r.bottom,96,layoutDpi(h))-188));if(!state->advanced||at.y<dip(h,136)||at.y>=bottom)return 0;}state->scroll=std::clamp(state->scroll-GET_WHEEL_DELTA_WPARAM(wp)/WHEEL_DELTA*50,0,state->maxScroll);InvalidateRect(h,nullptr,FALSE);return 0;
     case WM_ERASEBKGND:return 1;
     case WM_PAINT:{
         PaintBuffer paint(h);fillSurface(paint.dc,paint.rect,h);
         const int width=MulDiv(paint.rect.right,96,veyra::ui::layoutDpi(h)),height=MulDiv(paint.rect.bottom,96,veyra::ui::layoutDpi(h));
         const auto s=state->engine->snapshot();const auto& f=s.metrics.flow;
-        if(!state->advanced){paintDashboard(h,paint.dc,width,height,s,state->history);return 0;}
+        paintDashboard(h,paint.dc,width,height,s,state->history,state->advanced);
+        if(!state->advanced)return 0;
         const bool playing=s.running&&!s.image&&s.transport==engine::TransportState::Playing;
         const bool xess=s.applied.frameGenerationBackend==engine::FrameGenerationBackend::XeSS&&s.applied.multiplier>1;
         auto write=[&](const std::wstring& value,int x,int y,int w,int ht,int size,COLORREF color){chromeText(paint.dc,h,value,x,y,w,ht,size,color);};
         auto ms=[](std::optional<double> v){return v?std::format(L"{:.1f} ms",*v):std::wstring(L"未测");};
         auto timing=[&](const diagnostics::TimingAggregate& a){return playing&&a.mean&&a.p95?(state->advanced?std::format(L"{:.1f} / {:.1f}",*a.mean,*a.p95):ms(a.mean)):std::wstring(L"未测");};
         auto fps=[&](double value){return playing&&!f.rateWindowReady?std::wstring(L"采样中"):std::format(L"{:.1f} fps",value);};
-        write(L"实时处理状态",12,8,width-24,24,13,textColor);
-        write(state->advanced?L"收起详情 −":L"展开详情 +",width-96,8,84,24,10,secondary);
-        const int half=(width-24)/2;
-        write(xess?L"呈现提交 · XeSS SDK":L"实际呈现提交",12,36,half,20,10,secondary);
-        write(L"增强额外延迟 · 估计",12+half,36,half,20,10,secondary);
-        write(fps(xess?f.xessSdkSubmitFps:f.presentSubmitFps),12,57,half,28,18,textColor);
         const auto& extra=f.cpuTiming[size_t(diagnostics::CpuStage::EnhancementDelayEstimate)];
-        write(playing?ms(extra.mean):L"未测",12+half,57,half,28,18,textColor);
         std::vector<std::pair<std::wstring,std::wstring>> rows;
+        rows.emplace_back(L"实际呈现",fps(xess?f.xessSdkSubmitFps:f.presentSubmitFps));
+        rows.emplace_back(L"增强额外延迟估计",playing?ms(extra.mean):L"未测");
         rows.emplace_back(L"估计口径",s.capture?L"扣除基础显示开销":L"正常播放时序的额外落后");
         rows.emplace_back(L"测量范围",L"稳态估计 · 不含屏幕扫描");
         rows.emplace_back(L"请求目标（非实测）",s.nominalSourceFps>0?std::format(L"{:.1f} fps",s.nominalSourceFps*(s.captureHalfRate?.5:1)*s.applied.multiplier):L"未确定");
@@ -153,23 +149,23 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
             return lines;
         };
         for(const auto& row:rows){
-            const auto labels=split(row.first,width/2-14),values=split(row.second,width/2-12);
+            const auto labels=split(row.first,width/2-24),values=split(row.second,width/2-24);
             for(size_t line=0;line<std::max(labels.size(),values.size());++line)wrapped.emplace_back(line<labels.size()?labels[line]:L"",line<values.size()?values[line]:L"");
         }
         SelectObject(paint.dc,oldFont);DeleteObject(rowFont);rows=std::move(wrapped);
-        const int top=96,rowHeight=25,available=std::max(0,height-top-30)/rowHeight*rowHeight;
+        const int top=136,rowHeight=25,available=std::max(0,std::max(92,height-188)-40)/rowHeight*rowHeight;
         state->maxScroll=std::max(0,int(rows.size())*rowHeight-available);state->scroll=std::clamp(state->scroll/rowHeight*rowHeight,0,state->maxScroll);
         const int saved=SaveDC(paint.dc);IntersectClipRect(paint.dc,0,dip(h,top),paint.rect.right,dip(h,top+available));
         for(size_t i=0;i<rows.size();++i){const int y=top+int(i)*rowHeight-state->scroll;
             // glassText renders through its own DIB; a parent DC clip does not
             // constrain that buffer. Never draw partial rows into fixed text.
             if(y<top||y+rowHeight>top+available)continue;
-            write(rows[i].first,12,y,width/2-14,rowHeight,11,secondary);
-            write(rows[i].second,width/2,y,width/2-12,rowHeight,11,textColor);
+            write(rows[i].first,20,y,width/2-24,rowHeight,11,secondary);
+            write(rows[i].second,width/2,y,width/2-24,rowHeight,11,textColor);
         }
         RestoreDC(paint.dc,saved);
-        if(state->maxScroll&&available>0){const int thumb=std::max(18,available*available/(int(rows.size())*rowHeight));const int y=top+(available-thumb)*state->scroll/state->maxScroll;RECT r{dip(h,width-4),dip(h,y),dip(h,width-2),dip(h,y+thumb)};FillRect(paint.dc,&r,panelBrush());}
-        write(xess?L"估计截止SDK提交；内部显示排队未测":L"相对直接播放的估计；启动等待另计",12,height-28,width-24,24,9,secondary);
+        if(state->maxScroll&&available>0){const int thumb=std::max(18,available*available/(int(rows.size())*rowHeight));const int y=top+(available-thumb)*state->scroll/state->maxScroll;RECT r{dip(h,width-16),dip(h,y),dip(h,width-14),dip(h,y+thumb)};FillRect(paint.dc,&r,panelBrush());}
+
         return 0;
     }
     case WM_NCDESTROY:KillTimer(h,1);delete state;SetWindowLongPtrW(h,GWLP_USERDATA,0);break;

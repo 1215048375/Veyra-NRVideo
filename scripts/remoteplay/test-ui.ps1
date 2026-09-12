@@ -7,6 +7,7 @@ Add-Type -AssemblyName System.Drawing
 Add-Type @'
 using System;using System.Text;using System.Runtime.InteropServices;
 public static class RpUi {
+ [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
  public delegate bool EnumProc(IntPtr h,IntPtr p);
  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb,IntPtr p);
  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h,EnumProc cb,IntPtr p);
@@ -88,8 +89,9 @@ try {
  [RpUi]::ShowWindow($main,4)|Out-Null
  [RpUi]::SetWindowPos($main,[IntPtr](-1),0,0,0,0,0x13)|Out-Null
  Start-Sleep -Milliseconds 250
- foreach($view in @('overview','advanced')){
-  if($view -eq 'advanced'){[RpUi]::PostMessage($live,0x202,[IntPtr]::Zero,[IntPtr](12*65536+20))|Out-Null;Start-Sleep -Milliseconds 100}
+ $liveRect=New-Object RpUi+Rect;[RpUi]::GetWindowRect($live,[ref]$liveRect)|Out-Null
+ foreach($view in @('overview','advanced','returned')){
+  if($view -ne 'overview'){[RpUi]::PostMessage($live,0x202,[IntPtr]::Zero,[IntPtr](([int](120*[RpUi]::GetDpiForWindow($live)/96))*65536+($liveRect.right-$liveRect.left-[int](25*[RpUi]::GetDpiForWindow($live)/96))))|Out-Null;Start-Sleep -Milliseconds 100}
   $rect=New-Object RpUi+Rect;[RpUi]::GetWindowRect($live,[ref]$rect)|Out-Null
   $bitmap=New-Object Drawing.Bitmap(($rect.right-$rect.left),($rect.bottom-$rect.top))
   $graphics=[Drawing.Graphics]::FromImage($bitmap);$dc=$graphics.GetHdc()

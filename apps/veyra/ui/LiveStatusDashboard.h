@@ -19,7 +19,7 @@ struct DashboardHistory {
         else{low=0;if(++good>=8)overloaded=false;}
     }
 };
-inline void paintDashboard(HWND h,HDC dc,int w,int height,const engine::PlayerSnapshot& s,const DashboardHistory& history){
+inline void paintDashboard(HWND h,HDC dc,int w,int height,const engine::PlayerSnapshot& s,const DashboardHistory& history,bool advanced=false){
     const auto& f=s.metrics.flow;const bool active=s.running&&!s.image&&s.transport==engine::TransportState::Playing;
     auto text=[&](std::wstring str,int x,int y,int width,int ht,int size,COLORREF color){chromeText(dc,h,str,x,y,width,ht,size,color);};
     auto card=[&](int x,int y,int width,int ht){
@@ -29,7 +29,7 @@ inline void paintDashboard(HWND h,HDC dc,int w,int height,const engine::PlayerSn
         Gdiplus::SolidBrush bg(Gdiplus::Color(155,29,32,32));g.FillPath(&bg,&p);
         Gdiplus::Pen edge(Gdiplus::Color(40,132,145,140),1);g.DrawPath(&edge,&p);
     };
-    text(L"实时处理状态",12,7,w-100,24,12,textColor);text(L"详情 +",w-65,7,55,24,10,secondary);
+    text(L"实时处理状态",12,7,w-100,24,12,textColor);
     const int gap=6,left=10,cw=(w-20-gap*3)/4,top=38;
     const diagnostics::GpuStage stages[]={diagnostics::GpuStage::Flow,diagnostics::GpuStage::Nr,diagnostics::GpuStage::Sr,diagnostics::GpuStage::FgBatch};
     const wchar_t* names[]={L"光流延迟",L"NR延迟",L"超分延迟",L"帧生成延迟"};
@@ -41,7 +41,9 @@ inline void paintDashboard(HWND h,HDC dc,int w,int height,const engine::PlayerSn
     }
     const int chartTop=104,chartH=std::max(92,height-188),bottom=chartTop+chartH+8,bw=(w-26)/2;
     card(10,chartTop,w-20,chartH);
-    text(L"增强额外延迟",20,chartTop+8,w-135,20,10,secondary);
+    text(advanced?L"精细数据":L"增强额外延迟",20,chartTop+8,w-100,20,10,secondary);
+    text(advanced?L"◂":L"▸",w-38,chartTop+5,24,24,14,secondary);
+    if(!advanced){
     const auto extra=active?f.cpuTiming[size_t(diagnostics::CpuStage::EnhancementDelayEstimate)].mean:std::optional<double>{};
     text(extra?std::format(L"{:.1f}",*extra):L"—",w-103,chartTop+30,85,30,23,textColor);
     text(L"ms · 总计估计",w-103,chartTop+62,85,18,9,secondary);
@@ -55,6 +57,7 @@ inline void paintDashboard(HWND h,HDC dc,int w,int height,const engine::PlayerSn
         for(const auto& v:history.points){const float x=float(dip(h,x0))+float(dip(h,x1-x0))*float(index++)/119;
             if(!v){prev.reset();continue;}Gdiplus::PointF p(x,float(dip(h,y1))-float(dip(h,y1-y0))*float(*v/peak));if(prev)g.DrawLine(&line,*prev,p);prev=p;}}
         text(L"30秒前",x0,y1+3,65,16,8,secondary);text(L"现在",x1-28,y1+3,28,16,8,secondary);
+    }
     }
     card(10,bottom,bw,58);card(16+bw,bottom,bw,58);
     text(L"待输出画面",20,bottom+6,bw-20,18,10,secondary);
