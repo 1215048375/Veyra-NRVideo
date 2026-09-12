@@ -1727,3 +1727,6 @@ apps/veyra/SettingsWindow.cpp调整布局；apps/veyra/ui/AppShell.cpp新增音�
 
 ## 2026-09-12 NR先行低延迟与悬停帮助
 完成默认关闭的NR→SR→FG实验预览开关、旧预设默认关闭及v11存储，参数/播放/采集/PS5悬停说明。详细代码、测试命令、失败修复与未验证边界见 docs/NR_BEFORE_SR_PREVIEW_2026-09-12.md。90项contract、42组预设迁移、实际两种SR后端+NR+FG与恢复默认9项、统一48.25秒gate及UI通过。无新SDK/运行时，无push/release；实卡及PS5画质由用户验收。
+
+## 2026-09-12 PS5 HDR、PSN与主机保留规划
+用户要求先写方案。新增 docs/PS5_HDR_PSN_HOST_PLAN_2026-09-12.md：画质分段定位、实测码率、稳定用户目录及旧配对迁移、PSN浏览器授权/刷新/条件性自动注册、Main10/HDR显示与SDR映射、增强兼容能力矩阵和验收节点。静态检查确认现有配对已DPAPI保存，目录随applicationRoot变化；RemotePlaySource与EnhanceGraph拒绝HDR，不能只增选项。重复配对根因与本次糊灰尚未实测确认；既有BT1886修复不能当作当前无问题的证明。本轮仅文档与代码/官方上游资料核对，无产品修改，无PS5/OAuth/HDR实测，无发布。
