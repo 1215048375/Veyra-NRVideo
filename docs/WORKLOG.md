@@ -1746,3 +1746,6 @@ apps/veyra/SettingsWindow.cpp调整布局；apps/veyra/ui/AppShell.cpp新增音�
 用户授权后，main同步远端README改动并合并PS5开发分支，独立436步构建成功。双语README、Release说明、运行组件/串流许可证与对应源码补齐。外部便携五组、47.046秒统一gate、DPAPI、SDL边界、90项合同及便携PS5 UI通过。最终运行文件与测试哈希一致，71文件白名单通过，未提交SDK/运行时/凭据。资产、命令、日志、真实验收边界见 docs/RELEASE_0.0.5_EXECUTION.md，发布结果待追加。
 
 0.0.5已发布：main和标签源码提交7d8e24c，Release 387470534，公开2026-09-12T05:54:45Z，latest=v0.0.5。六附件远端大小/SHA256与本机一致，README blob一致；证据github-published.json与github-verify.log。无旧版替换、无SDK/运行时/凭据进入Git。发布后仅补本记录，实际PS5/PSN/HDR边界保持不变。
+
+## 2026-09-12 文件过载迟到后续修复方案
+用户4060日志显示revision13迟到均值62.649ms、队列2，音频持续推进；revision14另配置迟到0.578ms。静态检查发现源帧过期仅比较当前时钟，未预测增强完成，以及“原帧总呈现”的单批次历史假设与现有容量2不符。新增 FILE_OVERLOAD_LATENCY_REPAIR_PLAN_2026-09-12.md：先澄清文件迟到/实时额外延迟口径，关联测量、预计就绪选帧、有替代结果时跳旧呈现，保持音频连续及导出完整。仅方案与日志/代码审查，未新构建/运行RTX测试/修改产品/发布，不能断言全部60ms可消除。
