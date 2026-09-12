@@ -2,7 +2,7 @@
 #include "veyra/remoteplay/Types.h"
 namespace veyra::remoteplay {
 NalInfo inspectAnnexB(std::span<const std::uint8_t> b,Codec codec) noexcept {
-    NalInfo out; if(codec!=Codec::H264 && codec!=Codec::H265)return out;
+    NalInfo out; if(codec!=Codec::H264 && codec!=Codec::H265 && codec!=Codec::H265Hdr)return out;
     std::size_t pos=0;bool any=false;
     while(pos+3<=b.size()) {
         std::size_t prefix=0;

@@ -87,6 +87,7 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
     diagnostics::DiagnosticEvent initDiagnostic;initDiagnostic.stage="initialize";initDiagnostic.identity={epoch_+1,desc.settingsRevision,0};initDiagnostic.resolution.source={srcW_,srcH_};initDiagnostic.resolution.base=initDiagnostic.resolution.fg=initDiagnostic.resolution.output={workW_,workH_};initDiagnostic.resolution.nr={nrW_,nrH_};initDiagnostic.resolution.flow={nvofW_,nvofH_};initDiagnostic.flowApplied=std::to_string(unsigned(desc.flowQuality));initDiagnostic.runtimeHash="unverified-user-replaceable";Logger::diagnosticContext(initDiagnostic);
     veyra::log::info("resolution",std::format("source={}x{} base={}x{} nr={}x{} flow={}x{} fg={}x{} output={}x{}",srcW_,srcH_,workW_,workH_,nrW_,nrH_,nvofW_,nvofH_,workW_,workH_,workW_,workH_));
     veyra::log::info("pipeline-order",desc.nrBeforeSr?"NR -> residual(source) -> SR -> FG (experimental preview)":"SR -> NR -> residual -> FG");
+    if(desc.hdrOutput&&(!desc.hdrInput||desc.enableNr||desc.enableSr||desc.enableFg)){veyra::log::error("hdr","Native HDR enhancement combination is not validated");return false;}
     srEnabled_ = desc.enableSr && (srcW_ != workW_ || srcH_ != workH_);
     nrEnabled_ = desc.enableNr && !desc.noFeatures && !desc.noNgx;
     fgEnabled_ = desc.enableFg && !desc.noNgx && !desc.stillImage && desc.frameGenerationBackend!=engine::FrameGenerationBackend::XeSS;
@@ -100,7 +101,7 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
     }
     Status st = Status::Ok;
 
-    lumaPitch_ = (static_cast<size_t>(srcW_) + 255) & ~size_t(255);
+    lumaPitch_ = (static_cast<size_t>(srcW_)*(desc_.hdrInput?2:1) + 255) & ~size_t(255);
     chromaPitch_ = lumaPitch_;
     lumaSize_ = lumaPitch_ * srcH_;
     chromaSize_ = chromaPitch_ * ((srcH_ + 1) / 2);
@@ -149,8 +150,8 @@ bool EnhanceGraph::createResources()
     upDepth_ = makeUploadBuffer(context_.device(), dPitch_ * workH_);
     upZeroDepth_ = makeUploadBuffer(context_.device(), dPitch_ * workH_);
     upZeroMotion_ = makeUploadBuffer(context_.device(), dPitch_ * workH_);
-    lumaTex_ = makeTexture(context_.device(), srcW_, srcH_, DXGI_FORMAT_R8_UNORM, true);
-    chromaTex_ = makeTexture(context_.device(), (srcW_+1) / 2, (srcH_+1) / 2, DXGI_FORMAT_R8G8_UNORM, true);
+    lumaTex_ = makeTexture(context_.device(), srcW_, srcH_, desc_.hdrInput?DXGI_FORMAT_R16_UNORM:DXGI_FORMAT_R8_UNORM, true);
+    chromaTex_ = makeTexture(context_.device(), (srcW_+1) / 2, (srcH_+1) / 2, desc_.hdrInput?DXGI_FORMAT_R16G16_UNORM:DXGI_FORMAT_R8G8_UNORM, true);
     if(desc_.rgbInput||desc_.yuy2Input){
         if(desc_.yuy2Input&&(srcW_%2||desc_.rgbInput))return false;
         const unsigned packedWidth=desc_.yuy2Input?srcW_/2:srcW_;
@@ -175,8 +176,8 @@ bool EnhanceGraph::createResources()
     proxyTex_ = makeTexture(context_.device(), nrW_, nrH_, DXGI_FORMAT_R8G8B8A8_UNORM, true);
     neuralTex_ = makeTexture(context_.device(), nrW_, nrH_, DXGI_FORMAT_R8G8B8A8_UNORM, true);
     finalRgba_ = makeTexture(context_.device(), nrW_, nrH_, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
-    videoFrame_[0] = makeTexture(context_.device(), workW_, workH_, DXGI_FORMAT_R8G8B8A8_UNORM, true);
-    videoFrame_[1] = makeTexture(context_.device(), workW_, workH_, DXGI_FORMAT_R8G8B8A8_UNORM, true);
+    videoFrame_[0] = makeTexture(context_.device(), workW_, workH_, desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, true);
+    videoFrame_[1] = makeTexture(context_.device(), workW_, workH_, desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, true);
     confTex_ = makeTexture(context_.device(), nvofW_, nvofH_, DXGI_FORMAT_R8_UNORM, true);
     flowTex_ = makeTexture(context_.device(), nvofW_, nvofH_, DXGI_FORMAT_R16G16_FLOAT, true);
     depthTex_ = makeTexture(context_.device(), workW_, workH_, DXGI_FORMAT_R32_FLOAT, false);
@@ -578,8 +579,8 @@ bool EnhanceGraph::createViews()
         stagedSrv(rgbTex_.Get(),DXGI_FORMAT_R8G8B8A8_UNORM,rgbPass_,0);
         makeUav(context_.device(),srcRgba_.Get(),DXGI_FORMAT_R16G16B16A16_FLOAT,cpu(rgbPass_,1));
     }
-    if (viewsTex) stagedSrv(lumaTex_.Get(), DXGI_FORMAT_R8_UNORM, yuvPass_, 0);
-    if (viewsTex) stagedSrv(chromaTex_.Get(), DXGI_FORMAT_R8G8_UNORM, yuvPass_, 1);
+    if (viewsTex) stagedSrv(lumaTex_.Get(), desc_.hdrInput?DXGI_FORMAT_R16_UNORM:DXGI_FORMAT_R8_UNORM, yuvPass_, 0);
+    if (viewsTex) stagedSrv(chromaTex_.Get(), desc_.hdrInput?DXGI_FORMAT_R16G16_UNORM:DXGI_FORMAT_R8G8_UNORM, yuvPass_, 1);
     if (viewsUav) makeUav(context_.device(), srcRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, cpu(yuvPass_, 2));
     if (viewsTex) stagedSrv(nrInput_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, encPass_, 0);
     if (viewsUav) makeUav(context_.device(), proxyTex_.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, cpu(encPass_, 1));
@@ -587,8 +588,8 @@ bool EnhanceGraph::createViews()
     if (viewsTex) stagedSrv(proxyTex_.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, decPass_, 1);
     if (viewsTex) stagedSrv(neuralTex_.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, decPass_, 2);
     if (viewsUav) makeUav(context_.device(), finalRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, cpu(decPass_, 3));
-    if (viewsUav) makeUav(context_.device(), lumaTex_.Get(), DXGI_FORMAT_R8_UNORM, cpu(uploadPass_, 2));
-    if (viewsUav) makeUav(context_.device(), chromaTex_.Get(), DXGI_FORMAT_R8G8_UNORM, cpu(uploadPass_, 3));
+    if (viewsUav) makeUav(context_.device(), lumaTex_.Get(), desc_.hdrInput?DXGI_FORMAT_R16_UNORM:DXGI_FORMAT_R8_UNORM, cpu(uploadPass_, 2));
+    if (viewsUav) makeUav(context_.device(), chromaTex_.Get(), desc_.hdrInput?DXGI_FORMAT_R16G16_UNORM:DXGI_FORMAT_R8G8_UNORM, cpu(uploadPass_, 3));
     // Software NV12 ingestion uses plane copies; no raw-SRV dispatch.
     // Blit pass layout (all static; per-use offsets chosen at bind time):
     //  0: srcRgba SRV        1: workRgba UAV      (SR bypass / NR-off blit)
@@ -603,17 +604,17 @@ bool EnhanceGraph::createViews()
     if (viewsTex) stagedSrv(srcRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, blitPass_, 0);
     if (viewsUav) makeUav(context_.device(), workRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, cpu(blitPass_, 1));
     if (viewsTex) stagedSrv(nrEnabled_&&!desc_.nrBeforeSr ? residualRgba_.Get() : workRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, blitPass_, 2);
-    if (viewsUav) makeUav(context_.device(), videoFrame_[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, cpu(blitPass_, 3));
-    if (viewsUav) makeUav(context_.device(), videoFrame_[1].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, cpu(blitPass_, 4));
+    if (viewsUav) makeUav(context_.device(), videoFrame_[0].Get(), desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, cpu(blitPass_, 3));
+    if (viewsUav) makeUav(context_.device(), videoFrame_[1].Get(), desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, cpu(blitPass_, 4));
     if (viewsTex) stagedSrv(nvofInB_.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, blitPass_, 5);
     if (viewsUav) makeUav(context_.device(), nvofInA_.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, cpu(blitPass_, 6));
-    if (viewsTex) stagedSrv(videoFrame_[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 7);
-    if (viewsTex) stagedSrv(videoFrame_[1].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 8);
+    if (viewsTex) stagedSrv(videoFrame_[0].Get(), desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 7);
+    if (viewsTex) stagedSrv(videoFrame_[1].Get(), desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 8);
     if (viewsUav) makeUav(context_.device(), nvofInB_.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, cpu(blitPass_, 9));
     if (viewsTex) stagedSrv(genFrame_[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 10);
     if (viewsTex) stagedSrv(genFrame_[1].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 13);
-    if (viewsTex) stagedSrv(videoFrame_[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 11);
-    if (viewsTex) stagedSrv(videoFrame_[1].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 12);
+    if (viewsTex) stagedSrv(videoFrame_[0].Get(), desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 11);
+    if (viewsTex) stagedSrv(videoFrame_[1].Get(), desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 12);
 
     // Densify pass views: 0=rawFlow SRV(int2) 1=cost SRV(uint)
     // 2=previous RGB,3=current RGB,4=AMD SCD;5=flow UAV,6=confidence UAV.
@@ -663,9 +664,12 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     static const bool graphOff = GetEnvironmentVariableW(L"VEYRA_GRAPH_OFF", nullptr, 0) != 0;
     if (!frame || !initialized_ || !std::isfinite(ptsMs)) return false;
     const auto resolved=resolveFrameColor(*frame,color?*color:ColorDescription{});
-    if(resolved.matrix==YuvMatrix::BT2020NCL||resolved.matrix==YuvMatrix::BT2020CL||resolved.transfer==TransferFunction::BT2020_10){veyra::log::error("graph","BT.2020 input is not supported by the BT.601/709 SDR conversion");return false;}
+    if(resolved.matrix==YuvMatrix::BT2020CL||resolved.transfer==TransferFunction::BT2020_10||(resolved.matrix==YuvMatrix::BT2020NCL&&!desc_.hdrInput)){veyra::log::error("graph","BT.2020 input is not supported by the BT.601/709 SDR conversion");return false;}
+    if(resolved.transfer==TransferFunction::PQ&&(resolved.matrix!=YuvMatrix::BT2020NCL||resolved.primaries!=ColorPrimaries::BT2020)){
+        veyra::log::error("hdr","Unsupported PQ colorimetry: requires signaled/fallback BT2020 NCL and BT2020 primaries");return false;
+    }
     if(reset||!realFrameIndex_)veyra::log::info("color",std::format("range={} assumed={} matrix={} assumed={} transfer={} assumed={} display709={}",int(resolved.range),resolved.rangeAssumed,int(resolved.matrix),resolved.matrixAssumed,int(resolved.transfer),resolved.transferAssumed,resolved.displayReferred709));
-    if (frame->color_trc == AVCOL_TRC_SMPTE2084 || frame->color_trc == AVCOL_TRC_ARIB_STD_B67) {
+    if (resolved.transfer==TransferFunction::HLG || (resolved.transfer==TransferFunction::PQ&&!desc_.hdrInput)) {
         veyra::log::error("graph", "HDR input is unsupported by the V1 SDR pipeline"); return false;
     }
     if(std::abs(ptsMs)>9e13){veyra::log::error("timeline","PTS outside representable range");return false;}
@@ -770,7 +774,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         }
         const bool isArray = nv12Texture->GetDesc().DepthOrArraySize > 1;
         D3D12_SHADER_RESOURCE_VIEW_DESC lumaSrv{};
-        lumaSrv.Format = DXGI_FORMAT_R8_UNORM;
+        lumaSrv.Format = nv12Texture->GetDesc().Format==DXGI_FORMAT_P010?DXGI_FORMAT_R16_UNORM:DXGI_FORMAT_R8_UNORM;
         lumaSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         lumaSrv.Texture2D.MostDetailedMip = 0;
         lumaSrv.Texture2D.MipLevels = 1;
@@ -790,7 +794,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         }
         context_.device()->CreateShaderResourceView(nv12Texture, &lumaSrv, cpuHandleOf(yuvPass_, 0));
         D3D12_SHADER_RESOURCE_VIEW_DESC chromaSrv{};
-        chromaSrv.Format = DXGI_FORMAT_R8G8_UNORM;
+        chromaSrv.Format = nv12Texture->GetDesc().Format==DXGI_FORMAT_P010?DXGI_FORMAT_R16G16_UNORM:DXGI_FORMAT_R8G8_UNORM;
         chromaSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         chromaSrv.Texture2D.MostDetailedMip = 0;
         chromaSrv.Texture2D.MipLevels = 1;
@@ -813,27 +817,27 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     } else {
         nv12Ctx_ = sws_getCachedContext(nv12Ctx_, frame->width, frame->height,
             static_cast<AVPixelFormat>(frame->format),
-            frame->width, frame->height, AV_PIX_FMT_NV12, SWS_POINT,
+            frame->width, frame->height, desc_.hdrInput?AV_PIX_FMT_P010:AV_PIX_FMT_NV12, SWS_POINT,
             nullptr, nullptr, nullptr);
         if (nv12Ctx_ == nullptr) { veyra::log::error("graph", "sws"); return false; }
-        const int colorSpace=resolved.matrix==YuvMatrix::BT601?SWS_CS_ITU601:SWS_CS_ITU709;
+        const int colorSpace=resolved.matrix==YuvMatrix::BT2020NCL?SWS_CS_BT2020:resolved.matrix==YuvMatrix::BT601?SWS_CS_ITU601:SWS_CS_ITU709;
         const int* coefficients=sws_getCoefficients(colorSpace);
         const int full=resolved.range==ColorRange::Full?1:0;
         if(sws_setColorspaceDetails(nv12Ctx_,coefficients,full,coefficients,full,0,1<<16,1<<16)<0)return false;
         // Planar 8-bit YUV already exposes CPU luma for cadence analysis.
         // Convert directly into the fenced upload slot instead of writing and
         // copying another full NV12 frame. Never sample write-combined memory.
-        const bool directUpload=frame->format==AV_PIX_FMT_YUV420P||frame->format==AV_PIX_FMT_YUVJ420P||frame->format==AV_PIX_FMT_NV12;
-        uint8_t* planes[2] = { directUpload?mappedLuma_[parity]:nv12Buf_.data(), directUpload?mappedChroma_[parity]:nv12Buf_.data() + lumaSize_ };
-        const int strides[2] = { static_cast<int>(lumaPitch_), static_cast<int>(chromaPitch_) };
-        sws_scale(nv12Ctx_, frame->data, frame->linesize, 0, frame->height, planes, strides);
+        const bool directUpload=!desc_.hdrInput&&(frame->format==AV_PIX_FMT_YUV420P||frame->format==AV_PIX_FMT_YUVJ420P||frame->format==AV_PIX_FMT_NV12);
+        uint8_t* planes[4] = { directUpload?mappedLuma_[parity]:nv12Buf_.data(), directUpload?mappedChroma_[parity]:nv12Buf_.data() + lumaSize_ };
+        const int strides[4] = { static_cast<int>(lumaPitch_), static_cast<int>(chromaPitch_) };
+        if(sws_scale(nv12Ctx_, frame->data, frame->linesize, 0, frame->height, planes, strides)!=frame->height){veyra::log::error("color","Software plane conversion failed");return false;}
         std::vector<uint8_t> sample;sample.reserve(64*36);
-        for(unsigned y=0;y<36;++y)for(unsigned x=0;x<64;++x){const uint8_t v=directUpload?frame->data[0][ptrdiff_t(y*srcH_/36)*frame->linesize[0]+x*srcW_/64]:planes[0][size_t(y*srcH_/36)*lumaPitch_+x*srcW_/64];sample.push_back(v);}
+        for(unsigned y=0;y<36;++y)for(unsigned x=0;x<64;++x){const uint8_t v=directUpload?frame->data[0][ptrdiff_t(y*srcH_/36)*frame->linesize[0]+x*srcW_/64]:planes[0][size_t(y*srcH_/36)*lumaPitch_+(x*srcW_/64)*(desc_.hdrInput?2:1)+(desc_.hdrInput?1:0)];sample.push_back(v);}
         analyzeLuma(std::move(sample));
         if(!directUpload){for (uint32_t y = 0; y < srcH_; ++y)
-            std::memcpy(mappedLuma_[parity] + y * lumaPitch_, planes[0] + y * lumaPitch_, srcW_);
+            std::memcpy(mappedLuma_[parity] + y * lumaPitch_, planes[0] + y * lumaPitch_, srcW_*(desc_.hdrInput?2:1));
         for (uint32_t y = 0; y < (srcH_+1) / 2; ++y)
-            std::memcpy(mappedChroma_[parity] + y * chromaPitch_, planes[1] + y * chromaPitch_, ((srcW_+1)/2)*2);}
+            std::memcpy(mappedChroma_[parity] + y * chromaPitch_, planes[1] + y * chromaPitch_, ((srcW_+1)/2)*(desc_.hdrInput?4:2));}
         auto copyPlane = [&](ID3D12Resource* texture, ID3D12Resource* upload,
                              DXGI_FORMAT format, UINT width, UINT height, UINT pitch) {
             tracker_.transition(list, texture, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -845,9 +849,9 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             src.PlacedFootprint.Footprint = {format, width, height, 1, pitch};
             list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
         };
-        copyPlane(lumaTex_.Get(), upLuma_[parity].Get(), DXGI_FORMAT_R8_UNORM,
+        copyPlane(lumaTex_.Get(), upLuma_[parity].Get(), desc_.hdrInput?DXGI_FORMAT_R16_UNORM:DXGI_FORMAT_R8_UNORM,
                   srcW_, srcH_, static_cast<UINT>(lumaPitch_));
-        copyPlane(chromaTex_.Get(), upChroma_[parity].Get(), DXGI_FORMAT_R8G8_UNORM,
+        copyPlane(chromaTex_.Get(), upChroma_[parity].Get(), desc_.hdrInput?DXGI_FORMAT_R16G16_UNORM:DXGI_FORMAT_R8G8_UNORM,
                   (srcW_+1)/2, (srcH_+1)/2, static_cast<UINT>(chromaPitch_));
         tracker_.transition(list, lumaTex_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         tracker_.transition(list, chromaTex_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -863,9 +867,9 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         list->Dispatch((srcW_+15)/16,(srcH_+15)/16,1);
     }else{
         const float constants[8] = { resolved.range==ColorRange::Full?0.0f:1.0f,
-            resolved.matrix==YuvMatrix::BT601?0.0f:1.0f,
-            float(workingTransferCode(resolved)), 0.0f,
-            uintBits(srcW_), uintBits(srcH_), 0.0f, 0.0f };
+            resolved.matrix==YuvMatrix::BT2020NCL?2.0f:resolved.matrix==YuvMatrix::BT601?0.0f:1.0f,
+            resolved.transfer==TransferFunction::PQ?4.0f:float(workingTransferCode(resolved)), (nv12Texture?nv12Texture->GetDesc().Format==DXGI_FORMAT_P010:desc_.hdrInput)?1.0f:0.0f,
+            uintBits(srcW_), uintBits(srcH_), uintBits(desc_.hdrOutput?1u:0u), 0.0f };
         yuvPass_.bind(list, constants, gpuHandleOf(yuvPass_, 0).ptr, gpuHandleOf(yuvPass_, 2).ptr);
         list->Dispatch((srcW_ + 15) / 16, (srcH_ + 15) / 16, 1);
     }
@@ -1112,7 +1116,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         tracker_.transition(list, videoFrame_[parity].Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         const float constants[8] = {
             uintBits(workW_), uintBits(workH_),
-            uintBits(workW_), uintBits(workH_), 1, 0, 0, 0 };
+            uintBits(workW_), uintBits(workH_), desc_.hdrOutput?0.0f:1.0f, 0, 0, 0 };
         blitPass_.bind(list, constants, gpuHandleOf(blitPass_, srcSlot).ptr, gpuHandleOf(blitPass_, uavSlot).ptr);
         list->Dispatch((workW_ + 15) / 16, (workH_ + 15) / 16, 1);
         tracker_.uavBarrier(list, videoFrame_[parity].Get());

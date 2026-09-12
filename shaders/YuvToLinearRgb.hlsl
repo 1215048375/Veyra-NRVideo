@@ -24,9 +24,19 @@ float ExpandLimited(float c)
 
 float3 YuvToRgb(float y, float2 uv)
 {
-    float yy = colorParams0.x > 0.5 ? ExpandLimited(y) : y;
-    float uu = (uv.x - 128.0/255.0) * (colorParams0.x > 0.5 ? 255.0/224.0 : 1.0);
-    float vv = (uv.y - 128.0/255.0) * (colorParams0.x > 0.5 ? 255.0/224.0 : 1.0);
+    // P010 is stored as 10 significant HIGH bits in 16-bit UNORM. Its
+    // normalization is not 8-bit /255: decode legal code values explicitly.
+    bool ten=colorParams0.w>0.5;
+    float scale=ten?65535.0/64.0:255.0;
+    float black=ten?64.0:16.0,white=ten?940.0:235.0;
+    float middle=ten?512.0:128.0,span=ten?896.0:224.0;
+    float maximum=ten?1023.0:255.0;
+    float yy=colorParams0.x>0.5?(y*scale-black)/(white-black):y*scale/maximum;
+    yy=saturate(yy);
+    float uu=(uv.x*scale-middle)/(colorParams0.x>0.5?span:maximum);
+    float vv=(uv.y*scale-middle)/(colorParams0.x>0.5?span:maximum);
+
+    if(colorParams0.y>1.5)return float3(yy+1.4746*vv,yy-0.164553*uu-0.571353*vv,yy+1.8814*uu);
 
     if (colorParams0.y > 0.5) {
         // BT.709.
@@ -57,7 +67,21 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     const float2 uv = chromaPlane[uint2(dispatchThreadId.x / 2, dispatchThreadId.y / 2)];
     float3 rgb = YuvToRgb(y, uv);
     rgb = saturate(rgb);
-    if (colorParams0.z > 2.5) {
+    if(colorParams0.z>3.5){
+        // ST2084 EOTF to absolute cd/m2, then BT.2020 -> BT.709 linear.
+        const float m1=2610.0/16384.0,m2=2523.0/32.0;
+        float3 p=pow(rgb,1.0/m2);
+        float3 nits=10000.0*pow(max(p-3424.0/4096.0,0.0)/max(2413.0/128.0-2392.0/128.0*p,1e-6),1.0/m1);
+        float3 linear709=mul(float3x3(1.660491,-0.587641,-0.072850,-0.124550,1.132900,-0.008349,-0.018151,-0.100579,1.118730),nits);
+        if(yuvDimensions.z!=0)rgb=linear709/80.0; // scRGB: 1.0 = 80 nits.
+        else{
+            // Stable luminance shoulder, fixed 1000-nit reference peak.
+            // This is SDR mapping, never advertised as native HDR output.
+            float3 c=max(linear709/203.0,0.0);float lum=dot(c,float3(.2126,.7152,.0722));
+            float peak=1000.0/203.0;float mapped=lum*(1.0+lum/(peak*peak))/(1.0+lum);
+            rgb=saturate(c*(mapped/max(lum,1e-6)));
+        }
+    } else if (colorParams0.z > 2.5) {
         rgb = pow(rgb, 2.4); // BT.1886 EOTF, ideal black SDR display intent.
     } else if (colorParams0.z > 1.5) {
         rgb = float3(rgb.r < 0.081 ? rgb.r / 4.5 : pow((rgb.r + 0.099) / 1.099, 1.0/0.45),

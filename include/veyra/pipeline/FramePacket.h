@@ -68,7 +68,7 @@ enum class SourcePixelFormat : uint8_t {
 
 enum class ColorRange : uint8_t { Unknown = 0, Limited, Full };
 enum class YuvMatrix : uint8_t { Unknown = 0, BT601, BT709, BT2020NCL, BT2020CL };
-enum class TransferFunction : uint8_t { Unknown = 0, SRGB, BT709, BT2020_10, Linear };
+enum class TransferFunction : uint8_t { Unknown = 0, SRGB, BT709, BT2020_10, Linear, PQ, HLG };
 enum class ColorPrimaries : uint8_t { Unknown = 0, BT601_525, BT601_625, BT709, BT2020 };
 
 struct SampleAspectRatio {
@@ -97,7 +97,7 @@ struct ColorDescription {
     bool primariesAssumed = false;
 
     bool isHdrPath() const {
-        return pixelFormat == SourcePixelFormat::P010
+        return transfer == TransferFunction::PQ || transfer == TransferFunction::HLG || pixelFormat == SourcePixelFormat::P010
             || transfer == TransferFunction::BT2020_10;
     }
 };

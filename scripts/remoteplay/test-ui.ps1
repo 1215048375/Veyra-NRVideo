@@ -50,7 +50,9 @@ try {
   if($panel -eq [IntPtr]::Zero){throw 'Remote Play panel missing'}
   # Enumeration can see the HWND while WM_CREATE is still creating children.
   [RpUi]::SendMessage($panel,0,[IntPtr]::Zero,[IntPtr]::Zero)|Out-Null
-  foreach($control in @(15,16)){if([RpUi]::GetDlgItem($panel,$control) -eq [IntPtr]::Zero){throw 'Bitrate/profile management missing'}}
+  foreach($control in @(15,16,20,21,22)){if([RpUi]::GetDlgItem($panel,$control) -eq [IntPtr]::Zero){throw 'Bitrate/profile management missing'}}
+  $codec=[RpUi]::GetDlgItem($panel,5)
+  if([RpUi]::SendMessage($codec,0x146,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32() -ne 3){throw 'HDR codec option missing'}
   $decode=[RpUi]::GetDlgItem($panel,19)
   if($decode -eq [IntPtr]::Zero -or [RpUi]::SendMessage($decode,0x146,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32() -ne 3){throw 'Three decode choices missing'}
   foreach($choice in @(0,1,2,0)){

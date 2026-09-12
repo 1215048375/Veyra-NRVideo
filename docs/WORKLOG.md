@@ -1730,3 +1730,9 @@ apps/veyra/SettingsWindow.cpp调整布局；apps/veyra/ui/AppShell.cpp新增音�
 
 ## 2026-09-12 PS5 HDR、PSN与主机保留规划
 用户要求先写方案。新增 docs/PS5_HDR_PSN_HOST_PLAN_2026-09-12.md：画质分段定位、实测码率、稳定用户目录及旧配对迁移、PSN浏览器授权/刷新/条件性自动注册、Main10/HDR显示与SDR映射、增强兼容能力矩阵和验收节点。静态检查确认现有配对已DPAPI保存，目录随applicationRoot变化；RemotePlaySource与EnhanceGraph拒绝HDR，不能只增选项。重复配对根因与本次糊灰尚未实测确认；既有BT1886修复不能当作当前无问题的证明。本轮仅文档与代码/官方上游资料核对，无产品修改，无PS5/OAuth/HDR实测，无发布。
+
+## 2026-09-12 PS5 HDR/PSN/主机持久化实施
+
+开工标签checkpoint/ps5-hdr-psn-preimplementation-2026-09-12，方案提交37cfdf4。固定用户目录及DPAPI旧档迁移、稳定主机ID和观看模式、PSN浏览器回调授权/刷新/注销、H265 HDR与Main10输入、HDR原生旁路/SDR映射后增强已经进入产品代码。发现并修复sws_scale目标平面数组只有2项导致新10-bit Full测试访问异常；补齐P010码值、PQ/色域及FP16呈现。详细命令、失败与未完成边界见 docs/PS5_HDR_PSN_EXECUTION_2026-09-12.md。8组HDR GPU/呈现、Main10软硬解各12次真实NR、SDR颜色回归、90项contract及UI通过；42.73秒gate为收尾前二进制，最终按针对性测试报告。真实PS5画质、Sony登录未验收；免PIN自动注册、原生HDR增强不宣称完成。无发布/push/运行时入Git。
+
+收尾HDR组合回归：logs/ps5-hdr-combo.log，软/硬解 × NR单独/标准SR→NR→FG/低延迟NR→SR→FG，共6组通过；组合4K/2X各12次SR、12次NR、11有效生成帧。实际PS5画质与Sony授权仍待用户操作。

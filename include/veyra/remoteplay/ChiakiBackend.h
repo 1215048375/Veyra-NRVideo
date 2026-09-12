@@ -29,6 +29,7 @@ struct BackendResult {
 };
 struct NativeConnectRequest {
     std::string host;
+    std::string consoleId; // Stable discovery host_id / registration MAC, normalized hex.
     VideoProfile video;
     bool viewOnly=false;
     PairingCredentials credentials;

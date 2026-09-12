@@ -13,10 +13,10 @@ HostTime monotonic100ns() noexcept {
 }
 std::optional<std::string> VideoProfile::validate() const {
     if (!((width==1280 && height==720) || (width==1920 && height==1080)))
-        return "Only 720p/1080p SDR are supported by this integration profile";
+        return "Only 720p/1080p are supported by this integration profile";
     if (fps!=30 && fps!=60) return "Frame rate must be 30 or 60";
     if (bitrateKbps<1000 || bitrateKbps>100000) return "Bitrate must be 1000..100000 kbit/s";
-    if (codec!=Codec::H264 && codec!=Codec::H265) return "Unsupported codec";
+    if (codec!=Codec::H264 && codec!=Codec::H265 && codec!=Codec::H265Hdr) return "Unsupported codec";
     return {};
 }
 namespace {

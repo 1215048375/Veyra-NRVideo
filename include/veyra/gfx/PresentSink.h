@@ -24,6 +24,7 @@ using ComPtr = Microsoft::WRL::ComPtr<T>;
 
 class PresentSink {
 public:
+    static bool hdrDisplayActive(HWND);
     PresentSink() = default;
     ~PresentSink();
 
@@ -36,6 +37,7 @@ public:
         bool vsync = true;
         bool xess = false;
         bool captureCompatible = false;
+        bool hdr = false;
         // Probe runs create their own window class name per process.
         std::wstring title = L"Veyra";
         HWND targetWindow = nullptr; // borrowed UI-owned child HWND; never destroyed by sink

@@ -22,7 +22,7 @@ struct DiscoveryResult {
         try{std::lock_guard lock(out.mutex);out.report.hosts.clear();
             for(size_t i=0;i<std::min(count,size_t(16));++i)
                 if(chiaki_discovery_host_is_ps5(&hosts[i])&&hosts[i].host_addr&&validHost(hosts[i].host_addr))
-                    out.report.hosts.push_back({hosts[i].host_addr,hosts[i].state==CHIAKI_DISCOVERY_HOST_STATE_STANDBY});
+                    out.report.hosts.push_back({hosts[i].host_addr,hosts[i].state==CHIAKI_DISCOVERY_HOST_STATE_STANDBY,hosts[i].host_id?hosts[i].host_id:""});
         }catch(...){/* Keep callback exceptions out of C. */}
     }
 };

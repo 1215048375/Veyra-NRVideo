@@ -131,3 +131,7 @@ HDR屏：目标实现原生HDR旁路显示，优先评估RGBA16F scRGB交换链�
 - 本地chiaki固定提交0e16950165f06e5c3291537c2eeba6e852be7120：lib/include/chiaki/common.h、session.h，gui/src/psnaccountid.cpp、psntoken.cpp及自动注册调用。在线文档可能比固定源码更新，移植前逐项确认版本能力，不隐式升级依赖。
 
 本轮核对：git status干净基线；源码rg/Get-Content检查及上述网页读取。未运行PS5连接、HDR、OAuth或构建测试；未修改产品代码。
+
+## 2026-09-12 实施状态
+
+方案已进入产品代码，详见 [施工记录](PS5_HDR_PSN_EXECUTION_2026-09-12.md)。原文“未实施”仅代表规划时点；完成、未验证和未落地以施工记录的分项为准，不能把所有计划项视为已完成。

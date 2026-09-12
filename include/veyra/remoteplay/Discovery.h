@@ -2,7 +2,7 @@
 #include "ChiakiBackend.h"
 #include <vector>
 namespace veyra::remoteplay {
-struct DiscoveredConsole {std::string host;bool standby=false;};
+struct DiscoveredConsole {std::string host;bool standby=false;std::string consoleId;};
 struct DiscoveryReport {
     std::vector<DiscoveredConsole> hosts;
     std::vector<std::string> diagnostics;

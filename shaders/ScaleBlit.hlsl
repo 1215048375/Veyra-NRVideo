@@ -3,7 +3,7 @@
 // from window extent). SDR path only: straight RGBA8 in, RGBA8 out.
 
 Texture2D<float4> sourceTex : register(t0);
-RWTexture2D<unorm float4> outputTex : register(u0);
+RWTexture2D<float4> outputTex : register(u0);
 
 cbuffer ScaleBlitConstants : register(b0)
 {

@@ -43,11 +43,11 @@ pipeline::SourcePixelFormat pixelFormatFromFrame(const AVFrame& frame)
 {
     if(frame.format==AV_PIX_FMT_D3D12&&frame.hw_frames_ctx){
         const auto* context=reinterpret_cast<const AVHWFramesContext*>(frame.hw_frames_ctx->data);
-        return context->sw_format==AV_PIX_FMT_NV12?pipeline::SourcePixelFormat::NV12:pipeline::SourcePixelFormat::Unknown;
+        return context->sw_format==AV_PIX_FMT_NV12?pipeline::SourcePixelFormat::NV12:context->sw_format==AV_PIX_FMT_P010?pipeline::SourcePixelFormat::P010:pipeline::SourcePixelFormat::Unknown;
     }
     switch (frame.format) {
     case AV_PIX_FMT_NV12: return pipeline::SourcePixelFormat::NV12;
-    case AV_PIX_FMT_P010: return pipeline::SourcePixelFormat::P010;
+    case AV_PIX_FMT_YUV420P10LE:case AV_PIX_FMT_P010: return pipeline::SourcePixelFormat::P010;
     case AV_PIX_FMT_YUV420P: return pipeline::SourcePixelFormat::Yuv420P;
     case AV_PIX_FMT_YUYV422: return pipeline::SourcePixelFormat::Yuy2;
     case AV_PIX_FMT_BGRA: return pipeline::SourcePixelFormat::Bgra8;
@@ -131,6 +131,10 @@ bool RemotePlaySource::connect(const RemotePlayConnectDesc& desc)
     info_.color.transferAssumed = true;
     info_.color.primaries = pipeline::ColorPrimaries::BT709;
     info_.color.primariesAssumed = true;
+    if(request_.video.codec==remoteplay::Codec::H265Hdr){
+        info_.color.pixelFormat=pipeline::SourcePixelFormat::P010;info_.color.matrix=pipeline::YuvMatrix::BT2020NCL;
+        info_.color.transfer=pipeline::TransferFunction::PQ;info_.color.primaries=pipeline::ColorPrimaries::BT2020;info_.color.displayReferred709=true;
+    }
     clock_.reset(static_cast<remoteplay::HostTime>(origin100ns_), request_.video.fps);
     sequence_ = 0;
     fallbackSourceIndex_ = 0;
@@ -279,12 +283,19 @@ bool RemotePlaySource::drainDecoder(std::uint64_t sourceIndex, const pipeline::F
         pipeline::FramePacket packet = stamp->packet;
         packetStamps_.erase(stamp);
         packet.sequence = ++sequence_;
-        packet.colorInfo = pipeline::resolveFrameColor(*decoderFrame_, info_.color);
+        auto fallback=info_.color;
+        if(request_.video.codec==remoteplay::Codec::H265Hdr&&pixelFormatFromFrame(*decoderFrame_)!=pipeline::SourcePixelFormat::P010){
+            // A negotiated 8-bit fallback is not automatically a PQ signal.
+            fallback.transfer=pipeline::TransferFunction::BT709;fallback.transferAssumed=true;
+            fallback.matrix=pipeline::YuvMatrix::BT709;fallback.matrixAssumed=true;
+            fallback.primaries=pipeline::ColorPrimaries::BT709;fallback.primariesAssumed=true;
+        }
+        packet.colorInfo = pipeline::resolveFrameColor(*decoderFrame_, fallback);
         packet.colorInfo.pixelFormat = pixelFormatFromFrame(*decoderFrame_);
         if (decoderFrame_->width <= 0 || decoderFrame_->height <= 0 ||
             decoderFrame_->width > 1920 || decoderFrame_->height > 1080 ||
             packet.colorInfo.pixelFormat == pipeline::SourcePixelFormat::Unknown ||
-            packet.colorInfo.isHdrPath()) return false;
+            (packet.colorInfo.isHdrPath()&&request_.video.codec!=remoteplay::Codec::H265Hdr)) return false;
         if (info_.width != static_cast<uint32_t>(decoderFrame_->width) ||
             info_.height != static_cast<uint32_t>(decoderFrame_->height)) {
             info_.width = static_cast<uint32_t>(decoderFrame_->width);
@@ -381,7 +392,11 @@ SourceReadStatus RemotePlaySource::read(pipeline::FramePacket& out, const AVFram
     if (queued->resetDecoder) {
         flushDecoder();
         ++decoderEpoch_;
-        clock_.reset(static_cast<remoteplay::HostTime>(origin100ns_), request_.video.fps);
+        if(request_.video.codec==remoteplay::Codec::H265Hdr){
+        info_.color.pixelFormat=pipeline::SourcePixelFormat::P010;info_.color.matrix=pipeline::YuvMatrix::BT2020NCL;
+        info_.color.transfer=pipeline::TransferFunction::PQ;info_.color.primaries=pipeline::ColorPrimaries::BT2020;info_.color.displayReferred709=true;
+    }
+    clock_.reset(static_cast<remoteplay::HostTime>(origin100ns_), request_.video.fps);
         pendingOpenFlag_ = true;
     }
     const auto extended = sample.wireFrameIndex ? wireSequence_.observe(*sample.wireFrameIndex)

@@ -14,7 +14,7 @@ using HostTime = std::int64_t; // Local steady-clock, 100 ns. NEVER PS5 render t
 using Generation = std::uint64_t;
 HostTime monotonic100ns() noexcept;
 
-enum class Codec : std::uint8_t { H264, H265 };
+enum class Codec : std::uint8_t { H264, H265, H265Hdr };
 enum class TimestampProvenance : std::uint8_t { Unknown, SourceProvided, LocalEstimated };
 enum class SessionState : std::uint8_t { Idle, Connecting, WaitingFirstFrame, Streaming, LoginPinRequired, Failed, Stopping };
 enum class SampleKind : std::uint8_t { CodecConfig, AccessUnit };
