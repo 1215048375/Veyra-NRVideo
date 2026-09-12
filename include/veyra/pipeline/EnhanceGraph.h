@@ -70,6 +70,7 @@ struct EnhanceGraphDesc {
     bool noNgx = false;          // VEYRA_NO_NGX: core/features skipped, NVOF only
     bool hdrInput = false;       // PS5 Main10 ingress; explicit SDR mapping unless hdrOutput.
     bool hdrOutput = false;      // Native scRGB passthrough, no SDR-only enhancement.
+    bool highQualityPresentation = false; // PS5 ordinary scaling, no AI SR
     bool rgbInput = false;       // allocate direct RGBA ingestion before NGX creation
     bool yuy2Input = false;      // packed Y0 U Y1 V -> linear FP16; never subsample to NV12
     bool stillImage = false;     // no temporal motion/FG history for a single image
@@ -185,6 +186,7 @@ public:
     bool nrEnabled() const { return nrEnabled_; }
     bool fgEnabled() const { return fgEnabled_; }
     bool hdrOutput() const { return desc_.hdrOutput; }
+    bool highQualityPresentation() const { return desc_.highQualityPresentation; }
     bool xessEnabled() const { return desc_.enableFg && !desc_.noFeatures && !desc_.stillImage && desc_.frameGenerationBackend==engine::FrameGenerationBackend::XeSS; }
     ID3D12Resource* presentMotion(uint32_t slot) const { return presentMotion_[slot%2].Get(); }
     ID3D12Resource* presentDepth() const { return depthTex_.Get(); }

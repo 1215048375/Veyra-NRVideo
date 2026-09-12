@@ -127,6 +127,7 @@ bool RemotePlaySource::connect(const RemotePlayConnectDesc& desc)
     info_.color.matrix = pipeline::YuvMatrix::BT709;
     info_.color.matrixAssumed = true;
     info_.color.displayReferred709 = true;
+    info_.color.reconstructChroma = desc.highQualitySampling;
     info_.color.transfer = pipeline::TransferFunction::BT709;
     info_.color.transferAssumed = true;
     info_.color.primaries = pipeline::ColorPrimaries::BT709;
@@ -286,6 +287,9 @@ bool RemotePlaySource::drainDecoder(std::uint64_t sourceIndex, const pipeline::F
         packetStamps_.erase(stamp);
         packet.sequence = ++sequence_;
         auto fallback=info_.color;
+        // A previous stream profile's explicit siting must not survive a new
+        // frame with unspecified siting; PS5 fallback is documented as left.
+        fallback.chromaLocation=pipeline::ChromaLocation::Unknown;
         if(request_.video.codec==remoteplay::Codec::H265Hdr&&pixelFormatFromFrame(*decoderFrame_)!=pipeline::SourcePixelFormat::P010){
             // A negotiated 8-bit fallback is not automatically a PQ signal.
             fallback.transfer=pipeline::TransferFunction::BT709;fallback.transferAssumed=true;
@@ -293,6 +297,7 @@ bool RemotePlaySource::drainDecoder(std::uint64_t sourceIndex, const pipeline::F
             fallback.primaries=pipeline::ColorPrimaries::BT709;fallback.primariesAssumed=true;
         }
         packet.colorInfo = pipeline::resolveFrameColor(*decoderFrame_, fallback);
+        if(sequence_==1)veyra::log::info("remoteplay-sampling",std::format("fine={} chromaLocation={} assumedLeft={}",packet.colorInfo.reconstructChroma,int(packet.colorInfo.chromaLocation),packet.colorInfo.chromaLocation==pipeline::ChromaLocation::Unknown));
         packet.colorInfo.pixelFormat = pixelFormatFromFrame(*decoderFrame_);
         if (decoderFrame_->width <= 0 || decoderFrame_->height <= 0 ||
             decoderFrame_->width > 1920 || decoderFrame_->height > 1080 ||

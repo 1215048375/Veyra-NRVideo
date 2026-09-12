@@ -7,6 +7,15 @@ extern "C" {
 }
 namespace veyra::pipeline {
 inline ColorDescription resolveFrameColor(const AVFrame& frame,ColorDescription c={}){
+    switch(frame.chroma_location){
+    case AVCHROMA_LOC_LEFT:c.chromaLocation=ChromaLocation::Left;break;
+    case AVCHROMA_LOC_CENTER:c.chromaLocation=ChromaLocation::Center;break;
+    case AVCHROMA_LOC_TOPLEFT:c.chromaLocation=ChromaLocation::TopLeft;break;
+    case AVCHROMA_LOC_TOP:c.chromaLocation=ChromaLocation::Top;break;
+    case AVCHROMA_LOC_BOTTOMLEFT:c.chromaLocation=ChromaLocation::BottomLeft;break;
+    case AVCHROMA_LOC_BOTTOM:c.chromaLocation=ChromaLocation::Bottom;break;
+    default:break;
+    }
     switch(frame.format){
     case AV_PIX_FMT_NV12:c.pixelFormat=SourcePixelFormat::NV12;break;
     case AV_PIX_FMT_YUV420P10LE:case AV_PIX_FMT_P010:c.pixelFormat=SourcePixelFormat::P010;break;

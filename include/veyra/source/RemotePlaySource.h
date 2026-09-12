@@ -27,6 +27,7 @@ struct RemotePlayConnectDesc {
     remoteplay::QueueLimits queueLimits{};
     enum class DecodeMode { Automatic, Software, Hardware };
     DecodeMode decodeMode=DecodeMode::Automatic;
+    bool highQualitySampling=true; // local reconstruction, never a server quality promise
     // Set by the engine; shared ownership keeps the exact presentation adapter
     // alive until the decoder owner has stopped, including failed connects.
     std::shared_ptr<ID3D12Device> decodeDevice;

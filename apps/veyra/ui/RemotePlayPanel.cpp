@@ -15,7 +15,7 @@
 namespace veyra::ui {
 namespace {
 HWND window=nullptr;HFONT font=nullptr;
-enum {Host=1,Account,PairPin,Quality,CodecChoice,Pair,Connect,Cancel,Scan,Wake,LoginPin,SendPin,StatusText,Help,Bitrate,Forget,ViewOnly,Calibrate,DecodeChoice,LoginPsn,CompletePsn,ForgetPsn};
+enum {Host=1,Account,PairPin,Quality,CodecChoice,Pair,Connect,Cancel,Scan,Wake,LoginPin,SendPin,StatusText,Help,Bitrate,Forget,ViewOnly,Calibrate,DecodeChoice,LoginPsn,CompletePsn,ForgetPsn,SamplingChoice};
 uint64_t psnLoginStarted=0,psnRefreshAfter=0;
 std::function<bool()> calibrate;
 std::function<void(source::RemotePlayConnectDesc)> connect;
@@ -73,7 +73,7 @@ remoteplay::VideoProfile video(){
     p.width=q<2?1280:1920;p.height=q<2?720:1080;p.fps=(q==0||q==2)?30:60;
     p.codec=static_cast<remoteplay::Codec>(std::clamp<int>(int(SendDlgItemMessageW(window,CodecChoice,CB_GETCURSEL,0,0)),0,2));const auto rate=SendDlgItemMessageW(window,Bitrate,CB_GETCURSEL,0,0);p.bitrateKbps=bitrates[std::clamp<int>(int(rate),0,7)];return p;
 }
-void buttons(){for(int id:{Pair,Connect,Scan,Wake,Host,Account,PairPin,Quality,CodecChoice,Bitrate,Forget,LoginPsn,CompletePsn,ForgetPsn})EnableWindow(GetDlgItem(window,id),!busy);EnableWindow(GetDlgItem(window,Cancel),busy);}
+void buttons(){for(int id:{Pair,Connect,Scan,Wake,Host,Account,PairPin,Quality,CodecChoice,Bitrate,SamplingChoice,Forget,LoginPsn,CompletePsn,ForgetPsn})EnableWindow(GetDlgItem(window,id),!busy);EnableWindow(GetDlgItem(window,Cancel),busy);}
 template<class Work> void launch(Work work){
     if(busy)return;if(worker.joinable())worker.join();busy=true;done=false;buttons();SetDlgItemTextW(window,StatusText,L"正在处理…可随时取消");
     worker=std::jthread([work=std::move(work)](std::stop_token stop)mutable{
@@ -84,13 +84,13 @@ template<class Work> void launch(Work work){
 }
 void arrange(){
     auto move=[](int id,int x,int y,int w,int h){MoveWindow(GetDlgItem(window,id),dip(window,x),dip(window,y),dip(window,w),dip(window,h),TRUE);};
-    move(LoginPsn,20,576,145,30);move(CompletePsn,175,576,200,30);move(ForgetPsn,385,576,167,30);
+    move(LoginPsn,20,620,145,30);move(CompletePsn,175,620,200,30);move(ForgetPsn,385,620,167,30);
     move(Host,160,18,270,180);move(Scan,440,18,112,28);
     move(Account,160,62,392,28);move(PairPin,160,106,180,28);move(Pair,352,106,200,30);
     move(Quality,160,150,220,150);move(CodecChoice,392,150,160,150);
     move(Connect,160,199,180,36);move(Wake,352,199,200,36);
     move(LoginPin,160,250,180,28);move(SendPin,352,250,200,30);
-    move(Bitrate,160,295,180,180);move(Forget,352,295,80,32);move(Cancel,440,295,112,32);move(StatusText,20,341,530,64);move(ViewOnly,20,408,400,28);move(Calibrate,432,408,120,28);move(DecodeChoice,160,442,392,150);move(Help,20,485,530,86);
+    move(Bitrate,160,295,180,180);move(Forget,352,295,80,32);move(Cancel,440,295,112,32);move(StatusText,20,341,530,64);move(ViewOnly,20,408,400,28);move(Calibrate,432,408,120,28);move(DecodeChoice,160,442,392,150);move(SamplingChoice,160,486,392,120);move(Help,20,529,530,86);
 }
 LRESULT CALLBACK proc(HWND h,UINT msg,WPARAM wp,LPARAM lp)try{switch(msg){
 case WM_CREATE:{window=h;closing=false;font=makeFont(h);titleTheme(h);
@@ -104,6 +104,10 @@ case WM_CREATE:{window=h;closing=false;font=makeFont(h);titleTheme(h);
     add(L"COMBOBOX",L"",DecodeChoice,CBS_DROPDOWNLIST|WS_TABSTOP);
     for(auto label:{L"自动 · 优先硬解",L"CPU 软件解码",L"D3D12VA 硬件解码"})SendDlgItemMessageW(h,DecodeChoice,CB_ADDSTRING,0,LPARAM(label));
     SendDlgItemMessageW(h,DecodeChoice,CB_SETCURSEL,std::min(2u,GetPrivateProfileIntW(L"RemotePlay",L"DecodeMode",0,(remoteplay::profileDirectory()/L"settings.ini").c_str())),0);
+    add(L"STATIC",L"采样（重连生效）",107,0,20,489,138,25);
+    add(L"COMBOBOX",L"",SamplingChoice,CBS_DROPDOWNLIST|WS_TABSTOP);
+    for(auto label:{L"兼容采样 · 原有方式",L"精细采样 · 色度重建与双三次缩放"})SendDlgItemMessageW(h,SamplingChoice,CB_ADDSTRING,0,LPARAM(label));
+    SendDlgItemMessageW(h,SamplingChoice,CB_SETCURSEL,std::min(1u,GetPrivateProfileIntW(L"RemotePlay",L"FineSampling",1,(remoteplay::profileDirectory()/L"settings.ini").c_str())),0);
     add(L"STATIC",L"PS5 地址",100,0,20,21,130,25);add(L"STATIC",L"PSN Account ID",101,0,20,65,130,25);
     add(L"STATIC",L"8 位配对码",102,0,20,109,130,25);add(L"STATIC",L"格式（重连生效）",103,0,20,153,130,25);add(L"STATIC",L"登录 PIN（可选）",104,0,20,253,135,25);
     add(L"STATIC",L"码率请求",105,0,20,298,130,25);add(L"COMBOBOX",L"",Host,CBS_DROPDOWN|CBS_AUTOHSCROLL|WS_TABSTOP);SendDlgItemMessageW(h,Host,CB_LIMITTEXT,253,0);
@@ -144,7 +148,8 @@ case WM_CREATE:{window=h;closing=false;font=makeFont(h);titleTheme(h);
         {Forget,L"删除本机保存的这台主机配对信息；以后需要重新配对。"},
         {ViewOnly,L"只观看，不向PS5转发电脑手柄输入。不能保证同账号手柄仍能直连主机，这是PS5会话规则。"},
         {Calibrate,L"手柄放稳后校准陀螺仪，让镜头别自己散步。"},
-        {DecodeChoice,L"自动优先硬解，失败回软件；强制硬解失败会报错。软件解码主要用CPU，硬解用视频解码单元。重连生效。"}});
+        {DecodeChoice,L"自动优先硬解，失败回软件；强制硬解失败会报错。软件解码主要用CPU，硬解用视频解码单元。重连生效。"},
+        {SamplingChoice,L"精细模式按位置还原颜色采样，放大时用双三次插值并限制边缘光晕；1:1保留原像素。它不改变PS5码率，也不是AI超分：源头丢掉的细节，不能凭空变回来。会增加GPU工作；兼容模式可切回原有采样作对比。重连生效。"}});
     watching=connectionStatus().active;buttons();arrange();SetTimer(h,1,100,nullptr);
     if(auto auth=remoteplay::loadPsnAuthorization()){
         psnRefreshAfter=GetTickCount64()+300000;
@@ -200,7 +205,7 @@ case WM_COMMAND:switch(LOWORD(wp)){
             auto result=remoteplay::pairLocalPs5(host,account,pin,stop);SecureZeroMemory(pin.data(),pin.size());Outcome out;
             if(result.result.ok&&!stop.stop_requested()){remoteplay::NativeConnectRequest request;request.host=host;request.video=format;request.credentials=std::move(result.credentials);for(auto byte:result.mac)request.consoleId+=std::format("{:02x}",byte);if(request.consoleId=="000000000000")request.consoleId.clear();if(remoteplay::saveProfile(targetPath,request)){out.savedPath=targetPath;out.message=L"配对成功并已加密保存，可以连接。";}else out.message=L"配对成功，但保存失败。请检查目录权限后重试。";}
             else out.message=result.canceled||stop.stop_requested()?L"已取消配对":std::format(L"配对失败（{}），检查 PS5 配对码、Account ID 与网络。",result.result.code);return out;});break;}
-    case Connect:{if(busy)break;auto saved=remoteplay::loadProfile(profilePath());auto host=ascii(Host);if(!saved||!remoteplay::validHost(host)){SetDlgItemTextW(h,StatusText,L"请先完成配对，并填写有效主机地址。");break;}saved->host=host;saved->video=video();saved->viewOnly=IsDlgButtonChecked(h,ViewOnly)==BST_CHECKED;if(!remoteplay::saveProfile(currentProfile,*saved)){SetDlgItemTextW(h,StatusText,L"保存连接设置失败，请检查目录权限。");break;}source::RemotePlayConnectDesc desc;saved->viewOnly=IsDlgButtonChecked(h,ViewOnly)==BST_CHECKED;desc.request=std::move(*saved);const auto decode=std::clamp<int>(int(SendDlgItemMessageW(h,DecodeChoice,CB_GETCURSEL,0,0)),0,2);desc.decodeMode=static_cast<source::RemotePlayConnectDesc::DecodeMode>(decode);WritePrivateProfileStringW(L"RemotePlay",L"DecodeMode",std::to_wstring(decode).c_str(),(remoteplay::profileDirectory()/L"settings.ini").c_str());connect(std::move(desc));watching=true;EnableWindow(GetDlgItem(h,Cancel),TRUE);SetDlgItemTextW(h,StatusText,L"连接已开始。需要登录 PIN 时在下方提交。关闭面板不停止串流。");break;}
+    case Connect:{if(busy)break;auto saved=remoteplay::loadProfile(profilePath());auto host=ascii(Host);if(!saved||!remoteplay::validHost(host)){SetDlgItemTextW(h,StatusText,L"请先完成配对，并填写有效主机地址。");break;}saved->host=host;saved->video=video();saved->viewOnly=IsDlgButtonChecked(h,ViewOnly)==BST_CHECKED;if(!remoteplay::saveProfile(currentProfile,*saved)){SetDlgItemTextW(h,StatusText,L"保存连接设置失败，请检查目录权限。");break;}source::RemotePlayConnectDesc desc;saved->viewOnly=IsDlgButtonChecked(h,ViewOnly)==BST_CHECKED;desc.request=std::move(*saved);const auto decode=std::clamp<int>(int(SendDlgItemMessageW(h,DecodeChoice,CB_GETCURSEL,0,0)),0,2);desc.decodeMode=static_cast<source::RemotePlayConnectDesc::DecodeMode>(decode);WritePrivateProfileStringW(L"RemotePlay",L"DecodeMode",std::to_wstring(decode).c_str(),(remoteplay::profileDirectory()/L"settings.ini").c_str());desc.highQualitySampling=SendDlgItemMessageW(h,SamplingChoice,CB_GETCURSEL,0,0)==1;WritePrivateProfileStringW(L"RemotePlay",L"FineSampling",desc.highQualitySampling?L"1":L"0",(remoteplay::profileDirectory()/L"settings.ini").c_str());connect(std::move(desc));watching=true;EnableWindow(GetDlgItem(h,Cancel),TRUE);SetDlgItemTextW(h,StatusText,L"连接已开始。需要登录 PIN 时在下方提交。关闭面板不停止串流。");break;}
     case Cancel:if(busy&&worker.joinable())worker.request_stop();else if(watching)disconnect();break;
     case Scan:launch([](std::stop_token stop){Outcome out;auto report=remoteplay::discoverLocalPs5(stop);for(const auto& line:report.diagnostics)veyra::log::info("remoteplay-discovery",line);out.hosts=std::move(report.hosts);out.message=stop.stop_requested()?L"已取消查找":out.hosts.empty()?(report.error?std::format(L"主机搜索发生错误（{}），详情见日志；可手填 IP。",report.error):L"搜索完成，未收到 PS5 回应；可手填 IP，检查主机开机和局域网。"):L"已填入发现的 PS5 地址。多台主机可手工输入目标 IP。";return out;});break;
     case Wake:{if(busy)break;auto saved=remoteplay::loadProfile(profilePath());if(!saved){SetDlgItemTextW(h,StatusText,L"需要先配对才能唤醒。");break;}saved->host=ascii(Host);launch([request=std::move(*saved)](std::stop_token stop){Outcome out;if(stop.stop_requested()){out.message=L"已取消唤醒";return out;}auto r=remoteplay::wakeLocalPs5(request);out.message=r.ok?L"已发送唤醒请求，等待 PS5 启动后点击连接。":std::format(L"唤醒请求失败（{}）",r.code);return out;});break;}
@@ -217,6 +222,6 @@ void showRemotePlayPanel(HWND parent,std::function<void(source::RemotePlayConnec
     calibrate=std::move(calibration);
     connect=std::move(start);login=std::move(pin);connectionStatus=std::move(status);disconnect=std::move(stop);if(window){SetForegroundWindow(window);return;}
     WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"VeyraRemotePlaySetup";wc.hbrBackground=panelBrush();wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
-    CreateWindowExW(WS_EX_TOOLWINDOW,wc.lpszClassName,L"PS5 · Remote Play",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,dip(parent,590),dip(parent,665),parent,nullptr,wc.hInstance,nullptr);
+    CreateWindowExW(WS_EX_TOOLWINDOW,wc.lpszClassName,L"PS5 · Remote Play",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,dip(parent,590),dip(parent,709),parent,nullptr,wc.hInstance,nullptr);
 }
 }

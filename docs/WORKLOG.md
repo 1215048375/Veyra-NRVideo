@@ -1786,3 +1786,9 @@ apps/veyra/SettingsWindow.cpp调整布局；apps/veyra/ui/AppShell.cpp新增音�
 新增SourceFidelityTests及CMake目标，build-source-fidelity.cmd成功；真实RTX5070灰阶/细线2组及1:1/1440p/2160p两交换链呈现12组通过，1:1误差0，灰阶最大误差0.584/255，普通缩放匹配独立CPU双线性参考。颜色既有4组通过；普通H264硬解4帧及并发纹理检查误差0。命令与结果logs/source-fidelity-{build,result,color,hw}.log，单项均不足300秒。新诊断无PS5连接、无主机操作；当时chiaki运行，不争抢会话。没有新NR/SR/FG Create/Evaluate，未改产品算法或运行DLL，未重新宣称PS5 H265/HDR实机通过。当前测试仅到呈现缓冲，不包括DWM或显示器。旧实际PS5同AU误差0是此前证据。
 
 修正旧画质审计中的视觉结论和换场景前提，详见docs/PS5_SOURCE_FIDELITY_AUDIT_2026-09-13.md。下一步是色度位置/普通显示采样的独立数值对照与用户肉眼验收，源头编码质量另查同码流元数据/量化，不能用SR掩盖。未推送发布；SDK、DLL、配对、日志与媒体不入Git。
+
+## 2026-09-13 PS5 精细采样实现（等待用户验收）
+
+用户授权修复后关机，随后撤回音频缓冲选项；未改任何音频逻辑。基线320f860，存档checkpoint/ps5-sampling-2026-09-13，分支codex/ps5-sampling-repair。新增显式色度位置契约与按位置插值（缺失left回退有日志）；PS5普通放大使用带局部范围限幅的Catmull-Rom，像素中心1:1直接读取，缩小保留旧路径。默认精细、保留兼容采样，PS5面板可选且重连生效，选择保存在现有本地settings.ini；不改变主机配对、codec、码率和HDR选择，不另造播放循环/音频/队列或回读。文件、采集、导出默认不启用新采样。
+
+cmd /c out/remoteplay/build-clock-product.cmd 两次成功，日志logs/ps5-sampling-product-build.log与logs/ps5-sampling-final-build.log；DXIL及C++编译链接成功，diff检查通过。按用户要求不运行测试、不连接PS5、不做肉眼判断；NR/SR/FG Create/Evaluate、GPU采样成本、HDR与UI显示均未执行，不能把编译成功说成视觉改善已验收。修改文件/链路边界/明天A-B方法见docs/PS5_SAMPLING_REPAIR_PLAN_2026-09-13.md。桌面测试版对应out/remoteplay/product-repair/veyra.exe。未推送发布，未提交SDK/运行时/凭据/日志/测试媒体；完成本地存档后执行用户授权的正常关机请求。

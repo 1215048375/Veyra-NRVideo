@@ -871,7 +871,8 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         const float constants[8] = { resolved.range==ColorRange::Full?0.0f:1.0f,
             resolved.matrix==YuvMatrix::BT2020NCL?2.0f:resolved.matrix==YuvMatrix::BT601?0.0f:1.0f,
             resolved.transfer==TransferFunction::PQ?4.0f:float(workingTransferCode(resolved)), (nv12Texture?nv12Texture->GetDesc().Format==DXGI_FORMAT_P010:desc_.hdrInput)?1.0f:0.0f,
-            uintBits(srcW_), uintBits(srcH_), uintBits(desc_.hdrOutput?1u:0u), 0.0f };
+            uintBits(srcW_), uintBits(srcH_), uintBits(desc_.hdrOutput?1u:0u),
+            uintBits(resolved.reconstructChroma?std::max(1u,unsigned(resolved.chromaLocation)):0u) };
         yuvPass_.bind(list, constants, gpuHandleOf(yuvPass_, nv12Texture ? 3 + parity * 2 : 0).ptr, gpuHandleOf(yuvPass_, 2).ptr);
         list->Dispatch((srcW_ + 15) / 16, (srcH_ + 15) / 16, 1);
     }

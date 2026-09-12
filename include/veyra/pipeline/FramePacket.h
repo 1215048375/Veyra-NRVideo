@@ -70,6 +70,7 @@ enum class ColorRange : uint8_t { Unknown = 0, Limited, Full };
 enum class YuvMatrix : uint8_t { Unknown = 0, BT601, BT709, BT2020NCL, BT2020CL };
 enum class TransferFunction : uint8_t { Unknown = 0, SRGB, BT709, BT2020_10, Linear, PQ, HLG };
 enum class ColorPrimaries : uint8_t { Unknown = 0, BT601_525, BT601_625, BT709, BT2020 };
+enum class ChromaLocation : uint8_t { Unknown = 0, Left, Center, TopLeft, Top, BottomLeft, Bottom };
 
 struct SampleAspectRatio {
     uint32_t num = 1;
@@ -95,6 +96,9 @@ struct ColorDescription {
     bool matrixAssumed = false;
     bool transferAssumed = false;
     bool primariesAssumed = false;
+    // PS5 opt-in reconstruction; legacy file/capture/export sampling is unchanged.
+    ChromaLocation chromaLocation = ChromaLocation::Unknown;
+    bool reconstructChroma = false;
 
     bool isHdrPath() const {
         return transfer == TransferFunction::PQ || transfer == TransferFunction::HLG || pixelFormat == SourcePixelFormat::P010

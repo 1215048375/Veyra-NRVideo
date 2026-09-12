@@ -7,7 +7,7 @@
 cbuffer YuvParams : register(b0)
 {
     float4 colorParams0; // x=limitedRange y=matrix709 z=transferSRGB w=padding
-    uint4 yuvDimensions; // x=width y=height
+    uint4 yuvDimensions; // x=width y=height z=nativeHDR w=chroma location (0=legacy)
 };
 
 Texture2D<float> lumaPlane : register(t0);   // R8_UNORM or R16_UNORM
@@ -57,6 +57,29 @@ float SrgbDecode(float c)
     return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
 }
 
+float2 ReconstructChroma(uint2 pixel)
+{
+    uint location=yuvDimensions.w;
+    if(location==0)return chromaPlane[pixel/2];
+    // Chroma sample origin in luma pixel-center coordinates. Respect MPEG
+    // left, JPEG center and vertical top/bottom placement; no luma filtering.
+    float2 origin=float2(0.0,0.5);
+    if(location==2)origin=float2(0.5,0.5);
+    else if(location==3)origin=float2(0.0,0.0);
+    else if(location==4)origin=float2(0.5,0.0);
+    else if(location==5)origin=float2(0.0,1.0);
+    else if(location==6)origin=float2(0.5,1.0);
+    float2 position=(float2(pixel)-origin)*0.5;
+    int2 base=int2(floor(position));float2 fraction=frac(position);
+    // Clamp to the visible chroma extent, not decoder allocation padding.
+    int2 last=int2((yuvDimensions.xy+1)/2)-1;
+    float2 a=chromaPlane[clamp(base,int2(0,0),last)];
+    float2 b=chromaPlane[clamp(base+int2(1,0),int2(0,0),last)];
+    float2 c=chromaPlane[clamp(base+int2(0,1),int2(0,0),last)];
+    float2 d=chromaPlane[clamp(base+int2(1,1),int2(0,0),last)];
+    return lerp(lerp(a,b,fraction.x),lerp(c,d,fraction.x),fraction.y);
+}
+
 [numthreads(16, 16, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -64,7 +87,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
     const float y = lumaPlane[uint2(dispatchThreadId.x, dispatchThreadId.y)];
-    const float2 uv = chromaPlane[uint2(dispatchThreadId.x / 2, dispatchThreadId.y / 2)];
+    const float2 uv = ReconstructChroma(dispatchThreadId.xy);
     float3 rgb = YuvToRgb(y, uv);
     rgb = saturate(rgb);
     if(colorParams0.z>3.5){
