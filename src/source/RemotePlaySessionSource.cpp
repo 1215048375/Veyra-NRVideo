@@ -121,7 +121,7 @@ void RemotePlaySessionSource::publishDecoded(const AVFrame* frame,pipeline::Fram
     std::lock_guard lock(mutex_);
     ++rates_.decoded;
     if(latest_){++skipped_;item.packet.flags|=latest_->packet.flags;
-        item.packet.flags|=static_cast<pipeline::FrameFlags>(pipeline::FrameFlagBits::Discontinuity);}
+        item.packet.flags|=static_cast<pipeline::FrameFlags>(pipeline::FrameFlagBits::Drop);}
     latest_=std::move(item);
 }
 SourceReadStatus RemotePlaySessionSource::read(pipeline::FramePacket& packet,const AVFrame** frame) {

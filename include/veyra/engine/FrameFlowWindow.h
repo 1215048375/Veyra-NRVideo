@@ -35,11 +35,13 @@ public:
     }
 };
 // Each asynchronous job retains its own window. Replacing the current window
-// never lets an old job increment the new revision/epoch's counters.
+// never lets an old job increment a new settings/hard-reset window's counters.
+// Soft preview/mailbox drops retain that window and its measured throughput.
 class FrameFlowWindow {
     mutable std::mutex mutex_;
     diagnostics::FrameFlowMetrics metrics_;
     std::shared_ptr<FrameCompletionRates> rates_;
+    uint64_t firstTimingEpoch_=0,lastTimingEpoch_=0;
     std::array<uint64_t,8192> readyBatches_{};
     struct Latency {int64_t time;double ms;};
     std::deque<Latency> latency_;
@@ -61,6 +63,15 @@ class FrameFlowWindow {
 public:
     FrameFlowWindow(uint64_t session,pipeline::FrameIdentity id,int64_t now,std::shared_ptr<FrameCompletionRates> rates={}):rates_(rates?std::move(rates):std::make_shared<FrameCompletionRates>(now)){
         metrics_.latest.sessionId=session;metrics_.latest.frame=id;
+        firstTimingEpoch_=lastTimingEpoch_=id.epoch;
+    }
+    // A mailbox/preview drop invalidates temporal inputs, not GPU measurements
+    // from the same settings. Explicit open/seek/settings resets create a new
+    // window; asynchronous results outside its registered epoch range reject.
+    void advanceHistory(pipeline::FrameIdentity id){
+        std::lock_guard lock(mutex_);
+        if(id.settingsRevision==metrics_.latest.frame.settingsRevision&&id.epoch>=lastTimingEpoch_)
+            lastTimingEpoch_=id.epoch;
     }
     template<class F> void update(F action){std::lock_guard lock(mutex_);action(metrics_);}
     // CPU-observed reset/rebuild lifecycle; GPU execution remains in GPU timing.
@@ -92,7 +103,8 @@ public:
     }
     void gpuFrame(const diagnostics::GpuFrameTiming& frame,int64_t now){
         std::lock_guard lock(mutex_);
-        if(!metrics_.latest.sameWindow(metrics_.latest.sessionId,frame.identity))return;
+        if(frame.identity.settingsRevision!=metrics_.latest.frame.settingsRevision||
+           frame.identity.epoch<firstTimingEpoch_||frame.identity.epoch>lastTimingEpoch_)return;
         // Every dequeued record is delivered once. Different frames may have
         // equal timestamp endpoints, especially empty diagnostic passes.
         for(unsigned i=0;i<gpuCount;++i){const auto& s=frame.gpu[i];if(s.state==diagnostics::SampleState::Measured&&s.milliseconds)stage(i,*s.milliseconds,now);}

@@ -7,9 +7,49 @@
 #include <regex>
 #include <string>
 #include <vector>
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+#include "veyra/remoteplay/ProfileStore.h"
+#include "veyra/source/RemotePlaySource.h"
+#endif
 using namespace veyra;
 using namespace std::chrono_literals;
 int wmain(int argc,wchar_t**argv){
+#ifdef VEYRA_ENABLE_REMOTEPLAY
+    // Explicit opt-in; uses existing local pairing without changing it. Runs
+    // the actual shared engine, audio endpoint, GPU admission and presenter.
+    if(argc==3&&std::wstring_view(argv[1])==L"--last-paired-ps5"){
+        const auto dir=remoteplay::profileDirectory();wchar_t name[80]{};
+        GetPrivateProfileStringW(L"RemotePlay",L"LastProfile",L"",name,80,(dir/L"settings.ini").c_str());
+        const std::wstring profile=name;if(profile.empty()||profile.find_first_of(L"/\\:")!=profile.npos)return 3;
+        auto saved=remoteplay::loadProfile(dir/profile);if(!saved)return 4;
+        CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+        std::filesystem::create_directories(argv[2]);Logger::instance().openFile((std::filesystem::path(argv[2])/"engine.log").wstring());Logger::instance().setConsoleEnabled(false);
+        HWND window=CreateWindowExW(0,L"STATIC",L"PS5 timing regression",WS_POPUP,0,0,960,540,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);if(!window)return 5;
+        engine::EngineController engine;engine.setVolume(0,true);
+        engine::PlayerOptions options;options.nr=options.sr=options.fg=true;options.fgMultiplier=2;options.settings.videoSrQuality=2;
+        source::RemotePlayConnectDesc request;request.request=std::move(*saved);request.request.video={1920,1080,60,80000,remoteplay::Codec::H264};request.decodeMode=source::RemotePlayConnectDesc::DecodeMode::Hardware;
+        engine.openRemotePlay(window,std::move(request),options);
+        const auto start=std::chrono::steady_clock::now();unsigned overloadSamples=0,overloadTimings=0;double early=-1,late=-1;uint64_t maxGenerated=0;bool failed=false;int lastSecond=-1;
+        while(std::chrono::steady_clock::now()-start<120s){
+            const int second=int(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now()-start).count());
+            SetEnvironmentVariableW(L"VEYRA_TEST_VIDEO_WORK_MS",second>=30&&second<38?L"35":nullptr);
+            MSG msg;while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}
+            const auto s=engine.snapshot();if(s.failed){failed=true;char message[1024]{};WideCharToMultiByte(CP_UTF8,0,s.status.c_str(),-1,message,sizeof(message),nullptr,nullptr);std::cout<<"ENGINE_FAILED "<<message<<std::endl;break;}
+            maxGenerated=std::max(maxGenerated,s.generated);
+            if(second>=33&&second<38){++overloadSamples;overloadTimings+=s.metrics.flow.gpuTiming[size_t(diagnostics::GpuStage::Nr)].mean.has_value();}
+            if(second==25)early=s.captureAudio.compensationMs;
+            if(second>=110)late=s.captureAudio.compensationMs;
+            if(second!=lastSecond&&second%5==0){lastSecond=second;std::cout<<"PS5 t="<<second<<" presented="<<s.metrics.flow.presentSubmitFps<<" generated="<<s.generated<<" nrMs="<<s.metrics.flow.gpuTiming[size_t(diagnostics::GpuStage::Nr)].mean.value_or(-1)<<" audioDelay="<<s.captureAudio.compensationMs<<" pcm="<<s.captureAudio.bufferedMs<<" resets="<<s.captureAudio.resets<<std::endl;}
+            std::this_thread::sleep_for(20ms);
+        }
+        SetEnvironmentVariableW(L"VEYRA_TEST_VIDEO_WORK_MS",nullptr);
+        const auto final=engine.snapshot();engine.stop();
+        const auto stopDeadline=std::chrono::steady_clock::now()+10s;while(!engine.idle()&&std::chrono::steady_clock::now()<stopDeadline)std::this_thread::sleep_for(10ms);
+        const bool ok=!failed&&engine.idle()&&maxGenerated>100&&final.metrics.flow.validGeneratedFps>10&&overloadSamples>0&&overloadTimings*100>=overloadSamples*95&&early>=0&&late>=0&&late<150&&std::abs(late-early)<40;
+        std::cout<<(ok?"PASS ":"FAIL ")<<"PS5 actual NR/SR/DLSS 2X, overload timings="<<overloadTimings<<'/'<<overloadSamples<<" earlyAudio="<<early<<" lateAudio="<<late<<" finalValidFgFps="<<final.metrics.flow.validGeneratedFps<<std::endl;
+        DestroyWindow(window);CoUninitialize();return ok?0:1;
+    }
+#endif
     SetEnvironmentVariableW(L"VEYRA_VERBOSE_FRAME_LOGS",L"1");
     if(argc!=3&&!(argc==4&&(wcscmp(argv[3],L"--nr-first")==0||wcscmp(argv[3],L"--seek-stress")==0||wcscmp(argv[3],L"--half-rate")==0||wcscmp(argv[3],L"--overload")==0||wcscmp(argv[3],L"--overload-baseline")==0||wcscmp(argv[3],L"--file-overload")==0||wcscmp(argv[3],L"--source-gap")==0||wcscmp(argv[3],L"--file-endpoint")==0||wcscmp(argv[3],L"--file-continuity")==0||wcscmp(argv[3],L"--file-fg-recovery")==0||wcscmp(argv[3],L"--reset-rollback")==0)))return 2;SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     std::filesystem::create_directories(argv[2]);Logger::instance().openFile((std::filesystem::path(argv[2])/"engine.log").wstring());Logger::instance().setConsoleEnabled(false);

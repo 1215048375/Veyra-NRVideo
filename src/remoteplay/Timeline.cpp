@@ -2,6 +2,7 @@
 #include "veyra/remoteplay/Timeline.h"
 #include <limits>
 #include <stdexcept>
+#include <algorithm>
 namespace veyra::remoteplay {
 Sequence16Extender::Result Sequence16Extender::observe(std::uint16_t n) noexcept {
     if(!initialized_){initialized_=true;previous_=n;extended_=n;return {extended_,true,true,0};}
@@ -32,11 +33,25 @@ std::optional<EstimatedStamp> RemotePlayClock::video(std::uint64_t index,HostTim
     if(!anchored_){videoAnchor_=arrival-origin_;firstIndex_=index;anchored_=true;}
     else if(arrival-lastArrival_>2000000 || index-lastIndex_>fps_/2u){
         videoAnchor_=arrival-origin_;firstIndex_=index;gap=true;
+        phaseWindow_.clear();phase_=0;
     }
     const auto delta=rescale(index-firstIndex_,fps_);
     if(!delta || videoAnchor_>std::numeric_limits<std::int64_t>::max()-*delta)return {};
-    lastArrival_=arrival;lastIndex_=index;
-    return EstimatedStamp{videoAnchor_+*delta,10000000/static_cast<std::int64_t>(fps_),gap};
+    const auto nominal=videoAnchor_+*delta;
+    const auto error=(arrival-origin_)-nominal;
+    while(!phaseWindow_.empty()&&phaseWindow_.front().arrival<=arrival-10000000)phaseWindow_.pop_front();
+    while(!phaseWindow_.empty()&&phaseWindow_.back().error>=error)phaseWindow_.pop_back();
+    phaseWindow_.push_back({arrival,error});
+    // At most 0.5% slew; even after a jitter burst successive PTS cannot
+    // reverse or abruptly jump. A real network gap still resets above.
+    const auto step=10000000/static_cast<std::int64_t>(fps_);
+    const auto maxSlew=step/200;
+    phase_+=std::clamp(phaseWindow_.front().error-phase_,-maxSlew,maxSlew);
+    if(phase_>0&&nominal>std::numeric_limits<std::int64_t>::max()-phase_)return {};
+    auto pts=nominal+phase_;
+    if(index!=firstIndex_&&!gap)pts=std::max(pts,lastPts_+1);
+    lastArrival_=arrival;lastIndex_=index;lastPts_=pts;
+    return EstimatedStamp{pts,step,gap};
 }
 std::optional<std::int64_t> RemotePlayClock::audioPts(std::uint64_t first,std::uint32_t rate,HostTime start) const noexcept {
     if(!fps_ || start<origin_ || rate<8000 || rate>192000)return {};

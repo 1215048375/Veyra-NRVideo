@@ -14,9 +14,15 @@
 #include "veyra/engine/CfrTimeline.h"
 #include "veyra/Log.h"
 #include "veyra/sink/AudioFrameTimeline.h"
+#include "veyra/sink/ArrivalClockMapping.h"
 int main(){
     using namespace veyra;int failures=0,checks=0;
     auto check=[&](bool ok,const char* name){++checks;if(!ok)++failures;std::cout<<(ok?"PASS ":"FAIL ")<<name<<'\n';};
+    sink::ArrivalClockMapping ingressClock;
+    double mapping=0;
+    for(int i=0;i<60000;++i)mapping=ingressClock.observe(1000+i*10.01+(i%13==5?4:0),i*10.0);
+    check(std::abs(mapping-(1000+59999*.01))<2.1,"ten-minute audio ingress mapping ages oscillator drift instead of retaining startup minimum");
+    ingressClock.reset();check(ingressClock.observe(100,0)==100,"audio discontinuity replaces prior ingress mapping");
     sink::AudioFrameTimeline pcmTime;
     check(pipeline::ResolutionPlan::make({1920,1080},true,pipeline::NrSizePolicy::Native,false,1,pipeline::SrTarget::Uhd4K,true).nr==pipeline::Extent{1920,1080},"NR-first preview uses source resolution");
     check(pipeline::ResolutionPlan::make({1920,1080},true,pipeline::NrSizePolicy::Native,true,1,pipeline::SrTarget::Uhd4K,true).nr==pipeline::Extent{3840,2160},"export ignores low latency preview order");
@@ -97,6 +103,15 @@ int main(){
     check(captureTimeline.deadline(6000600000LL)<=6001030000LL,"unbuffered capture cannot accumulate source-clock drift");
     captureTimeline.reset(2,0,2000000,166667,true);
     check(captureTimeline.deadline(166667)==2333334,"switch to FG restores continuous source-PTS pacing and lookahead");
+    engine::PresentationScheduler ps5Timeline;bool decodedPairFits=true;
+    for(int64_t i=1;i<120;++i){
+        const int64_t b=i*166667,decoded=1000000+b+(i%2?150000:20000);
+        ps5Timeline.reset(1,b,decoded,166667);
+        const auto deadline=ps5Timeline.deadline(b-83333);
+        decodedPairFits&=engine::admitLiveFg(decoded+10000,deadline,1,12,.3);
+        decodedPairFits&=!engine::admitLiveFg(decoded+400000,deadline,40,12,.3);
+    }
+    check(decodedPairFits,"PS5 decoder jitter does not spend FG budget; delayed enhancement still expires against the original decoded input deadline");
     check(!engine::admitLiveFg(1200000,1000000,0,std::nullopt,0),"warmup rejects already-expired FG before evaluate");
     check(engine::admitLiveFg(900000,1000000,0,std::nullopt,0),"warmup does not invent a measured completion estimate");
     check(!engine::admitLiveFg(900000,1000000,2,30.0,1),"predicted completion beyond deadline skips optional pair");
@@ -144,6 +159,14 @@ int main(){
     delivered.identity.settingsRevision=2;deliveredTiming.gpuFrame(delivered,1000000);
     delivered.identity.settingsRevision=1;delivered.identity.epoch=2;deliveredTiming.gpuFrame(delivered,1000000);
     check(deliveredTiming.snapshot(2000000).gpuTiming[0].samples==2,"dequeued GPU frames each count once even with equal timestamps; old epoch and revision rejected");
+    for(uint64_t epoch=2;epoch<80;++epoch){
+        deliveredTiming.advanceHistory({epoch,1,epoch});
+        delivered.identity={epoch-1,1,epoch};deliveredTiming.gpuFrame(delivered,2000000+int64_t(epoch)*1000);
+    }
+    check(deliveredTiming.snapshot(5000000).gpuTiming[0].samples==80,"overload history changes retain delayed GPU samples across consecutive mailbox drops");
+    engine::FrameFlowWindow afterSeek(1,{80,1,80},6000000);
+    afterSeek.gpuFrame(delivered,6000000);
+    check(!afterSeek.snapshot(7000000).gpuTiming[0].mean,"hard reset rejects GPU samples from previous measurement window");
     diagnostics::GpuFrameTiming work{{1,1,1},{}};
     auto stamp=[&](diagnostics::GpuStage stage,uint64_t begin,uint64_t end){work.gpu[size_t(stage)]={diagnostics::SampleState::Measured,double(end-begin),begin,end,1000};};
     stamp(diagnostics::GpuStage::Color,0,2);

@@ -2,7 +2,9 @@
 #include <cstdint>
 namespace veyra::engine {
 // Maps a continuous source epoch to one monotonic host timeline. Processing
-// completion must never re-anchor individual pairs. Units are 100 ns.
+// completion must never re-anchor individual pairs. PS5 may explicitly reset
+// per newly decoded input pair (before enhancement) because its PTS is locally
+// estimated and decoder delivery jitter is not playback lateness. Units: 100 ns.
 class PresentationScheduler {
 public:
     void reset(uint64_t epoch,int64_t source,int64_t host,int64_t lookahead,bool paceSourcePts=true) {

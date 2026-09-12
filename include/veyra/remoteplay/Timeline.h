@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include "Types.h"
+#include <deque>
 namespace veyra::remoteplay {
 class Sequence16Extender {
 public:
@@ -25,6 +26,12 @@ public:
     std::optional<std::int64_t> audioPts(std::uint64_t firstSample,std::uint32_t rate,HostTime audioStart) const noexcept;
 private:
     HostTime origin_=0,videoAnchor_=0,lastArrival_=0;
+    // Bounded lower-envelope PLL: nominal profile FPS is not a source clock
+    // (a 60 profile can deliver ~59.94). Filter network jitter, slew only the
+    // locally estimated timestamps, and never accumulate nominal-rate error.
+    struct PhaseSample {HostTime arrival;std::int64_t error;};
+    std::deque<PhaseSample> phaseWindow_;
+    std::int64_t phase_=0,lastPts_=0;
     std::uint64_t firstIndex_=0,lastIndex_=0;
     std::uint32_t fps_=0;bool anchored_=false;
 };

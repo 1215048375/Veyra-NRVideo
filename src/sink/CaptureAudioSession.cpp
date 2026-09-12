@@ -1,5 +1,6 @@
 #include "veyra/sink/CaptureAudioSession.h"
 #include "veyra/sink/WasapiAudioSink.h"
+#include "veyra/sink/ArrivalClockMapping.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -29,6 +30,7 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
     std::atomic<unsigned> mode{0};std::atomic<int> offset{0};
     double videoPts=0,videoHost=0;bool haveVideo=false;
     double ingressMapping=0;bool haveIngress=false;
+    ArrivalClockMapping ingressClock;
     int64_t lastArrival=0;
     CaptureAudioState state;
     std::thread thread;
@@ -69,6 +71,7 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
         double filteredError=0,correctionPpm=0;
         int64_t nextCorrection=0;
         int64_t lastReset=0;
+        int64_t nextSyncLog=0;
         unsigned appliedMode=mode.load();int appliedOffset=offset.load();
         uint64_t lastUnderruns=0;
         bool endpointEventReady=false;
@@ -220,6 +223,10 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
                 const auto audioPts=renderer.mediaTimeMs();
                 const double observedNow=double(hostTime())/10000;
                 state.skewMs=fresh&&std::isfinite(audioPts)?std::optional<double>(audioPts-(vPts+observedNow-vHost)):std::nullopt;
+                if(hostTime()>=nextSyncLog){
+                    nextSyncLog=hostTime()+20000000;
+                    log::info("live-audio-sync",std::format("videoPtsMs={:.3f} videoHostMs={:.3f} audioIngressMapMs={:.3f} compensationMs={:.3f} pcmMs={:.3f} endpointMs={:.3f} skewMs={:.3f} correctionPpm={:.1f} resets={} (local clock alignment, not GPU execution time)",vPts,vHost,ingress,target,state.bufferedMs,state.endpointBufferedMs,state.skewMs.value_or(-999),state.driftCorrectionPpm,state.resets));
+                }
             }
         }
         renderer.shutdown();std::lock_guard lock(mutex);state.available=false;state.running=false;state.skewMs.reset();state.endpointBufferedMs=0;
@@ -248,10 +255,9 @@ bool CaptureAudioSession::push(const void* data,size_t bytes,double pts,bool dis
     std::lock_guard lock(p.mutex);
     if(p.stop||!p.state.error.empty())return true;
     if(discontinuity){p.input.clear();p.inputBytes=0;p.pendingReset=true;p.haveVideo=false;}
-    const double mapping=double(hostTime())/10000-pts;
     p.lastArrival=hostTime();
-    if(!p.haveIngress||discontinuity){p.ingressMapping=mapping;p.haveIngress=true;}
-    else p.ingressMapping=std::min(p.ingressMapping,mapping);
+    if(!p.haveIngress||discontinuity){p.ingressClock.reset();p.haveIngress=true;}
+    p.ingressMapping=p.ingressClock.observe(double(p.lastArrival)/10000,pts);
     const double blockMs=1000.0*bytes/p.format.nAvgBytesPerSec;
     if(p.queuedMs()+blockMs>Impl::maxQueuedMs){
         p.input.clear();p.inputBytes=0;p.pendingReset=true;++p.state.overflows;p.queueChanged();

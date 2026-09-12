@@ -35,7 +35,7 @@ inline void paintDashboard(HWND h,HDC dc,int w,int height,const engine::PlayerSn
     const wchar_t* names[]={L"光流耗时",L"NR耗时",L"超分耗时",L"帧生成耗时"};
     for(int i=0;i<4;++i){int x=left+i*(cw+gap);card(x,top,cw,58);text(names[i],x+6,top+7,cw-10,17,9,secondary);
         const auto& a=f.gpuTiming[size_t(stages[i])];std::wstring value=L"—";
-        if(active){if(s.metrics.gpu[size_t(stages[i])].state==diagnostics::SampleState::NotExecuted)value=L"未开启";else if(a.mean)value=std::format(L"{:.1f}",*a.mean);}
+        if(active){if(a.mean)value=std::format(L"{:.1f}",*a.mean);else if(s.metrics.gpu[size_t(stages[i])].state==diagnostics::SampleState::NotExecuted)value=(i==3&&s.applied.multiplier>1)?L"等待补帧":L"未开启";}
         if(i==3&&s.applied.multiplier>1&&s.applied.frameGenerationBackend==engine::FrameGenerationBackend::XeSS)value=L"不可测";
         text(value,x+6,top+27,cw-10,24,14,textColor);
     }

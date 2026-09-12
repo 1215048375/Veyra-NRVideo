@@ -6,6 +6,8 @@
 #include "veyra/remoteplay/PacketPump.h"
 #include "veyra/remoteplay/InputGate.h"
 #include "veyra/remoteplay/SessionInbox.h"
+#include "veyra/engine/PresentationScheduler.h"
+#include "veyra/engine/FgRecoveryBudget.h"
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -62,6 +64,27 @@ TEST(sequence_multiple_wraps){Sequence16Extender x;for(std::uint64_t i=0;i<20000
 TEST(clock_common_origin){RemotePlayClock c;c.reset(1000000,60);auto v=c.video(123,1300000);CHECK(v&&v->pts100ns==300000);CHECK(c.audioPts(480,48000,1100000)==200000);CHECK(v->provenance==TimestampProvenance::LocalEstimated);}
 TEST(clock_cadence_no_cumulative_rounding){RemotePlayClock c;c.reset(0,60);for(std::uint64_t i=0;i<60000;++i){const auto time=static_cast<std::int64_t>(i*10000000/60);auto s=c.video(i,time);CHECK(s&&s->pts100ns==time);}}
 TEST(clock_gap_reanchors){RemotePlayClock c;c.reset(0,60);CHECK(c.video(0,0));auto s=c.video(60,10000000);CHECK(s&&s->discontinuity&&s->pts100ns==10000000);}
+TEST(clock_long_session_drift_and_fg){
+    for(unsigned fps:{30u,60u})for(int ppm:{-1400,1400}){
+        RemotePlayClock c;c.reset(0,fps);
+        veyra::engine::PresentationScheduler schedule;
+        veyra::engine::FgRecoveryBudget budget;
+        const int64_t interval=10000000/fps;
+        schedule.reset(1,0,0,interval);
+        int64_t previous=-1;unsigned admitted=0,measured=0;
+        for(uint64_t i=0;i<fps*600u;++i){
+            const auto base=int64_t(i*uint64_t(1000000+ppm)*10/fps);
+            const auto jitter=i%97==11?20000:int64_t(i%7)*1000;
+            const auto arrival=base+jitter;
+            const auto stamp=c.video(i,arrival);
+            CHECK(stamp&&!stamp->discontinuity&&stamp->pts100ns>previous);previous=stamp->pts100ns;
+            budget.fgCost(2,arrival);budget.complete(12,true,false,arrival);
+            const bool admittedNow=budget.admit(arrival+20000,schedule.deadline(stamp->pts100ns-interval/2),2,.5);
+            if(i>fps*10u){CHECK(std::abs(stamp->pts100ns-base)<150000);++measured;admitted+=admittedNow;}
+        }
+        CHECK(admitted>measured*98/100);
+    }
+}
 TEST(clock_reject_invalid){RemotePlayClock c;CHECK(!c.video(0,0));THROWS(c.reset(0,120));THROWS(c.reset(-1,60));c.reset(10,60);CHECK(!c.video(0,9));CHECK(c.video(1,20));CHECK(!c.video(1,20));CHECK(!c.video(2,19));CHECK(!c.audioPts(0,0,10));CHECK(!c.audioPts(std::numeric_limits<std::uint64_t>::max(),8000,10));}
 TEST(queue_limits_validation){QueueLimits l;l.maxFrames=0;THROWS(VideoIngress{l});l={};l.maxConfigBytes=l.maxBytes+1;THROWS(VideoIngress{l});l={};l.maxAge100ns=0;THROWS(VideoIngress{l});}
 TEST(config_not_counted_as_picture){VideoIngress q;q.begin(1);CHECK(q.push(config(),0)==PushStatus::ConfigStored);CHECK(q.stats().accessUnits==0);CHECK(q.stats().depth==0);CHECK(!q.tryPop(0));}

@@ -258,6 +258,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
             LiveStats liveStats;std::deque<int64_t> liveSubmissions;
             TimingWindow liveAges,liveWaits,livePresent,liveReady;
             FgRecoveryBudget fgBudget;uint64_t fgBudgetRevision=options.settings.revision;
+            int64_t nextFgAdmissionLog=0;
             std::atomic<uint64_t> historyResets=0,presentationDrains=0,presentationCompletedReal=0,presentationSkippedGenerated=0,presentationCancelledJobs=0;
             std::atomic<uint64_t> presentationGeneration{0};
             std::unique_ptr<LiveGpuScheduler> liveScheduler;
@@ -561,6 +562,10 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                 if(frame!=cachedFrame){av_frame_free(&cachedFrame);cachedFrame=av_frame_clone(frame);cachedPacket=pkt;}
                 const auto processStart=Clock::now();
                 const auto captureArrival=pkt.arrivalHost100ns?pkt.arrivalHost100ns:host100ns();
+                // A PS5 callback is a compressed AU, not a decoded video frame.
+                // Its decode baseline must not consume the entire FG lookahead
+                // budget. Still measure full ingress latency from captureArrival.
+                const auto liveInputReady=isRemote&&pkt.decodedHost100ns>0?pkt.decodedHost100ns:captureArrival;
                 const auto sourceArrival=pkt.arrivalHost100ns?pkt.arrivalHost100ns:std::chrono::duration_cast<std::chrono::nanoseconds>(decodeStart.time_since_epoch()).count()/100;
                 // A skipped preview candidate breaks the temporal span the
                 // motion/NR/FG history was built on: the next processed frame
@@ -568,10 +573,11 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                 // break: metrics windows, completion predictions and reset
                 // lifecycle records continue (only hard resets — open/seek/
                 // pause/discontinuity/settings — reopen them).
-                const bool hardFrameReset=reset||pipeline::breaksHistory(pkt.flags);
-                const bool previewOnlyReset=!hardFrameReset&&previewSkipSinceProcess;
+                const bool hardFrameReset=reset||pipeline::breaksHistory(pkt.flags&~static_cast<pipeline::FrameFlags>(pipeline::FrameFlagBits::Drop));
+                const bool temporalBreak=pipeline::breaksHistory(pkt.flags)||previewSkipSinceProcess;
+                const bool previewOnlyReset=!hardFrameReset&&temporalBreak;
                 if(hardFrameReset)++metricsWindowEpoch;
-                const bool historyReset=hardFrameReset||previewSkipSinceProcess;
+                const bool historyReset=hardFrameReset||temporalBreak;
                 if(historyReset){++historyResets;++presentationGeneration;}
                 // A mailbox Drop must reset SR/NR/flow/FG history, but draining
                 // the two-batch presenter here discarded completed real frames.
@@ -585,11 +591,19 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                 if(isCapture&&!rereadCached&&useLiveFgAdmission&&options.settings.frameGenerationBackend!=FrameGenerationBackend::XeSS){
                     const auto presentP95=livePresent.p95();
                     admitFg=[&,presentP95](const pipeline::FrameBatch& batch){
-                        if(!liveTimeline.anchored(batch.identity.epoch))liveTimeline.reset(batch.identity.epoch,batch.b100ns,captureArrival,liveSourceInterval100ns(pkt.duration,activeSource->info().averageFps));
+                        // PS5 decode/network delivery jitters independently of
+                        // its estimated PTS. Give each newly decoded pair its
+                        // one-input-interval budget, anchored BEFORE enhancement.
+                        // Never extend it based on processing/ready completion.
+                        if(isRemote||!liveTimeline.anchored(batch.identity.epoch))liveTimeline.reset(batch.identity.epoch,batch.b100ns,liveInputReady,liveSourceInterval100ns(pkt.duration,activeSource->info().averageFps));
                         const auto interval=liveSourceInterval100ns(pkt.duration,activeSource->info().averageFps);
                         const auto a=(historyReset||batch.b100ns<=batch.a100ns||batch.b100ns-batch.a100ns>10000000)?batch.b100ns-interval:batch.a100ns;
                         const auto lastGenerated=pipeline::FrameBatch::interpolate(a,batch.b100ns,options.fgMultiplier-1,options.fgMultiplier);
-                        return fgBudget.admit(host100ns(),liveTimeline.deadline(lastGenerated),elapsedMs(processStart),presentP95);
+                        const auto now=host100ns(),deadline=liveTimeline.deadline(lastGenerated);
+                        const double elapsed=elapsedMs(processStart);
+                        const bool admitted=fgBudget.admit(now,deadline,elapsed,presentP95);
+                        if(now>=nextFgAdmissionLog){nextFgAdmissionLog=now+10000000;veyra::log::info("live-fg-admission",std::format("admitted={} remainingDeadlineMs={:.3f} predictedMs={:.3f} elapsedMs={:.3f} decodedAgeMs={:.3f} callbackAgeMs={:.3f} presentP95Ms={:.3f}",admitted,double(deadline-now)/10000,fgBudget.predicted(now).value_or(-1),elapsed,double(now-liveInputReady)/10000,double(now-captureArrival)/10000,presentP95));}
+                        return admitted;
                     };
                 }
                 // File playback: same pair admission, but deadlines are PTS
@@ -655,12 +669,14 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                     if(settingsChanged||!completionRates)completionRates=std::make_shared<FrameCompletionRates>(host100ns());
                     frameFlow=std::shared_ptr<FrameFlowWindow>(new FrameFlowWindow(runSessionId,out.batch.identity,host100ns(),completionRates),[](FrameFlowWindow* window){logFrameFlow(window->snapshot(monotonic100ns()),"closed");delete window;});
                     if(resetRecord)frameFlow->resetLifecycle(*resetRecord);else if(lastResetRecord)frameFlow->resetLifecycle(*lastResetRecord);
-                    frameFlow->update([&](auto& m){m.counters.historyResets+=uint64_t(out.historyReset);m.counters.settingsResets+=uint64_t(settingsChanged);m.counters.captureDropResets+=uint64_t(pipeline::hasFrameFlag(pkt.flags,pipeline::FrameFlagBits::Drop));});
+                    frameFlow->update([&](auto& m){m.counters.settingsResets+=uint64_t(settingsChanged);});
                     captureFlowBase=captureFlowLast;
                     {std::lock_guard lock(mutex_);rateSkippedBase=snapshot_.captureRateSkipped;activeFlow_=frameFlow;}
                     veyra::log::info("metrics",std::format("reset session={} appliedRevision={} epoch={} sourceBase={}",runSessionId,metricsRevision,metricsEpoch,statsSourceBase));
                 }
                 const double processMs=std::chrono::duration<double,std::milli>(processDone-processStart).count();
+                frameFlow->advanceHistory(out.batch.identity);
+                frameFlow->update([&](auto& m){m.counters.historyResets+=uint64_t(out.historyReset);m.counters.captureDropResets+=uint64_t(pipeline::hasFrameFlag(pkt.flags,pipeline::FrameFlagBits::Drop));});
                 const auto lineage=lineageTracker.observe(out.batch,sourceArrival,pkt.arrivalHost100ns>0,rereadCached||isImage);
                 if(lineage&&out.hasGenerated){
                     frameFlow->pairArrived(*lineage);
@@ -679,13 +695,13 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                     std::lock_guard lock(mutex_);snapshot_.captureHalfRate=halfRate;
                     veyra::log::info("capture-rate",std::format("revision={} requested60To30={} active={} transportFps={} originalPtsPreserved=true",options.settings.revision,options.settings.content==ContentRate::Capture60To30,halfRate,isCapture?activeSource->info().averageFps:0));
                 }
-                if(isCapture&&!rereadCached&&!liveTimeline.anchored(out.batch.identity.epoch)){
+                if(isCapture&&!rereadCached&&(isRemote||!liveTimeline.anchored(out.batch.identity.epoch))){
                     const auto duration100ns=liveSourceInterval100ns(pkt.duration,activeSource->info().averageFps);
                     // File replay has no device pacing and still needs its PTS
                     // clock. Physical capture without FG presents as soon as ready.
                     const bool paceSourcePts=options.fg||!physicalCapture;
-                    veyra::log::info("capture-timeline",std::format("interval100ns={} packetDurationKnown={} packetDurationPositive={} nominalFps={} FG={} pacing={}",duration100ns,!pkt.duration.isUnknown(),pkt.duration.num>0,activeSource->info().averageFps,options.fg,paceSourcePts?"source-pts":"capture-ready"));
-                    liveTimeline.reset(out.batch.identity.epoch,out.batch.b100ns,captureArrival,options.fg?duration100ns:0,paceSourcePts);
+                    if(!liveTimeline.anchored(out.batch.identity.epoch))veyra::log::info("capture-timeline",std::format("interval100ns={} packetDurationKnown={} packetDurationPositive={} nominalFps={} FG={} pacing={}",duration100ns,!pkt.duration.isUnknown(),pkt.duration.num>0,activeSource->info().averageFps,options.fg,isRemote?"decoded-pair":paceSourcePts?"source-pts":"capture-ready"));
+                    liveTimeline.reset(out.batch.identity.epoch,out.batch.b100ns,liveInputReady,options.fg?duration100ns:0,paceSourcePts);
                 }
                 if(!isImage&&!isCapture&&frames==0){anchor=Clock::now();anchorMs=lastAudioClockMs=pts;}
                 double frameWaitMs=0,framePresentMs=0;
