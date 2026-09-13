@@ -85,8 +85,9 @@ std::vector<CaptureFormat> CaptureCardSource::formats(unsigned device){ComPtr<IG
         // Device capabilities, not a 1080p/2160p 30/60 preset list. Keep native
         // indices so the selected row opens the exact driver media type.
         if(bm&&bm->biWidth>0&&bm->biWidth<=3840&&std::abs(int64_t(bm->biHeight))>0&&std::abs(int64_t(bm->biHeight))<=2160&&duration>0){unsigned w=bm->biWidth,h=unsigned(std::abs(int64_t(bm->biHeight)));double fps=1e7/duration;
-            wchar_t guid[40]{};StringFromGUID2(t->subtype,guid,40);const wchar_t* pixel=t->subtype==MEDIASUBTYPE_YUY2?L"YUY2":t->subtype==MEDIASUBTYPE_MJPG?L"MJPEG":t->subtype==MEDIASUBTYPE_NV12?L"NV12":t->subtype==MEDIASUBTYPE_RGB32?L"RGB32":guid;
-            out.push_back({i,w,h,fps,std::format(L"{} x {} @ {:.2f} fps · {} [format {}]",w,h,fps,pixel,i)});}freeType(t);}return out;}
+            const auto pixel=capturePixelName(t->subtype);CaptureMediaLayout layout;const bool valid=captureMediaLayout(*t,layout);const bool knownRaw=capturePacking(t->subtype)!=CapturePacking::Unknown;
+            const wchar_t* support=valid?((layout.format==AV_PIX_FMT_P010||layout.format==AV_PIX_FMT_P016)?L"原生 · SDR":L"原生"):knownRaw?L"布局/颜色暂不支持":L"需系统解码/转换";
+            out.push_back({i,w,h,fps,std::format(L"{} x {} @ {:.2f} fps · {} · {} [format {}]",w,h,fps,pixel,support,i)});}freeType(t);}return out;}
 const SourceInfo& CaptureCardSource::info()const{return p_->info;}
 bool CaptureCardSource::setAudioGain(float gain){
     auto& p=*p_;if(p.audioSession){p.audioSession->setGain(gain);return p.audioSession->snapshot().available;}if(!p.graph||!p.audioFilter)return false;
@@ -109,7 +110,9 @@ bool CaptureCardSource::configure(const SourceOpenDesc& desc){close();p_->lastAu
     // Read the driver-negotiated type back. Native YUY2/NV12/RGB32 connects
     // directly to our terminal filter: no intelligent-connect converter.
     native=nullptr;hr=p.config->GetFormat(&native);if(FAILED(hr)||!native){freeType(native);return false;}
-    const bool nativeSupported=native->subtype==MEDIASUBTYPE_YUY2||native->subtype==MEDIASUBTYPE_NV12||native->subtype==MEDIASUBTYPE_RGB32;
+    CaptureMediaLayout nativeLayout;const bool nativeSupported=captureMediaLayout(*native,nativeLayout);
+    if(!nativeSupported&&capturePacking(native->subtype)!=CapturePacking::Unknown){log::error("capture","Known raw format has unsupported layout/color metadata; refusing implicit RGB conversion");freeType(native);return false;}
+    if(nativeSupported&&(nativeLayout.format==AV_PIX_FMT_P010||nativeLayout.format==AV_PIX_FMT_P016)&&desc.legacyCaptureRgbForDiagnostic){log::error("capture","10/16-bit capture cannot use the legacy 8-bit RGB diagnostic converter");freeType(native);return false;}
     const bool direct=nativeSupported&&!desc.legacyCaptureRgbForDiagnostic;
     AM_MEDIA_TYPE connected{};
     if(direct){

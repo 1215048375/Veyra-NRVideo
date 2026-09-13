@@ -18,6 +18,7 @@ inline ColorDescription resolveFrameColor(const AVFrame& frame,ColorDescription 
     }
     switch(frame.format){
     case AV_PIX_FMT_NV12:c.pixelFormat=SourcePixelFormat::NV12;break;
+    case AV_PIX_FMT_P016:c.pixelFormat=SourcePixelFormat::P016;break;
     case AV_PIX_FMT_YUV420P10LE:case AV_PIX_FMT_P010:c.pixelFormat=SourcePixelFormat::P010;break;
     case AV_PIX_FMT_YUV420P:case AV_PIX_FMT_YUVJ420P:c.pixelFormat=SourcePixelFormat::Yuv420P;break;
     case AV_PIX_FMT_YUYV422:c.pixelFormat=SourcePixelFormat::Yuy2;break;

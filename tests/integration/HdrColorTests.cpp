@@ -7,6 +7,7 @@
 #include "veyra/engine/VideoPresenter.h"
 #include "veyra/source/MediaFileSource.h"
 #include "veyra/RuntimePaths.h"
+#include "CaptureFormatGpuCases.h"
 #include <iostream>
 #include <cmath>
 extern "C" {
@@ -17,7 +18,7 @@ int wmain(int argc,wchar_t** argv){
  CoInitializeEx(nullptr,COINIT_MULTITHREADED);
  gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;Status st;gfx::DeviceContextDesc dd;
  if(!ctx.initialize(dd,st)||!ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),4,st))return 2;
- int failures=0;
+ int failures=captureGpuCases(ctx,ring);
  for(bool native:{false,true})for(bool planar:{false,true})for(bool full:{false,true}){
   pipeline::EnhanceGraph graph(ctx,ring);pipeline::EnhanceGraphDesc gd;
   gd.sourceWidth=gd.workWidth=64;gd.sourceHeight=gd.workHeight=32;gd.enableNr=gd.enableFg=gd.enableSr=false;gd.noFeatures=true;gd.hdrInput=true;gd.hdrOutput=native;

@@ -69,6 +69,8 @@ struct EnhanceGraphDesc {
     bool noFeatures = false;     // VEYRA_NO_FEATURES: NVOF/NGX objects skipped
     bool noNgx = false;          // VEYRA_NO_NGX: core/features skipped, NVOF only
     bool hdrInput = false;       // PS5 Main10 ingress; explicit SDR mapping unless hdrOutput.
+    unsigned captureBitDepth = 8; // SDR P010/P016 storage, independent of HDR transfer.
+    bool wideYuvInput() const { return hdrInput || captureBitDepth > 8; }
     bool hdrOutput = false;      // Native scRGB passthrough, no SDR-only enhancement.
     bool highQualityPresentation = false; // PS5 ordinary scaling, no AI SR
     bool rgbInput = false;       // allocate direct RGBA ingestion before NGX creation
@@ -201,6 +203,8 @@ public:
     // Guidance outputs (quality statistics; diagnostic readback only).
     ID3D12Resource* flowResource() const { return flowTex_.Get(); }
     ID3D12Resource* confidenceResource() const { return confTex_.Get(); }
+    // Test-only borrowed ingress output. Read after process, restore NON_PIXEL_SHADER_RESOURCE.
+    ID3D12Resource* diagnosticLinearInput() const { return srcRgba_.Get(); }
     // Isolated diagnostics only: existing constant guidance, borrowed lifetime.
     // A caller writing before the first real frame must restore COMMON state.
     ID3D12Resource* diagnosticDepthResource(bool frameGeneration) const { return frameGeneration?depthTex_.Get():nrZeroDepth_.Get(); }

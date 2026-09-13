@@ -9,6 +9,7 @@
 #include <cstring>
 extern "C" {
 #include <libavutil/frame.h>
+#include <libavutil/imgutils.h>
 }
 int wmain(int argc,wchar_t** argv){
     if(argc==2&&wcscmp(argv[1],L"--list")==0){
@@ -29,7 +30,7 @@ int wmain(int argc,wchar_t** argv){
     auto readFrame=[&](){while(std::chrono::steady_clock::now()<deadline){auto r=source.read(packet,&frame);if(r==veyra::source::SourceReadStatus::Frame)return true;if(r==veyra::source::SourceReadStatus::Error)return false;}return false;};
     if(!readFrame()){printf("FAIL first frame\n");return 5;}
     const auto initialPts=packet.pts.toDouble();const auto initialReceived=source.metrics().received;
-    const int rowBytes=frame->width*(frame->format==AV_PIX_FMT_YUYV422?2:frame->format==AV_PIX_FMT_NV12?1:4);
+    const int rowBytes=av_image_get_linesize(AVPixelFormat(frame->format),frame->width,0);
     std::vector<unsigned char> row(frame->data[0],frame->data[0]+rowBytes);
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     auto stalled=source.metrics();

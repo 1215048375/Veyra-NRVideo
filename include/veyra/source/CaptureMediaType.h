@@ -1,5 +1,6 @@
 #pragma once
 #include "veyra/pipeline/ColorMetadata.h"
+#include "veyra/source/CapturePixelFormat.h"
 #include <windows.h>
 #include <dshow.h>
 #include <dvdmedia.h>
@@ -17,6 +18,9 @@ struct CaptureMediaLayout {
     AVPixelFormat format=AV_PIX_FMT_NONE;
     REFERENCE_TIME duration=0;
     pipeline::ColorDescription color;
+    CapturePacking packing=CapturePacking::Unknown;
+    unsigned planes=1,chromaStride=0,chromaRowBytes=0;
+    size_t chromaOffset=0,secondChromaOffset=0;
 };
 // Parse negotiated memory layout, not the UI's requested dimensions. YUV is
 // top-down for either sign of biHeight; only RGB DIBs use bottom-up storage.
@@ -31,19 +35,40 @@ inline bool captureMediaLayout(const AM_MEDIA_TYPE& type,CaptureMediaLayout& out
     const auto height=std::abs(int64_t(bm.biHeight));
     if(bm.biWidth<=0||bm.biWidth>3840||height<1||height>2160)return false;
     out.width=unsigned(bm.biWidth);out.height=unsigned(height);
-    if(type.subtype==MEDIASUBTYPE_YUY2){if(out.width%2)return false;out.format=AV_PIX_FMT_YUYV422;out.rowBytes=out.width*2;}
-    else if(type.subtype==MEDIASUBTYPE_NV12){if(out.width%2||out.height%2)return false;out.format=AV_PIX_FMT_NV12;out.rowBytes=out.width;}
-    else if(type.subtype==MEDIASUBTYPE_RGB32){out.format=AV_PIX_FMT_BGR0;out.rowBytes=out.width*4;out.bottomUp=bm.biHeight>0;}
-    else return false;
-    const unsigned rows=out.format==AV_PIX_FMT_NV12?out.height*3/2:out.height;
+    out.packing=capturePacking(type.subtype);
+    switch(out.packing){
+    case CapturePacking::Yuy2:case CapturePacking::Uyvy:case CapturePacking::Yvyu:
+        if(out.width%2)return false;out.format=AV_PIX_FMT_YUYV422;out.rowBytes=out.width*2;break;
+    case CapturePacking::Nv12:case CapturePacking::Nv21:case CapturePacking::I420:case CapturePacking::Yv12:
+    case CapturePacking::P010:case CapturePacking::P016:
+        if(out.width%2||out.height%2)return false;
+        out.planes=(out.packing==CapturePacking::I420||out.packing==CapturePacking::Yv12)?3:2;
+        out.format=out.planes==3?AV_PIX_FMT_YUV420P:out.packing==CapturePacking::P010?AV_PIX_FMT_P010:out.packing==CapturePacking::P016?AV_PIX_FMT_P016:AV_PIX_FMT_NV12;
+        out.rowBytes=out.width*((out.format==AV_PIX_FMT_P010||out.format==AV_PIX_FMT_P016)?2:1);break;
+    case CapturePacking::Bgr32:case CapturePacking::Bgra32:case CapturePacking::Bgr24:case CapturePacking::Rgb555:case CapturePacking::Rgb565:
+        out.format=AV_PIX_FMT_BGR0;out.bottomUp=bm.biHeight>0;
+        out.rowBytes=out.width*(out.packing==CapturePacking::Bgr24?3:(out.packing==CapturePacking::Rgb555||out.packing==CapturePacking::Rgb565)?2:4);break;
+    default:return false;
+    }
+    const unsigned rows=out.planes>1?out.height*3/2:out.height;
     out.stride=out.rowBytes;
+    if(out.format==AV_PIX_FMT_BGR0)out.stride=(out.stride+3)&~3u;
     if(bm.biSizeImage){
         // Fixed uncompressed allocation may include per-row padding. Reject
         // ambiguous/incomplete layouts instead of reading subsequent rows wrong.
-        if(bm.biSizeImage%rows||bm.biSizeImage/rows<out.rowBytes)return false;
+        if(bm.biSizeImage%rows||bm.biSizeImage/rows<out.stride)return false;
         out.stride=bm.biSizeImage/rows;
     }
+    if(out.format==AV_PIX_FMT_BGR0&&out.stride%4)return false;
+    if((out.planes==3||out.format==AV_PIX_FMT_P010||out.format==AV_PIX_FMT_P016)&&out.stride%2)return false;
     out.sampleBytes=size_t(out.stride)*rows;
+    if(out.planes>1){
+        out.chromaStride=out.planes==3?out.stride/2:out.stride;
+        out.chromaRowBytes=out.planes==3?out.width/2:out.rowBytes;
+        out.chromaOffset=size_t(out.stride)*out.height;
+        out.secondChromaOffset=out.chromaOffset+size_t(out.chromaStride)*(out.height/2);
+        if(out.packing==CapturePacking::Yv12)std::swap(out.chromaOffset,out.secondChromaOffset);
+    }
     if(out.sampleBytes>size_t(std::numeric_limits<LONG>::max()))return false;
     AVFrame frame{};frame.format=out.format;frame.width=int(out.width);frame.height=int(out.height);
     out.color=pipeline::resolveFrameColor(frame);
@@ -67,14 +92,29 @@ inline bool captureMediaLayout(const AM_MEDIA_TYPE& type,CaptureMediaLayout& out
 }
 inline bool copyCaptureSample(const CaptureMediaLayout& layout,const uint8_t* src,size_t bytes,AVFrame& dst){
     if(!src||bytes<layout.sampleBytes||dst.format!=layout.format||dst.width!=int(layout.width)||dst.height!=int(layout.height)||!dst.data[0]||dst.linesize[0]<int(layout.rowBytes))return false;
-    if(layout.format==AV_PIX_FMT_NV12&&(!dst.data[1]||dst.linesize[1]<int(layout.width)))return false;
-    for(unsigned y=0;y<layout.height;++y)std::memcpy(dst.data[0]+ptrdiff_t(y)*dst.linesize[0],src+size_t(layout.bottomUp?layout.height-1-y:y)*layout.stride,layout.rowBytes);
-    if(layout.format==AV_PIX_FMT_NV12)for(unsigned y=0;y<layout.height/2;++y)std::memcpy(dst.data[1]+ptrdiff_t(y)*dst.linesize[1],src+size_t(layout.height+y)*layout.stride,layout.width);
+    if(layout.format==AV_PIX_FMT_BGR0&&dst.linesize[0]<int(layout.width*4))return false;
+    if(layout.planes>1&&(!dst.data[1]||dst.linesize[1]<int(layout.chromaRowBytes)))return false;
+    if(layout.planes>2&&(!dst.data[2]||dst.linesize[2]<int(layout.chromaRowBytes)))return false;
+    for(unsigned y=0;y<layout.height;++y){
+        const auto* s=src+size_t(layout.bottomUp?layout.height-1-y:y)*layout.stride;auto* d=dst.data[0]+ptrdiff_t(y)*dst.linesize[0];
+        if(layout.packing==CapturePacking::Bgr24){for(unsigned x=0;x<layout.width;++x){d[x*4]=s[x*3];d[x*4+1]=s[x*3+1];d[x*4+2]=s[x*3+2];d[x*4+3]=255;}}
+        else if(layout.packing==CapturePacking::Rgb555||layout.packing==CapturePacking::Rgb565){
+            const bool six=layout.packing==CapturePacking::Rgb565;
+            for(unsigned x=0;x<layout.width;++x){const unsigned v=s[x*2]|(unsigned(s[x*2+1])<<8);const unsigned b=v&31,g=(v>>5)&(six?63:31),r=(v>>(six?11:10))&31;d[x*4]=uint8_t((b<<3)|(b>>2));d[x*4+1]=uint8_t(six?(g<<2)|(g>>4):(g<<3)|(g>>2));d[x*4+2]=uint8_t((r<<3)|(r>>2));d[x*4+3]=255;}
+        }else if(layout.packing==CapturePacking::Uyvy||layout.packing==CapturePacking::Yvyu){
+            const bool uy=layout.packing==CapturePacking::Uyvy;for(unsigned x=0;x<layout.rowBytes;x+=4){d[x]=s[x+(uy?1:0)];d[x+1]=s[x+(uy?0:3)];d[x+2]=s[x+(uy?3:2)];d[x+3]=s[x+(uy?2:1)];}
+        }else std::memcpy(d,s,layout.rowBytes);
+    }
+    for(unsigned p=1;p<layout.planes;++p)for(unsigned y=0;y<layout.height/2;++y){
+        const auto* s=src+(p==1?layout.chromaOffset:layout.secondChromaOffset)+size_t(y)*layout.chromaStride;auto* d=dst.data[p]+ptrdiff_t(y)*dst.linesize[p];
+        if(layout.packing==CapturePacking::Nv21){for(unsigned x=0;x<layout.chromaRowBytes;x+=2){d[x]=s[x+1];d[x+1]=s[x];}}
+        else std::memcpy(d,s,layout.chromaRowBytes);
+    }
     return true;
 }
 inline bool equivalentCaptureTypes(const AM_MEDIA_TYPE& a,const AM_MEDIA_TYPE& b){
     CaptureMediaLayout x,y;if(!captureMediaLayout(a,x)||!captureMediaLayout(b,y))return false;
-    return x.format==y.format&&x.width==y.width&&x.height==y.height&&x.stride==y.stride&&x.bottomUp==y.bottomUp&&x.duration==y.duration&&
+    return x.packing==y.packing&&x.format==y.format&&x.width==y.width&&x.height==y.height&&x.stride==y.stride&&x.bottomUp==y.bottomUp&&x.duration==y.duration&&
         x.color.range==y.color.range&&x.color.matrix==y.color.matrix&&x.color.transfer==y.color.transfer&&
         x.color.rangeAssumed==y.color.rangeAssumed&&x.color.matrixAssumed==y.color.matrixAssumed&&x.color.transferAssumed==y.color.transferAssumed;
 }

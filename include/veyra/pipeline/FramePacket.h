@@ -64,6 +64,7 @@ enum class SourcePixelFormat : uint8_t {
     Yuy2,      // packed capture format
     Bgra8,     // 8-bit BGRA
     Rgba16F,   // canonical linear working format
+    P016,      // 16-bit capture storage; does not imply HDR transfer
 };
 
 enum class ColorRange : uint8_t { Unknown = 0, Limited, Full };

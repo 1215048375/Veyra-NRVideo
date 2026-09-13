@@ -103,7 +103,7 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
     }
     Status st = Status::Ok;
 
-    lumaPitch_ = (static_cast<size_t>(srcW_)*(desc_.hdrInput?2:1) + 255) & ~size_t(255);
+    lumaPitch_ = (static_cast<size_t>(srcW_)*(desc_.wideYuvInput()?2:1) + 255) & ~size_t(255);
     chromaPitch_ = lumaPitch_;
     lumaSize_ = lumaPitch_ * srcH_;
     chromaSize_ = chromaPitch_ * ((srcH_ + 1) / 2);
@@ -152,8 +152,8 @@ bool EnhanceGraph::createResources()
     upDepth_ = makeUploadBuffer(context_.device(), dPitch_ * workH_);
     upZeroDepth_ = makeUploadBuffer(context_.device(), dPitch_ * workH_);
     upZeroMotion_ = makeUploadBuffer(context_.device(), dPitch_ * workH_);
-    lumaTex_ = makeTexture(context_.device(), srcW_, srcH_, desc_.hdrInput?DXGI_FORMAT_R16_UNORM:DXGI_FORMAT_R8_UNORM, true);
-    chromaTex_ = makeTexture(context_.device(), (srcW_+1) / 2, (srcH_+1) / 2, desc_.hdrInput?DXGI_FORMAT_R16G16_UNORM:DXGI_FORMAT_R8G8_UNORM, true);
+    lumaTex_ = makeTexture(context_.device(), srcW_, srcH_, desc_.wideYuvInput()?DXGI_FORMAT_R16_UNORM:DXGI_FORMAT_R8_UNORM, true);
+    chromaTex_ = makeTexture(context_.device(), (srcW_+1) / 2, (srcH_+1) / 2, desc_.wideYuvInput()?DXGI_FORMAT_R16G16_UNORM:DXGI_FORMAT_R8G8_UNORM, true);
     if(desc_.rgbInput||desc_.yuy2Input){
         if(desc_.yuy2Input&&(srcW_%2||desc_.rgbInput))return false;
         const unsigned packedWidth=desc_.yuy2Input?srcW_/2:srcW_;
@@ -587,8 +587,8 @@ bool EnhanceGraph::createViews()
         stagedSrv(rgbTex_.Get(),DXGI_FORMAT_R8G8B8A8_UNORM,rgbPass_,0);
         makeUav(context_.device(),srcRgba_.Get(),DXGI_FORMAT_R16G16B16A16_FLOAT,cpu(rgbPass_,1));
     }
-    if (viewsTex) stagedSrv(lumaTex_.Get(), desc_.hdrInput?DXGI_FORMAT_R16_UNORM:DXGI_FORMAT_R8_UNORM, yuvPass_, 0);
-    if (viewsTex) stagedSrv(chromaTex_.Get(), desc_.hdrInput?DXGI_FORMAT_R16G16_UNORM:DXGI_FORMAT_R8G8_UNORM, yuvPass_, 1);
+    if (viewsTex) stagedSrv(lumaTex_.Get(), desc_.wideYuvInput()?DXGI_FORMAT_R16_UNORM:DXGI_FORMAT_R8_UNORM, yuvPass_, 0);
+    if (viewsTex) stagedSrv(chromaTex_.Get(), desc_.wideYuvInput()?DXGI_FORMAT_R16G16_UNORM:DXGI_FORMAT_R8G8_UNORM, yuvPass_, 1);
     if (viewsUav) makeUav(context_.device(), srcRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, cpu(yuvPass_, 2));
     if (viewsTex) stagedSrv(nrInput_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, encPass_, 0);
     if (viewsUav) makeUav(context_.device(), proxyTex_.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, cpu(encPass_, 1));
@@ -596,8 +596,8 @@ bool EnhanceGraph::createViews()
     if (viewsTex) stagedSrv(proxyTex_.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, decPass_, 1);
     if (viewsTex) stagedSrv(neuralTex_.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, decPass_, 2);
     if (viewsUav) makeUav(context_.device(), finalRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, cpu(decPass_, 3));
-    if (viewsUav) makeUav(context_.device(), lumaTex_.Get(), desc_.hdrInput?DXGI_FORMAT_R16_UNORM:DXGI_FORMAT_R8_UNORM, cpu(uploadPass_, 2));
-    if (viewsUav) makeUav(context_.device(), chromaTex_.Get(), desc_.hdrInput?DXGI_FORMAT_R16G16_UNORM:DXGI_FORMAT_R8G8_UNORM, cpu(uploadPass_, 3));
+    if (viewsUav) makeUav(context_.device(), lumaTex_.Get(), desc_.wideYuvInput()?DXGI_FORMAT_R16_UNORM:DXGI_FORMAT_R8_UNORM, cpu(uploadPass_, 2));
+    if (viewsUav) makeUav(context_.device(), chromaTex_.Get(), desc_.wideYuvInput()?DXGI_FORMAT_R16G16_UNORM:DXGI_FORMAT_R8G8_UNORM, cpu(uploadPass_, 3));
     // Software NV12 ingestion uses plane copies; no raw-SRV dispatch.
     // Blit pass layout (all static; per-use offsets chosen at bind time):
     //  0: srcRgba SRV        1: workRgba UAV      (SR bypass / NR-off blit)
@@ -834,7 +834,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     } else {
         nv12Ctx_ = sws_getCachedContext(nv12Ctx_, frame->width, frame->height,
             static_cast<AVPixelFormat>(frame->format),
-            frame->width, frame->height, desc_.hdrInput?AV_PIX_FMT_P010:AV_PIX_FMT_NV12, SWS_POINT,
+            frame->width, frame->height, desc_.captureBitDepth==16?AV_PIX_FMT_P016:desc_.wideYuvInput()?AV_PIX_FMT_P010:AV_PIX_FMT_NV12, SWS_POINT,
             nullptr, nullptr, nullptr);
         if (nv12Ctx_ == nullptr) { veyra::log::error("graph", "sws"); return false; }
         const int colorSpace=resolved.matrix==YuvMatrix::BT2020NCL?SWS_CS_BT2020:resolved.matrix==YuvMatrix::BT601?SWS_CS_ITU601:SWS_CS_ITU709;
@@ -844,17 +844,17 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         // Planar 8-bit YUV already exposes CPU luma for cadence analysis.
         // Convert directly into the fenced upload slot instead of writing and
         // copying another full NV12 frame. Never sample write-combined memory.
-        const bool directUpload=!desc_.hdrInput&&(frame->format==AV_PIX_FMT_YUV420P||frame->format==AV_PIX_FMT_YUVJ420P||frame->format==AV_PIX_FMT_NV12);
+        const bool directUpload=!desc_.wideYuvInput()&&(frame->format==AV_PIX_FMT_YUV420P||frame->format==AV_PIX_FMT_YUVJ420P||frame->format==AV_PIX_FMT_NV12);
         uint8_t* planes[4] = { directUpload?mappedLuma_[parity]:nv12Buf_.data(), directUpload?mappedChroma_[parity]:nv12Buf_.data() + lumaSize_ };
         const int strides[4] = { static_cast<int>(lumaPitch_), static_cast<int>(chromaPitch_) };
         if(sws_scale(nv12Ctx_, frame->data, frame->linesize, 0, frame->height, planes, strides)!=frame->height){veyra::log::error("color","Software plane conversion failed");return false;}
         std::vector<uint8_t> sample;sample.reserve(64*36);
-        for(unsigned y=0;y<36;++y)for(unsigned x=0;x<64;++x){const uint8_t v=directUpload?frame->data[0][ptrdiff_t(y*srcH_/36)*frame->linesize[0]+x*srcW_/64]:planes[0][size_t(y*srcH_/36)*lumaPitch_+(x*srcW_/64)*(desc_.hdrInput?2:1)+(desc_.hdrInput?1:0)];sample.push_back(v);}
+        for(unsigned y=0;y<36;++y)for(unsigned x=0;x<64;++x){const uint8_t v=directUpload?frame->data[0][ptrdiff_t(y*srcH_/36)*frame->linesize[0]+x*srcW_/64]:planes[0][size_t(y*srcH_/36)*lumaPitch_+(x*srcW_/64)*(desc_.wideYuvInput()?2:1)+(desc_.wideYuvInput()?1:0)];sample.push_back(v);}
         analyzeLuma(std::move(sample));
         if(!directUpload){for (uint32_t y = 0; y < srcH_; ++y)
-            std::memcpy(mappedLuma_[parity] + y * lumaPitch_, planes[0] + y * lumaPitch_, srcW_*(desc_.hdrInput?2:1));
+            std::memcpy(mappedLuma_[parity] + y * lumaPitch_, planes[0] + y * lumaPitch_, srcW_*(desc_.wideYuvInput()?2:1));
         for (uint32_t y = 0; y < (srcH_+1) / 2; ++y)
-            std::memcpy(mappedChroma_[parity] + y * chromaPitch_, planes[1] + y * chromaPitch_, ((srcW_+1)/2)*(desc_.hdrInput?4:2));}
+            std::memcpy(mappedChroma_[parity] + y * chromaPitch_, planes[1] + y * chromaPitch_, ((srcW_+1)/2)*(desc_.wideYuvInput()?4:2));}
         auto copyPlane = [&](ID3D12Resource* texture, ID3D12Resource* upload,
                              DXGI_FORMAT format, UINT width, UINT height, UINT pitch) {
             tracker_.transition(list, texture, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -866,9 +866,9 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             src.PlacedFootprint.Footprint = {format, width, height, 1, pitch};
             list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
         };
-        copyPlane(lumaTex_.Get(), upLuma_[parity].Get(), desc_.hdrInput?DXGI_FORMAT_R16_UNORM:DXGI_FORMAT_R8_UNORM,
+        copyPlane(lumaTex_.Get(), upLuma_[parity].Get(), desc_.wideYuvInput()?DXGI_FORMAT_R16_UNORM:DXGI_FORMAT_R8_UNORM,
                   srcW_, srcH_, static_cast<UINT>(lumaPitch_));
-        copyPlane(chromaTex_.Get(), upChroma_[parity].Get(), desc_.hdrInput?DXGI_FORMAT_R16G16_UNORM:DXGI_FORMAT_R8G8_UNORM,
+        copyPlane(chromaTex_.Get(), upChroma_[parity].Get(), desc_.wideYuvInput()?DXGI_FORMAT_R16G16_UNORM:DXGI_FORMAT_R8G8_UNORM,
                   (srcW_+1)/2, (srcH_+1)/2, static_cast<UINT>(chromaPitch_));
         tracker_.transition(list, lumaTex_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         tracker_.transition(list, chromaTex_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -885,7 +885,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     }else{
         const float constants[8] = { resolved.range==ColorRange::Full?0.0f:1.0f,
             resolved.matrix==YuvMatrix::BT2020NCL?2.0f:resolved.matrix==YuvMatrix::BT601?0.0f:1.0f,
-            resolved.transfer==TransferFunction::PQ?4.0f:float(workingTransferCode(resolved)), (nv12Texture?nv12Texture->GetDesc().Format==DXGI_FORMAT_P010:desc_.hdrInput)?1.0f:0.0f,
+            resolved.transfer==TransferFunction::PQ?4.0f:float(workingTransferCode(resolved)), (nv12Texture?(nv12Texture->GetDesc().Format==DXGI_FORMAT_P010?1.0f:0.0f):(desc_.captureBitDepth==16?2.0f:desc_.wideYuvInput()?1.0f:0.0f)),
             uintBits(srcW_), uintBits(srcH_), uintBits(desc_.hdrOutput?1u:0u),
             uintBits(resolved.reconstructChroma?std::max(1u,unsigned(resolved.chromaLocation)):0u) };
         yuvPass_.bind(list, constants, gpuHandleOf(yuvPass_, nv12Texture ? 3 + parity * 2 : 0).ptr, gpuHandleOf(yuvPass_, 2).ptr);

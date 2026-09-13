@@ -12,6 +12,8 @@
 #include <chrono>
 extern "C" {
 #include <libavutil/frame.h>
+#include <libavutil/imgutils.h>
+#include <libavutil/pixdesc.h>
 }
 using namespace veyra;
 int wmain(int argc,wchar_t**argv){
@@ -28,6 +30,7 @@ int wmain(int argc,wchar_t**argv){
     gd.sourceWidth=gd.workWidth=info.width;gd.sourceHeight=gd.workHeight=info.height;
     gd.rgbInput=info.color.pixelFormat==pipeline::SourcePixelFormat::Bgra8;
     gd.yuy2Input=info.color.pixelFormat==pipeline::SourcePixelFormat::Yuy2;
+    gd.captureBitDepth=info.color.pixelFormat==pipeline::SourcePixelFormat::P010?10:info.color.pixelFormat==pipeline::SourcePixelFormat::P016?16:8;
     gd.enableNr=gd.enableFg=false;gd.noFeatures=true;
     const HWND window=CreateWindowExW(0,L"STATIC",L"Veyra color diagnostic",WS_POPUP,0,0,info.width,info.height,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     engine::VideoPresenter presenter;
@@ -40,10 +43,15 @@ int wmain(int argc,wchar_t**argv){
         if(result==source::SourceReadStatus::Frame)++frames;
     }
     if(frames<20||!frame)return 7;
-    const unsigned rowBytes=info.width*(frame->format==AV_PIX_FMT_YUYV422?2:frame->format==AV_PIX_FMT_NV12?1:4);
+    const auto pixelFormat=AVPixelFormat(frame->format);
+    const unsigned rowBytes=unsigned(av_image_get_linesize(pixelFormat,int(info.width),0));
     std::ofstream raw(dir/"source.raw",std::ios::binary);
-    for(unsigned y=0;y<info.height;++y)raw.write(reinterpret_cast<const char*>(frame->data[0]+ptrdiff_t(y)*frame->linesize[0]),rowBytes);
-    if(frame->format==AV_PIX_FMT_NV12)for(unsigned y=0;y<info.height/2;++y)raw.write(reinterpret_cast<const char*>(frame->data[1]+ptrdiff_t(y)*frame->linesize[1]),info.width);
+    const auto* pixelDesc=av_pix_fmt_desc_get(pixelFormat);
+    for(int plane=0;plane<av_pix_fmt_count_planes(pixelFormat);++plane){
+        const unsigned rows=plane?AV_CEIL_RSHIFT(info.height,pixelDesc->log2_chroma_h):info.height;
+        const int bytes=av_image_get_linesize(pixelFormat,int(info.width),plane);
+        for(unsigned y=0;y<rows;++y)raw.write(reinterpret_cast<const char*>(frame->data[plane]+ptrdiff_t(y)*frame->linesize[plane]),bytes);
+    }
     raw.close();
     pipeline::EnhanceGraph::FrameOutputs out;sink::RgbaImage gpu,display;
     const bool ok=graph.process(frame,packet.pts.toDouble()*1000,true,out,packet.sequence,&packet.colorInfo)&&

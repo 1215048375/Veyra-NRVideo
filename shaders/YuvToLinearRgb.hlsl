@@ -26,11 +26,11 @@ float3 YuvToRgb(float y, float2 uv)
 {
     // P010 is stored as 10 significant HIGH bits in 16-bit UNORM. Its
     // normalization is not 8-bit /255: decode legal code values explicitly.
-    bool ten=colorParams0.w>0.5;
-    float scale=ten?65535.0/64.0:255.0;
-    float black=ten?64.0:16.0,white=ten?940.0:235.0;
-    float middle=ten?512.0:128.0,span=ten?896.0:224.0;
-    float maximum=ten?1023.0:255.0;
+    bool sixteen=colorParams0.w>1.5,ten=colorParams0.w>0.5;
+    float scale=sixteen?65535.0:ten?65535.0/64.0:255.0;
+    float black=sixteen?4096.0:ten?64.0:16.0,white=sixteen?60160.0:ten?940.0:235.0;
+    float middle=sixteen?32768.0:ten?512.0:128.0,span=sixteen?57344.0:ten?896.0:224.0;
+    float maximum=sixteen?65535.0:ten?1023.0:255.0;
     float yy=colorParams0.x>0.5?(y*scale-black)/(white-black):y*scale/maximum;
     yy=saturate(yy);
     float uu=(uv.x*scale-middle)/(colorParams0.x>0.5?span:maximum);
