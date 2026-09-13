@@ -1874,3 +1874,9 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 用户反馈OBS音频正常、Veyra延迟高。确认产品音频ConnectDirect前缺少IAMBufferNegotiation，音频sink仅请求1个sample最小字节。参考OBS libdshowcapture固定c13d4b7及Microsoft API，独立增加连接前10ms帧对齐请求、失败兼容继续、实际allocator容量日志；新增实际inputBlockMs/inputIntervalMs/inputBlocks诊断，不改自动补偿和音频重采样。不能推定反馈者驱动确实500ms，未取得其日志/实卡听测。
 
 开工tag checkpoint/capture-audio-latency-20260913。旧产品合同32 PASS/1 FAIL验证缺口；修后38 PASS，完整构建100步成功；合成PCM+真实WASAPI同步16 PASS、抖动5秒additionalReset/underrun/missing全0、设备恢复PASS。delivery 23/23、53.123279秒，logs/delivery/c7ecf48ee7ae44a99cc3eb6f971d61fc/result.json，NR实际Create/Evaluate成功、SEH0。当前EXE B847BFAA3440548C8494DB5DE90280BAB76609DB5B5DECCFF3ABB0870C6DB89A，FFmpeg slice补丁DLL哈希不变。详细命令、失败、修改文件与验证边界见docs/CAPTURE_AUDIO_LATENCY_2026-09-13.md和logs/capture-audio-latency-20260913/。未修改发布包、SDK或运行时，无push。下一步反馈者新版实卡测试与日志，10ms请求不是总延迟承诺。
+
+## 2026-09-13 1.0.1 发布准备与验证
+
+用户明确授权发布1.0.1。codex/release-1.0.1整合音频修复79734ff、用户日志分析eabf3c7和远端用户README编辑77c2c04，保留用户删除。更新版本资源、双语README、组件/构建说明、Release Notes及打包文档选择。当前用户打开的EXE阻止链接，未强关，改用相同构建对象与1.0.1资源的Ninja实际命令链接至隔离输出；EXE版本1.0.1，哈希073B72E2D6C44045036684B115CEA99F54FCD10F52D4BA4FA79C191C54DA94BE。
+
+完整便携包与两份对应源码包制作成功，六个发布资产；七个已批准运行组件与PS5 patched FFmpeg不变，无SDK/运行时加入源码。便携ZIP逐文件清单校验及源码扫描通过，FFmpeg六个.mp4后缀文件确认是上游ASCII测试参考文本。新EXE解压后独立启动/实际增强5/5 PASS，最长7.92秒，社区/原版/Video SR组合均有NR执行和FG真实输出；此前产品代码delivery 23/23仍单独记录为版本资源更新前验证。具体命令、失败与恢复、资产哈希、运行码见docs/RELEASE_1.0.1_EXECUTION.md，日志logs/release-1.0.1。反馈者实卡音频改善仍待其新版测试，未声称10ms端到端。下一步推送源码及六资产并核验公开Release。

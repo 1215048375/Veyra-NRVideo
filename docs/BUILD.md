@@ -5,8 +5,8 @@
 ## Requirements
 
 - Windows 11 x64, Visual Studio 2022 C++ tools, Windows SDK, CMake 3.24+, Ninja.
-- Local FFmpeg development libraries matching avcodec63 / avformat63 / avutil61 / swresample7 / swscale10. Release 1.0.0 uses the LGPL vcpkg FFmpeg 9.0.1#1 build with the Veyra H.264 slice-capacity patch.
-- The PS5 H.264 repair included in 1.0.0 requires the additional [slice-capacity patch and matching rebuild](../scripts/ffmpeg/README.md). Stock 9.0.1 D3D12 H.264 has a 32-slice limit; the tested PS5 stream uses 68. Preserve `veyra-local-build.json` alongside the original vcpkg provenance in corresponding-source packages. Older 0.0.5 assets remain unchanged.
+- Local FFmpeg development libraries matching avcodec63 / avformat63 / avutil61 / swresample7 / swscale10. Release 1.0.1 uses the LGPL vcpkg FFmpeg 9.0.1#1 build with the Veyra H.264 slice-capacity patch.
+- The PS5 H.264 repair included in 1.0.1 requires the additional [slice-capacity patch and matching rebuild](../scripts/ffmpeg/README.md). Stock 9.0.1 D3D12 H.264 has a 32-slice limit; the tested PS5 stream uses 68. Preserve `veyra-local-build.json` alongside the original vcpkg provenance in corresponding-source packages. Older 0.0.5 assets remain unchanged.
 - NVIDIA DLSS SDK 310.7.0, Optical Flow SDK 5.0.7, RTX Video SDK 1.1.0, and nv-codec-headers. Prepare these under their respective licenses in ignored local directories.
 - Intel XeSS SDK 3.0.2 for the XeSS presenter; AMD FidelityFX SDK 1.1.4 optical-flow/backend static libraries for the AMD flow option.
 - Local NR runtime and NGX project configuration for experimental NR. The source repository intentionally does not contain them.
@@ -36,7 +36,7 @@ The NGX configuration lives in `runtime_local/config/ngx-local.json` for develop
 
 ## Dependency Sources
 
-Release 1.0.0 includes `Veyra-1.0.0-FFmpeg-source.zip` separately: the patched FFmpeg source, SPDX-verified vcpkg port and patches, notices, and configuration queried from the shipped DLL. It is not needed to run Veyra.
+Release 1.0.1 includes `Veyra-1.0.1-FFmpeg-source.zip` separately: the patched FFmpeg source, SPDX-verified vcpkg port and patches, notices, and configuration queried from the shipped DLL. It is not needed to run Veyra.
 
 - FFmpeg: https://github.com/FFmpeg/FFmpeg/tree/n9.0.1 ; vcpkg port source recorded in the distributed `licenses/FFMPEG-SPDX.json`.
 - vcpkg FFmpeg port: https://github.com/microsoft/vcpkg/tree/55cd8b8a4f19d8e6ba2ad114c8acacc4af5915a0/ports/ffmpeg . Its patches and the LGPL notices are part of the corresponding-source material.
@@ -52,16 +52,16 @@ Veyra and FidelityFX code are compiled into the executable; FFmpeg is dynamicall
 Run targeted tests and `scripts/gates/delivery.ps1`; each individual test must stay below300seconds. Physical capture and screen scanout require separate hardware verification. The legacy Loop gate is not part of the current process.
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/package-portable.ps1 -Root . -Version 1.0.0 -OutputDirectory out/releases/1.0.0
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/package-portable.ps1 -Root . -Version 1.0.1 -OutputDirectory out/releases/1.0.1
 ```
 
 The packager accepts `-BuildDirectory` for an isolated build, checks the publisher's fixed input files, copies an explicit payload, and emits a ZIP, checksums, and component manifests. It refuses to overwrite an existing candidate. This build-time audit does not restrict user DLL replacement. Do not upload SDK headers, samples, libraries, private media, logs, or development archives with the source.
 
-## PS5 in 1.0.0
+## PS5 in 1.0.1
 
-The release enables Remote Play; the default non-RemotePlay command above is a reduced build. Follow [REMOTEPLAY_BUILD_1.0.0.md](REMOTEPLAY_BUILD_1.0.0.md) for the full build, dependency source, patches and licensing.
+The release enables Remote Play; the default non-RemotePlay command above is a reduced build. Follow [REMOTEPLAY_BUILD_1.0.1.md](REMOTEPLAY_BUILD_1.0.1.md) for the full build, dependency source, patches and licensing.
 
-## GPU DIS (1.0.0 experimental option)
+## GPU DIS (1.0.1 experimental option)
 
 The open-source subset in `third_party/gpu-dis` compiles with the existing Windows
 SDK DXC; no additional GPU vendor SDK is required for DIS. `cmake/VeyraGpuDis.cmake`

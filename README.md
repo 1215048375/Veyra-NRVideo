@@ -13,7 +13,7 @@
 
 Windows 视频播放器与采集卡增强工具。支持视频、图片、采集卡实时预览和 PS5 局域网串流，可组合使用超分辨率、NR 画面增强与补帧。
 
-[下载 1.0.0 免安装版](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0) · [更新记录](docs/RELEASE_NOTES_1.0.0.md) · [反馈问题](https://github.com/Likely7/Veyra-NRVideo/issues)
+[下载 1.0.1 免安装版](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.1) · [更新记录](docs/RELEASE_NOTES_1.0.1.md) · [反馈问题](https://github.com/Likely7/Veyra-NRVideo/issues)
 
 ## 功能
 
@@ -30,11 +30,11 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片、采集
 
 日常模式以观看为主；专业模式展开增强参数、诊断和导出工具。切换模式不需要重新打开视频。
 
-1.0.0 整合 PS5 串流、音画同步和硬解修复，修复视频尾部崩溃与导出误报成功，更新透明图标并加入可选 GPU DIS 光流。
+1.0.1 修复采集音频未协商低延迟缓冲的问题，增加音频输入与队列诊断；保留 1.0.0 的功能与修复。
 
 ## 下载与运行
 
-1. 在 [Releases](https://github.com/Likely7/Veyra-NRVideo/releases) 下载 **Veyra-1.0.0-win64-portable.zip**，不要下载 Source code。
+1. 在 [Releases](https://github.com/Likely7/Veyra-NRVideo/releases) 下载 **Veyra-1.0.1-win64-portable.zip**，不要下载 Source code。
 2. 完整解压到一个可写文件夹，双击 **Veyra.exe**。无需安装 SDK、Python 或开发工具。
 3. 使用当前显卡驱动。要使用 NVIDIA NR、DLSS、RTX Video SR 和 NVENC，需兼容的 NVIDIA RTX 显卡；本版本主要在 RTX 5070 上验证。
 
@@ -113,11 +113,12 @@ NR 与 DLSS 帧生成属于 **community experimental / 社区实验集成**，�
 
 ## 开发与许可
 
-[构建说明](docs/BUILD.md) · [组件清单](docs/RUNTIME_COMPONENTS_1.0.0.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
+[构建说明](docs/BUILD.md) · [组件清单](docs/RUNTIME_COMPONENTS_1.0.1.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
 
 Veyra 原有源码采用 [GPLv3](LICENSE)；含串流的组合程序同时适用 [AGPLv3 与上游 OpenSSL 例外](licenses/remoteplay/CHIAKI_AGPL3_OPENSSL.txt)。应用源码对应版本标签，Release 另附串流依赖与 FFmpeg 对应源码包，普通用户无需下载。SDK、模型和运行时不进入源码仓库；Release 组件按各自许可与实验发布范围单独提供。
 
 
+<details>
 <summary>已搁置的 AMD NR 方向：调研参考</summary>
 
 [DLSS-NR-on-AMD](https://github.com/danielblnc/DLSS-NR-on-AMD)、[dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting)、[dlss5-image-enhancer-zluda](https://github.com/RedDukeDev/dlss5-image-enhancer-zluda) 及其 [ZLUDA 分支](https://github.com/RedDukeDev/ZLUDA)、[dlss5-neural-amd](https://github.com/zmodelerlover/dlss5-neural-amd)、[DLSS5-AMD-Video](https://github.com/eikkapine/DLSS5-AMD-Video)。这些项目用于可行性与性能路线研究，当前版本不提供 AMD NR。
