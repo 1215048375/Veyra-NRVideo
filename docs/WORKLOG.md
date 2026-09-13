@@ -1820,3 +1820,20 @@ cross runner 调用 scripts/gates/delivery.ps1 -Root . -BuildDirectory out/relea
 新程序 out/release-p1-20260913/build/veyra.exe，SHA256=B116AB6855D69CDEB29927AB3AD80422D54051339FCE47D7EE5939CAA987519D。patched avcodec-63.dll SHA256=0710F0D87A7FFCC9F998F1A35D0500345F6C66EB9A5A39C51D60D293142BD84F，与开工一致，未退回未打补丁的 FFmpeg；原版/社区 NR 身份符合已批准记录。未修改运行时、SDK、模型、凭据、个人配置或既有发布资产；未推送、打包上传或发布。
 
 限制：变分辨率文件明确停止；全片 CPU 解码验证会增加导出收尾时间，但可取消，不是增强路径 GPU→CPU 回读。实机 PS5/PSN、HDR 显示器、长时稳定性、多 GPU、4K60 采集卡端到端验收未执行，本轮回放不代表实卡通过。下一项唯一任务：用户试用本轮新构建；正在运行的旧程序不会自动更新。两个 P2 按用户范围保留。
+
+
+## 2026-09-13 GPU DIS 光流可切换实验接入
+
+用户确认 PS5 清晰度基本与 chiaki-ng 相当，授权接入此前讨论的 GPU DIS 作为可选实验后端。开工存档 3ae4d5c 保留另一轮已完成的三个 P1 修复；tag checkpoint/gpu-dis-preintegration-2026-09-13，施工分支 codex/gpu-dis-integration。完整实施/测试/修改文件与边界见 docs/GPU_DIS_INTEGRATION_PLAN_2026-09-13.md。
+
+专业光流选择增加 GPU DIS FAST，NVOF 默认及 FidelityFX 保留，预设枚举追加兼容；公开上游 cb7523b5104fc914dc501767c3139b43c2067af7 的 DIS source/shader 子集放 third_party/gpu-dis，保留 Apache/BSD 许可、来源及实际修改记录。只使用公共 D3D12 provider；没带工具箱 worker、SDK 或模型。图复用现有 A/B、parity fence、FlowAdapt、GPU 计时、reset 和 NR/SR/FG 消费者；增加 GPU 亮度适配、双向一致性与亮度置信度，未改变源显示颜色、音频、PS5、播放队列。不引入逐 pass CPU 等待或正常路径 GPU 回读。上游 shader 可见 SRV 写法按现有驱动 workaround 改为 staging；算法未改。包脚本递归带 DIS DXIL 子目录和开源 notices，未执行新发布。
+
+vcvars64 下 cmake --build out/remoteplay/product-repair --parallel 6，完整增量 115 步通过；定向目标编译也通过，日志 out/gpu-dis-build.log、out/gpu-dis-rebuild.log、out/gpu-dis-final-build.log、out/gpu-dis-build-all.log。真实 RTX5070/616.56：veyra_experimental_backend_tests dis/dis1080/dis-xess/nvof1080；veyra_repair_fg_tests dis/dis-sr；veyra_repair_preset_tests logs/gpu-dis-20260913/preset-fixed.v1。每次进程 240 秒上限，实际各约 0.1–5.6 秒。640/1080 双向 DIS 46 次、方向/重置/resize 数值通过、D3D12 debug error=0；DIS+XeSS generated=43；DIS+NR+DLSSG 12 源/11 生成全部 contentValid，进一步 RTX Video SR 到4K同样11/11。NR CreateFeature18 result=0x1/seh=0，FG warm-up result=0x1，VSR op=0/2 result=0x1。不是屏幕扫描/真实 PS5 画质验收。
+
+原预设测试新增后初次失败：测试没有删除刚加的 DIS 条目，导致旧条目数量断言失败。修复测试清理后，DIS 保存/重载相等与原有42项迁移测试均通过。保留原 results.json preset=1，最终 additional-results.json preset-fixed=0。详见 logs/gpu-dis-20260913/。
+
+同一1080合成平移数据，各45个已完成GPU计时，DIS 光流中位17.2824ms、均值17.2826ms；NVOF中位1.15165ms、均值1.21748ms。此公开实现本机明显更慢，因此保留实验选项，不能宣传性能提升或默认替换。双向计算与其变分迭代走通用计算单元，其他硬件/素材未推断。用户肉眼比较游戏画质仍待执行。
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/gates/delivery.ps1 -Root . -BuildDirectory out/remoteplay/product-repair，23/23 PASS，47.156秒，logs/delivery/ca204954e1e64ee4aeddf7a41cf5f1e6/result.json。git diff --check及package-portable.ps1语法检查通过。最终veyra.exe SHA256=114E00EDD266182BD2556FD1150C487FE3C4B6348112A63AA7706BFCE554BCFA；patched avcodec SHA256=0710F0D87A7FFCC9F998F1A35D0500345F6C66EB9A5A39C51D60D293142BD84F，保持硬解slice修复。桌面PS5测试版快捷方式已核对指向out/remoteplay/product-repair/veyra.exe。
+
+未测试真实PS5/采集卡新后端、多GPU、HDR屏幕、长时稳定性、Windows UI实际鼠标切换和新便携包部署；代码走既有后端切换重建/回滚，不能将静态接法当这些场景实测。仅本地构建与存档，没有push/Release/运行时修改，没有关机。下一项：用户重启桌面测试版，在专业模式的光流·运动估算选择GPU DIS，固定NR/SR/FG参数比较；速度/效果不满意即可切回NVOF。

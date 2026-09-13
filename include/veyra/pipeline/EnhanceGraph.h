@@ -34,7 +34,7 @@ struct AVFrame;
 struct SwsContext;
 struct NVSDK_NGX_Parameter;
 struct NVSDK_NGX_Handle;
-namespace veyra::guidance { class AmdOpticalFlow; }
+namespace veyra::guidance { class AmdOpticalFlow; class GpuDisOpticalFlow; }
 
 namespace veyra::gfx {
 class D3D12DeviceContext;
@@ -158,6 +158,7 @@ public:
         uint64_t srEvaluateCount = 0;
         uint64_t nvofExecuteCount = 0;
         uint64_t amdOfExecuteCount = 0;
+        uint64_t gpuDisExecuteCount = 0;
         uint64_t nvofFrameFailures = 0;
         uint64_t fgGeneratedFrames = 0;
         uint64_t fgSubmittedCandidates = 0, fgDisabledFrames = 0;
@@ -295,6 +296,7 @@ private:
     std::unique_ptr<ngx::DlssNrRuntimeAdapter> nrAdapter_;
     std::unique_ptr<ngx::DlssSrBackend> srBackend_;
     std::unique_ptr<guidance::AmdOpticalFlow> amdOf_;
+    std::unique_ptr<guidance::GpuDisOpticalFlow> gpuDis_;
     std::unique_ptr<ngx::VideoSrBackend> videoSrBackend_;
     std::unique_ptr<ngx::DlssFgBackend> fgBackend_;
     NVSDK_NGX_Parameter* ngxParams_ = nullptr;

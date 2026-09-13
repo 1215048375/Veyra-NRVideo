@@ -60,3 +60,12 @@ The packager accepts `-BuildDirectory` for an isolated build, checks the publish
 ## PS5 in 0.0.5
 
 The release enables Remote Play; the default non-RemotePlay command above is a reduced build. Follow [REMOTEPLAY_BUILD_0.0.5.md](REMOTEPLAY_BUILD_0.0.5.md) for the full build, dependency source, patches and licensing.
+
+## GPU DIS (current source build)
+
+The open-source subset in `third_party/gpu-dis` compiles with the existing Windows
+SDK DXC; no additional GPU vendor SDK is required for DIS. `cmake/VeyraGpuDis.cmake`
+retains the shader variants and compiler flags from `shader-recipes.json`.
+Keep `shaders/dis/*.dxil`, `GpuDisLuma.dxil`, and `GpuDisValidate.dxil` when moving
+an executable. Runtime requires D3D12 double-precision shader operations.
+See `docs/GPU_DIS_INTEGRATION_PLAN_2026-09-13.md` for tests and limitations.

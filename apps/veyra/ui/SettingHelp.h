@@ -36,7 +36,7 @@ inline const wchar_t* settingHelp(int id){
     case 206:return L"让框选区域少受NR改动，最多4块。只管NR，不给超分和补帧当保镖。";
     case 207:return L"选择DLSS SR或RTX视频超分，以及视频超分质量。两条路线各有脾气，试着看画质和耗时。";
     case 208:return L"选择DLSS或实验XeSS补帧。XeSS目前为预览2X，不支持视频导出；别只看名字，看实际效果。";
-    case 209:return L"选择运动估算后端。NVOF和AMD FidelityFX负责看出物体怎么动；选择AMD光流不等于获得AMD NR。";
+    case 209:return L"选择运动估算后端。NVOF、FidelityFX、GPU DIS负责看出物体怎么动。DIS是实验算法，走通用计算单元，可能和NR抢活干，不保证更快；选它不会换掉你的补帧方式，也不会解锁AMD NR。";
     case 211:return L"把增强参数恢复为内建默认。调迷路了就走这里，保存的用户预设不会被删。";
     case 213:return L"在画面上拖框添加NR保护区域，Esc取消。把不想被改的地方圈出来。";
     case 214:return L"清空当前NR保护框。只是撤掉围栏，不会删除视频。";

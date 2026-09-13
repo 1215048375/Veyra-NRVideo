@@ -1,0 +1,254 @@
+[
+  {
+    "source": "src/gpu/shaders/dis_native_gray.hlsl",
+    "output": "shaders/dis/dis_native_gray.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_native_rgba_gray.hlsl",
+    "output": "shaders/dis/dis_native_rgba_gray.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_native_luma.hlsl",
+    "output": "shaders/dis/dis_native_luma.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_perfect_area.hlsl",
+    "output": "shaders/dis/dis_perfect_area.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_d2_gradient.hlsl",
+    "output": "shaders/dis/dis_d2_gradient.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_d3_structure_hor.hlsl",
+    "output": "shaders/dis/dis_d3_structure_hor.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_d3_structure_ver.hlsl",
+    "output": "shaders/dis/dis_d3_structure_ver.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_perfect_vr_deriv2.hlsl",
+    "output": "shaders/dis/dis_perfect_vr_deriv2.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_perfect_vr_update.hlsl",
+    "output": "shaders/dis/dis_perfect_vr_update.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_perfect_vr_zero.hlsl",
+    "output": "shaders/dis/dis_perfect_vr_zero.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_d3_structure_hor.hlsl",
+    "output": "shaders/dis/dis_d3_structure_hor_stride3.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main",
+      "-D",
+      "DIS_TENSOR_STRIDE=3"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_d3_structure_ver.hlsl",
+    "output": "shaders/dis/dis_d3_structure_ver_stride3.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main",
+      "-D",
+      "DIS_TENSOR_STRIDE=3"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_perfect_patch_exact.hlsl",
+    "output": "shaders/dis/dis_perfect_patch_parallel.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main",
+      "-D",
+      "DIS_SINGLE_PATCH_GROUP=1",
+      "-D",
+      "DIS_ROUNDED_DIVIDE=1",
+      "-D",
+      "DIS_PARALLEL_STRIPES=1"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_perfect_densify.hlsl",
+    "output": "shaders/dis/dis_perfect_densify_exact.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main",
+      "-D",
+      "DIS_DENSE_EXACT=1"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_perfect_vr_deriv1.hlsl",
+    "output": "shaders/dis/dis_perfect_vr_deriv1_cpu.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main",
+      "-Gis",
+      "-D",
+      "DIS_VR_CPU_WARP=1"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_perfect_vr_system.hlsl",
+    "output": "shaders/dis/dis_perfect_vr_system_exact.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main",
+      "-Gis",
+      "-D",
+      "DIS_VR_EXACT=1"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_perfect_vr_sor.hlsl",
+    "output": "shaders/dis/dis_perfect_vr_sor_exact.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main",
+      "-Gis",
+      "-D",
+      "DIS_VR_EXACT=1"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_perfect_upsample.hlsl",
+    "output": "shaders/dis/dis_perfect_upsample_ipp.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main",
+      "-D",
+      "DIS_IPP_UPSAMPLE=1"
+    ]
+  },
+  {
+    "source": "src/gpu/shaders/dis_perfect_final.hlsl",
+    "output": "shaders/dis/dis_perfect_final.dxil",
+    "compiler": "dxc",
+    "arguments": [
+      "-nologo",
+      "-T",
+      "cs_6_0",
+      "-E",
+      "main",
+      "-Gis"
+    ]
+  }
+]

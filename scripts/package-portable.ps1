@@ -68,7 +68,16 @@ foreach ($notice in Get-ChildItem -LiteralPath (Join-Path $resolvedRoot 'license
   Copy-Payload $notice.FullName "licenses/$relative"
 }
 Copy-Payload (Join-Path $resolvedRoot 'docs/REMOTEPLAY_BUILD_0.0.5.md') 'docs/REMOTEPLAY_BUILD_0.0.5.md'
-foreach ($shader in Get-ChildItem -LiteralPath (Join-Path $bin 'shaders') -File -Filter '*.dxil') { Copy-Payload $shader.FullName "shaders/$($shader.Name)" }
+foreach ($shader in Get-ChildItem -LiteralPath (Join-Path $bin 'shaders') -Recurse -File -Filter '*.dxil') {
+  $relative=$shader.FullName.Substring((Join-Path $bin 'shaders').Length+1).Replace('\','/')
+  Copy-Payload $shader.FullName "shaders/$relative"
+}
+foreach ($name in @('LICENSE','NOTICE','PROVENANCE.md','VEYRA_INTEGRATION.md')) {
+  Copy-Payload (Join-Path $resolvedRoot "third_party/gpu-dis/$name") "licenses/gpu-dis/$name"
+}
+foreach ($notice in Get-ChildItem -LiteralPath (Join-Path $resolvedRoot 'third_party/gpu-dis/licenses') -File) {
+  Copy-Payload $notice.FullName "licenses/gpu-dis/licenses/$($notice.Name)"
+}
 Copy-Payload (Join-Path $resolvedRoot 'runtime_local/config/ngx-local.json') 'runtime/config/ngx-local.json'
 Copy-Payload 'C:/veyra-deps/installed/x64-windows/share/ffmpeg/copyright' 'licenses/FFMPEG-COPYRIGHT.txt'
 Copy-Payload 'C:/veyra-deps/installed/x64-windows/share/ffmpeg/vcpkg.spdx.json' 'licenses/FFMPEG-SPDX.json'

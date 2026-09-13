@@ -110,3 +110,11 @@ NR and DLSS frame generation are **community-experimental integrations**, not NV
 Original Veyra source is [GPLv3](LICENSE); the combined streaming program also falls under [AGPLv3 and the upstream OpenSSL exception](licenses/remoteplay/CHIAKI_AGPL3_OPENSSL.txt). Application source matches the release tag. The RemotePlay-source and FFmpeg-source assets provide dependency source and are not needed to run the player. SDKs, models, and runtimes are excluded from this source repository. Release components retain their separate licenses and experimental distribution boundaries.
 
 Stage cards report GPU processing times. The chart estimates additional delay versus unenhanced playback, not their sum or measured button-to-screen latency. Files can be processed ahead. Sustained overload skips expired preview frame opportunities to keep media time advancing and audio continuous; export retains complete processing.
+
+### Unreleased: experimental GPU DIS motion
+
+The current source build adds **GPU DIS · FAST experimental** to the optical-flow
+selector. NVOF remains the default. DIS is not necessarily faster; on our RTX 5070
+1080p synthetic translation test it was substantially slower than NVOF. Use it
+for comparisons with fixed enhancement settings. This option is not in the
+published 0.0.5 portable package.

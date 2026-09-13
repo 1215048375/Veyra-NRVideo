@@ -56,7 +56,8 @@ int main(int argc,char** argv){if(argc!=2)return 2;using namespace veyra::engine
  auto xess=s;xess.frameGenerationBackend=FrameGenerationBackend::XeSS;ok=ok&&!b.put(L"XeSS 4X rejected",xess);
  xess.multiplier=2;ok=ok&&b.put(L"XeSS 2X",xess);PresetStore xessReload(p);ok=ok&&xessReload.load()&&xessReload.entries().back().settings==xess&&b.erase(1);
  auto badBackend=s;badBackend.frameGenerationBackend=static_cast<FrameGenerationBackend>(3);ok=ok&&!b.put(L"invalid backend",badBackend);
- auto badFlow=s;badFlow.opticalFlowBackend=static_cast<OpticalFlowBackend>(2);ok=ok&&!b.put(L"invalid flow backend",badFlow);
+ auto dis=s;dis.opticalFlowBackend=OpticalFlowBackend::GpuDis;ok=ok&&b.put(L"GPU DIS",dis)&&b.save();PresetStore disReload(p);ok=ok&&disReload.load()&&disReload.entries().back().settings==dis&&b.erase(1);
+ auto badFlow=s;badFlow.opticalFlowBackend=static_cast<OpticalFlowBackend>(3);ok=ok&&!b.put(L"invalid flow backend",badFlow);
  auto badNr=s;badNr.nrRuntime=static_cast<NrRuntime>(2);ok=ok&&!b.put(L"invalid NR runtime",badNr);
  auto half=s;half.content=ContentRate::Capture60To30;ok=ok&&b.put(L"capture half rate",half);PresetStore halfReload(p);ok=ok&&halfReload.load()&&halfReload.entries().back().settings.content==ContentRate::Capture60To30&&b.erase(1);
  auto badSr=s;badSr.videoSrQuality=5;ok=ok&&!b.put(L"invalid video SR",badSr);

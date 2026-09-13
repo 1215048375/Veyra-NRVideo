@@ -1,0 +1,20 @@
+XeSS GPU Motion — GPU Block / GPU DIS R4.2 source snapshot
+
+The project's own additions and modifications are licensed under Apache-2.0.
+This statement does not replace upstream licenses or assert ownership of
+third-party contributions. See PROVENANCE.md and licenses/.
+
+OpenCV DIS and related reference/ported code:
+Copyright (C) 2000-2008, Intel Corporation, all rights reserved.
+Copyright (C) 2009, Willow Garage Inc., all rights reserved.
+Third party copyrights are property of their respective owners.
+The retained BSD file-header terms are in licenses/OPENCV_DIS_BSD_HEADER.txt.
+The OpenCV project Apache-2.0 text is in licenses/OPENCV_APACHE_LICENSE.txt.
+Sources include OpenCV modules/video/src/dis_flow.cpp,
+variational_refinement.cpp, and related DIS, interpolation and image-conversion
+implementations. The D3D12/HLSL port and integration are modifications.
+
+Intel XeSS, XeFG and XeLL are Intel technologies used through documented APIs.
+Intel SDK binaries and headers are not licensed by this repository's LICENSE.
+oneVPL, OpenVINO, OpenCL, Microsoft Windows SDK and build tools retain their
+respective upstream terms. No vendor endorsement is implied.

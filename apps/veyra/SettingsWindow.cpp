@@ -167,7 +167,7 @@ case WM_CREATE:{window=h;font=makeFont(h);items.clear();displayedBackendWarning.
     add(L"STATIC",L"补帧倍率",1112,0,1,12,122,-1,24);
     combo(202,1,150,{L"关闭补帧",L"2X · 一张中间帧",L"3X · 两张中间帧",L"4X · 三张中间帧"});
     add(L"STATIC",L"运动估算",1113,0,1,12,194,-1,24);
-    combo(209,1,222,{L"NVIDIA NVOF 光流",L"AMD FidelityFX 光流 · 实验"});
+    combo(209,1,222,{L"NVIDIA NVOF 光流",L"AMD FidelityFX 光流 · 实验",L"GPU DIS 光流 · FAST 实验"});
     add(L"BUTTON",L"AMD 性能档 · 光流宽高各减半",215,BS_AUTOCHECKBOX|WS_TABSTOP,1,12,266,-1,36);
     combo(204,1,310,{L"NR / DLSS光流 · 性能",L"NR / DLSS光流 · 平衡",L"NR / DLSS光流 · 质量"});
     add(L"STATIC",L"内容节奏",1114,0,1,12,354,-1,24);

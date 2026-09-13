@@ -16,7 +16,7 @@ constexpr std::string_view nrRuntimeName(NrRuntime runtime) {
     return "unknown";
 }
 enum class FlowQuality { Performance, Balanced, Quality };
-enum class OpticalFlowBackend { Nvidia, AmdFidelityFx };
+enum class OpticalFlowBackend { Nvidia, AmdFidelityFx, GpuDis };
 enum class ContentRate { Transport, Auto, Fps30, Fps50, Fps60, Capture60To30 };
 enum class AudioSyncMode { Automatic, Manual, Off };
 constexpr std::string_view frameGenerationBackendName(FrameGenerationBackend backend) {
@@ -30,6 +30,7 @@ constexpr std::string_view opticalFlowBackendName(OpticalFlowBackend backend) {
     switch(backend) {
     case OpticalFlowBackend::Nvidia: return "NVIDIA_NVOF";
     case OpticalFlowBackend::AmdFidelityFx: return "AMD_FIDELITYFX_OF";
+    case OpticalFlowBackend::GpuDis: return "GPU_DIS_FAST";
     }
     return "unknown";
 }
@@ -109,7 +110,7 @@ struct EnhancementSettings {
         if(frameGenerationBackend==FrameGenerationBackend::XeSS&&multiplier>2)return "XeSS preview currently supports 2X only";
         if(videoSrQuality>4)return "invalid video SR quality";
         if(!pipeline::validSrTarget(srTarget))return "invalid SR target";
-        if(opticalFlowBackend!=OpticalFlowBackend::Nvidia&&opticalFlowBackend!=OpticalFlowBackend::AmdFidelityFx)return "invalid optical flow backend";
+        if(opticalFlowBackend!=OpticalFlowBackend::Nvidia&&opticalFlowBackend!=OpticalFlowBackend::AmdFidelityFx&&opticalFlowBackend!=OpticalFlowBackend::GpuDis)return "invalid optical flow backend";
         if(multiplier<1||multiplier>4)return "unsupported multiplier";
         if(nrPolicy!=pipeline::NrSizePolicy::Realtime&&nrPolicy!=pipeline::NrSizePolicy::Native)return "invalid NR size policy";
         if(flow<FlowQuality::Performance||flow>FlowQuality::Quality||content<ContentRate::Transport||content>ContentRate::Capture60To30)return "invalid flow/content mode";

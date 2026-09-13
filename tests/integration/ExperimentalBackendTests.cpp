@@ -125,11 +125,13 @@ bool readCanonicalFlow(gfx::D3D12DeviceContext& ctx, gfx::CommandSlotRing& ring,
 
 int wmain(int argc,wchar_t** argv){
     if(argc!=3)return 2;
-    const bool xess=wcscmp(argv[1],L"xess")==0;
+    const bool dis=std::wstring(argv[1]).find(L"dis")==0;
+    const bool xess=wcscmp(argv[1],L"xess")==0||wcscmp(argv[1],L"dis-xess")==0;
     const bool amd=wcscmp(argv[1],L"amd")==0;
     const bool sr=std::wstring(argv[1]).find(L"sr")==0;
-    if(!xess&&!amd&&!sr)return 2;
-    const unsigned width=sr?1920:640,height=sr?1080:360,frames=sr?3:48;
+    if(!xess&&!amd&&!sr&&!dis&&wcscmp(argv[1],L"nvof1080")!=0)return 2;
+    const bool full=std::wstring(argv[1]).find(L"1080")!=std::wstring::npos;
+    const unsigned width=(sr||full)?1920:640,height=(sr||full)?1080:360,frames=sr?3:48;
     CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     std::filesystem::create_directories(argv[2]);
     Logger::instance().openFile((std::filesystem::path(argv[2])/"engine.log").wstring());
@@ -143,11 +145,11 @@ int wmain(int argc,wchar_t** argv){
     Microsoft::WRL::ComPtr<ID3D12InfoQueue> info;ctx.device()->QueryInterface(IID_PPV_ARGS(&info));
     pipeline::EnhanceGraph graph(ctx,ring);engine::VideoPresenter presenter;
     pipeline::EnhanceGraphDesc desc;
-    desc.sourceWidth=desc.workWidth=640;desc.sourceHeight=desc.workHeight=360;
+    desc.sourceWidth=desc.workWidth=width;desc.sourceHeight=desc.workHeight=height;
     desc.rgbInput=true;desc.enableNr=false;desc.enableFg=xess;desc.noNgx=true;
     desc.enableNvofStandalone=true;
     desc.frameGenerationBackend=engine::FrameGenerationBackend::XeSS;
-    desc.opticalFlowBackend=amd?engine::OpticalFlowBackend::AmdFidelityFx:engine::OpticalFlowBackend::Nvidia;
+    desc.opticalFlowBackend=dis?engine::OpticalFlowBackend::GpuDis:amd?engine::OpticalFlowBackend::AmdFidelityFx:engine::OpticalFlowBackend::Nvidia;
     if(sr){
         desc.sourceWidth=width;desc.sourceHeight=height;
         desc.workWidth=std::wstring(argv[1]).find(L"8k")!=std::wstring::npos?7680:2560;
@@ -183,7 +185,7 @@ int wmain(int argc,wchar_t** argv){
             if(xess)ok=ok&&presenter.xessGeneratedCount()==before;
         }
         if(i==24)SetWindowPos(window,nullptr,0,0,800,600,SWP_NOACTIVATE|SWP_NOZORDER);
-        if(amd&&(i==23||i==47)){
+        if((amd||dis)&&(i==23||i==47)){
             ok=ring.drainQueue()&&ok;
             FlowSample& sample=i==23?rightward:leftward;
             ok=ok&&readCanonicalFlow(ctx,ring,graph.flowResource(),sample);
@@ -192,7 +194,7 @@ int wmain(int argc,wchar_t** argv){
     }
     ok=ring.drainQueue()&&ok;
     const auto generated=presenter.xessGeneratedCount();
-    const auto dispatches=graph.metrics().amdOfExecuteCount;
+    const auto dispatches=dis?graph.metrics().gpuDisExecuteCount:graph.metrics().amdOfExecuteCount;
     if(sr&&ok){
         sink::RgbaImage image;
         ok=graph.metrics().srEvaluateCount==frames&&sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),image);
@@ -201,13 +203,13 @@ int wmain(int argc,wchar_t** argv){
         std::cout<<"SR extent="<<image.width<<"x"<<image.height<<" evaluate="<<graph.metrics().srEvaluateCount<<" nonblack="<<nonblack<<" pass="<<ok<<std::endl;
     }
     if(xess)ok=ok&&generated>10;
-    if(amd){
+    if(amd||dis){
         // The source moves right then left. Canonical current->previous motion
         // must therefore point left then right with no material vertical drift.
         const bool directionOk=rightward.count>0&&leftward.count>0&&rightward.x<-0.5f&&leftward.x>0.5f&&
             std::abs(rightward.y)<0.5f&&std::abs(leftward.y)<0.5f;
-        std::cout<<"AMD flow rightward=("<<rightward.x<<","<<rightward.y<<") leftward=("<<leftward.x<<","<<leftward.y<<") samples="<<rightward.count<<"/"<<leftward.count<<" directionPass="<<directionOk<<std::endl;
-        ok=ok&&dispatches==48&&directionOk;
+        std::cout<<(dis?"GPU DIS flow rightward=(":"AMD flow rightward=(")<<rightward.x<<","<<rightward.y<<") leftward=("<<leftward.x<<","<<leftward.y<<") samples="<<rightward.count<<"/"<<leftward.count<<" directionPass="<<directionOk<<std::endl;
+        ok=ok&&dispatches==(dis?46u:48u)&&directionOk;
     }
     out={};presenter.close();graph.shutdown();av_frame_free(&frame);
     uint64_t errors=0;
@@ -217,6 +219,6 @@ int wmain(int argc,wchar_t** argv){
         if(SUCCEEDED(info->GetMessage(i,message,&size))&&message->Severity<=D3D12_MESSAGE_SEVERITY_ERROR){++errors;log::error("debug",message->pDescription);}
     }
     ok=ok&&errors==0;
-    std::cout<<"BACKEND "<<(xess?"xess":amd?"amd-of":"sr")<<" generated="<<generated<<" amdDispatches="<<dispatches<<" debugErrors="<<errors<<" pass="<<ok<<" (SDK submissions, not scanout or visual quality)\n";
+    std::cout<<"BACKEND "<<(dis?(xess?"gpu-dis-xess":"gpu-dis"):xess?"xess":amd?"amd-of":"sr")<<" generated="<<generated<<" amdDispatches="<<dispatches<<" debugErrors="<<errors<<" pass="<<ok<<" (SDK submissions, not scanout or visual quality)\n";
     info.Reset();ring.shutdown();ctx.shutdown();DestroyWindow(window);CoUninitialize();return ok?0:1;
 }

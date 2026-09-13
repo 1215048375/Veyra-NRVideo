@@ -22,8 +22,10 @@ int main(int argc,char** argv){
     pipeline::EnhanceGraphDesc gd;gd.sourceWidth=gd.workWidth=1920;gd.sourceHeight=gd.workHeight=1080;gd.enableNr=false;gd.enableSr=false;gd.enableFg=true;gd.runtimeAbsPath=(std::filesystem::path(VEYRA_PROJECT_ROOT)/"runtime_local/nvidia").wstring();
     const std::string mode=argc>1?argv[1]:"off";
     gd.enableNr=mode!="off";gd.enableNvofStandalone=gd.enableNr;
+    if(mode.starts_with("dis"))gd.opticalFlowBackend=engine::OpticalFlowBackend::GpuDis;
     if(mode=="flowP")gd.flowQuality=engine::FlowQuality::Performance;
     if(mode=="flowQ")gd.flowQuality=engine::FlowQuality::Quality;
+    if(mode=="dis-sr"){gd.workWidth=3840;gd.workHeight=2160;gd.nrWidth=1920;gd.nrHeight=1080;gd.enableSr=true;gd.videoSrQuality=2;}
     if(mode=="sr"){gd.workWidth=3840;gd.workHeight=2160;gd.nrWidth=1920;gd.nrHeight=1080;gd.enableSr=true;}
     if(mode=="mfg3"||mode=="mfg4"){gd.fgMultiplier=mode=="mfg3"?3:4;gd.enableNr=false;gd.enableNvofStandalone=false;}
     if(ok)ok=graph.initialize(gd)&&graph.createViews();
@@ -48,7 +50,7 @@ int main(int argc,char** argv){
         previous=std::move(real);
         if(i==10)retained=out.batch;
     }
-    std::cout<<"RESULT source="<<graph.metrics().nvofExecuteCount+1<<" generated="<<generated<<" contentValid="<<valid<<" display=unmeasured"<<std::endl;
+    std::cout<<"RESULT source="<<graph.metrics().nvofExecuteCount+graph.metrics().gpuDisExecuteCount+1<<" generated="<<generated<<" contentValid="<<valid<<" display=unmeasured"<<std::endl;
     pipeline::EnhanceGraph::FrameOutputs rejected;
     const bool protectedLease=ok&&!graph.process(f,240,false,rejected);
     std::cout<<"LEASE retained-slot-overwrite-rejected="<<protectedLease<<std::endl;

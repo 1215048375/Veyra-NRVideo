@@ -28,6 +28,7 @@
 #include "veyra/ngx/NgxParameters.h"
 #include "veyra/ngx/NvOfSession.h"
 #include "veyra/guidance/AmdOpticalFlow.h"
+#include "veyra/guidance/GpuDisOpticalFlow.h"
 
 extern "C" {
 #include <libavutil/frame.h>
@@ -293,6 +294,12 @@ bool EnhanceGraph::initNvof()
     if(desc_.stillImage){mvecSource_="single-image (no temporal motion)";return true;}
     if (desc_.noFeatures || !(nvofStandalone_ || xessEnabled() || (fgEnabled_&&desc_.frameGenerationBackend==engine::FrameGenerationBackend::Dlss) || (srEnabled_&&!desc_.videoSrQuality))) {
         veyra::log::info("graph", "VEYRA_NO_FEATURES: NVOF session skipped");
+        return true;
+    }
+    if(desc_.opticalFlowBackend==engine::OpticalFlowBackend::GpuDis){
+        gpuDis_=std::make_unique<guidance::GpuDisOpticalFlow>();
+        if(!gpuDis_->initialize(context_.device(),nvofW_,nvofH_))return false;
+        mvecSource_="gpu-dis FAST + bidirectional/photometric confidence";
         return true;
     }
     if(desc_.opticalFlowBackend==engine::OpticalFlowBackend::AmdFidelityFx){
@@ -895,7 +902,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     // Guidance from original source-space color before SR/NR. Queue waits are GPU-side.
     bool haveFlow = false;
     const bool runMotion = nvofStandalone_ || xessEnabled() || fgEnabled_ || (srEnabled_ && !desc_.videoSrQuality);
-    if (runMotion && (amdOf_ || (nvof_ && nvof_->initialized()))) {
+    if (runMotion && (gpuDis_ || amdOf_ || (nvof_ && nvof_->initialized()))) {
         const float dims[8] = {uintBits(nvofW_),uintBits(nvofH_),uintBits(nvofW_),uintBits(nvofH_),0,0,0,0};
         if (prevValid_) {
             tracker_.transition(list,nvofInB_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -917,7 +924,19 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             ++metrics_.amdOfExecuteCount;haveFlow=prevValid_;
             gpuTimer_.mark(list,GpuStage::Flow,true);
         }
-        if (prevValid_) {
+        if(gpuDis_ && prevValid_){
+            gpuTimer_.mark(list,GpuStage::Flow);
+            tracker_.transition(list,flowTex_.Get(),D3D12_RESOURCE_STATE_COMMON);
+            tracker_.transition(list,confTex_.Get(),D3D12_RESOURCE_STATE_COMMON);
+            // The next ring submission signals this value; the parity upload
+            // fence above retires all uses before these descriptors are reused.
+            if(!gpuDis_->dispatch(list,context_.directQueue(),context_.fence(),ring_.lastSignaledValue()+1,parity,
+                nvofInA_.Get(),nvofInB_.Get(),flowTex_.Get(),confTex_.Get(),previousSource_,sourceFrameId))return false;
+            tracker_.transition(list,flowTex_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            ++metrics_.gpuDisExecuteCount;haveFlow=true;
+            gpuTimer_.mark(list,GpuStage::Flow,true);
+        }
+        if (prevValid_ && !gpuDis_) {
             if(!amdOf_){
             gpuTimer_.mark(list,GpuStage::Flow);
             if(!ring_.submitAndSignal(slot))return false;
@@ -1323,6 +1342,7 @@ void EnhanceGraph::shutdown()
         (void)nrAdapter_->snippetReleaseFeature(nrHandle_, rr, rs);
         nrHandle_ = nullptr;
     }
+    gpuDis_.reset();
     amdOf_.reset();
     for(auto& motion:presentMotion_)motion.Reset();
     if (fgBackend_) fgBackend_->release();

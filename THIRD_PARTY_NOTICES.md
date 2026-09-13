@@ -65,3 +65,15 @@ Veyra calls the pinned Chiaki orientation tracker API (AGPL-3.0-only with OpenSS
 `src/remoteplay/PsnAuth.cpp` adapts the OAuth request contract and public client identifiers from chiaki-ng, commit `0e16950165f06e5c3291537c2eeba6e852be7120`, `gui/src/psnaccountid.cpp`, `gui/include/psnaccountid.h`, and `gui/src/psntoken.cpp`. Upstream credits the Account ID script to grill2010. License: AGPL-3.0-only with the upstream OpenSSL exception. The Windows HTTP, protected storage and UI integration are Veyra code. This is an unofficial client, not Sony endorsement. json-c remains an existing Chiaki dependency; its license/notice must remain in binary distributions.
 
 Static dependency notices and installed SPDX records: licenses/remoteplay/{json-c,libevent,miniupnpc,openssl,opus,sdl3}/. Upstream curl, nanopb, Jerasure and gf-complete notices are in the same directory. Their corresponding sources and port recipes accompany the RemotePlay-source release asset.
+
+## GPU DIS optical flow (experimental)
+
+Source: https://github.com/gggz114514-oss/XeSS-GPU-Motion , commit
+`cb7523b5104fc914dc501767c3139b43c2067af7` (public R4.2 snapshot).
+The DIS provider and its shader closure are included under `third_party/gpu-dis/`.
+Owned additions use Apache-2.0; OpenCV-derived portions retain their BSD/Apache
+terms and Intel/Willow Garage/other upstream attribution. See that directory's
+LICENSE, NOTICE, PROVENANCE.md, VEYRA_INTEGRATION.md, and licenses/.
+Veyra adds GPU input/consumer adapters and descriptor staging; no Intel SDK,
+worker dependencies or proprietary runtime is included in this source subset.
+This is a motion-estimation option, not Intel XeSS frame generation itself.

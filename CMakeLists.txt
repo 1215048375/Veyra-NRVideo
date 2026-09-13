@@ -545,7 +545,13 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
 
   # Headless quality-core runner (Playbook R3.3): the phase5 gate's quality
   add_library(veyra_engine STATIC src/engine/EngineController.cpp src/engine/EngineControllerImage.cpp src/engine/TiledImageProcessor.cpp src/engine/PresetStore.cpp src/engine/VideoPresenter.cpp src/engine/VideoExportJob.cpp src/engine/ExportJobManager.cpp src/engine/Subtitles.cpp)
-  target_sources(veyra_pipeline PRIVATE src/guidance/AmdOpticalFlow.cpp)
+  target_sources(veyra_pipeline PRIVATE src/guidance/AmdOpticalFlow.cpp
+    src/guidance/GpuDisOpticalFlow.cpp third_party/gpu-dis/src/gpu/native_strict_dis_provider.cpp)
+  target_include_directories(veyra_pipeline PRIVATE third_party/gpu-dis/src/gpu)
+  include(cmake/VeyraGpuDis.cmake)
+  veyra_add_compute_shader(veyra_shader_gpu_dis_luma GpuDisLuma)
+  veyra_add_compute_shader(veyra_shader_gpu_dis_validate GpuDisValidate)
+  add_dependencies(veyra_pipeline veyra_shader_gpu_dis veyra_shader_gpu_dis_luma veyra_shader_gpu_dis_validate)
   if(EXISTS "${VEYRA_FIDELITYFX_ROOT}/bin/ffx_sdk/ffx_opticalflow_x64.lib")
     target_compile_definitions(veyra_pipeline PRIVATE VEYRA_HAS_AMD_OF=1)
     target_include_directories(veyra_pipeline PRIVATE "${VEYRA_FIDELITYFX_ROOT}/include")
