@@ -1920,3 +1920,9 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 - 临时检查脚本out/smooth-motion-help-ui.ps1只操作自己启动的隐藏空载测试实例，确认说明默认收起、展开无重叠、收起恢复、内部FG控件启用、DLSS/XeSS倍率4/2项保留。空载GUI12秒，退出0。git diff --check通过。证据logs/smooth-motion-help/。
 - 普通EXE已本地替换，资源版本仍1.0.2；SHA256 61C70478840A7C3961CA299CCEB5371609218F147D7E0046333209FEB3155963。patched avcodec保持0710F0D87A7FFCC9F998F1A35D0500345F6C66EB9A5A39C51D60D293142BD84F。无SDK/DLL/模型/配置/日志入Git，未push或发布。
 - 本轮未执行NR/FG Create/Evaluate、实卡/PS5串流、驱动补帧或叠加实测；只变更说明及其布局。下一步用户在NVIDIA App为普通版veyra.exe单独配置后自行对照效果，旧实验EXE的配置不自动搬迁。
+
+## 2026-09-14 — 发布1.1.0准备与验证
+
+用户授权发布并在完成后关机。codex/release-1.1.0，存档checkpoint/pre-release-1.1.0-20260914。包含普通版Smooth Motion教程与允许叠加策略、此前采集格式扩展；不合入强制互斥实验构建。更新README中英文功能表/教程、1.1.0版本及发布/组件/源码说明。
+完整构建通过；delivery23/23，46.8241855秒（logs/delivery/f3bba8f704634831ab09ab62e7c233b7），真实NR Create0x1/SEH0、原生4K Evaluate12，播放和导出通过；采集布局127、GPU颜色/HDR38通过；独立解压便携5/5通过，真实内部FG生成664/669/669帧。细节、命令、未执行范围见docs/RELEASE_1.1.0_EXECUTION.md。
+便携/RemotePlay源码/FFmpeg源码及各自SHA256共六资产生成，逐文件及排除扫描通过；七运行文件与patched FFmpeg沿用，社区NR继续HashMismatch，源码没有SDK/DLL/模型/凭据。桌面普通程序已为1.1.0，EXE SHA256 F4106617DD743E2913729D3BDF9DF8A8DE911E1E28EAC482F3204ECD4967AE39。下一步推送main/tag、上传草稿、核实服务端digest后公开latest，再保存记录关机。

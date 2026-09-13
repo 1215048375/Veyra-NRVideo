@@ -14,7 +14,7 @@ English | [简体中文](README.md)
 
 A Windows video player and capture-card enhancement tool. Play videos, process images, and preview capture devices with optional super resolution, NR enhancement, and frame generation.
 
-[Download 1.0.2 Portable](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.2) · [Release Notes](docs/RELEASE_NOTES_1.0.2.md) · [Report an Issue](https://github.com/Likely7/Veyra-NRVideo/issues)
+[Download 1.1.0 Portable](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.1.0) · [Release Notes](docs/RELEASE_NOTES_1.1.0.md) · [Report an Issue](https://github.com/Likely7/Veyra-NRVideo/issues)
 
 ## Features
 
@@ -24,17 +24,18 @@ A Windows video player and capture-card enhancement tool. Play videos, process i
 | Super resolution | DLSS SR and RTX Video SR; 1440p / 4K / 8K targets with aspect ratio preserved |
 | NR enhancement | Experimental NVIDIA NR; realtime and native modes, style, intensity, and region protection |
 | Frame generation | DLSS 2X / 3X / 4X; experimental XeSS 2X preview |
+| Smooth Motion | NVIDIA App driver-based frame generation, enabled manually; in-app setup guide |
 | Controls | Live settings, restore defaults, original/processed comparison, split view, preview zoom |
 | Export | PNG / JPEG images; NVENC H.264 / HEVC video |
 | Diagnostics | Completed source/generated frames, presentation submissions, stage timings, software latency |
 
 Daily mode focuses on watching. Professional mode expands the controls, diagnostics, and export tools without reopening the video. The application currently uses a Chinese interface.
 
-Version 1.0.2 improves PS5 reconnection: retry allowance renews after 30 seconds of continuous decoded video, transient console occupancy is retried, and logs survive restarts. Previous capture-audio fixes are retained.
+Version 1.1.0 adds Smooth Motion usage support and an in-app setup guide, expands capture pixel formats, and fixes GUID labels shown for P010 / RGB formats. Previous PS5 reconnection and capture-audio fixes are retained.
 
 ## Download and Run
 
-1. Download **Veyra-1.0.2-win64-portable.zip** from [Releases](https://github.com/Likely7/Veyra-NRVideo/releases). The Source code archives are for developers.
+1. Download **Veyra-1.1.0-win64-portable.zip** from [Releases](https://github.com/Likely7/Veyra-NRVideo/releases). The Source code archives are for developers.
 2. Extract the entire archive into a writable directory and run **Veyra.exe**. No SDK, Python, or development tools are needed.
 3. Use a current GPU driver. NVIDIA NR, DLSS, RTX Video SR, and NVENC require compatible NVIDIA RTX hardware; this version was primarily tested on an RTX 5070.
 
@@ -115,7 +116,7 @@ NR and DLSS frame generation are **community-experimental integrations**, not NV
 
 ## Development and License
 
-[Build Instructions](docs/BUILD.md) · [Runtime Components](docs/RUNTIME_COMPONENTS_1.0.2.md) · [Third-Party Notices](THIRD_PARTY_NOTICES.md)
+[Build Instructions](docs/BUILD.md) · [Runtime Components](docs/RUNTIME_COMPONENTS_1.1.0.md) · [Third-Party Notices](THIRD_PARTY_NOTICES.md)
 
 Original Veyra source is [GPLv3](LICENSE); the combined streaming program also falls under [AGPLv3 and the upstream OpenSSL exception](licenses/remoteplay/CHIAKI_AGPL3_OPENSSL.txt). Application source matches the release tag. The RemotePlay-source and FFmpeg-source assets provide dependency source and are not needed to run the player. SDKs, models, and runtimes are excluded from this source repository. Release components retain their separate licenses and experimental distribution boundaries.
 
@@ -148,7 +149,7 @@ Thank you to these projects and their contributors. Integrated code, dependencie
 | [AMD FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) | Optical flow and its D3D12 backend. |
 | [Lucide](https://github.com/lucide-icons/lucide) | UI icons, retaining Lucide and Feather-derived license notices. |
 | [Intel XeSS / XeLL](https://github.com/intel/xess) | Experimental XeSS frame generation and related runtime interfaces. |
-| [NVIDIA DLSS](https://github.com/NVIDIA/DLSS), [RTX Video SDK](https://developer.nvidia.com/rtx-video-sdk), [Optical Flow SDK](https://developer.nvidia.com/opticalflow-sdk), [Video Codec SDK](https://developer.nvidia.com/video-codec-sdk) | Upscaling, optical flow, encoding and enhancement interfaces. Experimental NR components have separate identities and boundaries in [Runtime Components](docs/RUNTIME_COMPONENTS_1.0.2.md); this is not vendor certification. |
+| [NVIDIA DLSS](https://github.com/NVIDIA/DLSS), [RTX Video SDK](https://developer.nvidia.com/rtx-video-sdk), [Optical Flow SDK](https://developer.nvidia.com/opticalflow-sdk), [Video Codec SDK](https://developer.nvidia.com/video-codec-sdk) | Upscaling, optical flow, encoding and enhancement interfaces. Experimental NR components have separate identities and boundaries in [Runtime Components](docs/RUNTIME_COMPONENTS_1.1.0.md); this is not vendor certification. |
 | [vcpkg](https://github.com/microsoft/vcpkg) | Dependency builds, version records and license provenance. |
 
 Remote Play also depends on **OpenSSL, Opus, json-c, libevent, miniupnpc, curl, nanopb, Jerasure and gf-complete**. Their attribution and license notices are retained in [licenses/remoteplay](licenses/remoteplay), with corresponding source supplied in Releases.
