@@ -1908,3 +1908,6 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 构建曾因正在运行的EXE占用失败，用户关闭后62步及最终4步增量通过。127项布局/边界、30组GPU采集颜色/精度、8组既有HDR回归通过；GPU测试最初误选8位呈现资源，改取真实FP16 ingress后通过，失败日志保留。delivery 23/23、56.2209961秒，logs/delivery/544cd7222e404abcb7a760a63f1c546c/result.json；RTX5070原生4K NR Create=0x1/SEH0/Evaluate12。具体命令、文件与失败见docs/CAPTURE_FORMATS_PLAN_2026-09-14.md及logs/capture-formats-20260914。
 
 本机USB3 Video枚举/SetFormat/ConnectDirect成功，Run返回0x800705AA资源不足，未算实卡通过；当时OBS运行，未证明占用原因。反馈者Live Gamer Ultra 2.1不在本机。桌面EXE已更新，资源版本仍1.0.2、SHA256 B62CA082176CE02D690D302236BEBC86ABD557CA18243CDD2000E21645A49BCC，patched FFmpeg不变。源码不含SDK/二进制/日志/凭据，未发布；下一步反馈者新版实卡验收。用户正在剪辑，后续Smooth Motion本轮只写方案，不再跑GPU测试。
+## 2026-09-14 Smooth Motion执行方案（未施工）
+
+用户正在剪辑，要求只写接入方案。新增docs/SMOOTH_MOTION_EXECUTION_PLAN_2026-09-14.md：推荐Veyra专属NVAPI DRS配置管理、默认关闭、与内部DLSS/XeSS互斥；先验证驱动实际接管再实现UI。定义可回滚事务、程序匹配/共享profile冲突、重启生效状态、统计不可测边界、音频/截图/导出/OBS分离及分阶段验收。核对NVIDIA官方说明和公开nvapi.h的DRS接口、Profile Inspector固定提交2f50c388b3a4d661cade66b32746bec096d1eee1的设置ID。未修改驱动、未执行Smooth Motion GPU测试、未发布。下一步用户空闲后做可回滚的Veyra程序级可行性测试。
