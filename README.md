@@ -1,5 +1,7 @@
 # Veyra
 
+<p align="center"><img src="assets/veyra-logo.png" alt="Veyra" width="200"></p>
+
 [English](README_EN.md) | 简体中文
 
 <p align="center">
@@ -11,7 +13,7 @@
 
 Windows 视频播放器与采集卡增强工具。支持视频、图片、采集卡实时预览和 PS5 局域网串流，可组合使用超分辨率、NR 画面增强与补帧。
 
-[下载 0.0.5 免安装版](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.5) · [更新记录](docs/RELEASE_NOTES_0.0.5.md) · [反馈问题](https://github.com/Likely7/Veyra-NRVideo/issues)
+[下载 1.0.0 免安装版](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0) · [更新记录](docs/RELEASE_NOTES_1.0.0.md) · [反馈问题](https://github.com/Likely7/Veyra-NRVideo/issues)
 
 ## 功能
 
@@ -28,11 +30,11 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片、采集
 
 日常模式以观看为主；专业模式展开增强参数、诊断和导出工具。切换模式不需要重新打开视频。
 
-0.0.5 新增 PS5 局域网串流、手柄与主机保留，更新实时调度、音频连续性、增强延迟面板、低延迟模式和悬停说明。
+1.0.0 整合 PS5 串流、音画同步和硬解修复，修复视频尾部崩溃与导出误报成功，更新透明图标并加入可选 GPU DIS 光流。
 
 ## 下载与运行
 
-1. 在 [Releases](https://github.com/Likely7/Veyra-NRVideo/releases) 下载 **Veyra-0.0.5-win64-portable.zip**，不要下载 Source code。
+1. 在 [Releases](https://github.com/Likely7/Veyra-NRVideo/releases) 下载 **Veyra-1.0.0-win64-portable.zip**，不要下载 Source code。
 2. 完整解压到一个可写文件夹，双击 **Veyra.exe**。无需安装 SDK、Python 或开发工具。
 3. 使用当前显卡驱动。要使用 NVIDIA NR、DLSS、RTX Video SR 和 NVENC，需兼容的 NVIDIA RTX 显卡；本版本主要在 RTX 5070 上验证。
 
@@ -46,6 +48,8 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片、采集
 <img width="276" height="374" alt="7baf2084b2310a7e685c5355bf9307d3" src="https://github.com/user-attachments/assets/1438c8f7-08b4-46fd-ad5e-6d83c46cdec2" />
 
 ### 视频与图片
+
+专业模式顶部点击 **截图**，保存处理后的完整画面到系统“图片”文件夹下的 `Veyra Screenshots`，格式为 PNG。原生 HDR 截图暂不支持。
 
 点击底栏“打开”选择文件。底栏提供播放、进度、音量、字幕和全屏；切换到专业模式后，鼠标位于画面上时可用滚轮缩放。
 
@@ -72,11 +76,11 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片、采集
 
 ### 增强与补帧
 
-当前源码开发版另提供 **GPU DIS 光流 · FAST 实验**，在“光流·运动估算”中选择；默认仍是 NVOF。它不一定更快，本机 1080p 合成测试明显慢于 NVOF，适合比较效果。未包含在已发布的 0.0.5 包中。
+光流可选 NVIDIA NVOF、AMD FidelityFX 和 **GPU DIS · FAST 实验**，默认 NVOF。GPU DIS 供效果对比，本机 1080p 合成测试明显慢于 NVOF，不保证提升性能。
 
 专业模式中分别开启 NR、超分和补帧。超分下方选择算法及目标尺寸；补帧页选择 DLSS 或 XeSS 及可用倍率。建议从实时 NR、较低 RTX Video SR 档位和2X补帧开始，结合对比画面与实时状态调整。
 
-处理跟不上时降低画质、倍率或目标尺寸。四个阶段卡显示光流、NR、超分、补帧的 GPU 耗时；曲线显示相对无增强播放的额外延迟估计，不能简单相加，也不是按键到屏幕实测延迟。视频可提前处理，因此处理耗时不一定变成额外等待。
+处理跟不上时降低画质、倍率或目标尺寸。四个阶段卡显示光流、NR、超分、补帧的 GPU 耗时；曲线显示光流、NR、超分、残差合成、补帧的总增强处理耗时；展开后的第一项另列画面额外延迟估计。两者口径不同，都不是按键到屏幕的实测延迟。
 
 音画同步自动跟随软件处理链路，采集卡音视频共同的输入延迟不会重复补偿。轻微耗时波动不会逐帧停放声音；持续欠速时实时预览跳过过期的补帧或源帧增强机会，保持媒体时间前进。导出仍完整处理，不采用预览跳帧策略。
 
@@ -84,7 +88,7 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片、采集
 
 ### 导出与运行组件
 
-在专业模式选择图片保存或视频导出、格式与输出位置。XeSS 目前仅用于预览；视频导出使用已支持的 DLSS 路径。
+在专业模式选择图片保存或视频导出、格式与输出位置。视频导出会在结尾核对完整性，可能需要额外时间，可取消。内嵌字幕暂不保留；不要让多个实例同时导出到同一个目标文件。XeSS 目前仅用于预览；视频导出使用已支持的 DLSS 路径。
 
 允许自行替换 DLL：退出软件后，NVIDIA 文件放在 `runtime/experimental/`，XeSS / XeLL 放在 `runtime_local/intel/experimental/`，保留文件名。软件不锁定哈希或签名；清单仅记录发布包原件，替换版的接口与硬件兼容性不作保证。卸载整个软件只需退出后删除解压目录。
 
@@ -109,6 +113,6 @@ NR 与 DLSS 帧生成属于 **community experimental / 社区实验集成**，�
 
 ## 开发与许可
 
-[构建说明](docs/BUILD.md) · [组件清单](docs/RUNTIME_COMPONENTS_0.0.5.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
+[构建说明](docs/BUILD.md) · [组件清单](docs/RUNTIME_COMPONENTS_1.0.0.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
 
 Veyra 原有源码采用 [GPLv3](LICENSE)；含串流的组合程序同时适用 [AGPLv3 与上游 OpenSSL 例外](licenses/remoteplay/CHIAKI_AGPL3_OPENSSL.txt)。应用源码对应版本标签，Release 另附串流依赖与 FFmpeg 对应源码包，普通用户无需下载。SDK、模型和运行时不进入源码仓库；Release 组件按各自许可与实验发布范围单独提供。

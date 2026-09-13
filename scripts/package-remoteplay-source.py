@@ -4,6 +4,7 @@ from pathlib import Path
 p=argparse.ArgumentParser()
 p.add_argument('--root',type=Path,default=Path('.'))
 p.add_argument('--output',type=Path,required=True)
+p.add_argument('--version',required=True)
 a=p.parse_args(); root=a.root.resolve()
 clean=Path('C:/veyra-deps/chiaki-source'); vcpkg=Path('C:/veyra-deps/vcpkg')
 prefix=Path('C:/veyra-deps/remoteplay-installed/x64-windows-static')
@@ -36,7 +37,7 @@ with zipfile.ZipFile(a.output,'x',zipfile.ZIP_DEFLATED,compresslevel=6) as z:
    path=repo/name
    if path.is_file(): put(z,path,'chiaki-clean/'+(('' if rel=='.' else rel+'/'))+name)
  tree(z,root/'scripts/remoteplay','veyra/scripts/remoteplay')
- for name in ['cmake/VeyraRemotePlay.cmake','scripts/build.ps1','CMakePresets.json','docs/REMOTEPLAY_BUILD_0.0.5.md','docs/BUILD.md','THIRD_PARTY_NOTICES.md']:
+ for name in ['cmake/VeyraRemotePlay.cmake','scripts/build.ps1','CMakePresets.json',f'docs/REMOTEPLAY_BUILD_{a.version}.md','docs/BUILD.md','THIRD_PARTY_NOTICES.md']:
   put(z,root/name,'veyra/'+name)
  tree(z,root/'licenses/remoteplay','licenses/remoteplay')
  for dep in ['json-c','libevent','miniupnpc','openssl','opus','sdl3']:
@@ -62,7 +63,7 @@ with zipfile.ZipFile(a.output,'x',zipfile.ZIP_DEFLATED,compresslevel=6) as z:
  for name in git(ff,'ls-files').splitlines():
   path=ff/name
   if path.is_file():put(z,path,'fidelityfx/'+name)
- z.writestr('README.txt','Veyra 0.0.5 corresponding dependency source. Application source is tag v0.0.5 at Likely7/Veyra-NRVideo. See veyra/docs/REMOTEPLAY_BUILD_0.0.5.md. FFmpeg source is a separate asset. No proprietary SDK/runtime, credentials or user data.\n')
+ z.writestr('README.txt',f'Veyra {a.version} corresponding dependency source. Application source is tag v{a.version} at Likely7/Veyra-NRVideo. See veyra/docs/REMOTEPLAY_BUILD_{a.version}.md. FFmpeg source is a separate asset. No proprietary SDK/runtime, credentials or user data.\n')
  z.writestr('source-manifest.json',json.dumps(records,indent=2))
  z.writestr('excluded-development-binaries.json',json.dumps(excluded,indent=2))
 digest=hashlib.sha256(a.output.read_bytes()).hexdigest().upper()

@@ -1,5 +1,7 @@
 # Veyra
 
+<p align="center"><img src="assets/veyra-logo.png" alt="Veyra" width="200"></p>
+
 English | [简体中文](README.md)
 
 <p align="center">
@@ -12,7 +14,7 @@ English | [简体中文](README.md)
 
 A Windows video player and capture-card enhancement tool. Play videos, process images, and preview capture devices with optional super resolution, NR enhancement, and frame generation.
 
-[Download 0.0.5 Portable](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v0.0.5) · [Release Notes](docs/RELEASE_NOTES_0.0.5.md) · [Report an Issue](https://github.com/Likely7/Veyra-NRVideo/issues)
+[Download 1.0.0 Portable](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0) · [Release Notes](docs/RELEASE_NOTES_1.0.0.md) · [Report an Issue](https://github.com/Likely7/Veyra-NRVideo/issues)
 
 ## Features
 
@@ -28,11 +30,11 @@ A Windows video player and capture-card enhancement tool. Play videos, process i
 
 Daily mode focuses on watching. Professional mode expands the controls, diagnostics, and export tools without reopening the video. The application currently uses a Chinese interface.
 
-Version 0.0.5 adds PS5 LAN streaming, controllers and saved consoles, with playback scheduling, audio continuity, delay diagnostics, optional NR-first preview and hover-help improvements.
+Version 1.0.0 integrates streaming, playback and export repairs, with a transparent logo, processed-frame screenshots and optional GPU DIS motion.
 
 ## Download and Run
 
-1. Download **Veyra-0.0.5-win64-portable.zip** from [Releases](https://github.com/Likely7/Veyra-NRVideo/releases). The Source code archives are for developers.
+1. Download **Veyra-1.0.0-win64-portable.zip** from [Releases](https://github.com/Likely7/Veyra-NRVideo/releases). The Source code archives are for developers.
 2. Extract the entire archive into a writable directory and run **Veyra.exe**. No SDK, Python, or development tools are needed.
 3. Use a current GPU driver. NVIDIA NR, DLSS, RTX Video SR, and NVENC require compatible NVIDIA RTX hardware; this version was primarily tested on an RTX 5070.
 
@@ -71,7 +73,7 @@ Choose Open on the bottom bar. Playback, seeking, volume, subtitles, and fullscr
 
 Enable NR, super resolution, and frame generation independently in Professional mode. Select the upscaling method and target size beneath the super-resolution switch. The frame-generation page offers DLSS / XeSS and the supported multipliers.
 
-Start with realtime NR, a lower RTX Video SR quality, and 2X frame generation. Compare the image and watch the diagnostics. Reduce quality, multiplier, or target size if processing falls behind. The delay chart estimates additional enhancement delay, not complete capture-to-display latency. Frame generation does not reduce game input latency.
+Start with realtime NR, a lower RTX Video SR quality, and 2X frame generation. Compare the image and watch the diagnostics. Reduce quality, multiplier, or target size if processing falls behind. The main chart reports enhancement GPU processing time; estimated extra picture delay is separate in the detailed view. Frame generation does not reduce game input latency.
 
 Audio synchronization follows the software processing chain without counting the capture card's shared input delay twice. Small timing fluctuations no longer stop audio on each frame. Sustained GPU overload skips expired preview opportunities while audio and media time continue; reduce workload to retain more video frames.
 
@@ -105,16 +107,20 @@ NR and DLSS frame generation are **community-experimental integrations**, not NV
 
 ## Development and License
 
-[Build Instructions](docs/BUILD.md) · [Runtime Components](docs/RUNTIME_COMPONENTS_0.0.5.md) · [Third-Party Notices](THIRD_PARTY_NOTICES.md)
+[Build Instructions](docs/BUILD.md) · [Runtime Components](docs/RUNTIME_COMPONENTS_1.0.0.md) · [Third-Party Notices](THIRD_PARTY_NOTICES.md)
 
 Original Veyra source is [GPLv3](LICENSE); the combined streaming program also falls under [AGPLv3 and the upstream OpenSSL exception](licenses/remoteplay/CHIAKI_AGPL3_OPENSSL.txt). Application source matches the release tag. The RemotePlay-source and FFmpeg-source assets provide dependency source and are not needed to run the player. SDKs, models, and runtimes are excluded from this source repository. Release components retain their separate licenses and experimental distribution boundaries.
 
-Stage cards report GPU processing times. The chart estimates additional delay versus unenhanced playback, not their sum or measured button-to-screen latency. Files can be processed ahead. Sustained overload skips expired preview frame opportunities to keep media time advancing and audio continuous; export retains complete processing.
+Stage cards and the main chart report enhancement GPU processing times. Extra picture delay is estimated separately in the detailed view; neither is measured button-to-screen latency. Files can be processed ahead. Sustained overload skips expired preview frame opportunities to keep media time advancing and audio continuous; export retains complete processing.
 
-### Unreleased: experimental GPU DIS motion
+### Experimental GPU DIS motion
 
-The current source build adds **GPU DIS · FAST experimental** to the optical-flow
-selector. NVOF remains the default. DIS is not necessarily faster; on our RTX 5070
-1080p synthetic translation test it was substantially slower than NVOF. Use it
-for comparisons with fixed enhancement settings. This option is not in the
-published 0.0.5 portable package.
+Select GPU DIS · FAST in the optical-flow menu to compare results. NVOF remains
+the default. This implementation was substantially slower than NVOF on our RTX
+5070 in a 1080p synthetic test; a performance improvement is not promised.
+
+Video export validates completeness before success and may take extra time to
+finish. Embedded subtitles are not preserved. Avoid simultaneous exports from
+multiple instances to the same target file.
+
+In Professional mode, click **Screenshot** in the top toolbar to save the latest processed full-resolution picture as PNG under **Pictures / Veyra Screenshots**. Application UI and window zoom are excluded; native HDR screenshots are not supported.

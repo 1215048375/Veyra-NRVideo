@@ -1837,3 +1837,14 @@ vcvars64 下 cmake --build out/remoteplay/product-repair --parallel 6，完整�
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/gates/delivery.ps1 -Root . -BuildDirectory out/remoteplay/product-repair，23/23 PASS，47.156秒，logs/delivery/ca204954e1e64ee4aeddf7a41cf5f1e6/result.json。git diff --check及package-portable.ps1语法检查通过。最终veyra.exe SHA256=114E00EDD266182BD2556FD1150C487FE3C4B6348112A63AA7706BFCE554BCFA；patched avcodec SHA256=0710F0D87A7FFCC9F998F1A35D0500345F6C66EB9A5A39C51D60D293142BD84F，保持硬解slice修复。桌面PS5测试版快捷方式已核对指向out/remoteplay/product-repair/veyra.exe。
 
 未测试真实PS5/采集卡新后端、多GPU、HDR屏幕、长时稳定性、Windows UI实际鼠标切换和新便携包部署；代码走既有后端切换重建/回滚，不能将静态接法当这些场景实测。仅本地构建与存档，没有push/Release/运行时修改，没有关机。下一项：用户重启桌面测试版，在专业模式的光流·运动估算选择GPU DIS，固定NR/SR/FG参数比较；速度/效果不满意即可切回NVOF。
+
+
+## 2026-09-13 正式应用 1.0.0 整合、透明图标与截图
+
+用户授权当前版本整合各修复分支、换透明 Logo、发布 GitHub 1.0.0，随后追加专业顶部截图。开工2c45419，存档checkpoint/pre-release-1.0.0-2026-09-13，施工codex/release-1.0.0。release-p1-20260913对应代码已在3ae4d5c祖先中，PS5相关修复分支均已包含；合并nrvideo/main的两次README更新并保留用户图片，不重复合入旧归档代码。细节见docs/RELEASE_1.0.0_EXECUTION.md。
+
+替换透明PNG及9尺寸ICO，实际EXE资源验证alpha=0..255；版本资源1.0.0。顶部截图复用最终处理真实帧保存，唯一PNG到Pictures/Veyra Screenshots，无UI/窗口缩放/对比层；不声称精确截正在扫描的插值帧，原生HDR明确暂不支持。仅用户触发单次GPU回读；普通播放链路不增加回读。新增smoke-screenshot通过实际按钮处理器，1080输入NR+VSR+FG保存3840×2160，退出0、nrEvaluated261/generated221/failedfalse。测试代码仍只驱动产品模块。双语README、BUILD、Release Notes、组件/串流构建说明和source脚本更新。
+
+cmd /c out/gpu-dis-build-all.cmd成功，最终EXE SHA256=95CE6F6236DC3A9CF90E68330A1FC999580BC3F66D4658EA6A96D6066EFF9159。delivery 23/23、44.737秒：logs/delivery/92e09ba3556148a9b9275d2ba1ef1bfe/result.json。单次测试低于300秒。完整便携包final目录生成、逐文件hash及禁止路径扫描通过；解压后的portable-smoke 5/5（PATH隔离、manifest禁用、运行时模块路径核对），日志logs/release-1.0.0/。包303913391字节，SHA256=EAAE5B13252EDE1F59DC41E3773C6DAFC960918EFDA914F160D1F3B03A34DBC5。
+
+沿用七文件运行组件及社区NR HashMismatch记录，签名/哈希/许可证由publisher脚本核对。FFmpeg真实patched tree生成对应源码并校验header、5DLL、slice补丁哈希；RemotePlay对应源码固定Chiaki和静态依赖，带全部补丁及构建材料。无NVIDIA SDK/运行时/模型进入源码Git，未打包凭据/用户配置/测试媒体。新源代码资产仅开源依赖；完整包仅允许清单内runtime。未新增或修改运行时身份。新版本实际PS5长时、HDR屏幕、蓝牙/多GPU仍未验收；两个P2导出边界明确保留，没把应用正式版说成全部功能官方认证。发布结果在后续记录。

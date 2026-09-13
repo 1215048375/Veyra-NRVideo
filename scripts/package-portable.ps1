@@ -67,7 +67,8 @@ foreach ($notice in Get-ChildItem -LiteralPath (Join-Path $resolvedRoot 'license
   $relative = $notice.FullName.Substring((Join-Path $resolvedRoot 'licenses').Length+1).Replace('\','/')
   Copy-Payload $notice.FullName "licenses/$relative"
 }
-Copy-Payload (Join-Path $resolvedRoot 'docs/REMOTEPLAY_BUILD_0.0.5.md') 'docs/REMOTEPLAY_BUILD_0.0.5.md'
+$remoteBuildDoc = if ([version]$Version -ge [version]'1.0.0') {'REMOTEPLAY_BUILD_1.0.0.md'} else {'REMOTEPLAY_BUILD_0.0.5.md'}
+Copy-Payload (Join-Path $resolvedRoot "docs/$remoteBuildDoc") "docs/$remoteBuildDoc"
 foreach ($shader in Get-ChildItem -LiteralPath (Join-Path $bin 'shaders') -Recurse -File -Filter '*.dxil') {
   $relative=$shader.FullName.Substring((Join-Path $bin 'shaders').Length+1).Replace('\','/')
   Copy-Payload $shader.FullName "shaders/$relative"
