@@ -100,9 +100,8 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片、采集
 
 ## 技术路线与边界
 
-```text
-视频 / 图片 / 采集卡 / PS5 → 颜色处理 → SR → NR → 帧生成 → 显示 / 导出
-```
+<img width="332" height="576" alt="123" src="https://github.com/user-attachments/assets/3cd48fca-2f7b-418a-8b0e-0848f6bde556" />
+
 
 C++20、Win32、D3D12；文件由 FFmpeg 处理，采集使用 DirectShow，视频导出使用 NVENC。各入口共享增强管线，采集保留最新帧，光流提供估算的运动信息。
 
