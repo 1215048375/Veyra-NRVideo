@@ -1880,3 +1880,5 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 用户明确授权发布1.0.1。codex/release-1.0.1整合音频修复79734ff、用户日志分析eabf3c7和远端用户README编辑77c2c04，保留用户删除。更新版本资源、双语README、组件/构建说明、Release Notes及打包文档选择。当前用户打开的EXE阻止链接，未强关，改用相同构建对象与1.0.1资源的Ninja实际命令链接至隔离输出；EXE版本1.0.1，哈希073B72E2D6C44045036684B115CEA99F54FCD10F52D4BA4FA79C191C54DA94BE。
 
 完整便携包与两份对应源码包制作成功，六个发布资产；七个已批准运行组件与PS5 patched FFmpeg不变，无SDK/运行时加入源码。便携ZIP逐文件清单校验及源码扫描通过，FFmpeg六个.mp4后缀文件确认是上游ASCII测试参考文本。新EXE解压后独立启动/实际增强5/5 PASS，最长7.92秒，社区/原版/Video SR组合均有NR执行和FG真实输出；此前产品代码delivery 23/23仍单独记录为版本资源更新前验证。具体命令、失败与恢复、资产哈希、运行码见docs/RELEASE_1.0.1_EXECUTION.md，日志logs/release-1.0.1。反馈者实卡音频改善仍待其新版测试，未声称10ms端到端。下一步推送源码及六资产并核验公开Release。
+
+发布完成：main及v1.0.1（c0cba4b）已推送，六资产服务器大小/摘要与本地一致，2026-09-13T14:53:27Z正式公开为latest，非草稿/非预发布，Release ID 387931939。链接https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.1 。未修改1.0.0资产，未关闭用户正在运行的程序。发布后仅补记文档，不重打包、不移动tag；待反馈者下载新版进行实卡音频验收。

@@ -27,6 +27,12 @@
 
 每个ZIP附独立.sha256。包内分别99、17714、10451个文件（包含顶层说明/构建元数据）。发布只上传这六个资产，不上传本地audit、日志或展开目录。发布结果在完成后追加。
 
+## 公开发布结果
+
+main与标记v1.0.1已推送到Likely7/Veyra-NRVideo；标记指向c0cba4b042ad62cc3331d7136c11a4280f566a5d。使用`gh release create v1.0.1 --repo Likely7/Veyra-NRVideo --verify-tag --title "Veyra 1.0.1" --notes-file docs/RELEASE_NOTES_1.0.1.md --draft`上传上述六资产；GitHub API逐项确认uploaded、大小及SHA256全部与本地一致，再使用`gh release edit v1.0.1 --repo Likely7/Veyra-NRVideo --draft=false --prerelease=false --latest`公开。
+
+2026-09-13T14:53:27Z发布，Release ID 387931939，公开latest接口确认v1.0.1、draft=false、prerelease=false、六资产。地址：https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.1 。证据logs/release-1.0.1/github-draft.json及github-published.json。本段以发布后文档提交补记，不移动版本标记；1.0.0资产未修改。README本地链接及Git改动文件扫描通过，工作树无SDK或运行二进制新增。
+
 ## 边界
 
 未占用反馈者的实体采集卡、未进行声学端到端延迟验收；请求10ms并不保证驱动遵守或全部设备均解决。下一步为反馈者新版测试，结合inputBlockMs、inputIntervalMs、skewMs和各队列确认。如果小块已生效仍持续落后，继续排查设备PTS/同步重锚。
