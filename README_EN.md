@@ -79,6 +79,14 @@ Audio synchronization follows the software processing chain without counting the
 
 Hover over settings for help. Default order is Upscale → NR → Frame generation. Optional Low latency mode uses NR → Upscale → Frame generation for preview only; it may reduce cost but increase ghosting or edge artifacts.
 
+### Smooth Motion (NVIDIA App)
+
+To use Smooth Motion alone, set Veyra's frame-generation multiplier to **Off**, then enable **Smooth Motion** for the current **Veyra.exe** in **NVIDIA App → Graphics** and restart the player. NR and super resolution can stay enabled. The professional frame-generation panel includes an expandable guide.
+
+For internal DLSS / XeSS only, disable Smooth Motion in NVIDIA App and restart before selecting internal generation. Stacking both is also allowed without blocking; its quality and performance have not been validated, and ghosting, latency or GPU load may increase. Veyra's generation and master-enhancement switches do not disable driver generation.
+
+Software FPS, timings and queues exclude driver-generated work. Screenshots and exports do not include driver-generated intermediate frames. A/V timing and recording capture require separate verification. A user reported effective, stable operation on this machine; this is not validation of every GPU or driver.
+
 ### Export and Runtime Replacement
 
 Use Professional mode to save an image or export a video, then choose the format and destination. XeSS is preview-only; supported video frame-generation export uses DLSS.

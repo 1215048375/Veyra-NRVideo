@@ -14,6 +14,19 @@ std::function<bool(engine::EnhancementSettings)> apply;
 engine::PresetStore store(runtime::localDataDirectory()/"user-presets.v1");bool loaded=false,dirty=false,populating=false,enhancementEnabled=true;int page=0,scroll=0,contentHeight=0;uint64_t displayedRevision=0;engine::EnhancementSettings configuredSettings;
 std::wstring displayedBackendWarning;
 engine::EnhancementSettings displayedSettings;
+bool smoothMotionHelpExpanded=false;
+constexpr auto smoothMotionHelp=L"只用 Smooth Motion\n"
+    L"1. 本页补帧倍率选择“关闭补帧”。NR、超分照常使用。\n"
+    L"2. NVIDIA App → 图形 → 选择当前使用的 Veyra.exe → AI 插帧 → 开。找不到程序时手动添加。\n"
+    L"3. 应用后重启播放器。以前给实验版 EXE 开启的设置，需要为当前程序重新设置。\n\n"
+    L"切换与叠加\n"
+    L"只用 DLSS / XeSS：去 NVIDIA App 关闭 AI 插帧，重启后在这里选择补帧方式和倍率。\n"
+    L"也允许双方同时开启。叠加效果尚未验证，不保证更好；可能增加重影、延迟或 GPU 负担，不合适就关掉一层。\n\n"
+    L"注意事项\n"
+    L"• 软件的“关闭补帧”和总增强开关，不会关闭驱动 AI 插帧。\n"
+    L"• 面板 FPS、耗时、队列不包含驱动生成部分，不能据此判断驱动是否生效，也不要直接把 FPS 乘二。\n"
+    L"• 驱动额外延迟未测量，音画同步需实测。截图、导出不含驱动生成的帧；直播录制是否捕获到它们也需另测。\n"
+    L"• 功能可用性以 NVIDIA App、显卡和驱动支持为准。";
 struct Item{HWND h;int page,x,y,w,height;};std::vector<Item> items;
 HWND item(int id){for(auto& entry:items)if(GetDlgCtrlID(entry.h)==id)return entry.h;return nullptr;}
 LRESULT send(int id,UINT message,WPARAM w=0,LPARAM l=0){return SendMessageW(item(id),message,w,l);}
@@ -125,11 +138,15 @@ void refreshPresets(){auto list=item(300);SendMessageW(list,CB_RESETCONTENT,0,0)
 void arrange(){
     if(!window||!body)return;RECT r{};GetClientRect(window,&r);int width=MulDiv(r.right,96,veyra::ui::layoutDpi(window)),height=MulDiv(r.bottom,96,veyra::ui::layoutDpi(window));
     const int sticky=128,viewport=std::max(1,height-sticky);contentHeight=0;
-    for(auto& entry:items)if(entry.page==page){wchar_t cls[32]{};GetClassNameW(entry.h,cls,32);contentHeight=std::max(contentHeight,entry.y+(_wcsicmp(cls,L"COMBOBOX")==0?36:entry.height)+12);}
+    int helpHeight=0;
+    if(smoothMotionHelpExpanded){auto dc=GetDC(window);auto old=SelectObject(dc,font);RECT textRect{0,0,dip(window,std::max(1,width-24)),0};DrawTextW(dc,smoothMotionHelp,-1,&textRect,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX);SelectObject(dc,old);ReleaseDC(window,dc);helpHeight=MulDiv(textRect.bottom,96,layoutDpi(window))+16;}
+    const auto helpOffset=[&](const Item& entry){const auto id=GetDlgCtrlID(entry.h);return entry.page==1&&(id==1114||id==205||id==1110)?helpHeight:0;};
+    for(auto& entry:items){if(GetDlgCtrlID(entry.h)==1120)entry.height=helpHeight;
+        if(entry.page==page&&(GetDlgCtrlID(entry.h)!=1120||smoothMotionHelpExpanded)){wchar_t cls[32]{};GetClassNameW(entry.h,cls,32);contentHeight=std::max(contentHeight,entry.y+helpOffset(entry)+(_wcsicmp(cls,L"COMBOBOX")==0?36:entry.height)+12);}}
     scroll=std::clamp(scroll,0,std::max(0,contentHeight-viewport));
     SetWindowPos(body,nullptr,0,dip(window,sticky),r.right,dip(window,viewport),SWP_NOZORDER|SWP_NOACTIVATE|SWP_NOREDRAW);
     auto batch=BeginDeferWindowPos(int(items.size()));
-    for(auto& entry:items){bool fixed=entry.page==-1,visible=entry.page==page||fixed;int w=entry.w<0?width-entry.x-12:entry.w;int y=fixed?(GetDlgCtrlID(entry.h)==400?0:(GetDlgCtrlID(entry.h)==211||GetDlgCtrlID(entry.h)==219)?86:42):entry.y-scroll;
+    for(auto& entry:items){bool fixed=entry.page==-1,visible=(entry.page==page||fixed)&&(GetDlgCtrlID(entry.h)!=1120||smoothMotionHelpExpanded);int w=entry.w<0?width-entry.x-12:entry.w;int y=fixed?(GetDlgCtrlID(entry.h)==400?0:(GetDlgCtrlID(entry.h)==211||GetDlgCtrlID(entry.h)==219)?86:42):entry.y+helpOffset(entry)-scroll;
         if(fixed){SetWindowPos(entry.h,nullptr,dip(window,entry.x),dip(window,y),dip(window,std::max(1,w)),dip(window,42),SWP_NOACTIVATE|SWP_NOZORDER|SWP_NOREDRAW);continue;}batch=DeferWindowPos(batch,entry.h,nullptr,dip(window,entry.x),dip(window,y),dip(window,std::max(1,w)),dip(window,entry.height),SWP_NOACTIVATE|SWP_NOZORDER|SWP_NOREDRAW|SWP_NOCOPYBITS|(visible?SWP_SHOWWINDOW:SWP_HIDEWINDOW));}
     EndDeferWindowPos(batch);RedrawWindow(body,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN);InvalidateRect(window,nullptr,FALSE);
 }
@@ -138,13 +155,14 @@ HWND add(const wchar_t* cls,const wchar_t* text,int id,DWORD style,int group,int
 void button(const wchar_t* title,int id,int group,int x,int y,int width=-1){add(L"BUTTON",title,id,BS_PUSHBUTTON|WS_TABSTOP,group,x,y,width,36);}
 void combo(int id,int group,int y,std::initializer_list<const wchar_t*> names){auto h=add(L"COMBOBOX",L"",id,CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP,group,12,y,-1,200);for(auto name:names)SendMessageW(h,CB_ADDSTRING,0,LPARAM(name));}
 LRESULT CALLBACK proc(HWND h,UINT msg,WPARAM wp,LPARAM lp){
+    if(msg==WM_COMMAND&&LOWORD(wp)==221&&HIWORD(wp)==BN_CLICKED){smoothMotionHelpExpanded=!smoothMotionHelpExpanded;putText(221,smoothMotionHelpExpanded?L"Smooth Motion · 收起说明 ▴":L"Smooth Motion · 开启方法 ▾");arrange();return 0;}
     if(msg==WM_COMMAND&&!populating&&LOWORD(wp)==220&&HIWORD(wp)==BN_CLICKED){liveField(220);return 0;}
     if(msg==WM_COMMAND&&!populating&&LOWORD(wp)==219&&HIWORD(wp)==BN_CLICKED){liveField(219);return 0;}
     if(msg==WM_COMMAND&&!populating&&LOWORD(wp)==218&&HIWORD(wp)==CBN_SELCHANGE){liveField(218);return 0;}
     if(msg==WM_COMMAND&&!populating&&((LOWORD(wp)==216&&HIWORD(wp)==CBN_SELCHANGE)||(LOWORD(wp)==217&&HIWORD(wp)==EN_CHANGE))){liveField(LOWORD(wp));return 0;}
     if(msg==WM_COMMAND&&!populating&&((LOWORD(wp)==209&&HIWORD(wp)==CBN_SELCHANGE)||(LOWORD(wp)==215&&HIWORD(wp)==BN_CLICKED))){liveField(LOWORD(wp));return 0;}
     switch(msg){
-case WM_CREATE:{window=h;font=makeFont(h);items.clear();displayedBackendWarning.clear();
+case WM_CREATE:{window=h;font=makeFont(h);items.clear();displayedBackendWarning.clear();smoothMotionHelpExpanded=false;
     WNDCLASSW bodyClass{};bodyClass.lpfnWndProc=bodyProc;bodyClass.hInstance=GetModuleHandleW(nullptr);bodyClass.lpszClassName=L"VeyraInspectorBody";bodyClass.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&bodyClass);
     body=CreateWindowExW(WS_EX_CONTROLPARENT,bodyClass.lpszClassName,L"滚动参数",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,0,88,300,300,h,nullptr,bodyClass.hInstance,nullptr);
     add(L"BUTTON",L"实验性 NVIDIA NR 增强",200,BS_AUTOCHECKBOX|WS_TABSTOP,0,12,12,-1,36);
@@ -214,14 +232,18 @@ case WM_CREATE:{window=h;font=makeFont(h);items.clear();displayedBackendWarning.
         case 215:entry.y=122;break;case 204:entry.y=166;break;
         case 1111:entry.y=214;break;case 208:entry.y=242;break;
         case 1112:entry.y=286;break;case 202:entry.y=314;break;
-        case 1114:entry.y=358;break;case 205:entry.y=386;break;
-        case 1110:entry.y=430;break;
+        case 1114:entry.y=402;break;case 205:entry.y=430;break;
+        case 1110:entry.y=474;break;
         case 1115:entry.page=4;entry.y=12;break;
         case 216:entry.page=4;entry.y=50;break;
         case 1116:case 217:entry.page=4;entry.y=100;break;
         }
     }
     setText(item(1103),L"光流与补帧");
+    button(L"Smooth Motion · 开启方法 ▾",221,1,12,358);
+    ghost(item(221));
+    SetPropW(item(221),L"veyra.tip",HANDLE(L"查看 NVIDIA App 的 AI 插帧开启方法。这里只提供说明，不修改驱动，也不限制叠加补帧。"));
+    add(L"STATIC",smoothMotionHelp,1120,SS_NOPREFIX,1,12,400,-1,1);
     setText(item(1113),L"光流 · 运动估算");
     setText(item(1115),L"采集 / 串流音频同步");
     add(L"STATIC",L"调整实时输入的声音补偿，不改变补帧倍率。正值让声音更晚；自动模式由软件估算。",1118,0,4,12,148,-1,90);

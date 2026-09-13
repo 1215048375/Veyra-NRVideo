@@ -1911,3 +1911,12 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 ## 2026-09-14 Smooth Motion执行方案（未施工）
 
 用户正在剪辑，要求只写接入方案。新增docs/SMOOTH_MOTION_EXECUTION_PLAN_2026-09-14.md：推荐Veyra专属NVAPI DRS配置管理、默认关闭、与内部DLSS/XeSS互斥；先验证驱动实际接管再实现UI。定义可回滚事务、程序匹配/共享profile冲突、重启生效状态、统计不可测边界、音频/截图/导出/OBS分离及分阶段验收。核对NVIDIA官方说明和公开nvapi.h的DRS接口、Profile Inspector固定提交2f50c388b3a4d661cade66b32746bec096d1eee1的设置ID。未修改驱动、未执行Smooth Motion GPU测试、未发布。下一步用户空闲后做可回滚的Veyra程序级可行性测试。
+## 2026-09-14 — 普通版 Smooth Motion 开启说明，不强制互斥
+
+- 用户实测反馈 Smooth Motion 有效且稳定，并明确取消软件内管理/强制互斥方案：只用驱动补帧可在软件选择关闭补帧，允许与内部 DLSS/XeSS 同开。叠加效果未验证，不宣传更好。
+- 从普通构建基线6d0ec99建立codex/smooth-motion-help；原受限实验分支codex/smooth-motion-experiment保留在27c17eb。普通版没有实验FG禁用逻辑，也没有新增驱动检测/配置写入。
+- SettingsWindow 在倍率下方增加可展开的“Smooth Motion · 开启方法”，同主题展示，按宽度/DPI计算高度，下移后续参数，收起恢复。说明软件开关不控制驱动、叠加未测、指标不含驱动部分、截图/导出及音频/直播边界。更新双语README、AGENTS和原方案状态；具体记录docs/SMOOTH_MOTION_HELP_2026-09-14.md。
+- 实际构建：VS x64 cmake --build out/remoteplay/product-repair --target veyra veyra_ui_contract_tests veyra_repair_preset_tests --parallel 4，通过。UI合同（含384组四种DPI布局）通过；预设（含42组后端迁移）通过。第一次预设测试遗漏文件参数退出2，补上out目录独立临时文件后通过，日志保留。
+- 临时检查脚本out/smooth-motion-help-ui.ps1只操作自己启动的隐藏空载测试实例，确认说明默认收起、展开无重叠、收起恢复、内部FG控件启用、DLSS/XeSS倍率4/2项保留。空载GUI12秒，退出0。git diff --check通过。证据logs/smooth-motion-help/。
+- 普通EXE已本地替换，资源版本仍1.0.2；SHA256 61C70478840A7C3961CA299CCEB5371609218F147D7E0046333209FEB3155963。patched avcodec保持0710F0D87A7FFCC9F998F1A35D0500345F6C66EB9A5A39C51D60D293142BD84F。无SDK/DLL/模型/配置/日志入Git，未push或发布。
+- 本轮未执行NR/FG Create/Evaluate、实卡/PS5串流、驱动补帧或叠加实测；只变更说明及其布局。下一步用户在NVIDIA App为普通版veyra.exe单独配置后自行对照效果，旧实验EXE的配置不自动搬迁。
