@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$PackageDirectory,[Parameter(Mandatory=$true)][string]$InputFile,[Parameter(Mandatory=$true)][string]$OutputDirectory)
+param([Parameter(Mandatory=$true)][string]$PackageDirectory,[Parameter(Mandatory=$true)][string]$InputFile,[Parameter(Mandatory=$true)][string]$OutputDirectory,[ValidateRange(7,20)][int]$CaseSeconds=7)
 $ErrorActionPreference='Stop'
 # A PowerShell 7 parent may omit Windows PowerShell's Utility module from the
 # inherited module paths. Load this host's hashing/JSON cmdlets explicitly.
@@ -23,7 +23,7 @@ try {
         @{name='video-sr-nr-fg';args=@($inputPath,'--video-sr','1','--nr','--fg','--realtime');modules=@('nvngx_dlssnr.dll','nvngx_dlssg.dll')}
     )) {
         $name=$case.name
-        $argv=@($case.args)+@('--smoke-seconds','7')
+        $argv=@($case.args)+@('--smoke-seconds',"$CaseSeconds")
         if($name -ne 'empty'){$argv+=@('--smoke-controls','--smoke-save',"$output/$name.jpg")}
         $p=Start-Process -FilePath $exe -ArgumentList @($argv|ForEach-Object{'"'+$_+'"'}) -WorkingDirectory $env:TEMP -WindowStyle Hidden -PassThru -RedirectStandardOutput "$output/$name.stdout.log" -RedirectStandardError "$output/$name.stderr.log"
         $handle=$p.Handle

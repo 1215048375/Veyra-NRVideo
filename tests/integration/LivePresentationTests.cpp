@@ -17,7 +17,8 @@ int wmain(int argc,wchar_t**argv){
 #ifdef VEYRA_ENABLE_REMOTEPLAY
     // Explicit opt-in; uses existing local pairing without changing it. Runs
     // the actual shared engine, audio endpoint, GPU admission and presenter.
-    if((argc==3||(argc==4&&(std::wstring_view(argv[3])==L"--reconnect"||std::wstring_view(argv[3])==L"--cancel-reconnect"||std::wstring_view(argv[3])==L"--manual-reconnect")))&&std::wstring_view(argv[1])==L"--last-paired-ps5"){
+    if((argc==3||(argc==4&&(std::wstring_view(argv[3])==L"--reconnect"||std::wstring_view(argv[3])==L"--cancel-reconnect"||std::wstring_view(argv[3])==L"--manual-reconnect"||std::wstring_view(argv[3])==L"--repeat-outage")))&&std::wstring_view(argv[1])==L"--last-paired-ps5"){
+        const bool repeatOutage=argc==4&&std::wstring_view(argv[3])==L"--repeat-outage";
         const bool manualReconnect=argc==4&&std::wstring_view(argv[3])==L"--manual-reconnect";
         const bool reconnect=argc==4,cancelReconnect=reconnect&&(std::wstring_view(argv[3])==L"--cancel-reconnect"||manualReconnect);
         const auto dir=remoteplay::profileDirectory();wchar_t name[80]{};
@@ -31,10 +32,12 @@ int wmain(int argc,wchar_t**argv){
         engine::PlayerOptions options;options.nr=options.sr=options.fg=true;options.fgMultiplier=2;options.settings.videoSrQuality=2;
         source::RemotePlayConnectDesc request;request.request=std::move(*saved);request.request.video={1920,1080,60,80000,remoteplay::Codec::H264};request.decodeMode=source::RemotePlayConnectDesc::DecodeMode::Hardware;
         if(reconnect)SetEnvironmentVariableW(L"VEYRA_TEST_REMOTEPLAY_DISCONNECT_AFTER_FRAMES",cancelReconnect?L"120":L"600");
+        if(repeatOutage)SetEnvironmentVariableW(L"VEYRA_TEST_REMOTEPLAY_REPEAT_OUTAGE",L"1");
         engine.openRemotePlay(window,std::move(request),options);
         const auto start=std::chrono::steady_clock::now();unsigned overloadSamples=0,overloadTimings=0;double early=-1,late=-1;uint64_t maxGenerated=0;bool failed=false;int lastSecond=-1;
+        unsigned recoveryEpisodes=0;bool wasRecovering=false;
         bool sawRecovery=false,resumed=false,cancelled=false,playedBefore=false;uint64_t recoveryFrames=0,recoveryGenerated=0;unsigned attempts=0,postHealthySamples=0;
-        while(std::chrono::steady_clock::now()-start<(reconnect?50s:120s)){
+        while(std::chrono::steady_clock::now()-start<(repeatOutage?115s:reconnect?50s:120s)){
             const int second=int(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now()-start).count());
             SetEnvironmentVariableW(L"VEYRA_TEST_VIDEO_WORK_MS",!reconnect&&second>=30&&second<38?L"35":nullptr);
             MSG msg;while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}
@@ -42,6 +45,7 @@ int wmain(int argc,wchar_t**argv){
             maxGenerated=std::max(maxGenerated,s.generated);
             attempts=std::max(attempts,s.remoteReconnectAttempts);
             if(!sawRecovery&&s.frames>30&&s.generated>20)playedBefore=true;
+            if(s.remoteRecovering&&!wasRecovering)++recoveryEpisodes;wasRecovering=s.remoteRecovering;
             if(s.remoteRecovering){sawRecovery=true;recoveryFrames=s.frames;recoveryGenerated=s.generated;}
             if(sawRecovery&&!s.remoteRecovering&&attempts>=1&&attempts<=3&&s.frames>recoveryFrames+60&&s.metrics.flow.validGeneratedFps>10&&s.captureAudio.bufferedMs>0)resumed=true;
             if(resumed&&s.frames>recoveryFrames+300&&s.generated>recoveryGenerated+100&&s.nrActive&&s.srActive&&s.captureAudio.running&&s.captureAudio.error.empty())++postHealthySamples;
@@ -54,6 +58,7 @@ int wmain(int argc,wchar_t**argv){
         }
         SetEnvironmentVariableW(L"VEYRA_TEST_VIDEO_WORK_MS",nullptr);
         SetEnvironmentVariableW(L"VEYRA_TEST_REMOTEPLAY_DISCONNECT_AFTER_FRAMES",nullptr);
+        SetEnvironmentVariableW(L"VEYRA_TEST_REMOTEPLAY_REPEAT_OUTAGE",nullptr);
         const auto final=engine.snapshot();engine.stop();
         const auto stopDeadline=std::chrono::steady_clock::now()+10s;while(!engine.idle()&&std::chrono::steady_clock::now()<stopDeadline)std::this_thread::sleep_for(10ms);
         if(reconnect){
@@ -83,8 +88,8 @@ int wmain(int argc,wchar_t**argv){
             }
             // Observe beyond the first retry backoff: Stop must not reopen the session.
             if(cancelReconnect)std::this_thread::sleep_for(2s);
-            const bool ok=!failed&&engine.idle()&&sawRecovery&&attempts>=1&&attempts<=3&&(cancelReconnect?cancelled:playedBefore&&resumed&&postHealthySamples>=250&&final.captureAudio.compensationMs<150);
-            std::cout<<(ok?"PASS ":"FAIL ")<<"PS5 owned transport interruption playedBefore="<<playedBefore<<" recovery="<<sawRecovery<<" attempts="<<attempts<<" resumedWithFgAndAudio="<<resumed<<" postHealthySamples="<<postHealthySamples<<" manualCancel="<<cancelled<<" idle="<<engine.idle()<<std::endl;
+            const bool ok=(!repeatOutage||(recoveryEpisodes>=2&&!final.remoteRecovering&&final.frames>recoveryFrames+300&&final.metrics.flow.validGeneratedFps>10))&&!failed&&engine.idle()&&sawRecovery&&attempts>=1&&attempts<=3&&(cancelReconnect?cancelled:playedBefore&&resumed&&postHealthySamples>=250&&final.captureAudio.compensationMs<150);
+            std::cout<<(ok?"PASS ":"FAIL ")<<"PS5 owned transport interruption episodes="<<recoveryEpisodes<<" playedBefore="<<playedBefore<<" recovery="<<sawRecovery<<" attempts="<<attempts<<" resumedWithFgAndAudio="<<resumed<<" postHealthySamples="<<postHealthySamples<<" manualCancel="<<cancelled<<" idle="<<engine.idle()<<std::endl;
             DestroyWindow(window);CoUninitialize();return ok?0:1;
         }
         const bool ok=!failed&&engine.idle()&&maxGenerated>100&&final.metrics.flow.validGeneratedFps>10&&overloadSamples>0&&overloadTimings*100>=overloadSamples*95&&early>=0&&late>=0&&late<150&&std::abs(late-early)<40;

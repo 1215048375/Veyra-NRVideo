@@ -19,6 +19,7 @@ bool RemotePlaySessionSource::connect(RemotePlayConnectDesc desc) {
 void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc desc) {
     RemotePlaySource source;
     remoteplay::StreamRecovery recovery;
+    bool repeatedTestDisconnect=false;
     const auto milliseconds=[] {return remoteplay::monotonic100ns()/10000;};
     // Keep the existing in-memory credentials only for this user-started run.
     // Their move-only destructor wipes them; never reread another saved profile.
@@ -108,7 +109,14 @@ void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc de
                     firstFrame=false;
                     publishDecoded(frame,packet,source.info());
                     lastFrame=now;
-                    recovery.frame(milliseconds());
+                    const bool renewed=recovery.frame(milliseconds());
+                    if(renewed){
+                        log::info("remoteplay-recovery",std::format("retry allowance renewed after 30s continuous decoded progress; lifetimeAttempts={}",recovery.reconnects()));
+                        if(!repeatedTestDisconnect&&GetEnvironmentVariableW(L"VEYRA_TEST_REMOTEPLAY_REPEAT_OUTAGE",nullptr,0)){
+                            repeatedTestDisconnect=true;const auto r=source.disconnectTransportForTest();
+                            log::warn("remoteplay-recovery-test",std::format("second owned transport stop after renewal ok={} code={}",r.ok,r.code));
+                        }
+                    }
                     {std::lock_guard lock(mutex_);recovery_.active=false;recovery_.message.clear();}
                     if(testDisconnectFrames&&!testDisconnected&&snapshot.decodedFrames>=testDisconnectFrames){
                         testDisconnected=true;const auto r=source.disconnectTransportForTest();
@@ -137,7 +145,7 @@ void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc de
         ready_.notify_all();
     }
     if(retry&&!stop.stop_requested()){
-        std::lock_guard lock(mutex_);recovery_={true,recovery.reconnects(),std::format(L"串流中断，正在重新连接（{}/3）…",recovery.reconnects())};
+        std::lock_guard lock(mutex_);recovery_={true,recovery.episodeRetries(),std::format(L"串流中断，正在重新连接（{}/3）…",recovery.episodeRetries())};
         latest_.reset();pendingControllers_.clear();controller_={};feedback_={};
     }
     log::info("remoteplay-recovery",std::format("teardown begin attempt={} retry={} cancelled={}",recovery.reconnects(),retry,stop.stop_requested()));
@@ -149,7 +157,7 @@ void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc de
     if(!retry||stop.stop_requested())break;
     log::warn("remoteplay-recovery",std::format("old session joined; reconnect={} using existing in-memory pairing",recovery.reconnects()));
     // Interruptible 1/2/4 second backoff; manual Stop prevents the next start.
-    for(unsigned i=0;i<(1u<<(recovery.reconnects()-1))*20&&!stop.stop_requested();++i)std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    for(unsigned i=0;i<(1u<<(recovery.episodeRetries()-1))*20&&!stop.stop_requested();++i)std::this_thread::sleep_for(std::chrono::milliseconds(50));
     if(stop.stop_requested())break;
     }
     {std::lock_guard lock(mutex_);recovery_.active=false;}

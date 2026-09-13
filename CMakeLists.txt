@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(veyra VERSION 1.0.1 LANGUAGES CXX RC)
+project(veyra VERSION 1.0.2 LANGUAGES CXX RC)
 
 # Match the compiler's actual bytes, including on localized Windows installs.
 # CMake's cached, decoded prefix can leave Ninja with zero header dependencies.

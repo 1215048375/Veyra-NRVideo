@@ -176,6 +176,20 @@ TEST(recovery_busy_then_slow_handshake){
     r.frame(31999);CHECK(r.poll(32999,false,false)==A::Keyframe);
     CHECK(r.poll(37999,false,false)==A::Reconnect);
 }
+TEST(recovery_stable_progress_renews_outage_budget_not_identity){
+    StreamRecovery r;using A=StreamRecovery::Action;
+    for(int i=0;i<3;++i){r.beginAttempt(i*10000);r.frame(i*10000+100);CHECK(r.poll(i*10000+6100,false,false)==A::Reconnect);}
+    r.beginAttempt(30000);CHECK(!r.frame(30100));
+    for(int64_t t=30200;t<60100;t+=100)CHECK(!r.frame(t));
+    CHECK(r.episodeRetries()==3);CHECK(r.frame(60100));CHECK(r.episodeRetries()==0);CHECK(r.reconnects()==3);
+    CHECK(!r.frame(60200));CHECK(r.poll(66200,false,false)==A::Reconnect);
+    CHECK(r.episodeRetries()==1);CHECK(r.reconnects()==4);
+}
+TEST(recovery_intermittent_frames_do_not_renew_budget){
+    StreamRecovery r;using A=StreamRecovery::Action;r.beginAttempt(0);r.frame(100);CHECK(r.poll(6100,false,false)==A::Reconnect);r.beginAttempt(7000);
+    for(int64_t t=7100;t<150000;t+=1000)CHECK(!r.frame(t));
+    CHECK(r.episodeRetries()==1);CHECK(r.reconnects()==1);
+}
 int main(int argc,char**argv){
     std::string filter;
     if(argc==2&&std::string_view(argv[1])=="--list"){for(auto [name,f]:tests()){(void)f;std::cout<<name<<'\n';}return 0;}
