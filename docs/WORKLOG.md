@@ -1848,3 +1848,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/gates/delivery.p
 cmd /c out/gpu-dis-build-all.cmd成功，最终EXE SHA256=95CE6F6236DC3A9CF90E68330A1FC999580BC3F66D4658EA6A96D6066EFF9159。delivery 23/23、44.737秒：logs/delivery/92e09ba3556148a9b9275d2ba1ef1bfe/result.json。单次测试低于300秒。完整便携包final目录生成、逐文件hash及禁止路径扫描通过；解压后的portable-smoke 5/5（PATH隔离、manifest禁用、运行时模块路径核对），日志logs/release-1.0.0/。包303913391字节，SHA256=EAAE5B13252EDE1F59DC41E3773C6DAFC960918EFDA914F160D1F3B03A34DBC5。
 
 沿用七文件运行组件及社区NR HashMismatch记录，签名/哈希/许可证由publisher脚本核对。FFmpeg真实patched tree生成对应源码并校验header、5DLL、slice补丁哈希；RemotePlay对应源码固定Chiaki和静态依赖，带全部补丁及构建材料。无NVIDIA SDK/运行时/模型进入源码Git，未打包凭据/用户配置/测试媒体。新源代码资产仅开源依赖；完整包仅允许清单内runtime。未新增或修改运行时身份。新版本实际PS5长时、HDR屏幕、蓝牙/多GPU仍未验收；两个P2导出边界明确保留，没把应用正式版说成全部功能官方认证。发布结果在后续记录。
+
+## 2026-09-13 1.0.0 公开发布完成
+
+源码整合提交 2939cd4046e24f2b2fc987322f0196e7cc5acd2a 已 fast-forward 至 main，git push nrvideo main v1.0.0 成功。v1.0.0 标注标签固定该提交；本段是发布后的文档记录，不移动标签或替换已验证二进制。
+
+GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 2026-09-13 06:38:08 UTC 公开。gh release edit v1.0.0 --repo Likely7/Veyra-NRVideo --draft=false --prerelease=false --latest 成功；随后读取 releases/latest，确认 tag=v1.0.0、draft=false、prerelease=false。六个资产均 uploaded，逐项服务端 digest、size 与本地 SHA256、长度一致，包括三个 ZIP 和三个校验文件。核对记录 logs/release-1.0.0/github-assets-verified.json（仅本地）。源码 v0.0.5..v1.0.0 新增/修改文件扫描未发现 DLL/LIB/EXE/ZIP/模型；工作区发布前干净。当前发布与对应源码包均已完成，真实 PS5 长时及其他未测硬件边界仍按上文，不由发布状态推定通过。

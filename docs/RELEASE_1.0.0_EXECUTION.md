@@ -46,3 +46,9 @@ README 中英版、更新说明、运行组件表及对应源码脚本更新到�
 源码脚本 `package-remoteplay-source.py --version 1.0.0` 与 `package-ffmpeg-source.py --version 1.0.0 --source C:/veyra-deps/ffmpeg-ps5-slices-source` 成功；后者校验真实 patched header、DLL、补丁身份和 LGPL 配置。不用 stock source 冒充修复版对应源码。6 个上传资产为上述 ZIP 与各自 .sha256。
 
 未执行真实 PS5 新版长时/蓝牙/多GPU/HDR屏幕验收；未声称新版无全部bug。导出两个已知P2功能边界已写 Release Notes。正式应用版本不改变各实验组件属性。无独立 Reviewer，仅代码自查与实际自动检查。
+
+## 2026-09-13 1.0.0 公开发布完成
+
+源码整合提交 2939cd4046e24f2b2fc987322f0196e7cc5acd2a 已 fast-forward 至 main，git push nrvideo main v1.0.0 成功。v1.0.0 标注标签固定该提交；本段是发布后的文档记录，不移动标签或替换已验证二进制。
+
+GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 2026-09-13 06:38:08 UTC 公开。gh release edit v1.0.0 --repo Likely7/Veyra-NRVideo --draft=false --prerelease=false --latest 成功；随后读取 releases/latest，确认 tag=v1.0.0、draft=false、prerelease=false。六个资产均 uploaded，逐项服务端 digest、size 与本地 SHA256、长度一致，包括三个 ZIP 和三个校验文件。核对记录 logs/release-1.0.0/github-assets-verified.json（仅本地）。源码 v0.0.5..v1.0.0 新增/修改文件扫描未发现 DLL/LIB/EXE/ZIP/模型；工作区发布前干净。当前发布与对应源码包均已完成，真实 PS5 长时及其他未测硬件边界仍按上文，不由发布状态推定通过。
