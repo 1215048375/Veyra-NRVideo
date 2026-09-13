@@ -116,3 +116,43 @@ NR 与 DLSS 帧生成属于 **community experimental / 社区实验集成**，�
 [构建说明](docs/BUILD.md) · [组件清单](docs/RUNTIME_COMPONENTS_1.0.0.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
 
 Veyra 原有源码采用 [GPLv3](LICENSE)；含串流的组合程序同时适用 [AGPLv3 与上游 OpenSSL 例外](licenses/remoteplay/CHIAKI_AGPL3_OPENSSL.txt)。应用源码对应版本标签，Release 另附串流依赖与 FFmpeg 对应源码包，普通用户无需下载。SDK、模型和运行时不进入源码仓库；Release 组件按各自许可与实验发布范围单独提供。
+
+## 致谢与项目来源
+
+感谢以下项目及其贡献者。这里分别说明实际复用、依赖和开发参考；具体版本、修改记录与许可证见 [第三方声明](THIRD_PARTY_NOTICES.md)。
+
+### 已集成或复用
+
+| 项目 | 在 Veyra 中的用途 |
+| --- | --- |
+| [chiaki-ng](https://github.com/streetpea/chiaki-ng) | PS5 Remote Play 协议核心、配对与连接；手柄、触觉和 PSN 授权流程的集成与适配。上游 Account ID 方案同时感谢 grill2010。 |
+| [XeSS-GPU-Motion](https://github.com/gggz114514-oss/XeSS-GPU-Motion) / [OpenCV](https://github.com/opencv/opencv) | 移植 GPU DIS 光流实现与着色器；保留其 OpenCV DIS 衍生部分的来源和许可。 |
+| [FFmpeg](https://github.com/FFmpeg/FFmpeg) / [nv-codec-headers](https://github.com/FFmpeg/nv-codec-headers) | 音视频解封装、解码、封装及 NVENC API 声明；发布包附实际使用的 FFmpeg 补丁与对应源码。 |
+| [SDL](https://github.com/libsdl-org/SDL) | 电脑端手柄输入、DualSense 支持与触觉音频输出。 |
+| [AMD FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) | 光流算法与 D3D12 后端。 |
+| [Lucide](https://github.com/lucide-icons/lucide) | 界面图标，保留 Lucide 与 Feather 衍生图标的许可。 |
+| [Intel XeSS / XeLL](https://github.com/intel/xess) | 实验性 XeSS 帧生成及相关运行接口。 |
+| [NVIDIA DLSS](https://github.com/NVIDIA/DLSS)、[RTX Video SDK](https://developer.nvidia.com/rtx-video-sdk)、[Optical Flow SDK](https://developer.nvidia.com/opticalflow-sdk)、[Video Codec SDK](https://developer.nvidia.com/video-codec-sdk) | 超分、光流、编码及增强接口。实验 NR 组件的独立身份与范围见 [运行组件清单](docs/RUNTIME_COMPONENTS_1.0.0.md)，不代表官方认证。 |
+| [vcpkg](https://github.com/microsoft/vcpkg) | 开源依赖的构建、版本与许可证记录。 |
+
+串流依赖还包括 **OpenSSL、Opus、json-c、libevent、miniupnpc、curl、nanopb、Jerasure 和 gf-complete**；各项目的完整归因与许可保留在 [licenses/remoteplay](licenses/remoteplay)，对应源码随 Release 提供。
+
+### 架构、实现思路与对照参考
+
+| 项目 | 参考内容 |
+| --- | --- |
+| [Magpie Experimental](https://github.com/SAOG0721/Magpie/tree/experimental) | NR / SR / FG 组合、可调处理顺序、运动信息、残差合成、资源同步和呈现节奏；也是开发中的重要实测对照。 |
+| [OBS Studio](https://github.com/obsproject/obs-studio) | DirectShow 采集、像素格式与颜色信息、缓冲和窗口捕获行为。 |
+| [NVEnc](https://github.com/rigaya/NVEnc) / [RTXVideoProcessor](https://github.com/DrC0ns0le/RTXVideoProcessor) | 视频超分、GPU 帧资源、编解码和处理调度；曾参考 FRUC 路线，Veyra 现已移除 FRUC。 |
+| [mpv](https://github.com/mpv-player/mpv) | 视频播放器中的 RTX 超分接入与视频处理路线。 |
+| [video2dlssnr](https://github.com/DaniilSokolyuk/video2dlssnr) / [dlss5-nr-player](https://github.com/Zonnery/dlss5-nr-player) | NR 视频管线、处理顺序及数据传输方式的研究对照；未复制其代码。 |
+| [dlss5-video-player](https://github.com/2600th/dlss5-video-player) / [dlss5-visual-enhancer](https://github.com/Merserk/dlss5-visual-enhancer) / [dlss5-infinity-studio](https://github.com/SamG-Coder/dlss5-infinity-studio) | 播放、离线增强、导出与缓存工作流的方案参考。 |
+| [DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder) / [DLSS5-Reshade-AIO](https://github.com/kibblerz/DLSS5-Reshade-AIO) / [Assassin’s Creed Odyssey DLAA](https://github.com/SAOG0721/Assassins-Creed-Odyssey-DLAA) | 运动与深度输入、颜色传递、NR 保护区域和时序契约的研究参考。Veyra 不加载或分发 ReShade / RenoDX add-on。 |
+| [Video2X](https://github.com/k4yt3x/video2x) / [RIFE](https://github.com/hzwer/ECCV2022-RIFE) | 普通视频超分与插帧路线的调研参考，未集成这些算法。 |
+
+<details>
+<summary>已搁置的 AMD NR 方向：调研参考</summary>
+
+[DLSS-NR-on-AMD](https://github.com/danielblnc/DLSS-NR-on-AMD)、[dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting)、[dlss5-image-enhancer-zluda](https://github.com/RedDukeDev/dlss5-image-enhancer-zluda) 及其 [ZLUDA 分支](https://github.com/RedDukeDev/ZLUDA)、[dlss5-neural-amd](https://github.com/zmodelerlover/dlss5-neural-amd)、[DLSS5-AMD-Video](https://github.com/eikkapine/DLSS5-AMD-Video)。这些项目用于可行性与性能路线研究，当前版本不提供 AMD NR。
+
+</details>

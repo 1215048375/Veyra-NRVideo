@@ -1854,3 +1854,7 @@ cmd /c out/gpu-dis-build-all.cmd成功，最终EXE SHA256=95CE6F6236DC3A9CF90E68
 源码整合提交 2939cd4046e24f2b2fc987322f0196e7cc5acd2a 已 fast-forward 至 main，git push nrvideo main v1.0.0 成功。v1.0.0 标注标签固定该提交；本段是发布后的文档记录，不移动标签或替换已验证二进制。
 
 GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 2026-09-13 06:38:08 UTC 公开。gh release edit v1.0.0 --repo Likely7/Veyra-NRVideo --draft=false --prerelease=false --latest 成功；随后读取 releases/latest，确认 tag=v1.0.0、draft=false、prerelease=false。六个资产均 uploaded，逐项服务端 digest、size 与本地 SHA256、长度一致，包括三个 ZIP 和三个校验文件。核对记录 logs/release-1.0.0/github-assets-verified.json（仅本地）。源码 v0.0.5..v1.0.0 新增/修改文件扫描未发现 DLL/LIB/EXE/ZIP/模型；工作区发布前干净。当前发布与对应源码包均已完成，真实 PS5 长时及其他未测硬件边界仍按上文，不由发布状态推定通过。
+
+## 2026-09-13 README 项目来源与致谢
+
+按用户要求，在中英文 README 最底部补齐实际集成/复用、架构与实现参考、已搁置 AMD NR 调研来源及各项目链接。依据 THIRD_PARTY_NOTICES、GPU DIS provenance、竞品/性能/采集审计与质量/AMD NR 方案核对，区分依赖和研究，不把尚未接入的算法宣传为现有功能。保留完整许可证及对应源码入口。仅文档改动，执行 Markdown 本地链接与双语项目 URL 一致性检查、git diff --check；无需重建或改动 1.0.0 包与标签。
