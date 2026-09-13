@@ -7,6 +7,9 @@
 #include "veyra/engine/FrameFlowWindow.h"
 #include "veyra/engine/EnhancementDelayEstimate.h"
 #include <iostream>
+#include <filesystem>
+#include <fstream>
+#include <windows.h>
 #include "veyra/engine/ContentCadence.h"
 #include "veyra/diagnostics/Redaction.h"
 #include <limits>
@@ -18,6 +21,20 @@
 int main(){
     using namespace veyra;int failures=0,checks=0;
     auto check=[&](bool ok,const char* name){++checks;if(!ok)++failures;std::cout<<(ok?"PASS ":"FAIL ")<<name<<'\n';};
+    const auto logPath=std::filesystem::temp_directory_path()/(L"veyra-log-reopen-"+std::to_wstring(GetCurrentProcessId())+L".log");
+    {
+        auto logger=std::make_unique<Logger>();logger->setConsoleEnabled(false);
+        check(logger->openFile(logPath.wstring()),"open isolated diagnostic log");
+        logger->write(LogLevel::Info,"test","before-restart");logger->closeFile();
+        check(logger->openFile(logPath.wstring(),true),"append diagnostic log after restart");
+        logger->write(LogLevel::Info,"test","after-restart");logger->flush();
+        auto other=std::make_unique<Logger>();other->setConsoleEnabled(false);
+        check(!other->openFile(logPath.wstring()),"second writer cannot truncate active diagnostic log");
+        logger->closeFile();
+        std::ifstream file(logPath);std::string content((std::istreambuf_iterator<char>(file)),{});
+        check(content.find("before-restart")!=content.npos&&content.find("after-restart")!=content.npos,"both sessions survive reopen and rejected concurrent writer");
+    }
+    std::filesystem::remove(logPath);
     sink::ArrivalClockMapping ingressClock;
     double mapping=0;
     for(int i=0;i<60000;++i)mapping=ingressClock.observe(1000+i*10.01+(i%13==5?4:0),i*10.0);

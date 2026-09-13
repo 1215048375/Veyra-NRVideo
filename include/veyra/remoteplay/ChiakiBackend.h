@@ -41,6 +41,7 @@ struct NativeSnapshot {
     uint64_t callbackRejected=0,packetReceived=0,packetLost=0;
     uint64_t transportErrors=0,assemblyErrors=0;
     bool automaticRetryAllowed=true;
+    bool startupRetryAllowed=false; // Only transient RP_IN_USE, never an auth rejection.
     int64_t serverTargetBitrate=-1; // Raw upstream field; diagnostic opt-in only.
     uint64_t qualityReports=0;
 };

@@ -17,8 +17,9 @@ int wmain(int argc,wchar_t**argv){
 #ifdef VEYRA_ENABLE_REMOTEPLAY
     // Explicit opt-in; uses existing local pairing without changing it. Runs
     // the actual shared engine, audio endpoint, GPU admission and presenter.
-    if((argc==3||(argc==4&&(std::wstring_view(argv[3])==L"--reconnect"||std::wstring_view(argv[3])==L"--cancel-reconnect")))&&std::wstring_view(argv[1])==L"--last-paired-ps5"){
-        const bool reconnect=argc==4,cancelReconnect=reconnect&&std::wstring_view(argv[3])==L"--cancel-reconnect";
+    if((argc==3||(argc==4&&(std::wstring_view(argv[3])==L"--reconnect"||std::wstring_view(argv[3])==L"--cancel-reconnect"||std::wstring_view(argv[3])==L"--manual-reconnect")))&&std::wstring_view(argv[1])==L"--last-paired-ps5"){
+        const bool manualReconnect=argc==4&&std::wstring_view(argv[3])==L"--manual-reconnect";
+        const bool reconnect=argc==4,cancelReconnect=reconnect&&(std::wstring_view(argv[3])==L"--cancel-reconnect"||manualReconnect);
         const auto dir=remoteplay::profileDirectory();wchar_t name[80]{};
         GetPrivateProfileStringW(L"RemotePlay",L"LastProfile",L"",name,80,(dir/L"settings.ini").c_str());
         const std::wstring profile=name;if(profile.empty()||profile.find_first_of(L"/\\:")!=profile.npos)return 3;
@@ -56,6 +57,30 @@ int wmain(int argc,wchar_t**argv){
         const auto final=engine.snapshot();engine.stop();
         const auto stopDeadline=std::chrono::steady_clock::now()+10s;while(!engine.idle()&&std::chrono::steady_clock::now()<stopDeadline)std::this_thread::sleep_for(10ms);
         if(reconnect){
+            if(manualReconnect){
+                bool manualOk=!failed&&cancelled&&engine.idle();
+                // Reuse the same process/engine after cancelling recovery, then
+                // immediately reopen again. No global reset or new pairing.
+                for(int cycle=0;cycle<2&&manualOk;++cycle){
+                    auto again=remoteplay::loadProfile(dir/profile);if(!again){manualOk=false;break;}
+                    source::RemotePlayConnectDesc next;next.request=std::move(*again);
+                    next.request.video={1920,1080,60,80000,remoteplay::Codec::H264};next.decodeMode=source::RemotePlayConnectDesc::DecodeMode::Hardware;
+                    engine.openRemotePlay(window,std::move(next),options);
+                    const auto deadline=std::chrono::steady_clock::now()+55s;bool played=false;
+                    while(std::chrono::steady_clock::now()<deadline){
+                        MSG msg;while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}
+                        const auto snap=engine.snapshot();if(snap.failed)break;
+                        if(snap.frames>=180&&snap.generated>=100&&snap.captureAudio.running){played=true;break;}
+                        std::this_thread::sleep_for(20ms);
+                    }
+                    engine.stop();const auto end=std::chrono::steady_clock::now()+10s;
+                    while(!engine.idle()&&std::chrono::steady_clock::now()<end)std::this_thread::sleep_for(10ms);
+                    manualOk=played&&engine.idle();
+                    std::cout<<"MANUAL cycle="<<cycle<<" played="<<played<<" idle="<<engine.idle()<<std::endl;
+                }
+                std::cout<<(manualOk?"PASS ":"FAIL ")<<"same-process manual reconnect after cancelling recovery"<<std::endl;
+                DestroyWindow(window);CoUninitialize();return manualOk?0:1;
+            }
             // Observe beyond the first retry backoff: Stop must not reopen the session.
             if(cancelReconnect)std::this_thread::sleep_for(2s);
             const bool ok=!failed&&engine.idle()&&sawRecovery&&attempts>=1&&attempts<=3&&(cancelReconnect?cancelled:playedBefore&&resumed&&postHealthySamples>=250&&final.captureAudio.compensationMs<150);

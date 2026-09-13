@@ -115,7 +115,7 @@ void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc de
                         log::warn("remoteplay-recovery-test",std::format("injected owned transport stop ok={} code={} (no console power command)",r.ok,r.code));
                     }
                 } else {
-                    const auto action=recovery.poll(milliseconds(),snapshot.state==remoteplay::SessionState::LoginPinRequired,result==SourceReadStatus::Error,native.automaticRetryAllowed);
+                    const auto action=recovery.poll(milliseconds(),snapshot.state==remoteplay::SessionState::LoginPinRequired,result==SourceReadStatus::Error,native.automaticRetryAllowed,native.startupRetryAllowed);
                     if(action==remoteplay::StreamRecovery::Action::Keyframe){
                         source.recoverVideo();log::warn("remoteplay-recovery",std::format("request keyframe; received={} decoded={} videoCallbacks={} rejected={} packetReceived={} packetLost={}",snapshot.video.accessUnits,snapshot.decodedFrames,native.videoCallbacks,native.callbackRejected,native.packetReceived,native.packetLost));
                         std::lock_guard lock(mutex_);recovery_.active=true;recovery_.message=L"画面中断，正在请求关键帧恢复…";
@@ -123,7 +123,8 @@ void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc de
                     else if(action==remoteplay::StreamRecovery::Action::Fail){
                         log::error("remoteplay-recovery",std::format("recovery stopped attempts={} quitReason={} error={}",recovery.reconnects(),native.lastQuitReason,snapshot.errorCode));
                         std::lock_guard lock(mutex_);failed_=true;recovery_.active=false;
-                        recovery_.message=snapshot.state==remoteplay::SessionState::LoginPinRequired?L"等待 PS5 登录 PIN 超时，请重新连接。":!native.automaticRetryAllowed?L"PS5 已结束或拒绝串流，请检查主机状态后重新连接。":L"PS5 串流未恢复，请检查主机及网络后点击连接；无需重新配对。";break;
+                        recovery_.message=snapshot.state==remoteplay::SessionState::LoginPinRequired?L"等待 PS5 登录 PIN 超时，请重新连接。":native.startupRetryAllowed?L"PS5 仍被串流会话占用，请结束其他串流或稍后重试；无需重新配对。":!native.automaticRetryAllowed?L"PS5 已结束或拒绝串流，请检查主机状态后重新连接。":L"PS5 串流未恢复，请检查主机及网络后点击连接；无需重新配对。";
+                        recovery_.message+=std::format(L"（终止码 {} / 错误 {}）",native.lastQuitReason,snapshot.errorCode);break;
                     }
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 }
@@ -139,10 +140,12 @@ void RemotePlaySessionSource::run(std::stop_token stop, RemotePlayConnectDesc de
         std::lock_guard lock(mutex_);recovery_={true,recovery.reconnects(),std::format(L"串流中断，正在重新连接（{}/3）…",recovery.reconnects())};
         latest_.reset();pendingControllers_.clear();controller_={};feedback_={};
     }
+    log::info("remoteplay-recovery",std::format("teardown begin attempt={} retry={} cancelled={}",recovery.reconnects(),retry,stop.stop_requested()));
     if(monitor.joinable()){monitor.request_stop();monitor.join();}
     if(feeder.joinable()){feeder.request_stop();feeder.join();}
     audio_.stop();
     source.close();
+    log::info("remoteplay-recovery",std::format("teardown complete attempt={}",recovery.reconnects()));
     if(!retry||stop.stop_requested())break;
     log::warn("remoteplay-recovery",std::format("old session joined; reconnect={} using existing in-memory pairing",recovery.reconnects()));
     // Interruptible 1/2/4 second backoff; manual Stop prevents the next start.

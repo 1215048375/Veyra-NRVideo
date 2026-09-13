@@ -51,7 +51,7 @@ Logger::~Logger()
     closeFile();
 }
 
-bool Logger::openFile(const std::wstring& path)
+bool Logger::openFile(const std::wstring& path, bool append)
 {
     std::error_code ec;
     const std::filesystem::path fsPath(path);
@@ -68,7 +68,7 @@ bool Logger::openFile(const std::wstring& path)
     }
     // Diagnostics may read a running session without stopping capture. Keep
     // concurrent writers excluded so another instance cannot truncate this log.
-    file_ = _wfsopen(path.c_str(), L"wb", _SH_DENYWR);
+    file_ = _wfsopen(path.c_str(), append ? L"ab" : L"wb", _SH_DENYWR);
     if (file_ == nullptr) {
         return false;
     }

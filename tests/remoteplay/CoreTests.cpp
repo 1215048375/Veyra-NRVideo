@@ -154,13 +154,27 @@ TEST(recovery_progress_and_terminal_quit){
     CHECK(r.poll(1100,false,false)==A::Keyframe);r.frame(1500);CHECK(r.poll(2000,false,false)==A::Wait);
     CHECK(r.poll(2200,false,true,false)==A::Fail);CHECK(r.reconnects()==0);
     CHECK(r.poll(2200,false,true,true)==A::Reconnect);r.beginAttempt(5000);
-    CHECK(r.poll(10999,false,false)==A::Wait);CHECK(r.poll(11000,false,false)==A::Reconnect);
+    CHECK(r.poll(11000,false,false)==A::Wait);CHECK(r.poll(34999,false,false)==A::Wait);CHECK(r.poll(35000,false,false)==A::Reconnect);
 }
 TEST(recovery_retryable_busy_requires_prior_video){
     StreamRecovery r;using A=StreamRecovery::Action;r.beginAttempt(0);
     CHECK(r.poll(500,false,true,true)==A::Fail);CHECK(r.reconnects()==0);
     r.frame(1000);CHECK(r.poll(7000,false,false)==A::Reconnect);r.beginAttempt(8000);
     CHECK(r.poll(8500,false,true,true)==A::Reconnect);CHECK(r.reconnects()==2);
+}
+TEST(recovery_manual_busy_retry_is_bounded){
+    StreamRecovery r;using A=StreamRecovery::Action;r.beginAttempt(0);
+    for(int i=0;i<3;++i){CHECK(r.poll(i*2000+500,false,true,true,true)==A::Reconnect);r.beginAttempt((i+1)*2000);}
+    CHECK(r.poll(6500,false,true,true,true)==A::Fail);CHECK(r.reconnects()==3);
+    StreamRecovery denied;denied.beginAttempt(0);
+    CHECK(denied.poll(500,false,true,false,true)==A::Fail);CHECK(denied.reconnects()==0);
+}
+TEST(recovery_busy_then_slow_handshake){
+    StreamRecovery r;using A=StreamRecovery::Action;r.beginAttempt(0);
+    CHECK(r.poll(500,false,true,true,true)==A::Reconnect);r.beginAttempt(2000);
+    CHECK(r.poll(8000,false,false)==A::Wait);CHECK(r.poll(31999,false,false)==A::Wait);
+    r.frame(31999);CHECK(r.poll(32999,false,false)==A::Keyframe);
+    CHECK(r.poll(37999,false,false)==A::Reconnect);
 }
 int main(int argc,char**argv){
     std::string filter;

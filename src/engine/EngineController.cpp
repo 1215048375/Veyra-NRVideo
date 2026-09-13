@@ -170,7 +170,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                         const auto state=remote->sessionSnapshot().state;
                         {std::lock_guard lock(mutex_);snapshot_.remotePlayState=int(state);}
                         if(result==source::SourceReadStatus::Frame){cachedFrame=av_frame_clone(first);break;}
-                        if(result==source::SourceReadStatus::Error){status(L"PS5 未返回可解码画面，请检查连接或重新配对",true);break;}
+                        if(result==source::SourceReadStatus::Error){const auto recovery=remote->recoveryStatus();status(recovery.message.empty()?L"PS5 未返回可解码画面，请检查主机及网络后重新连接。":recovery.message,true);break;}
                         if(state==remoteplay::SessionState::LoginPinRequired)status(L"PS5 要求登录 PIN，请在串流面板输入");
                         std::this_thread::sleep_for(std::chrono::milliseconds(2));
                     }

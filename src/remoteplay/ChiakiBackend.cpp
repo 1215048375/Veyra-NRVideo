@@ -281,8 +281,10 @@ NativeSnapshot ChiakiBackend::snapshot()const{
     if(s.initialized)chiaki_packet_stats_get(&s.session.stream_connection.packet_stats,false,&out.packetReceived,&out.packetLost);
     // After a stopped session the PS5 may briefly still report RP_IN_USE.
     // Retrying this request cannot evict it; the console remains authoritative.
-    // StreamRecovery retries only after this user-started run had real video.
+    // A manual reconnect may race the console releasing our previous session.
+    // Retry RP_IN_USE within the same bounded budget; never force eviction.
     out.automaticRetryAllowed=out.lastQuitReason==CHIAKI_QUIT_REASON_NONE||out.lastQuitReason==CHIAKI_QUIT_REASON_CTRL_UNKNOWN||out.lastQuitReason==CHIAKI_QUIT_REASON_CTRL_CONNECT_FAILED||out.lastQuitReason==CHIAKI_QUIT_REASON_STREAM_CONNECTION_UNKNOWN||out.lastQuitReason==CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_IN_USE;
+    out.startupRetryAllowed=out.lastQuitReason==CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_IN_USE;
     return out;
 }
 } // namespace veyra::remoteplay

@@ -31,7 +31,7 @@ public:
     Logger& operator=(const Logger&) = delete;
 
     // Creates parent directories; returns false and logs to console on failure.
-    bool openFile(const std::wstring& path);
+    bool openFile(const std::wstring& path, bool append = false);
     void closeFile();
     void setConsoleEnabled(bool enabled);
 

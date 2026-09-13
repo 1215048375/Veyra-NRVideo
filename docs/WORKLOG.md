@@ -1882,3 +1882,11 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 完整便携包与两份对应源码包制作成功，六个发布资产；七个已批准运行组件与PS5 patched FFmpeg不变，无SDK/运行时加入源码。便携ZIP逐文件清单校验及源码扫描通过，FFmpeg六个.mp4后缀文件确认是上游ASCII测试参考文本。新EXE解压后独立启动/实际增强5/5 PASS，最长7.92秒，社区/原版/Video SR组合均有NR执行和FG真实输出；此前产品代码delivery 23/23仍单独记录为版本资源更新前验证。具体命令、失败与恢复、资产哈希、运行码见docs/RELEASE_1.0.1_EXECUTION.md，日志logs/release-1.0.1。反馈者实卡音频改善仍待其新版测试，未声称10ms端到端。下一步推送源码及六资产并核验公开Release。
 
 发布完成：main及v1.0.1（c0cba4b）已推送，六资产服务器大小/摘要与本地一致，2026-09-13T14:53:27Z正式公开为latest，非草稿/非预发布，Release ID 387931939。链接https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.1 。未修改1.0.0资产，未关闭用户正在运行的程序。发布后仅补记文档，不重打包、不移动tag；待反馈者下载新版进行实卡音频验收。
+
+## 2026-09-13 PS5 断流后重连修复（本地）
+
+用户反馈长时串流卡住、自动及手动连接均不能恢复，必须重启。存档checkpoint/ps5-reconnect-20260913，分支codex/ps5-reconnect-repair，基线e3d6c3c。旧现场日志被启动截断，自然断流根因不明；修改GUI仅初始化一次日志、追加保留跨重启记录并独立处理override/多进程。新会话首帧统一30秒，已有画面的断流仍6秒恢复；初次仅RP_IN_USE允许最多3次退避重试，拒绝认证不重试。失败保留具体原因/终止码，增加资源结束前后日志，不无依据提示重新配对。
+
+用户明确停流授权实机：旧可控自动恢复PASS，未复现自然停帧；新版同一进程取消恢复后手动重连两轮PASS，真实捕获占用码4，第二轮3次占用后恢复，画面/FG/音频均推进且idle=1。新版可控自动恢复PASS（attempt2，463健康采样），真实NR/4K DLSSG Create=0x1、SEH=0。core75/75、contract107/0、boundary通过，完整99步构建通过；双GUI日志重启检查PASS。每次测试210秒以内上限。详细命令、修改清单、证据及限制见docs/PS5_RECONNECT_REPAIR_2026-09-13.md，logs/ps5-reconnect-20260913/。
+
+已正常关闭用户空闲旧GUI，更新桌面快捷方式的同一EXE，SHA256 23791CE1A316A4CFDAA9D292502E4620CB9E74BAA07E5310F82D843A53FAE326；FFmpeg切片补丁不变。无SDK/二进制/配对进入Git，不改已发布1.0.1，不push。下一步用户长时游玩确认；最初自然停帧原因仍需新日志，不能宣称全部断流根除。
