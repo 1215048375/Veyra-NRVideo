@@ -155,6 +155,10 @@ bool CaptureCardSource::configure(const SourceOpenDesc& desc){close();p_->lastAu
                     return target->push(bytes,size_t(sample->GetActualDataLength()),double(begin)/10000,sample->IsDiscontinuity()==S_OK)?S_OK:E_FAIL;
                 },candidate,terminal);
                 if(SUCCEEDED(hr))hr=p.graph->AddFilter(candidate.Get(),L"Veyra audio PCM");
+                // Request small input blocks before connection; downstream
+                // playback cannot undo time spent filling a driver buffer.
+                // Some devices reject this advisory API, so do not fail capture.
+                if(SUCCEEDED(hr))suggestCaptureAudioBuffering(audioPin.Get(),*reinterpret_cast<const WAVEFORMATEX*>(type->pbFormat));
                 if(SUCCEEDED(hr))hr=p.graph->ConnectDirect(audioPin.Get(),terminal.Get(),type);
                 if(SUCCEEDED(hr)){p.audioSink=candidate;p.audioSession=std::move(session);connectedAudio=true;}
                 else if(candidate)p.graph->RemoveFilter(candidate.Get());

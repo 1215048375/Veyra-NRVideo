@@ -225,7 +225,7 @@ struct CaptureAudioSession::Impl : AudioPcmSource {
                 state.skewMs=fresh&&std::isfinite(audioPts)?std::optional<double>(audioPts-(vPts+observedNow-vHost)):std::nullopt;
                 if(hostTime()>=nextSyncLog){
                     nextSyncLog=hostTime()+20000000;
-                    log::info("live-audio-sync",std::format("videoPtsMs={:.3f} videoHostMs={:.3f} audioIngressMapMs={:.3f} compensationMs={:.3f} pcmMs={:.3f} endpointMs={:.3f} skewMs={:.3f} correctionPpm={:.1f} resets={} (local clock alignment, not GPU execution time)",vPts,vHost,ingress,target,state.bufferedMs,state.endpointBufferedMs,state.skewMs.value_or(-999),state.driftCorrectionPpm,state.resets));
+                    log::info("live-audio-sync",std::format("videoPtsMs={:.3f} videoHostMs={:.3f} audioIngressMapMs={:.3f} compensationMs={:.3f} pcmMs={:.3f} endpointMs={:.3f} skewMs={:.3f} correctionPpm={:.1f} resets={} inputBlockMs={:.3f} inputIntervalMs={:.3f} inputBlocks={} (local clock alignment, not GPU execution time)",vPts,vHost,ingress,target,state.bufferedMs,state.endpointBufferedMs,state.skewMs.value_or(-999),state.driftCorrectionPpm,state.resets,state.inputBlockMs,state.inputIntervalMs,state.inputBlocks));
                 }
             }
         }
@@ -255,7 +255,10 @@ bool CaptureAudioSession::push(const void* data,size_t bytes,double pts,bool dis
     std::lock_guard lock(p.mutex);
     if(p.stop||!p.state.error.empty())return true;
     if(discontinuity){p.input.clear();p.inputBytes=0;p.pendingReset=true;p.haveVideo=false;}
-    p.lastArrival=hostTime();
+    const auto arrival=hostTime();
+    p.state.inputIntervalMs=p.state.inputBlocks&&!discontinuity?double(arrival-p.lastArrival)/10000:0;
+    p.state.inputBlockMs=1000.0*bytes/p.format.nAvgBytesPerSec;++p.state.inputBlocks;
+    p.lastArrival=arrival;
     if(!p.haveIngress||discontinuity){p.ingressClock.reset();p.haveIngress=true;}
     p.ingressMapping=p.ingressClock.observe(double(p.lastArrival)/10000,pts);
     const double blockMs=1000.0*bytes/p.format.nAvgBytesPerSec;

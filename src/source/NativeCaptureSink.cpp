@@ -10,6 +10,10 @@
 namespace veyra::source {
 using Microsoft::WRL::ComPtr;
 namespace {
+LONG audioBlockBytes(const WAVEFORMATEX& f){
+    // Round up to whole sample frames, including uncommon rates such as 11025.
+    return LONG(((uint64_t(f.nSamplesPerSec)+99)/100)*f.nBlockAlign);
+}
 void clearType(AM_MEDIA_TYPE& t){CoTaskMemFree(t.pbFormat);if(t.pUnk)t.pUnk->Release();t={};}
 HRESULT copyType(AM_MEDIA_TYPE& dst,const AM_MEDIA_TYPE& src){
     dst=src;dst.pbFormat=nullptr;dst.pUnk=nullptr;
@@ -110,8 +114,19 @@ public:
     HRESULT STDMETHODCALLTYPE EndFlush()override{std::lock_guard lock(mutex_);flushing_=false;return S_OK;}
     HRESULT STDMETHODCALLTYPE NewSegment(REFERENCE_TIME,REFERENCE_TIME,double)override{return S_OK;}
     HRESULT STDMETHODCALLTYPE GetAllocator(IMemAllocator** p)override{if(!p)return E_POINTER;std::lock_guard lock(mutex_);if(!allocator_){const auto hr=CoCreateInstance(CLSID_MemoryAllocator,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&allocator_));if(FAILED(hr))return hr;}return allocator_.CopyTo(p);}
-    HRESULT STDMETHODCALLTYPE NotifyAllocator(IMemAllocator* p,BOOL)override{if(!p)return E_POINTER;std::lock_guard lock(mutex_);allocator_=p;return S_OK;}
-    HRESULT STDMETHODCALLTYPE GetAllocatorRequirements(ALLOCATOR_PROPERTIES* p)override{if(!p)return E_POINTER;std::lock_guard lock(mutex_);*p={3,LONG(layout_.sampleBytes),1,0};return S_OK;}
+    HRESULT STDMETHODCALLTYPE NotifyAllocator(IMemAllocator* p,BOOL)override{
+        if(!p)return E_POINTER;std::lock_guard lock(mutex_);allocator_=p;
+        if(audio_){
+            ALLOCATOR_PROPERTIES actual{};const auto hr=p->GetProperties(&actual);
+            const auto& f=*reinterpret_cast<const WAVEFORMATEX*>(desired_.pbFormat);
+            log::info("capture-audio-buffer",std::format("actual allocator hr=0x{:08X} buffers={} bytes={} capacityPerBlockMs={:.3f} (capacity, not measured latency)",uint32_t(hr),actual.cBuffers,actual.cbBuffer,SUCCEEDED(hr)?1000.0*actual.cbBuffer/f.nAvgBytesPerSec:0.0));
+        }
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetAllocatorRequirements(ALLOCATOR_PROPERTIES* p)override{
+        if(!p)return E_POINTER;std::lock_guard lock(mutex_);
+        *p={3,audio_?audioBlockBytes(*reinterpret_cast<const WAVEFORMATEX*>(desired_.pbFormat)):LONG(layout_.sampleBytes),1,0};return S_OK;
+    }
     HRESULT STDMETHODCALLTYPE Receive(IMediaSample* sample)override{
         if(!sample)return E_POINTER;std::lock_guard lock(mutex_);if(flushing_)return S_FALSE;if(state_==State_Stopped)return VFW_E_WRONG_STATE;
         // A device mode change needs full source/graph recreation, never a
@@ -129,6 +144,21 @@ public:
     HRESULT STDMETHODCALLTYPE ReceiveMultiple(IMediaSample** p,long n,long* done)override{if(!p||!done||n<0)return E_INVALIDARG;*done=0;while(*done<n){const auto hr=Receive(p[*done]);if(hr!=S_OK)return hr;++*done;}return S_OK;}
     HRESULT STDMETHODCALLTYPE ReceiveCanBlock()override{return S_OK;}
 };
+}
+HRESULT suggestCaptureAudioBuffering(IPin* pin,const WAVEFORMATEX& format){
+    if(!pin)return E_POINTER;
+    if(!format.nBlockAlign||format.nSamplesPerSec<8000||format.nSamplesPerSec>192000||format.nBlockAlign>8||
+        format.nAvgBytesPerSec!=uint64_t(format.nSamplesPerSec)*format.nBlockAlign)return E_INVALIDARG;
+    ComPtr<IAMBufferNegotiation> negotiation;
+    const auto queryHr=pin->QueryInterface(IID_PPV_ARGS(&negotiation));
+    if(FAILED(queryHr)){
+        log::warn("capture-audio-buffer",std::format("upstream buffer negotiation unavailable hr=0x{:08X}; retain driver defaults",uint32_t(queryHr)));
+        return queryHr;
+    }
+    const ALLOCATOR_PROPERTIES wanted{-1,audioBlockBytes(format),-1,-1};
+    const auto hr=negotiation->SuggestAllocatorProperties(&wanted);
+    log::info("capture-audio-buffer",std::format("upstream request bytes={} blockMs={:.3f} rate={} channels={} bits={} hr=0x{:08X} (advisory; actual callbacks logged separately)",wanted.cbBuffer,1000.0*wanted.cbBuffer/format.nAvgBytesPerSec,format.nSamplesPerSec,format.nChannels,format.wBitsPerSample,uint32_t(hr)));
+    return hr;
 }
 HRESULT createNativeCaptureSink(const AM_MEDIA_TYPE& type,std::function<HRESULT(IMediaSample*)> callback,ComPtr<IBaseFilter>& filter,ComPtr<IPin>& pin){
     filter.Reset();pin.Reset();CaptureMediaLayout layout;if(!captureMediaLayout(type,layout))return VFW_E_INVALIDMEDIATYPE;

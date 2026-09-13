@@ -6,9 +6,12 @@
 using namespace veyra;
 using Microsoft::WRL::ComPtr;
 // Minimal upstream peer: the production input pin must validate its direction.
-struct OutputPin final:IPin {
+struct OutputPin final:IPin,IAMBufferNegotiation {
     std::atomic<ULONG> refs{1};
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** p)override{if(!p)return E_POINTER;*p=nullptr;if(id!=IID_IUnknown&&id!=IID_IPin)return E_NOINTERFACE;*p=this;AddRef();return S_OK;}
+    bool supportsBuffering=false;HRESULT bufferResult=S_OK;unsigned suggestions=0;ALLOCATOR_PROPERTIES suggested{};
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** p)override{if(!p)return E_POINTER;*p=nullptr;if(id==IID_IUnknown||id==IID_IPin)*p=static_cast<IPin*>(this);else if(id==IID_IAMBufferNegotiation&&supportsBuffering)*p=static_cast<IAMBufferNegotiation*>(this);else return E_NOINTERFACE;AddRef();return S_OK;}
+    HRESULT STDMETHODCALLTYPE SuggestAllocatorProperties(const ALLOCATOR_PROPERTIES* p)override{if(!p)return E_POINTER;suggested=*p;++suggestions;return bufferResult;}
+    HRESULT STDMETHODCALLTYPE GetAllocatorProperties(ALLOCATOR_PROPERTIES* p)override{if(!p)return E_POINTER;*p=suggested;return S_OK;}
     ULONG STDMETHODCALLTYPE AddRef()override{return ++refs;}ULONG STDMETHODCALLTYPE Release()override{auto n=--refs;if(!n)delete this;return n;}
     HRESULT STDMETHODCALLTYPE Connect(IPin*,const AM_MEDIA_TYPE*)override{return E_NOTIMPL;}
     HRESULT STDMETHODCALLTYPE ReceiveConnection(IPin*,const AM_MEDIA_TYPE*)override{return E_NOTIMPL;}
@@ -75,11 +78,21 @@ int main(){
     WAVEFORMATEX wave{};wave.wFormatTag=WAVE_FORMAT_PCM;wave.nChannels=2;wave.nSamplesPerSec=48000;wave.wBitsPerSample=16;wave.nBlockAlign=4;wave.nAvgBytesPerSec=192000;
     AM_MEDIA_TYPE audio{};audio.majortype=MEDIATYPE_Audio;audio.subtype=MEDIASUBTYPE_PCM;audio.formattype=FORMAT_WaveFormatEx;audio.cbFormat=sizeof(wave);audio.pbFormat=reinterpret_cast<BYTE*>(&wave);
     output.Attach(new OutputPin);unsigned audioReceived=0;
+    auto* audioPeer=static_cast<OutputPin*>(output.Get());
+    check(source::suggestCaptureAudioBuffering(output.Get(),wave)==E_NOINTERFACE,"missing upstream negotiation reports fallback without requesting allocator");
+    audioPeer->supportsBuffering=true;
+    check(source::suggestCaptureAudioBuffering(output.Get(),wave)==S_OK&&audioPeer->suggestions==1&&audioPeer->suggested.cbBuffer==1920&&audioPeer->suggested.cBuffers==-1&&audioPeer->suggested.cbAlign==-1&&audioPeer->suggested.cbPrefix==-1,"upstream 48k stereo16 request is 10ms with driver-owned pool and alignment");
+    auto unusual=wave;unusual.nSamplesPerSec=11025;unusual.nAvgBytesPerSec=44100;
+    check(source::suggestCaptureAudioBuffering(output.Get(),unusual)==S_OK&&audioPeer->suggested.cbBuffer==444,"uncommon rate rounds up to whole PCM frames");
+    auto floatStereo=wave;floatStereo.wFormatTag=WAVE_FORMAT_IEEE_FLOAT;floatStereo.wBitsPerSample=32;floatStereo.nBlockAlign=8;floatStereo.nAvgBytesPerSec=384000;
+    check(source::suggestCaptureAudioBuffering(output.Get(),floatStereo)==S_OK&&audioPeer->suggested.cbBuffer==3840,"float stereo uses byte rate rather than hardcoded 1920 bytes");
+    audioPeer->bufferResult=E_FAIL;
+    check(source::suggestCaptureAudioBuffering(output.Get(),wave)==E_FAIL,"driver rejection is visible to diagnostics");
     check(SUCCEEDED(source::createNativeAudioSink(audio,[&](IMediaSample*){++audioReceived;return S_OK;},filter,input)),"create shared native PCM terminal");
-    check(filter&&SUCCEEDED(filter.As(&memory))&&input->ReceiveConnection(output.Get(),&audio)==S_OK,"PCM format is accepted explicitly");
+    check(filter&&SUCCEEDED(filter.As(&memory))&&input->ReceiveConnection(output.Get(),&audio)==S_OK,"PCM connection remains supported after rejected advisory request");
     wave.nSamplesPerSec=44100;wave.nAvgBytesPerSec=176400;check(input->QueryAccept(&audio)==S_FALSE,"audio rate change requires reconnect");wave.nSamplesPerSec=48000;wave.nAvgBytesPerSec=192000;
     ALLOCATOR_PROPERTIES audioWanted{},audioActual{};
-    check(memory->GetAllocatorRequirements(&audioWanted)==S_OK&&audioWanted.cbBuffer==4,"audio allocator retains frame alignment after connection");
+    check(memory->GetAllocatorRequirements(&audioWanted)==S_OK&&audioWanted.cbBuffer==1920&&audioWanted.cbBuffer%wave.nBlockAlign==0,"audio allocator requests aligned 10ms blocks instead of a single sample");
     audioWanted.cbBuffer=1920;
     bool audioReady=memory->GetAllocator(&allocator)==S_OK&&allocator->SetProperties(&audioWanted,&audioActual)==S_OK&&allocator->Commit()==S_OK;
     check(audioReady,"PCM allocator initialized");

@@ -42,8 +42,9 @@ int main(int argc,char** argv){
         }
         const auto s=audio.snapshot();audio.stop();std::sort(errors.begin(),errors.end());
         const double p95=errors.empty()?999:errors[(errors.size()*95+99)/100-1];
-        const bool pass=missing==0&&s.resets==settledResets&&s.underruns==settledUnderruns&&s.overflows==0&&p95<35;
-        std::cout<<(pass?"PASS ":"FAIL ")<<"CAPTURE_JITTER additionalResets="<<s.resets-settledResets<<" additionalUnderruns="<<s.underruns-settledUnderruns<<" missing="<<missing<<" p95SkewMs="<<p95<<'\n';
+        const bool inputTelemetry=s.inputBlocks==500&&std::abs(s.inputBlockMs-10)<.001&&s.inputIntervalMs>=0&&s.inputIntervalMs<100;
+        const bool pass=inputTelemetry&&missing==0&&s.resets==settledResets&&s.underruns==settledUnderruns&&s.overflows==0&&p95<35;
+        std::cout<<(pass?"PASS ":"FAIL ")<<"CAPTURE_JITTER additionalResets="<<s.resets-settledResets<<" additionalUnderruns="<<s.underruns-settledUnderruns<<" missing="<<missing<<" p95SkewMs="<<p95<<" inputBlocks="<<s.inputBlocks<<" inputBlockMs="<<s.inputBlockMs<<" inputIntervalMs="<<s.inputIntervalMs<<'\n';
         return pass?0:1;
     }
     if(driftTest){

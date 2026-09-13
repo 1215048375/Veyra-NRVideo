@@ -1858,3 +1858,19 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 ## 2026-09-13 README 项目来源与致谢
 
 按用户要求，在中英文 README 最底部补齐实际集成/复用、架构与实现参考、已搁置 AMD NR 调研来源及各项目链接。依据 THIRD_PARTY_NOTICES、GPU DIS provenance、竞品/性能/采集审计与质量/AMD NR 方案核对，区分依赖和研究，不把尚未接入的算法宣传为现有功能。保留完整许可证及对应源码入口。仅文档改动，执行 Markdown 本地链接与双语项目 URL 一致性检查、git diff --check；无需重建或改动 1.0.0 包与标签。
+
+## 2026-09-13 本地缓存与重复产物清理
+
+用户授权检查并清理项目缓存。清理前扫描24.758GiB，执行out/cleanup-20260913.ps1预览和-Apply后移除1833个目标、12.656GiB，失败0；复扫12.103GiB。路径均解析为项目内out/logs，预检Git无跟踪文件、无重解析点、无正在运行的目标EXE。安全预览脚本首次祖先遍历未终止，已终止预览进程并修正为显式GetDirectoryName/Get-Item逐级验证；此前未发生删除。最终预览约3秒、清理约9秒。
+
+删除：out/build旧构建；旧Release展开目录、0.0.2候选、1.0.0首轮候选ZIP（保留该目录内正式FFmpeg源码ZIP）；1.0.0最终包重复展开/验证目录；release-audit/package与旧audit/P1 build；RemotePlay关闭功能的验证构建；logs/delivery、optimization-goal-20260908、phase5中的合成PNG/JPG/MP4/partial/bin。对应.log/.json、测试源码保留；delivery的92e09ba3556148a9b9275d2ba1ef1bfe及ca204954e1e64ee4aeddf7a41cf5f1e6整轮产物保留。历史文档中指向已清理旧二进制/图片的路径不再存在，不代表重新测试或修改旧结论。
+
+保留：当前out/remoteplay/product-repair完整构建与桌面快捷方式目标、chiaki-msvc-stage、SDK/模型/runtime_local、Git历史、源代码、真实captures、loop/local回归输入、正式1.0.0三个ZIP及旧最终版本ZIP备份。清理没有访问用户数据目录中的PS5配对/PSN凭据。当前构建仍使用外部C:/veyra-deps依赖，不退回stock FFmpeg。
+
+验证：当前EXE、patched avcodec-63.dll和1.0.0 portable/RemotePlay-source/FFmpeg-source ZIP逐项SHA256与清理前相同；current CMakeCache、chiaki stage、最终delivery result存在；清理后git status无变更（本记录落盘前）、git diff --check通过。未运行产品或重新构建，因为没有改动产品文件。详细清单及哈希位于logs/cleanup-20260913/{plan.json,result.json,protected-before.json,after-size.json}，仅本地保存。旧out/build路径需重新配置/构建后才能使用，后续开发优先使用保留的out/remoteplay/product-repair。未修改GitHub Release资产。
+
+## 2026-09-13 采集卡音频高延迟排查
+
+用户反馈OBS音频正常、Veyra延迟高。确认产品音频ConnectDirect前缺少IAMBufferNegotiation，音频sink仅请求1个sample最小字节。参考OBS libdshowcapture固定c13d4b7及Microsoft API，独立增加连接前10ms帧对齐请求、失败兼容继续、实际allocator容量日志；新增实际inputBlockMs/inputIntervalMs/inputBlocks诊断，不改自动补偿和音频重采样。不能推定反馈者驱动确实500ms，未取得其日志/实卡听测。
+
+开工tag checkpoint/capture-audio-latency-20260913。旧产品合同32 PASS/1 FAIL验证缺口；修后38 PASS，完整构建100步成功；合成PCM+真实WASAPI同步16 PASS、抖动5秒additionalReset/underrun/missing全0、设备恢复PASS。delivery 23/23、53.123279秒，logs/delivery/c7ecf48ee7ae44a99cc3eb6f971d61fc/result.json，NR实际Create/Evaluate成功、SEH0。当前EXE B847BFAA3440548C8494DB5DE90280BAB76609DB5B5DECCFF3ABB0870C6DB89A，FFmpeg slice补丁DLL哈希不变。详细命令、失败、修改文件与验证边界见docs/CAPTURE_AUDIO_LATENCY_2026-09-13.md和logs/capture-audio-latency-20260913/。未修改发布包、SDK或运行时，无push。下一步反馈者新版实卡测试与日志，10ms请求不是总延迟承诺。
