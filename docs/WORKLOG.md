@@ -1926,3 +1926,5 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 用户授权发布并在完成后关机。codex/release-1.1.0，存档checkpoint/pre-release-1.1.0-20260914。包含普通版Smooth Motion教程与允许叠加策略、此前采集格式扩展；不合入强制互斥实验构建。更新README中英文功能表/教程、1.1.0版本及发布/组件/源码说明。
 完整构建通过；delivery23/23，46.8241855秒（logs/delivery/f3bba8f704634831ab09ab62e7c233b7），真实NR Create0x1/SEH0、原生4K Evaluate12，播放和导出通过；采集布局127、GPU颜色/HDR38通过；独立解压便携5/5通过，真实内部FG生成664/669/669帧。细节、命令、未执行范围见docs/RELEASE_1.1.0_EXECUTION.md。
 便携/RemotePlay源码/FFmpeg源码及各自SHA256共六资产生成，逐文件及排除扫描通过；七运行文件与patched FFmpeg沿用，社区NR继续HashMismatch，源码没有SDK/DLL/模型/凭据。桌面普通程序已为1.1.0，EXE SHA256 F4106617DD743E2913729D3BDF9DF8A8DE911E1E28EAC482F3204ECD4967AE39。下一步推送main/tag、上传草稿、核实服务端digest后公开latest，再保存记录关机。
+
+1.1.0发布完成：main/v1.1.0（1523ddb）已推送；2026-09-13T18:50:38Z公开为latest，Release ID 387998437，非draft/prerelease。六资产均uploaded、服务端size及SHA256逐项匹配；远端README与标签一致。地址https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.1.0 。证据logs/release-1.1.0/published-release.json、remote-assets-verified.json。未移动tag或修改验证后的压缩包。本记录保存后按用户明确请求关机。

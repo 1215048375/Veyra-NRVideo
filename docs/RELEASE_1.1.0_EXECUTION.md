@@ -33,3 +33,8 @@ patched avcodec SHA256仍为0710F0D87A7FFCC9F998F1A35D0500345F6C66EB9A5A39C51D60
 ## 发布核实
 
 上传前检查与命令结果在 `logs/release-1.1.0/`。先创建草稿上传，核对服务端六资产的字节数和digest后再正式公开为latest；完成结果追加WORKLOG，不移动版本标签或改动已验证资产。
+
+### 发布完成
+
+2026-09-13T18:50:38Z，GitHub Release 387998437已正式公开为latest，tag v1.1.0指向1523ddb，非草稿、非预发布。main/tag推送成功，远端README与标签blob匹配。六资产全部uploaded，服务端size/digest逐项匹配本地，证据logs/release-1.1.0/remote-assets-verified.json与published-release.json。地址：https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.1.0 。
+发布后不移动tag，不修改ZIP。包内文档与源码文字一致；首次按工作树原始字节对比README因Git切换分支的CRLF/LF差异报不一致，归一化换行后全部一致，包自身逐字节manifest校验仍通过。按用户授权，在保存本记录后执行关机。
