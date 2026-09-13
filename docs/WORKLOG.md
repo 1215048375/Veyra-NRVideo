@@ -1897,4 +1897,6 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 
 完整构建21步通过；核心77/77；真实PS5两次可控断流115秒PASS，第二次在稳定30秒续期后注入，画面/NR/SR/DLSSG/音频恢复，2319健康采样，idle=1，NGX Create/Release=0x1、SEH0。便携初次7秒smoke在原版FG初始化/seek后仅预热即结束，不能计通过；添加可选测试时长参数，15秒观察5/5通过，保留真实生成及包内模块路径断言。EXE B693547F722C01E583F1B549507E355540618B628740147154A212F61D3BFFE2，桌面同路径已为1.0.2。
 
-七运行文件和patched FFmpeg不变；便携/两对应源码ZIP及SHA256共六资产，逐文件和源码排除检查通过，未放入SDK/用户媒体/凭据。更新双语README及Release Notes、组件和构建说明。详见docs/RELEASE_1.0.2_EXECUTION.md，证据logs/release-1.0.2。软件恢复改善不等于无线故障根治。下一步推送并核验公开发布，后续由用户长时网络环境验收。
+七运行文件和patched FFmpeg不变；便携/两对应源码ZIP及SHA256共六资产，逐文件和源码排除检查通过，未放入SDK/用户媒体/凭据。更新双语README及Release Notes、组件和构建说明。详见docs/RELEASE_1.0.2_EXECUTION.md，证据logs/release-1.0.2。软件恢复改善不等于无线故障根治。
+
+发布完成：main与v1.0.2（09c054c）已推送至nrvideo。六资产全部uploaded，服务端字节数及SHA256逐项匹配；2026-09-13T15:32:29Z正式公开为latest，非草稿/非预发布，Release ID 387942841，API复核通过。地址https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.2 。发布后只追加本记录，不移动标签、不修改旧资产。桌面快捷方式所指EXE已为1.0.2；下一步用户长时游玩验收。

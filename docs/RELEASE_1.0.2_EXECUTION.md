@@ -10,7 +10,7 @@
 
 ## 验证与发布
 
-待补构建、离线回归、重复断流实机、包内启动和上传校验结果。七个增强运行文件与patched FFmpeg不变，源码/运行包分离，发布完整便携ZIP、RemotePlay/FFmpeg对应源码ZIP及各自SHA256文件。所有测试单次不超过300秒。不宣称Wi-Fi断流根因已修复。
+构建、离线回归、重复断流实机、包内启动和上传校验结果见下文。七个增强运行文件与patched FFmpeg不变，源码/运行包分离，发布完整便携ZIP、RemotePlay/FFmpeg对应源码ZIP及各自SHA256文件。所有测试单次不超过300秒。不宣称Wi-Fi断流根因已修复。
 
 ### 实际构建与恢复回归
 
@@ -35,4 +35,10 @@
 
 最终命令：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance/portable-smoke.ps1 -PackageDirectory out/releases/1.0.2-verify/Veyra-1.0.2-win64-portable -InputFile loop/local/fixed_clips/test_av_1080p.mp4 -OutputDirectory logs/release-1.0.2/portable-smoke-15s -CaseSeconds 15`。5/5 PASS，每项15.54–15.85秒；基线817帧，社区528处理/526生成，原版562/560，Video SR707/665。精简PATH、独立解压目录、manifest临时禁用仍加载包内模块成功；结果和失败日志均保留。未改ZIP中的产品文件，源码包只需随标签提供新增测试脚本，无依赖源码变化。
 
-源码改变：StreamRecovery.h、RemotePlaySessionSource.cpp、CoreTests.cpp、LivePresentationTests.cpp、portable-smoke.ps1、版本/README/构建组件说明与本记录。上一修复aad8ce4同时随本次标记发布。git diff --check及变更路径检查通过，不含SDK、运行二进制、日志或凭据。下一步推送main/版本标记、上传六资产、核验服务端SHA256后公开为latest。
+源码改变：StreamRecovery.h、RemotePlaySessionSource.cpp、CoreTests.cpp、LivePresentationTests.cpp、portable-smoke.ps1、版本/README/构建组件说明与本记录。上一修复aad8ce4同时随本次标记发布。git diff --check及变更路径检查通过，不含SDK、运行二进制、日志或凭据。
+
+### GitHub 发布完成
+
+main及附注标签v1.0.2已推送到nrvideo（Likely7/Veyra-NRVideo），标签指向09c054c。六个资产均为uploaded，逐项名称、字节数、服务端SHA256与本地文件匹配（包括三个.sha256文件自身的摘要）。核验记录为logs/release-1.0.2/github-draft.json。
+
+2026-09-13T15:32:29Z已公开为latest，非草稿、非预发布，Release ID 387942841；再次查询releases/latest确认v1.0.2及六资产，记录logs/release-1.0.2/github-published.json。发布地址：https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.2 。未修改旧版本资产。发布后只追加文档记录，不重打包、不移动标签。下一步由用户在日常Wi-Fi环境下长时游玩验收，网络瞬时断流仍不属于已消除的问题。
