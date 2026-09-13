@@ -39,6 +39,7 @@ FFmpegVideoDecoder::~FFmpegVideoDecoder()
 bool FFmpegVideoDecoder::openSoftware(const AVCodecParameters* codecParameters,
     int streamTimeBaseNum, int streamTimeBaseDen, unsigned softwareThreads)
 {
+    receiveStatus_ = DecodeReceiveStatus::NeedInput;
     if (context_ != nullptr) {
         close();
     }
@@ -91,6 +92,7 @@ bool FFmpegVideoDecoder::openD3D12VA(const AVCodecParameters* codecParameters,
     int streamTimeBaseNum, int streamTimeBaseDen,
     ID3D12Device* device, ID3D12CommandQueue* queue)
 {
+    receiveStatus_ = DecodeReceiveStatus::NeedInput;
     if (context_ != nullptr) {
         close();
     }
@@ -160,6 +162,7 @@ bool FFmpegVideoDecoder::openD3D12VA(const AVCodecParameters* codecParameters,
 
 void FFmpegVideoDecoder::close()
 {
+    receiveStatus_ = DecodeReceiveStatus::NeedInput;
     if (frame_ != nullptr) {
         av_frame_free(&frame_);
     }
@@ -204,12 +207,22 @@ bool FFmpegVideoDecoder::sendPacket(const AVPacket* packet)
 const AVFrame* FFmpegVideoDecoder::receiveFrame()
 {
     if (context_ == nullptr) {
+        receiveStatus_ = DecodeReceiveStatus::Error;
         return nullptr;
     }
     const int result = avcodec_receive_frame(context_, frame_);
     if (result < 0) {
+        if (result == AVERROR(EAGAIN)) receiveStatus_ = DecodeReceiveStatus::NeedInput;
+        else if (result == AVERROR_EOF) receiveStatus_ = DecodeReceiveStatus::EndOfStream;
+        else {
+            receiveStatus_ = DecodeReceiveStatus::Error;
+            char errorText[AV_ERROR_MAX_STRING_SIZE]{};
+            av_strerror(result, errorText, sizeof(errorText));
+            log::error("media", std::format("decoder: receive_frame failed code={} text={}", result, errorText));
+        }
         return nullptr;
     }
+    receiveStatus_ = DecodeReceiveStatus::Frame;
     ++stats_.framesDecoded;
     // Frame timestamps are in the CODEC context time_base; AVFrame.time_base
     // is not reliably populated by every decoder path.
@@ -257,6 +270,7 @@ const AVFrame* FFmpegVideoDecoder::receiveFrame()
 
 void FFmpegVideoDecoder::flushBuffers()
 {
+    receiveStatus_ = DecodeReceiveStatus::NeedInput;
     if (context_ != nullptr) {
         avcodec_flush_buffers(context_);
     }

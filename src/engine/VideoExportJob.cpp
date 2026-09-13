@@ -29,6 +29,8 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
     gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;source::MediaFileSource source;pipeline::EnhanceGraph graph(ctx,ring);sink::NvencD3D12Encoder enc;
     AVFormatContext *mux=nullptr,*audioInput=nullptr;AVStream* videoStream=nullptr;AVStream* audioStream=nullptr;AVPacket* audioPacket=av_packet_alloc();
     int audioIndex=-1;bool audioPending=false,audioEof=false,ok=false,headerWritten=false;int64_t written=0;double audioEndSeconds=0,videoOriginSeconds=0;
+    std::wstring failureReason;
+    uint32_t outputWidth=0,outputHeight=0;AVRational outputRate{};
     const auto partial=output+L".partial";
     try { do {
         Status st=Status::Ok;gfx::DeviceContextDesc dd;dd.commandSlotCount=6;
@@ -43,17 +45,19 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
         // Bounded metadata scan; decoded pixels are not retained. Rewind the
         // file source afterwards, preserving all source frames for the export.
         std::vector<double> samples;bool scanError=false;
-        for(unsigned i=0;i<120&&!cancel;++i){pipeline::FramePacket p;const AVFrame* f=nullptr;const auto rs=source.read(p,&f);if(rs==source::SourceReadStatus::Eos)break;if(rs!=source::SourceReadStatus::Frame||p.pts.isUnknown()){scanError=true;break;}samples.push_back(p.pts.toDouble());}
+        for(unsigned i=0;i<120&&!cancel;++i){pipeline::FramePacket p;const AVFrame* f=nullptr;const auto rs=source.read(p,&f);if(rs==source::SourceReadStatus::Eos)break;if(rs!=source::SourceReadStatus::Frame||p.pts.isUnknown()){failureReason=source.errorMessage();scanError=true;break;}samples.push_back(p.pts.toDouble());}
         if(scanError||samples.empty()||cancel)break;
         const auto [rateNum,rateDen]=CfrTimeline::select(info.nominalRateNum,info.nominalRateDen,info.timestampQuantum,samples);
         CfrTimeline timeline(rateNum,rateDen,info.timestampQuantum,samples.front());
         if(!timeline.valid()){progress(0,L"无法确认一致的恒定帧率，已停止导出");veyra::log::error("export-timeline","CFR rejected source=preflight; no timestamp-consistent rate candidate");break;}
         source.close();if(!source.open(od))break; // reopen from the true beginning, including negative PTS
         const AVRational rate=av_mul_q({rateNum,rateDen},{int(options.fg?options.fgMultiplier:1),1});
+        outputRate=rate;
         veyra::log::info("export-timeline",std::format("CFR declared={}/{} candidate={}/{} timestampQuantum={} sampled={} output={}/{} (timestamp-consistent candidate, quantized short clips may be ambiguous; every PTS validated)",info.nominalRateNum,info.nominalRateDen,rateNum,rateDen,info.timestampQuantum,samples.size(),rate.num,rate.den));
         const auto resolution=pipeline::ResolutionPlan::make({info.width,info.height},options.sr,pipeline::NrSizePolicy::Native,true,options.settings.revision,options.settings.srTarget);
         pipeline::EnhanceGraphDesc gd;gd.sourceWidth=info.width;gd.sourceHeight=info.height;gd.workWidth=resolution.base.width;gd.workHeight=resolution.base.height;gd.nrWidth=resolution.nr.width;gd.nrHeight=resolution.nr.height;gd.flowWidth=resolution.flow.width;gd.flowHeight=resolution.flow.height;gd.enableSr=resolution.srApplied;gd.videoSrQuality=options.settings.videoSrQuality;gd.enableNr=options.nr;gd.nrRuntime=options.settings.nrRuntime;gd.enableFg=options.fg;gd.fgMultiplier=options.fgMultiplier;gd.frameGenerationBackend=options.settings.frameGenerationBackend;gd.enableNvofStandalone=options.nr;gd.model=options.settings.model;gd.residual=options.settings.residual;gd.protection=options.settings.protection;gd.settingsRevision=options.settings.revision;gd.flowQuality=options.settings.flow;gd.opticalFlowBackend=options.settings.opticalFlowBackend;gd.amdFlowHalfResolution=options.settings.amdFlowHalfResolution;gd.contentRate=options.settings.content;gd.runtimeAbsPath=runtime::localRuntimeDirectory().wstring();
         if(!graph.initialize(gd)||!graph.createViews())break;
+        outputWidth=gd.workWidth;outputHeight=gd.workHeight;
         if(avformat_alloc_output_context2(&mux,nullptr,"mp4",utf8(partial).c_str())<0||!mux)break;
         videoStream=avformat_new_stream(mux,nullptr);if(!videoStream)break;videoStream->time_base={rate.den,rate.num};videoStream->avg_frame_rate=rate;
         auto* cp=videoStream->codecpar;cp->codec_type=AVMEDIA_TYPE_VIDEO;cp->codec_id=hevc?AV_CODEC_ID_HEVC:AV_CODEC_ID_H264;cp->width=gd.workWidth;cp->height=gd.workHeight;cp->format=AV_PIX_FMT_YUV420P;cp->color_range=AVCOL_RANGE_MPEG;cp->color_space=AVCOL_SPC_BT709;cp->color_primaries=AVCOL_PRI_BT709;cp->color_trc=AVCOL_TRC_IEC61966_2_1;
@@ -68,7 +72,7 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
             av_dict_copy(&mux->metadata,audioInput->metadata,0);
         }
         auto writeAudioUntil=[&](double seconds){if(!audioStream)return true;
-            for(;;){if(!audioPending){if(audioEof)return true;av_packet_unref(audioPacket);if(av_read_frame(audioInput,audioPacket)<0){audioEof=true;return true;}if(audioPacket->stream_index!=audioIndex)continue;audioPending=true;}
+            for(;;){if(!audioPending){if(audioEof)return true;av_packet_unref(audioPacket);const int readResult=av_read_frame(audioInput,audioPacket);if(readResult==AVERROR_EOF){audioEof=true;return true;}if(readResult<0){veyra::log::error("export-audio",std::format("source packet read failed code={}",readResult));return false;}if(audioPacket->stream_index!=audioIndex)continue;if(audioPacket->flags&AV_PKT_FLAG_CORRUPT){veyra::log::error("export-audio","corrupt source audio packet");return false;}audioPending=true;}
                 const auto tb=audioInput->streams[audioIndex]->time_base;const int64_t ts=audioPacket->pts!=AV_NOPTS_VALUE?audioPacket->pts:audioPacket->dts;const double time=ts==AV_NOPTS_VALUE?0:ts*av_q2d(tb)-videoOriginSeconds;if(time>seconds)return true;
                 const int64_t origin=av_rescale_q(static_cast<int64_t>(videoOriginSeconds*1000000),{1,1000000},tb);
                 if(audioPacket->pts!=AV_NOPTS_VALUE)audioPacket->pts-=origin;if(audioPacket->dts!=AV_NOPTS_VALUE)audioPacket->dts-=origin;
@@ -83,7 +87,7 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
         auto headers=enc.headers();cp->extradata=static_cast<uint8_t*>(av_mallocz(headers.size()+AV_INPUT_BUFFER_PADDING_SIZE));if(!cp->extradata)break;memcpy(cp->extradata,headers.data(),headers.size());cp->extradata_size=int(headers.size());
         if(avio_open(&mux->pb,utf8(partial).c_str(),AVIO_FLAG_WRITE)<0||avformat_write_header(mux,nullptr)<0)break;headerWritten=true;
         uint64_t sourceCount=0,generatedCount=0,holdCount=0;int64_t outputIndex=0;bool error=false;std::shared_ptr<pipeline::FrameLease> lastReal;
-        while(!cancel){if(frameBoundary&&!frameBoundary())break;pipeline::FramePacket packet;const AVFrame* frame=nullptr;const auto rs=source.read(packet,&frame);if(rs==source::SourceReadStatus::Eos)break;if(rs!=source::SourceReadStatus::Frame||packet.pts.isUnknown()){error=true;break;}
+        while(!cancel){if(frameBoundary&&!frameBoundary()){error=true;break;}pipeline::FramePacket packet;const AVFrame* frame=nullptr;const auto rs=source.read(packet,&frame);if(rs==source::SourceReadStatus::Eos)break;if(rs!=source::SourceReadStatus::Frame||packet.pts.isUnknown()){failureReason=source.errorMessage();error=true;break;}
             if(sourceCount==0)videoOriginSeconds=packet.pts.toDouble();
             const double expectedPts=timeline.expected(sourceCount);
             if(!timeline.accepts(sourceCount,packet.pts.toDouble())){
@@ -121,7 +125,33 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
     }while(false); }catch(const std::exception&){progress(0,L"导出异常，已保留partial，请查看诊断");ok=false;}
     enc.close();if(mux){if(mux->pb)avio_closep(&mux->pb);avformat_free_context(mux);}if(audioInput)avformat_close_input(&audioInput);av_packet_free(&audioPacket);
     ring.drainQueue();graph.shutdown();source.close();ring.shutdown();ctx.shutdown();
-    if(ok){progress(.999,L"正在封装和验证输出");source::MediaFileSource check;source::SourceOpenDesc od;od.path=partial;od.preferHardwareDecode=false;pipeline::FramePacket pkt;const AVFrame* frame=nullptr;ok=check.open(od)&&check.read(pkt,&frame)==source::SourceReadStatus::Frame;check.close();if(ok)ok=MoveFileExW(partial.c_str(),output.c_str(),MOVEFILE_WRITE_THROUGH)!=FALSE;}
-    progress(ok?1:0,ok?L"视频导出完成，解码回读成功":cancel?L"导出已取消，partial文件已保留":L"视频导出失败，partial文件已保留，请查看诊断");return ok;
+    if(ok){
+        progress(.999,L"正在封装和验证输出");
+        source::MediaFileSource check;source::SourceOpenDesc od;od.path=partial;od.preferHardwareDecode=false;
+        ok=!cancel&&check.open(od);
+        const auto info=check.info();
+        CfrTimeline verifiedTimeline(outputRate.num,outputRate.den,info.timestampQuantum,0);
+        ok=ok&&info.width==outputWidth&&info.height==outputHeight&&verifiedTimeline.valid();
+        uint64_t decoded=0;bool reachedEos=false;
+        while(ok&&!cancel){
+            pipeline::FramePacket pkt;const AVFrame* frame=nullptr;const auto rs=check.read(pkt,&frame);
+            if(rs==source::SourceReadStatus::Eos){reachedEos=true;break;}
+            if(rs!=source::SourceReadStatus::Frame||pkt.pts.isUnknown()||decoded>=uint64_t(written)||!verifiedTimeline.accepts(decoded,pkt.pts.toDouble())){ok=false;break;}
+            ++decoded;
+        }
+        ok=ok&&!cancel&&reachedEos&&decoded==uint64_t(written);
+        veyra::log::info("export-verify",std::format("decoded={} expected={} eof={} cancelled={} passed={}",decoded,written,reachedEos,bool(cancel),ok));
+        check.close();
+        if(!ok&&!cancel)failureReason=L"输出完整性验证失败，未生成正式文件";
+        if(ok)ok=!cancel&&MoveFileExW(partial.c_str(),output.c_str(),MOVEFILE_WRITE_THROUGH)!=FALSE;
+    }
+    if(ok)progress(1,L"视频导出完成，逐帧完整性验证通过");
+    else {
+        std::wstring message=cancel?L"导出已取消":failureReason.empty()?L"视频导出失败，请查看诊断":failureReason;
+        std::error_code ec;
+        message+=std::filesystem::exists(partial,ec)?L"；partial文件已保留":L"；未生成输出文件";
+        progress(0,message);
+    }
+    return ok;
 }
 }

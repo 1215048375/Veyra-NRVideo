@@ -63,7 +63,11 @@ ExportJobSnapshot ExportJobManager::poll(){
     if(!p_->shared)return p_->snapshot;
     auto& s=*p_->shared;p_->snapshot.sourceFrames=InterlockedCompareExchange64(&s.sourceFrames,0,0);p_->snapshot.generated=InterlockedCompareExchange64(&s.generated,0,0);p_->snapshot.holds=InterlockedCompareExchange64(&s.holds,0,0);p_->snapshot.encoded=InterlockedCompareExchange64(&s.encoded,0,0);p_->snapshot.state=static_cast<ExportState>(InterlockedCompareExchange(&s.state,0,0));p_->snapshot.progress=InterlockedCompareExchange(&s.progress,0,0)/10000.0;
     if(p_->cancelAt&&GetTickCount64()-p_->cancelAt>5000&&WaitForSingleObject(p_->process,0)==WAIT_TIMEOUT)TerminateJobObject(p_->job,3);
-    if(WaitForSingleObject(p_->process,0)==WAIT_OBJECT_0){DWORD code=1;GetExitCodeProcess(p_->process,&code);p_->snapshot.state=code==0?ExportState::Succeeded:code==3||p_->cancelAt?ExportState::Cancelled:ExportState::Failed;if(code==0)p_->snapshot.progress=1;p_->snapshot.message=label(p_->snapshot.state);p_->clear();}
+    if(WaitForSingleObject(p_->process,0)==WAIT_OBJECT_0){DWORD code=1;GetExitCodeProcess(p_->process,&code);p_->snapshot.state=code==0?ExportState::Succeeded:code==3||p_->cancelAt?ExportState::Cancelled:ExportState::Failed;if(code==0)p_->snapshot.progress=1;
+        // The completed worker owns the final failure explanation, including
+        // whether preflight stopped before a partial file was ever created.
+        const bool explained=p_->snapshot.state==ExportState::Failed&&InterlockedCompareExchange(&s.state,0,0)==LONG(ExportState::Failed)&&s.message[0];
+        p_->snapshot.message=explained?s.message:label(p_->snapshot.state);p_->clear();}
     if(p_->shared&&InterlockedCompareExchange(&p_->shared->messageLock,1,0)==0){if(p_->shared->message[0])p_->snapshot.message=p_->shared->message;InterlockedExchange(&p_->shared->messageLock,0);}if(p_->snapshot.message.empty()||p_->snapshot.state==ExportState::Paused||p_->snapshot.state==ExportState::Cancelled)p_->snapshot.message=label(p_->snapshot.state);return p_->snapshot;
 }
 int runExportWorker(HANDLE mapping){

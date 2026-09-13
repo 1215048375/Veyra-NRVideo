@@ -30,6 +30,7 @@ public:
     uint64_t framesRead() const { return framesRead_; }
     uint64_t seekCount() const { return seekCount_; }
     uint64_t epoch() const { return epoch_; }
+    const std::wstring& errorMessage() const { return errorMessage_; }
 
 private:
     pipeline::ColorDescription parseColor(const AVCodecParameters* params) const;
@@ -44,6 +45,7 @@ private:
     bool pendingSeekFlag_ = false;
     bool draining_ = false;
     bool eofSignalled_ = false;
+    std::wstring errorMessage_;
     int64_t lastPtsUs_ = INT64_MIN;
 };
 

@@ -25,6 +25,8 @@ struct DecoderStats {
     uint64_t pixelReadbackCount = 0; // software decode uploads only; always 0 on the GPU path
 };
 
+enum class DecodeReceiveStatus { NeedInput, Frame, EndOfStream, Error };
+
 class FFmpegVideoDecoder {
 public:
     FFmpegVideoDecoder() = default;
@@ -61,6 +63,8 @@ public:
     // Receive one decoded frame; false when more input is needed or at EOF.
     // The frame stays owned by the decoder and is valid until the next call.
     const AVFrame* receiveFrame();
+    // nullptr can mean pending input, normal EOF, or a hard decode error.
+    DecodeReceiveStatus receiveStatus() const { return receiveStatus_; }
 
     void flushBuffers(); // seek boundary (Playbook 13.4)
     const DecoderStats& stats() const { return stats_; }
@@ -78,6 +82,7 @@ public:
 private:
     AVCodecContext* context_ = nullptr;
     AVFrame* frame_ = nullptr;
+    DecodeReceiveStatus receiveStatus_ = DecodeReceiveStatus::NeedInput;
     int frameTimeBaseNum_ = 0;
     int frameTimeBaseDen_ = 0;
     DecoderStats stats_{};

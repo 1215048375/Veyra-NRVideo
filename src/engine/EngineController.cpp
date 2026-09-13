@@ -515,7 +515,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
 #ifdef VEYRA_ENABLE_REMOTEPLAY
                         if(remote){const auto recovery=remote->recoveryStatus();status(recovery.message.empty()?L"PS5 串流异常，请检查主机状态后重新连接。":recovery.message,true);break;}
 #endif
-                        status(isCapture?L"采集信号中断，请检查设备连接或格式":L"视频解码或时间戳错误",true);break;}
+                        status(isCapture?L"采集信号中断，请检查设备连接或格式":source.errorMessage().empty()?L"视频解码或时间戳错误":source.errorMessage(),true);break;}
                 }
                 if(isRemote&&frame&&(uint32_t(frame->width)!=width||uint32_t(frame->height)!=height)){
                     drainLivePresentation();if(!ring.drainQueue()){status(L"串流尺寸切换排空失败",true);break;}
@@ -545,6 +545,13 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                 double pts=isImage?0:pkt.pts.toDouble()*1000;
                 if(isCapture&&frames==0){anchor=Clock::now();anchorMs=pts;}
                 if(pts+0.1<discardBefore)continue;
+                auto retainCandidate=[&](){
+                    if(frame==cachedFrame)return true;
+                    AVFrame* owned=av_frame_clone(frame);
+                    if(!owned)return false;
+                    av_frame_free(&cachedFrame);cachedFrame=owned;cachedPacket=pkt;frame=cachedFrame;
+                    return true;
+                };
                 // Realtime preview candidates: decode stays ordered and
                 // reference-lossless; an expired candidate loses only its
                 // enhancement/display opportunity (plan §4.3). The open/seek
@@ -553,6 +560,9 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                     const double previewIntervalMs=double(liveSourceInterval100ns(pkt.duration,activeSource->info().averageFps))/10000.0;
                     bool previewSourceFailed=false;
                     while(!stop_&&previewCandidateExpired(nowMs(),pts,previewIntervalMs)){
+                        // read() can clear the decoder's borrowed AVFrame even
+                        // on EOS/EAGAIN. Own this candidate before looking ahead.
+                        if(!retainCandidate()){previewSourceFailed=true;break;}
                         pipeline::FramePacket next;const AVFrame* raw=nullptr;
                         const auto rs=activeSource->read(next,&raw);
                         if(rs==source::SourceReadStatus::Eos)break; // final decoded candidate is kept
@@ -563,9 +573,9 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                         pts=nextPts;
                         ++previewSkippedTotal;++previewSkippedSinceSubmit;previewSkipSinceProcess=true;
                     }
-                    if(previewSourceFailed){status(L"视频解码或时间戳错误",true);break;}
+                    if(previewSourceFailed){status(source.errorMessage().empty()?L"视频读取或候选帧保存失败":source.errorMessage(),true);break;}
                 }
-                if(frame!=cachedFrame){av_frame_free(&cachedFrame);cachedFrame=av_frame_clone(frame);cachedPacket=pkt;}
+                if(!retainCandidate()){status(L"无法保存解码帧，已停止播放",true);break;}
                 const auto processStart=Clock::now();
                 const auto captureArrival=pkt.arrivalHost100ns?pkt.arrivalHost100ns:host100ns();
                 // A PS5 callback is a compressed AU, not a decoded video frame.

@@ -1792,3 +1792,31 @@ apps/veyra/SettingsWindow.cpp调整布局；apps/veyra/ui/AppShell.cpp新增音�
 用户授权修复后关机，随后撤回音频缓冲选项；未改任何音频逻辑。基线320f860，存档checkpoint/ps5-sampling-2026-09-13，分支codex/ps5-sampling-repair。新增显式色度位置契约与按位置插值（缺失left回退有日志）；PS5普通放大使用带局部范围限幅的Catmull-Rom，像素中心1:1直接读取，缩小保留旧路径。默认精细、保留兼容采样，PS5面板可选且重连生效，选择保存在现有本地settings.ini；不改变主机配对、codec、码率和HDR选择，不另造播放循环/音频/队列或回读。文件、采集、导出默认不启用新采样。
 
 cmd /c out/remoteplay/build-clock-product.cmd 两次成功，日志logs/ps5-sampling-product-build.log与logs/ps5-sampling-final-build.log；DXIL及C++编译链接成功，diff检查通过。按用户要求不运行测试、不连接PS5、不做肉眼判断；NR/SR/FG Create/Evaluate、GPU采样成本、HDR与UI显示均未执行，不能把编译成功说成视觉改善已验收。修改文件/链路边界/明天A-B方法见docs/PS5_SAMPLING_REPAIR_PLAN_2026-09-13.md。桌面测试版对应out/remoteplay/product-repair/veyra.exe。未推送发布，未提交SDK/运行时/凭据/日志/测试媒体；完成本地存档后执行用户授权的正常关机请求。
+
+## 2026-09-13 正式发布前完整审查（发现发布阻断，未修产品代码）
+
+用户要求正式发布前审查 bug。基线 f037f49，codex/ps5-sampling-repair，开工工作区干净；本轮用户要求审查后实际执行测试，不能继续沿用上次“仅编译”的证据限制。报告 `docs/RELEASE_AUDIT_2026-09-13.md` 列出 5 项确认问题：P1 欠速播放到 EOF 复用已清空 AVFrame 导致 0xC0000409；P1 变分辨率文件用新尺寸写旧 YUV 上传容量；P1 损坏尾部导出 52/60 帧仍报成功且音轨缩短；P2 partial 检查/打开竞争可覆盖另一任务文件；P2 内嵌字幕导出无提示丢失。只形成审查结果，未修复这些问题。
+
+执行 `scripts/build.ps1 -Preset x64-release -BuildDirectory out/release-audit-20260913/build -RemotePlay`（完整依赖参数见报告），444 步成功；`scripts/gates/delivery.ps1 -Root . -BuildDirectory out/release-audit-20260913/build` 的 23 项通过，45.033 秒，result=`logs/delivery/c992884d6d924d02a4cce0374a758094/result.json`。临时 runner 的 27 项及扩展 16 项运行通过；初次 seek 压力用 60 秒素材却要求跳到 700 秒导致退出 1，保留原失败，改 710 秒素材后相同测试全部通过（22.156 秒）。Remote Play core 新构建 73/73；精细采样临时数值对照 30 组通过，1:1 最大误差 0、放大 0.560/255、六色度位置 0.588/255，均为合成 SDR 呈现缓冲检查；不是游戏画质或显示器验收。
+
+本机 RTX5070/616.56 实际 NR Feature18、SR、DLSSG Create 均 result=0x1/seh=0；NR/FG/NVOF 实际执行及输出验证见 nr-flow/sr-nr-fg 日志，便携 VSR smoke 记录 nrEvaluated=120、nvofExecuted=117、generated=115。真实 USB3 Video 1080p60 YUY2/MJPEG 各收到 19 帧，消费者停顿时正确丢过期帧；未据此宣称实卡画质/4K60通过。本地 `package-portable.ps1` 与 `acceptance/portable-smoke.ps1` 的 5 场景通过，七文件 manifest 身份/许可证/扫描通过，软件不依赖 publisher manifest 的决定保持有效。审查 ZIP 只在本地，未上传，不能作无缺陷正式候选。
+
+完整命令/日志/失败复现位于 `logs/release-audit-20260913/` 和报告，辅助脚本/合成素材均在忽略目录。原版/社区 NR 身份符合批准记录；patched avcodec SHA256=0710F0D87A7FFCC9F998F1A35D0500345F6C66EB9A5A39C51D60D293142BD84F，未退回未补丁 FFmpeg。未修改、提交任何 SDK/DLL/模型/个人配置/凭据/测试媒体。未连接实际 PS5、未做 PSN/HDR 显示器/长时稳定性/多 GPU/4K60采集端到端验收；本轮没有独立 Reviewer。修改仅为本审查报告与 WORKLOG。下一项唯一任务：修复 EOF 候选帧寿命并针对性回归，再按报告优先级清理其余问题，当前不建议正式发布。
+
+## 2026-09-13 仅修复发布审查三个 P1（本地回归通过）
+
+用户明确“只修复p1”，本轮仅处理 F1/F2/F3，F4/F5 两个 P2 未改。基线 f037f49，存档 tag 为 checkpoint/release-p1-2026-09-13，施工分支 codex/release-p1-repair；保留此前审查报告与工作记录。完整修改清单、命令、证据与限制见 docs/RELEASE_P1_REPAIR_PLAN_2026-09-13.md。
+
+F1：EngineController 在追帧读取下一帧前用 av_frame_clone 持有候选帧引用，EOF 不再使用被源清空的借用 AVFrame；复用原缓存，不增加像素拷贝。F2：EnhanceGraph 在访问像素/上传资源前校验尺寸及像素格式，MediaFileSource 对中途变尺寸明确报错并锁存失败；普通文件不会自动重建图。F3：解码器区分 NeedInput/Frame/EndOfStream/Error，源拒绝损坏包/帧及硬解码错误，导出传播视频/音频读取错误，结束时全片解码校验输出帧数、尺寸、CFR PTS 与真实 EOF，成功后才提升 partial；验证可取消。ExportJobManager 保留子进程最终失败原因，避免早期失败被误写成已保留 partial。未修改音频调度或两个 P2。
+
+scripts/build.ps1 -Root . -Preset x64-release -BuildDirectory out/release-p1-20260913/build -RemotePlay（依赖完整参数见修复文档）初次 446 步、最终增量 31 步成功；日志 logs/release-p1-20260913/build.log、rebuild.log、final-build.log。新增 tests/integration/FileSafetyTests.cpp 与 scripts/gates/release-p1.py；python scripts/gates/release-p1.py --root . --build-directory out/release-p1-20260913/build --output-directory logs/release-p1-20260913/verified 最终 29 次进程调用及 12 项额外文件/音频/计数断言全部通过，总耗时 25.032 秒。覆盖正常/强制欠速 EOF、暂停 seek/resume、大小/零尺寸/非法格式、坏帧失败锁存及 seek/reopen、早晚损坏输入、变尺寸输入、输出损坏、验证取消、边界中止、实际导出 worker 失败消息、4K B 帧线程解码逐像素与 PTS 一致性。早期损坏返回 1 且无输出，晚期损坏/变尺寸返回 1 且只保留 partial；篡坏刚编码的尾包得到 decoded=59 expected=60 eof=false passed=false；健康输出 60/240 帧及音频时长正确。
+
+首轮 regression/result.json 为 false：测试脚本将失败退出码误写为取消码 3，实际产品正确返回 1，文件状态断言正确；修正期望后 regression-final 全通过。自查去除重复状态初始化、增加提升输出前取消检查后重新构建，最终 verified 全通过；原失败证据保留。没有独立 Reviewer。
+
+python out/release-p1-20260913/cross_checks.py 的 13 项调用全部退出 0，结果 logs/release-p1-20260913/cross/result.json；包含硬解导入、HDR Main10 软件/硬件路径、实时回放、NR 先行、欠速音频连续性、FG 恢复、图片尺寸、源保真、NTSC 导出及 NR/FG 实际欠速尾帧。RTX5070/616.56 实际 Feature18/DLSSG Create result=0x1、seh=0；欠速尾帧 nrEvaluated=16、nvofExecuted=2、generated=1、failed=false；Main10 硬解 confirmed=1，NR/SR 各 12、FG 11。NTSC 30000/1001 输出验证 90/90 帧，视频 3.003 秒、音频 3.000 秒。强制欠速测试不代表性能改善。
+
+cross runner 调用 scripts/gates/delivery.ps1 -Root . -BuildDirectory out/release-p1-20260913/build 一次，23/23 通过，45.3460832 秒；证据 logs/delivery/7490c0d852a04aadbe96eced2106524f/result.json，status=software_short_gate_passed。包含实际 native4K NR/NVOF、D3D12 NVENC H.264/HEVC、FG、输出解码/音频、暂停 seek、图片及取消。
+
+新程序 out/release-p1-20260913/build/veyra.exe，SHA256=B116AB6855D69CDEB29927AB3AD80422D54051339FCE47D7EE5939CAA987519D。patched avcodec-63.dll SHA256=0710F0D87A7FFCC9F998F1A35D0500345F6C66EB9A5A39C51D60D293142BD84F，与开工一致，未退回未打补丁的 FFmpeg；原版/社区 NR 身份符合已批准记录。未修改运行时、SDK、模型、凭据、个人配置或既有发布资产；未推送、打包上传或发布。
+
+限制：变分辨率文件明确停止；全片 CPU 解码验证会增加导出收尾时间，但可取消，不是增强路径 GPU→CPU 回读。实机 PS5/PSN、HDR 显示器、长时稳定性、多 GPU、4K60 采集卡端到端验收未执行，本轮回放不代表实卡通过。下一项唯一任务：用户试用本轮新构建；正在运行的旧程序不会自动更新。两个 P2 按用户范围保留。

@@ -153,30 +153,53 @@ bool MediaFileSource::open(const SourceOpenDesc& desc)
 
 SourceReadStatus MediaFileSource::read(pipeline::FramePacket& out, const AVFrame** decodedFrame)
 {
-    if (!info_.opened) { return SourceReadStatus::Error; }
     if (decodedFrame != nullptr) { *decodedFrame = nullptr; }
+    out = pipeline::FramePacket{};
+    if (!info_.opened || !errorMessage_.empty()) { return SourceReadStatus::Error; }
 
     const AVFrame* frame = nullptr;
     for (;;) {
         frame = decoder_.receiveFrame();
         if (frame != nullptr) { break; }
-        if (draining_) {
-            // Decoder fully drained after EOF.
+        if (decoder_.receiveStatus() == media::DecodeReceiveStatus::EndOfStream) {
             return SourceReadStatus::Eos;
+        }
+        if (decoder_.receiveStatus() == media::DecodeReceiveStatus::Error || draining_) {
+            errorMessage_ = L"视频解码失败，已停止处理，请检查源文件是否损坏";
+            return SourceReadStatus::Error;
         }
         bool eof = false;
         if (!demuxer_.readVideoPacket(eof)) {
-            if (!eof) { return SourceReadStatus::Error; }
+            if (!eof) { errorMessage_ = L"源视频读取失败，已停止处理"; return SourceReadStatus::Error; }
             draining_ = true;
-            decoder_.sendPacket(nullptr); // enter drain mode
+            if (!decoder_.sendPacket(nullptr)) {
+                errorMessage_ = L"视频尾帧解码失败，已停止处理";
+                return SourceReadStatus::Error;
+            }
             continue;
         }
+        if (demuxer_.currentPacket()->flags & AV_PKT_FLAG_CORRUPT) {
+            veyra::log::error("source-file", "corrupt video packet; refusing to skip source data");
+            errorMessage_ = L"源视频包含损坏数据，已停止处理";
+            return SourceReadStatus::Error;
+        }
         if (!decoder_.sendPacket(demuxer_.currentPacket())) {
-            veyra::log::warn("source-file", "sendPacket rejected; retrying next packet");
+            errorMessage_ = L"视频解码失败，已停止处理，请检查源文件是否损坏";
+            return SourceReadStatus::Error;
         }
     }
 
-    out = pipeline::FramePacket{};
+    if ((frame->flags & AV_FRAME_FLAG_CORRUPT) || frame->decode_error_flags) {
+        veyra::log::error("source-file", std::format("corrupt decoded frame flags={} decodeErrors={}", frame->flags, frame->decode_error_flags));
+        errorMessage_ = L"源视频包含损坏画面，已停止处理";
+        return SourceReadStatus::Error;
+    }
+    if (frame->width <= 0 || frame->height <= 0 || uint32_t(frame->width) != info_.width || uint32_t(frame->height) != info_.height) {
+        veyra::log::error("source-file", std::format("frame extent changed: opened={}x{} decoded={}x{}; file processing stopped before upload", info_.width, info_.height, frame->width, frame->height));
+        errorMessage_ = L"视频中途改变分辨率，当前文件处理不支持，已安全停止";
+        return SourceReadStatus::Error;
+    }
+
     ++sequence_;
     out.sequence = sequence_;
     const int tbNum = decoder_.frameTimeBaseNum();
@@ -229,6 +252,7 @@ bool MediaFileSource::seek(const pipeline::Rational& targetSeconds)
     const int64_t targetUs = rationalToUs(targetSeconds);
     if (!demuxer_.seekToUs(targetUs)) { return false; }
     decoder_.flushBuffers();
+    errorMessage_.clear();
     draining_ = false;
     eofSignalled_ = false;
     pendingSeekFlag_ = true;
@@ -241,6 +265,7 @@ bool MediaFileSource::seek(const pipeline::Rational& targetSeconds)
 
 void MediaFileSource::close() noexcept
 {
+    errorMessage_.clear();
     decoder_.close();
     demuxer_.close();
     info_ = SourceInfo{};

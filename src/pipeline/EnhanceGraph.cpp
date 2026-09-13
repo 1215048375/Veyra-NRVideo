@@ -31,6 +31,7 @@
 
 extern "C" {
 #include <libavutil/frame.h>
+#include <libavutil/pixdesc.h>
 #include <libavutil/hwcontext_d3d12va.h>
 #include <libswscale/swscale.h>
 }
@@ -663,6 +664,13 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     diagnostic.resolution.source={srcW_,srcH_};diagnostic.resolution.base={workW_,workH_};diagnostic.resolution.nr={nrW_,nrH_};diagnostic.resolution.flow={nvofW_,nvofH_};diagnostic.resolution.fg=diagnostic.resolution.output={workW_,workH_};diagnostic.runtimeHash="unverified-user-replaceable";diagnostic.flowApplied=std::to_string(actualFlowPerf());diagnostic.fallbackReason=mvecSource_;Logger::diagnosticContext(diagnostic);
     static const bool graphOff = GetEnvironmentVariableW(L"VEYRA_GRAPH_OFF", nullptr, 0) != 0;
     if (!frame || !initialized_ || !std::isfinite(ptsMs)) return false;
+    // Reject before CPU plane access, swscale, or command-slot acquisition.
+    // Source-side resize handling must rebuild the graph before submitting a
+    // new extent; all upload sizes/strides still belong to this graph's extent.
+    if (frame->width <= 0 || frame->height <= 0 || uint32_t(frame->width) != srcW_ || uint32_t(frame->height) != srcH_ || !av_pix_fmt_desc_get(static_cast<AVPixelFormat>(frame->format))) {
+        veyra::log::error("graph", std::format("frame contract rejected: expected={}x{} actual={}x{} format={}", srcW_, srcH_, frame->width, frame->height, frame->format));
+        return false;
+    }
     const auto resolved=resolveFrameColor(*frame,color?*color:ColorDescription{});
     if(resolved.matrix==YuvMatrix::BT2020CL||resolved.transfer==TransferFunction::BT2020_10||(resolved.matrix==YuvMatrix::BT2020NCL&&!desc_.hdrInput)){veyra::log::error("graph","BT.2020 input is not supported by the BT.601/709 SDR conversion");return false;}
     if(resolved.transfer==TransferFunction::PQ&&(resolved.matrix!=YuvMatrix::BT2020NCL||resolved.primaries!=ColorPrimaries::BT2020)){
