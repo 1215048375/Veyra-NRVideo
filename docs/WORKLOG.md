@@ -1932,3 +1932,7 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 ## 2026-09-14 — 精简双语 README 致谢
 
 用户授权将确认的简短致谢更新到 GitHub。先 fetch 并 fast-forward 到用户远端修改 83de594，保留其 README 内容。README.md / README_EN.md 底部统一为 Magpie Experimental（研究启发）、chiaki-ng（串流基础）、XeSS-GPU-Motion（GPU DIS 实现）及第三方说明链接；原完整依赖、参考和已搁置 AMD 调研清单移入 THIRD_PARTY_NOTICES.md，原许可证与组件记录保留。git diff --check 通过，核对双语段落及迁移后的相对链接。仅文档改动，未构建、未执行 GPU Create/Evaluate、未修改运行组件或 Release 资产。随后提交并推送 main。
+
+## 2026-09-14 — 用户提供 NeuralScreen 1.8.2 的 RTX30 调研
+
+仅静态读取用户包、Get-FileHash/Authenticode/VersionInfo、dumpbin exports 和包内固定提交的 worker 源码。确认 DLL 为 DCC0DC24…/165840496 bytes/310.8.0.0/HashMismatch，与包清单一致但不同于已批准两版；五项 NGX 入口存在。架构查询进程 hook 是额外兼容条件，发现索引0/未知句柄回退、无恢复生命周期等不适合直接照搬的边界。详见 docs/RTX30_NEURALSCREEN_AUDIT_2026-09-14.md。未启动第三方程序、未加载/复制/修改 DLL、未执行 Create/Evaluate、未构建；没有 RTX30 实机验收。git diff --check 通过。未提交、未推送、未发布。下一步如授权实施，先隔离验证 NR 适配器与可恢复的老架构兼容。
