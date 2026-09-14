@@ -54,7 +54,7 @@ inline const wchar_t* settingHelp(int id){
     case 313:return L"给选中的预设换名，配方不变。";
     case 314:return L"删除选中的预设，需要确认；当前画面不会跟着被删。";
     case 315:return L"设为下次启动的增强默认配方。软件仍从日常模式打开。";
-    case 500:return L"选择导出编码：H.264兼容性广，HEVC通常更省空间。接收设备也得看得懂。";
+    case 500:return L"H.264兼容性广，HEVC通常更省空间。HDR视频须选HEVC，保存为Main10 / PQ；别把HDR硬塞进普通H.264。";
     case 501:return L"选保存位置并导出视频。参数在开始时冻结，NR按原生处理；低延迟预览顺序不带进导出。";
     case 502:return L"保存当前图片或视频帧。精彩的一瞬间，留下来。";
     case 503:return L"暂停或继续导出任务，不是暂停你正在看的视频。";

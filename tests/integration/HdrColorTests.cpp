@@ -19,18 +19,18 @@ int wmain(int argc,wchar_t** argv){
  gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;Status st;gfx::DeviceContextDesc dd;
  if(!ctx.initialize(dd,st)||!ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),4,st))return 2;
  int failures=captureGpuCases(ctx,ring);
- for(bool native:{false,true})for(bool planar:{false,true})for(bool full:{false,true}){
+ for(bool hlg:{false,true})for(bool native:{false,true})for(bool planar:{false,true})for(bool full:{false,true}){
   pipeline::EnhanceGraph graph(ctx,ring);pipeline::EnhanceGraphDesc gd;
   gd.sourceWidth=gd.workWidth=64;gd.sourceHeight=gd.workHeight=32;gd.enableNr=gd.enableFg=gd.enableSr=false;gd.noFeatures=true;gd.hdrInput=true;gd.hdrOutput=native;
   if(!graph.initialize(gd)||!graph.createViews())return 3;
-  AVFrame* f=av_frame_alloc();f->width=64;f->height=32;f->format=planar?AV_PIX_FMT_YUV420P10LE:AV_PIX_FMT_P010;f->color_range=full?AVCOL_RANGE_JPEG:AVCOL_RANGE_MPEG;f->colorspace=AVCOL_SPC_BT2020_NCL;f->color_trc=AVCOL_TRC_SMPTE2084;f->color_primaries=AVCOL_PRI_BT2020;
+  AVFrame* f=av_frame_alloc();f->width=64;f->height=32;f->format=planar?AV_PIX_FMT_YUV420P10LE:AV_PIX_FMT_P010;f->color_range=full?AVCOL_RANGE_JPEG:AVCOL_RANGE_MPEG;f->colorspace=AVCOL_SPC_BT2020_NCL;f->color_trc=hlg?AVCOL_TRC_ARIB_STD_B67:AVCOL_TRC_SMPTE2084;f->color_primaries=AVCOL_PRI_BT2020;
   if(av_frame_get_buffer(f,32)<0)return 4;
   // Published ST2084 reference encodings: black, 100 cd/m2, 1000 cd/m2.
-  constexpr double encoded[]={0,.5080784215,.7518270962};constexpr double nits[]={0,100,1000};
+  const double encoded[]={0,hlg?.75:.5080784215,hlg?1.0:.7518270962};const double nits[]={0,hlg?203.152:100,1000};
   for(unsigned y=0;y<32;++y)for(unsigned x=0;x<64;++x){auto code=uint16_t(std::lround((full?0:64)+encoded[std::min(x/22,2u)]*(full?1023:876)));reinterpret_cast<uint16_t*>(f->data[0]+y*f->linesize[0])[x]=planar?code:uint16_t(code<<6);}
   for(unsigned y=0;y<16;++y)for(unsigned x=0;x<(planar?32u:64u);++x)reinterpret_cast<uint16_t*>(f->data[1]+y*f->linesize[1])[x]=planar?512:32768;
   if(planar)for(unsigned y=0;y<16;++y)for(unsigned x=0;x<32;++x)reinterpret_cast<uint16_t*>(f->data[2]+y*f->linesize[2])[x]=512;
-  pipeline::ColorDescription color;color.pixelFormat=pipeline::SourcePixelFormat::P010;color.transfer=pipeline::TransferFunction::PQ;color.matrix=pipeline::YuvMatrix::BT2020NCL;
+  pipeline::ColorDescription color;color.pixelFormat=pipeline::SourcePixelFormat::P010;color.transfer=hlg?pipeline::TransferFunction::HLG:pipeline::TransferFunction::PQ;color.matrix=pipeline::YuvMatrix::BT2020NCL;
   pipeline::EnhanceGraph::FrameOutputs out;bool ok=graph.process(f,0,true,out,1,&color);double error=0;
   if(ok&&!native){sink::RgbaImage image;ok=sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),image);if(ok){for(unsigned i=0;i<3;++i){double l=nits[i]/203.0,p=1000.0/203.0,m=std::clamp(l*(1+l/(p*p))/(1+l),0.0,1.0);double expected=m<=.0031308?12.92*m:1.055*pow(m,1/2.4)-.055;double actual=image.pixels[(i*22+5)*4]/255.0;error=std::max(error,std::abs(expected-actual));}ok=error<.012;}}
   if(ok&&native){
@@ -48,7 +48,7 @@ int wmain(int argc,wchar_t** argv){
    engine::VideoPresenter presenter;ok=window&&presenter.open(ctx,window,graph)&&presenter.present(ctx,ring,graph,out.videoSlot,false);
    ring.drainQueue();presenter.close();if(window)DestroyWindow(window);
   }
-  std::cout<<"HDR_COLOR native="<<native<<" planar="<<planar<<" full="<<full<<" error="<<error<<" pass="<<ok<<std::endl;if(!ok)++failures;
+  std::cout<<"HDR_COLOR hlg="<<hlg<<" native="<<native<<" planar="<<planar<<" full="<<full<<" error="<<error<<" pass="<<ok<<std::endl;if(!ok)++failures;
   out={};ring.drainQueue();graph.shutdown();av_frame_free(&f);
  }
  if(argc>1)for(unsigned mode=0;mode<3;++mode)for(bool hardware:{false,true}){

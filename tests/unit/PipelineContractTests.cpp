@@ -69,9 +69,12 @@ int main() {
         cd.matrixAssumed = true;   // HD SDR documented default
         cd.rotationDegrees = 0;
         check("color:hdr-path-detected", [&] {
-            ColorDescription hdr; hdr.pixelFormat = SourcePixelFormat::P010;
+            ColorDescription hdr; hdr.pixelFormat = SourcePixelFormat::P010;hdr.transfer=TransferFunction::PQ;
             return hdr.isHdrPath();
         }());
+        ColorDescription tenBit;tenBit.pixelFormat=SourcePixelFormat::P010;
+        check("color:ten-bit-alone-is-not-HDR",!tenBit.isHdrPath());
+        tenBit.transfer=TransferFunction::HLG;check("color:HLG-is-HDR",tenBit.isHdrPath());
         check("color:assumed-flag-survives", cd.matrixAssumed && !cd.rangeAssumed);
 
         constexpr FrameFlags seekCut =

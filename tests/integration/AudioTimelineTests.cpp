@@ -36,7 +36,7 @@ void decode(const std::filesystem::path& file) {
     check(until([&] { return pipe.decodingComplete(); }), "decoder and resampler fully drained");
     check(std::abs(pipe.headPtsMs()) < 0.05, "first PCM timestamp is block start at zero");
     check(std::abs(pipe.tailPtsMs()-750) < 0.05, "resampled tail preserves 750ms duration");
-    size_t total=0; double pts=0, maxError=0; std::vector<float> block(2*137);
+    size_t total=0; double pts=0, maxError=0; std::vector<float> block(pipe.pcmFormat().channels*137);
     while (auto n=pipe.pull(block.data(),137,&pts)) {
         maxError=std::max(maxError,std::abs(pts-1000.0*total/kAudioRate)); total+=n;
     }
@@ -119,9 +119,9 @@ int wmain(int argc, wchar_t** argv) {
     for(uint32_t rate:{48000u,44100u}) { const auto file=dir/(std::to_string(rate)+".wav"); fixture(file,rate); decode(file); }
     AudioRenderer renderer;
     check(!std::isfinite(renderer.mediaTimeMs()), "unstarted clock is invalid");
-    if (!renderer.start()) { check(false,"WASAPI endpoint initialization"); renderer.shutdown(); return 1; }
-    renderer.setGain(0);
     AudioPipeline pipe; check(pipe.open((dir/"48000.wav").wstring()),"open renderer fixture");
+    if (!renderer.start(pipe.pcmFormat())) { check(false,"WASAPI endpoint initialization"); renderer.shutdown(); return 1; }
+    renderer.setGain(0);
     pipe.startThread(&renderer);
     check(until([&]{return renderer.started();}),"WASAPI prefilled and started");
     check(renderer.framesWritten()>0 && std::isfinite(renderer.mediaTimeMs()),"valid clock only after actual PCM submission");

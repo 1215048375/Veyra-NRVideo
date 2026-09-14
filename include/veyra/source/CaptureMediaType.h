@@ -83,9 +83,14 @@ inline bool captureMediaLayout(const AM_MEDIA_TYPE& type,CaptureMediaLayout& out
         else if(ext.NominalRange!=DXVA2_NominalRange_Unknown)return false;
         if(ext.VideoTransferMatrix==DXVA2_VideoTransferMatrix_BT601){out.color.matrix=pipeline::YuvMatrix::BT601;out.color.matrixAssumed=false;}
         else if(ext.VideoTransferMatrix==DXVA2_VideoTransferMatrix_BT709){out.color.matrix=pipeline::YuvMatrix::BT709;out.color.matrixAssumed=false;}
+        // Extended Windows MF/DXVA color codes: BT2020_10/12=4/5,
+        // BT2020 primaries=9, ST2084=15, HLG=16 (Windows SDK mfobjects.h).
+        else if(ext.VideoTransferMatrix==4||ext.VideoTransferMatrix==5){out.color.matrix=pipeline::YuvMatrix::BT2020NCL;out.color.matrixAssumed=false;}
         else if(ext.VideoTransferMatrix!=DXVA2_VideoTransferMatrix_Unknown)return false;
+        if(ext.VideoPrimaries==9){out.color.primaries=pipeline::ColorPrimaries::BT2020;out.color.primariesAssumed=false;}
         if(ext.VideoTransferFunction==DXVA2_VideoTransFunc_10){out.color.transfer=pipeline::TransferFunction::Linear;out.color.transferAssumed=false;}
         else if(ext.VideoTransferFunction==DXVA2_VideoTransFunc_sRGB){out.color.transferAssumed=false;}
+        else if(ext.VideoTransferFunction==15||ext.VideoTransferFunction==16){out.color.transfer=ext.VideoTransferFunction==15?pipeline::TransferFunction::PQ:pipeline::TransferFunction::HLG;out.color.transferAssumed=false;}
         else if(ext.VideoTransferFunction!=DXVA2_VideoTransFunc_Unknown&&ext.VideoTransferFunction!=DXVA2_VideoTransFunc_709&&ext.VideoTransferFunction!=DXVA2_VideoTransFunc_22)return false;
     }
     return true;

@@ -68,10 +68,10 @@ struct EnhanceGraphDesc {
     bool enableNvofStandalone = false; // run NVOF+densify per frame without FG (quality core)
     bool noFeatures = false;     // VEYRA_NO_FEATURES: NVOF/NGX objects skipped
     bool noNgx = false;          // VEYRA_NO_NGX: core/features skipped, NVOF only
-    bool hdrInput = false;       // PS5 Main10 ingress; explicit SDR mapping unless hdrOutput.
+    bool hdrInput = false;       // PQ/HLG YUV ingress; SDR tone mapping unless hdrOutput.
     unsigned captureBitDepth = 8; // SDR P010/P016 storage, independent of HDR transfer.
     bool wideYuvInput() const { return hdrInput || captureBitDepth > 8; }
-    bool hdrOutput = false;      // Native scRGB passthrough, no SDR-only enhancement.
+    bool hdrOutput = false;      // HDR-preserving output: scRGB without FG; RGB10/PQ with FG.
     bool highQualityPresentation = false; // PS5 ordinary scaling, no AI SR
     bool rgbInput = false;       // allocate direct RGBA ingestion before NGX creation
     bool yuy2Input = false;      // packed Y0 U Y1 V -> linear FP16; never subsample to NV12

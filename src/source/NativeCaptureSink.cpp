@@ -1,6 +1,7 @@
 #include "veyra/source/NativeCaptureSink.h"
 #include "veyra/source/CaptureMediaType.h"
 #include "veyra/Log.h"
+#include "veyra/sink/AudioFormat.h"
 #include <format>
 #include <mmreg.h>
 #include <atomic>
@@ -22,16 +23,11 @@ HRESULT copyType(AM_MEDIA_TYPE& dst,const AM_MEDIA_TYPE& src){
 }
 bool audioType(const AM_MEDIA_TYPE& t){
     if(t.majortype!=MEDIATYPE_Audio||t.formattype!=FORMAT_WaveFormatEx||!t.pbFormat||t.cbFormat<sizeof(WAVEFORMATEX))return false;
-    const auto& f=*reinterpret_cast<const WAVEFORMATEX*>(t.pbFormat);
-    return (f.wFormatTag==WAVE_FORMAT_PCM||f.wFormatTag==WAVE_FORMAT_IEEE_FLOAT)&&
-        f.nChannels>=1&&f.nChannels<=2&&f.nSamplesPerSec>=8000&&f.nSamplesPerSec<=192000&&
-        (f.wBitsPerSample==16||f.wBitsPerSample==32)&&
-        (f.wFormatTag!=WAVE_FORMAT_IEEE_FLOAT||f.wBitsPerSample==32)&&
-        f.nBlockAlign==f.nChannels*f.wBitsPerSample/8&&f.nAvgBytesPerSec==f.nSamplesPerSec*f.nBlockAlign;
+    sink::WavePcmFormat parsed;return sink::parseWavePcm(t.pbFormat,t.cbFormat,parsed);
 }
 bool sameAudio(const AM_MEDIA_TYPE& a,const AM_MEDIA_TYPE& b){
     return audioType(a)&&audioType(b)&&a.subtype==b.subtype&&
-        std::memcmp(a.pbFormat,b.pbFormat,sizeof(WAVEFORMATEX))==0;
+        a.cbFormat==b.cbFormat&&std::memcmp(a.pbFormat,b.pbFormat,a.cbFormat)==0;
 }
 class PinEnum final:public IEnumPins {
     std::atomic<ULONG> refs_{1};ComPtr<IPin> pin_;bool used_=false;
@@ -147,7 +143,9 @@ public:
 }
 HRESULT suggestCaptureAudioBuffering(IPin* pin,const WAVEFORMATEX& format){
     if(!pin)return E_POINTER;
-    if(!format.nBlockAlign||format.nSamplesPerSec<8000||format.nSamplesPerSec>192000||format.nBlockAlign>8||
+    if(!format.nBlockAlign||format.nSamplesPerSec<8000||format.nSamplesPerSec>192000||format.nChannels<1||format.nChannels>8||
+        (format.wBitsPerSample!=16&&format.wBitsPerSample!=24&&format.wBitsPerSample!=32)||
+        format.nBlockAlign!=format.nChannels*(format.wBitsPerSample/8)||
         format.nAvgBytesPerSec!=uint64_t(format.nSamplesPerSec)*format.nBlockAlign)return E_INVALIDARG;
     ComPtr<IAMBufferNegotiation> negotiation;
     const auto queryHr=pin->QueryInterface(IID_PPV_ARGS(&negotiation));

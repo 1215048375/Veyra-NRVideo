@@ -1,6 +1,7 @@
 #include "veyra/source/CaptureMediaType.h"
 #include "veyra/source/NativeCaptureSink.h"
 #include "CaptureFormatCases.h"
+#include "veyra/sink/AudioFormat.h"
 #include <iostream>
 #include <vector>
 #include <atomic>
@@ -104,5 +105,20 @@ int main(){
         filter->Stop();sample.Reset();allocator->Decommit();input->Disconnect();
     }
     memory.Reset();input.Reset();filter.Reset();output.Reset();allocator.Reset();
+    {
+        auto hdrVi=vi;hdrVi.bmiHeader.biHeight=4;hdrVi.bmiHeader.biSizeImage=48;hdrVi.bmiHeader.biBitCount=24;
+        auto hdrType=type;hdrType.subtype={source::captureFourcc('P','0','1','0'),0,0x10,{0x80,0,0,0xaa,0,0x38,0x9b,0x71}};hdrType.pbFormat=reinterpret_cast<BYTE*>(&hdrVi);
+        DXVA2_ExtendedFormat hdrFlags{};hdrFlags.NominalRange=DXVA2_NominalRange_16_235;hdrFlags.VideoTransferMatrix=4;hdrFlags.VideoPrimaries=9;
+        for(unsigned transfer:{15u,16u}){hdrFlags.VideoTransferFunction=transfer;hdrVi.dwControlFlags=hdrFlags.value|AMCONTROL_COLORINFO_PRESENT;
+            check(source::captureMediaLayout(hdrType,layout)&&layout.color.isHdrPath()&&layout.color.primaries==pipeline::ColorPrimaries::BT2020&&layout.color.matrix==pipeline::YuvMatrix::BT2020NCL&&!layout.color.transferAssumed,"capture negotiates explicit PQ/HLG BT2020 metadata");
+        }
+        auto multi=sink::floatWave({6,0x60f});AM_MEDIA_TYPE mt=audio;mt.subtype=KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;mt.cbFormat=sizeof(multi);mt.pbFormat=reinterpret_cast<BYTE*>(&multi);
+        output.Attach(new OutputPin);auto* peer=static_cast<OutputPin*>(output.Get());peer->supportsBuffering=true;
+        check(source::suggestCaptureAudioBuffering(output.Get(),multi.Format)==S_OK&&peer->suggested.cbBuffer==11520,"six-channel float upstream negotiation retains 10ms target");
+        check(SUCCEEDED(source::createNativeAudioSink(mt,[](IMediaSample*){return S_OK;},filter,input))&&input->ReceiveConnection(output.Get(),&mt)==S_OK,"native sink directly connects six-channel extensible PCM");
+        auto changed=multi;changed.dwChannelMask=0x3f;auto alternative=mt;alternative.pbFormat=reinterpret_cast<BYTE*>(&changed);
+        check(input->QueryAccept(&alternative)==S_FALSE,"side-to-back layout change requires reconnect even at identical byte stride");
+        input->Disconnect();input.Reset();filter.Reset();output.Reset();
+    }
     CoUninitialize();std::cout<<"failures="<<failures<<'\n';return failures?1:0;
 }

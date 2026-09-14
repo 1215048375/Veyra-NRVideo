@@ -691,13 +691,16 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         return false;
     }
     const auto resolved=resolveFrameColor(*frame,color?*color:ColorDescription{});
+    if(desc_.hdrInput&&!resolved.isHdrPath()){
+        veyra::log::error("hdr","HDR source transfer changed to SDR; reopen/rebuild required");return false;
+    }
     if(resolved.matrix==YuvMatrix::BT2020CL||resolved.transfer==TransferFunction::BT2020_10||(resolved.matrix==YuvMatrix::BT2020NCL&&!desc_.hdrInput)){veyra::log::error("graph","BT.2020 input is not supported by the BT.601/709 SDR conversion");return false;}
-    if(resolved.transfer==TransferFunction::PQ&&(resolved.matrix!=YuvMatrix::BT2020NCL||resolved.primaries!=ColorPrimaries::BT2020)){
-        veyra::log::error("hdr","Unsupported PQ colorimetry: requires signaled/fallback BT2020 NCL and BT2020 primaries");return false;
+    if(resolved.isHdrPath()&&(resolved.matrix!=YuvMatrix::BT2020NCL||resolved.primaries!=ColorPrimaries::BT2020)){
+        veyra::log::error("hdr","Unsupported PQ/HLG colorimetry: requires signaled/fallback BT2020 NCL and BT2020 primaries");return false;
     }
     if(reset||!realFrameIndex_)veyra::log::info("color",std::format("range={} assumed={} matrix={} assumed={} transfer={} assumed={} display709={}",int(resolved.range),resolved.rangeAssumed,int(resolved.matrix),resolved.matrixAssumed,int(resolved.transfer),resolved.transferAssumed,resolved.displayReferred709));
-    if (resolved.transfer==TransferFunction::HLG || (resolved.transfer==TransferFunction::PQ&&!desc_.hdrInput)) {
-        veyra::log::error("graph", "HDR input is unsupported by the V1 SDR pipeline"); return false;
+    if (resolved.isHdrPath()&&(!desc_.hdrInput||desc_.rgbInput||desc_.yuy2Input)) {
+        veyra::log::error("graph", "HDR input requires an explicit YUV HDR contract; RGB/YUY2 HDR ingress is unsupported"); return false;
     }
     if(std::abs(ptsMs)>9e13){veyra::log::error("timeline","PTS outside representable range");return false;}
     if(prevValid_&&(std::llround(ptsMs*10000)-std::llround(prevPtsMs_*10000)<4||ptsMs-prevPtsMs_>1000)){
@@ -897,7 +900,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     }else{
         const float constants[8] = { resolved.range==ColorRange::Full?0.0f:1.0f,
             resolved.matrix==YuvMatrix::BT2020NCL?2.0f:resolved.matrix==YuvMatrix::BT601?0.0f:1.0f,
-            resolved.transfer==TransferFunction::PQ?4.0f:float(workingTransferCode(resolved)), (nv12Texture?(nv12Texture->GetDesc().Format==DXGI_FORMAT_P010?1.0f:0.0f):(desc_.captureBitDepth==16?2.0f:desc_.wideYuvInput()?1.0f:0.0f)),
+            resolved.transfer==TransferFunction::HLG?5.0f:resolved.transfer==TransferFunction::PQ?4.0f:float(workingTransferCode(resolved)), (nv12Texture?(nv12Texture->GetDesc().Format==DXGI_FORMAT_P010?1.0f:0.0f):(desc_.captureBitDepth==16?2.0f:desc_.wideYuvInput()?1.0f:0.0f)),
             uintBits(srcW_), uintBits(srcH_), uintBits(desc_.hdrOutput?1u:0u),
             uintBits(resolved.reconstructChroma?std::max(1u,unsigned(resolved.chromaLocation)):0u) };
         yuvPass_.bind(list, constants, gpuHandleOf(yuvPass_, nv12Texture ? 3 + parity * 2 : 0).ptr, gpuHandleOf(yuvPass_, 2).ptr);

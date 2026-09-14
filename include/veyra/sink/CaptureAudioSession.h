@@ -8,6 +8,7 @@
 namespace veyra::sink {
 struct CaptureAudioState {
     bool available=false,running=false,clockEstimated=true,limited=false;
+    unsigned inputChannels=0,outputChannels=0;uint32_t inputChannelMask=0,outputChannelMask=0;
     double compensationMs=0,bufferedMs=0,bufferHighWaterMs=0,endpointBufferedMs=0;
     double driftCorrectionPpm=0;
     double inputBlockMs=0,inputIntervalMs=0;
@@ -20,7 +21,7 @@ class CaptureAudioSession {
 public:
     CaptureAudioSession();
     ~CaptureAudioSession();
-    bool configure(const WAVEFORMATEX&);
+    bool configure(const WAVEFORMATEX&,size_t formatBytes=sizeof(WAVEFORMATEX));
     bool start();
     void stop();
     bool push(const void* data,size_t bytes,double ptsMs,bool discontinuity);

@@ -126,6 +126,7 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
         rows.emplace_back(L"NR内部尺寸",s.applied.nr?std::format(L"{} x {}",s.metrics.resolution.nr.width,s.metrics.resolution.nr.height):L"关闭");
         rows.emplace_back(L"NR运行版本",s.nrActive?(s.applied.nrRuntime==engine::NrRuntime::Ampere?L"RTX 30兼容 · 实验":s.applied.nrRuntime==engine::NrRuntime::Community?L"社区兼容 · 实验":L"NVIDIA原版"):L"未运行");
         rows.emplace_back(L"显示模式",s.running?(s.applied.captureCompatible?L"直播兼容 · 实验":L"标准显示"):L"未运行");
+        if(s.audioAvailable)rows.emplace_back(L"音频声道 · 输入 / 输出",std::format(L"{} / {}{}",s.capture?s.captureAudio.inputChannels:s.audioInputChannels,s.capture?s.captureAudio.outputChannels:s.audioOutputChannels,(s.capture?s.captureAudio.outputChannels<s.captureAudio.inputChannels:s.audioOutputChannels<s.audioInputChannels)?L" · 降混":L""));
         rows.emplace_back(L"音频同步",s.audioAvailable?(s.capture?(s.captureAudio.running?L"软件估算同步":L"等待视频锚点"):(s.audioEndpointRecovering?L"音频设备恢复中 · 时间线保持":s.audioRebuffering?L"重新同步 · 等待视频锚点":L"音频主时钟")):L"无音频");
         if(!s.capture&&s.audioAvailable){
             rows.emplace_back(L"音频设备恢复次数",std::to_wstring(s.audioEndpointRecoveries));
@@ -139,6 +140,7 @@ inline LRESULT CALLBACK proc(HWND h,UINT message,WPARAM wp,LPARAM lp){
             rows.emplace_back(L"音频设备队列",std::format(L"{:.1f} ms",s.captureAudio.endpointBufferedMs));
             rows.emplace_back(L"音频重锚 / 溢出",std::format(L"{} / {}",s.captureAudio.resets,s.captureAudio.overflows));
         }
+        if(!s.colorStatus.empty())rows.emplace_back(L"实际颜色链路",s.colorStatus);
         if(!s.backendWarning.empty())rows.emplace_back(L"后端状态",s.backendWarning);
         if(!s.captureAudio.error.empty())rows.emplace_back(L"采集音频异常",s.captureAudio.error);
         }

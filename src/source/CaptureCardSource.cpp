@@ -4,6 +4,7 @@
 #include "veyra/source/NativeCaptureSink.h"
 #include "veyra/pipeline/ColorMetadata.h"
 #include "veyra/Log.h"
+#include "veyra/sink/AudioFormat.h"
 #include <windows.h>
 #include <dshow.h>
 #include <dvdmedia.h>
@@ -137,20 +138,41 @@ bool CaptureCardSource::configure(const SourceOpenDesc& desc){close();p_->lastAu
     }
     freeType(native);const bool layoutValid=SUCCEEDED(hr)&&captureMediaLayout(connected,p.layout);freeType(&connected,false);
     if(!layoutValid){log::error("capture",std::format("unsupported negotiated layout/connect failure hr=0x{:08X}",uint32_t(hr)));return false;}
+    unsigned colorOverride=0;swscanf_s(desc.path.c_str(),L"capture:%u:%d:%d:%u",&index,&format,&audio,&colorOverride);
+    if(colorOverride>2)return false;
+    if(colorOverride){
+        if(p.layout.format!=AV_PIX_FMT_P010&&p.layout.format!=AV_PIX_FMT_P016){log::error("capture-color","Explicit HDR requires P010/P016; select a 10/16-bit capture format");return false;}
+        p.layout.color.transfer=colorOverride==1?pipeline::TransferFunction::PQ:pipeline::TransferFunction::HLG;
+        p.layout.color.matrix=pipeline::YuvMatrix::BT2020NCL;p.layout.color.primaries=pipeline::ColorPrimaries::BT2020;
+        p.layout.color.transferAssumed=p.layout.color.matrixAssumed=p.layout.color.primariesAssumed=false;
+        log::info("capture-color",std::format("manual override={} BT2020; range retains negotiated metadata",colorOverride==1?"PQ":"HLG"));
+    }
     p.info={};p.info.kind=pipeline::SourceKind::CaptureCard;p.info.width=p.layout.width;p.info.height=p.layout.height;p.info.averageFps=p.layout.duration>0?1e7/p.layout.duration:0;p.info.duration=pipeline::Rational::unknown();p.info.color=p.layout.color;
     p.nominalDuration100ns=p.layout.duration;
-    log::info("capture-color",std::format("format={} stride={} rowBytes={} bytes={} bottomUp={} matrix={} assumed={} range={} assumed={} workingTransfer={} assumed={} (SDR display-referred)",int(p.layout.format),p.layout.stride,p.layout.rowBytes,p.layout.sampleBytes,p.layout.bottomUp,int(p.info.color.matrix),p.info.color.matrixAssumed,int(p.info.color.range),p.info.color.rangeAssumed,int(p.info.color.transfer),p.info.color.transferAssumed));
+    log::info("capture-color",std::format("format={} stride={} rowBytes={} bytes={} bottomUp={} matrix={} assumed={} range={} assumed={} workingTransfer={} assumed={} (explicit transfer contract)",int(p.layout.format),p.layout.stride,p.layout.rowBytes,p.layout.sampleBytes,p.layout.bottomUp,int(p.info.color.matrix),p.info.color.matrixAssumed,int(p.info.color.range),p.info.color.rangeAssumed,int(p.info.color.transfer),p.info.color.transferAssumed));
     if(audio>=0){
         const bool connected=[&]{
         if(!bind(unsigned(audio),true,p.audioFilter)||FAILED(p.graph->AddFilter(p.audioFilter.Get(),L"Capture audio")))return false;
         ComPtr<IPin> audioPin;
         if(FAILED(p.builder->FindPin(p.audioFilter.Get(),PINDIR_OUTPUT,&PIN_CATEGORY_CAPTURE,&MEDIATYPE_Audio,FALSE,0,&audioPin)))return false;
         ComPtr<IEnumMediaTypes> types;if(FAILED(audioPin->EnumMediaTypes(&types)))return false;
+        // Preserve the device's actual speaker layout. Enumeration order is
+        // commonly stereo first even when native 5.1 is available.
+        auto releaseType=[](AM_MEDIA_TYPE* type){freeType(type);};
+        using AudioType=std::unique_ptr<AM_MEDIA_TYPE,decltype(releaseType)>;
+        std::vector<AudioType> audioTypes;
+        for(;;){AM_MEDIA_TYPE* type=nullptr;if(types->Next(1,&type,nullptr)!=S_OK)break;
+            AudioType owned(type,releaseType);sink::WavePcmFormat pcm;
+            if(type->formattype==FORMAT_WaveFormatEx&&sink::parseWavePcm(type->pbFormat,type->cbFormat,pcm))audioTypes.push_back(std::move(owned));
+        }
+        std::stable_sort(audioTypes.begin(),audioTypes.end(),[](const auto& a,const auto& b){
+            return reinterpret_cast<const WAVEFORMATEX*>(a->pbFormat)->nChannels>reinterpret_cast<const WAVEFORMATEX*>(b->pbFormat)->nChannels;
+        });
         bool connectedAudio=false;
-        for(;;){
-            AM_MEDIA_TYPE* type=nullptr;if(types->Next(1,&type,nullptr)!=S_OK)break;
+        for(const auto& owned:audioTypes){
+            auto* type=owned.get();
             auto session=std::make_unique<sink::CaptureAudioSession>();ComPtr<IBaseFilter> candidate;ComPtr<IPin> terminal;
-            if(type->formattype==FORMAT_WaveFormatEx&&type->pbFormat&&type->cbFormat>=sizeof(WAVEFORMATEX)&&session->configure(*reinterpret_cast<WAVEFORMATEX*>(type->pbFormat))){
+            if(type->formattype==FORMAT_WaveFormatEx&&type->pbFormat&&type->cbFormat>=sizeof(WAVEFORMATEX)&&session->configure(*reinterpret_cast<WAVEFORMATEX*>(type->pbFormat),type->cbFormat)){
                 auto* target=session.get();
                 hr=createNativeAudioSink(*type,[target](IMediaSample* sample){
                     BYTE* bytes=nullptr;REFERENCE_TIME begin=0,end=0;
@@ -167,7 +189,7 @@ bool CaptureCardSource::configure(const SourceOpenDesc& desc){close();p_->lastAu
                 else if(candidate)p.graph->RemoveFilter(candidate.Get());
                 log::info("capture-audio",std::format("PCM ConnectDirect hr=0x{:X}",unsigned(hr)));
             }
-            freeType(type);if(connectedAudio)break;
+            if(connectedAudio)break;
         }
         return connectedAudio;
         }();

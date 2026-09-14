@@ -31,7 +31,9 @@ struct PlayerSnapshot {
     EnhancementSettings desired,applied;bool applying=false;
     bool nrActive=false,srActive=false,fgActive=false;
     std::wstring backendWarning;
+    std::wstring colorStatus;
     sink::CaptureAudioState captureAudio;
+    unsigned audioInputChannels=0,audioOutputChannels=0;
     bool audioRebuffering=false;
     uint64_t audioVideoWaits=0;
     bool audioEndpointRecovering=false;HRESULT audioEndpointError=S_OK;uint64_t audioEndpointRecoveries=0;

@@ -45,6 +45,13 @@ bool AudioPipeline::open(const std::wstring& path)
     if (avcodec_parameters_to_context(codecCtx_, fmt_->streams[si]->codecpar) < 0) return false;
     if (avcodec_open2(codecCtx_, codec, nullptr) < 0) return false;
     stream_ = fmt_->streams[si];
+    const auto& layout=codecCtx_->ch_layout;
+    if(layout.order==AV_CHANNEL_ORDER_NATIVE&&layout.u.mask<=UINT32_MAX)pcmFormat_={unsigned(layout.nb_channels),uint32_t(layout.u.mask)};
+    else if(layout.nb_channels==1)pcmFormat_={1,SPEAKER_FRONT_CENTER};
+    else if(layout.nb_channels==2)pcmFormat_={};
+    else {log::error("audio","Unsupported or unspecified multichannel speaker layout");return false;}
+    if(!pcmFormat_.valid())return false;
+    log::info("audio-format",std::format("file input channels={} mask=0x{:X}; preserve to renderer",pcmFormat_.channels,pcmFormat_.mask));
     veyra::log::info("audio", std::format("audio stream idx={} codec={} rate={}",
         si, codec->name, codecCtx_->sample_rate));
     return true;
@@ -86,9 +93,9 @@ size_t AudioPipeline::pull(float* dst, size_t maxFrames, double* firstPtsMs)
     while (copied < take && !segments_.empty()) {
         Segment& seg = segments_.front();
         const size_t n = std::min(take - copied, seg.frames);
-        // Ring is a deque of float pairs: copy n frames.
-        for (size_t i = 0; i < n * 2; ++i) {
-            dst[copied * 2 + i] = ring_.front();
+        // Copy n interleaved frames, retaining every source channel.
+        for (size_t i = 0; i < n * pcmFormat_.channels; ++i) {
+            dst[copied * pcmFormat_.channels + i] = ring_.front();
             ring_.pop_front();
         }
         copied += n;
@@ -124,11 +131,23 @@ double AudioPipeline::requestSeek(double targetMs)
 
 void AudioPipeline::pushDecoded(const AVFrame* frame)
 {
-    // Convert to 48k stereo float in converted_.
+    // Fail closed on an unannounced format change instead of reusing an old
+    // channel stride/rate and reading the wrong planes. Seek clears swr_.
+    const auto& layout=frame->ch_layout;
+    const bool layoutMatches=layout.nb_channels==int(pcmFormat_.channels)&&
+        ((layout.order==AV_CHANNEL_ORDER_NATIVE&&layout.u.mask==pcmFormat_.mask)||
+         (layout.order==AV_CHANNEL_ORDER_UNSPEC&&layout.nb_channels<=2));
+    if(!layoutMatches||frame->sample_rate<=0||
+       (swr_&&(frame->sample_rate!=swrInputRate_||frame->format!=swrInputFormat_))){
+        log::error("audio-format","Decoded audio layout/rate/format changed; reopen source required");
+        stopFlag_=true;return;
+    }
+    // Convert to 48 kHz float in converted_, preserving the speaker layout.
     if (swr_ == nullptr) {
-        AVChannelLayout outLayout = AV_CHANNEL_LAYOUT_STEREO;
-        AVChannelLayout inLayout = frame->ch_layout.nb_channels > 0
+        AVChannelLayout outLayout{};av_channel_layout_from_mask(&outLayout,pcmFormat_.mask);
+        AVChannelLayout inLayout = frame->ch_layout.order == AV_CHANNEL_ORDER_NATIVE
             ? frame->ch_layout : outLayout;
+        swrInputRate_=frame->sample_rate;swrInputFormat_=frame->format;
         const int result = swr_alloc_set_opts2(&swr_,
             &outLayout, AV_SAMPLE_FMT_FLT, kAudioRate,
             &inLayout, static_cast<AVSampleFormat>(frame->format), frame->sample_rate,
@@ -151,10 +170,10 @@ void AudioPipeline::pushDecoded(const AVFrame* frame)
         log::error("audio", "decoded audio block exceeds bounded conversion capacity");
         return;
     }
-    converted_.resize(static_cast<size_t>(capacity) * 2);
+    converted_.resize(static_cast<size_t>(capacity) * pcmFormat_.channels);
     uint8_t* planes[1] = { reinterpret_cast<uint8_t*>(converted_.data()) };
     const int outSamples = swr_convert(swr_, planes,
-        static_cast<int>(converted_.size() / 2),
+        static_cast<int>(converted_.size() / pcmFormat_.channels),
         const_cast<const uint8_t**>(frame->extended_data), frame->nb_samples);
     if (outSamples < 0) { log::error("audio", std::format("swr_convert failed code={}", outSamples)); return; }
     pushConverted(outSamples);
@@ -203,7 +222,7 @@ void AudioPipeline::pushConverted(int frames)
         veyra::log::error("audio", "ring overflow despite watermarks (bug)");
         return;
     }
-    ring_.insert(ring_.end(), converted_.data() + skip * 2, converted_.data() + static_cast<size_t>(frames) * 2);
+    ring_.insert(ring_.end(), converted_.data() + skip * pcmFormat_.channels, converted_.data() + static_cast<size_t>(frames) * pcmFormat_.channels);
     ringFrames_ += addFrames;
     if (!segments_.empty()) {
         Segment& last = segments_.back();
@@ -235,7 +254,7 @@ void AudioPipeline::decodeBlock()
         if (received == AVERROR_EOF) {
             if (swr_) {
                 uint8_t* planes[] = {reinterpret_cast<uint8_t*>(converted_.data())};
-                const int count = swr_convert(swr_, planes, static_cast<int>(converted_.size() / 2), nullptr, 0);
+                const int count = swr_convert(swr_, planes, static_cast<int>(converted_.size() / pcmFormat_.channels), nullptr, 0);
                 if (count > 0) { pushConverted(count); continue; }
                 if (count < 0) log::error("audio", std::format("resampler drain failed code={}", count));
             }
@@ -287,11 +306,22 @@ void AudioPipeline::closeAll()
     if (fmt_ != nullptr) avformat_close_input(&fmt_);
 }
 
-bool AudioRenderer::start()
+bool AudioRenderer::copyPcm(BYTE* destination,const float* input,size_t frames){
+    if(!channelMix_){std::memcpy(destination,input,frames*outputFormat_.channels*sizeof(float));return true;}
+    mixed_.resize(frames*outputFormat_.channels);
+    uint8_t* out[]={reinterpret_cast<uint8_t*>(mixed_.data())};const uint8_t* in[]={reinterpret_cast<const uint8_t*>(input)};
+    const int converted=swr_convert(channelMix_,out,int(frames),in,int(frames));
+    if(converted!=int(frames))return checked(E_FAIL,"Channel mapping unexpectedly changed frame count");
+    std::memcpy(destination,mixed_.data(),frames*outputFormat_.channels*sizeof(float));return true;
+}
+
+bool AudioRenderer::start(AudioFormat input)
 {
     std::lock_guard endpointLock(endpointMutex_);
     if(client_||enum_)return checked(E_UNEXPECTED,"Endpoint already initialized");
     lastError_=S_OK;bufferedMs_=0;smoothedGain_=0;
+    if(!input.valid())return checked(E_INVALIDARG,"Invalid input channel layout");
+    inputFormat_=input;lastRaw_.assign(input.channels,0);
     HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     comInited_ = SUCCEEDED(hr);
     if(FAILED(hr)&&hr!=RPC_E_CHANGED_MODE)return checked(hr,"Initialize COM");
@@ -303,17 +333,25 @@ bool AudioRenderer::start()
     hr = device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
         reinterpret_cast<void**>(&client_));
     if (!checked(hr,"Activate AudioClient")) return false;
-    WAVEFORMATEX mix{};
-    mix.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
-    mix.nChannels = 2;
-    mix.nSamplesPerSec = kAudioRate;
-    mix.wBitsPerSample = 32;
-    mix.nBlockAlign = 8;
-    mix.nAvgBytesPerSec = mix.nSamplesPerSec * mix.nBlockAlign;
+    WAVEFORMATEX* deviceMix=nullptr;
+    if(!checked(client_->GetMixFormat(&deviceMix),"GetMixFormat"))return false;
+    WavePcmFormat deviceFormat;const bool known=parseWavePcm(deviceMix,sizeof(WAVEFORMATEX)+deviceMix->cbSize,deviceFormat);
+    outputFormat_=input;
+    if(!known||(deviceFormat.layout.mask&input.mask)!=input.mask)
+        outputFormat_=known?deviceFormat.layout:AudioFormat{};
+    CoTaskMemFree(deviceMix);
+    auto mix=floatWave(outputFormat_);
+    if(outputFormat_!=inputFormat_){
+        AVChannelLayout from{},to{};av_channel_layout_from_mask(&from,inputFormat_.mask);av_channel_layout_from_mask(&to,outputFormat_.mask);
+        const int result=swr_alloc_set_opts2(&channelMix_,&to,AV_SAMPLE_FMT_FLT,kAudioRate,&from,AV_SAMPLE_FMT_FLT,kAudioRate,0,nullptr);
+        av_channel_layout_uninit(&from);av_channel_layout_uninit(&to);
+        if(result<0||!channelMix_||swr_init(channelMix_)<0)return checked(E_FAIL,"Configure endpoint channel mapping");
+    }
+    log::info("audio-format",std::format("input={} mask=0x{:X} output={} mask=0x{:X} downmix={} deviceLayoutKnown={}",input.channels,input.mask,outputFormat_.channels,outputFormat_.mask,outputFormat_.channels<input.channels,known));
     sampleRate_ = kAudioRate;
     hr = client_->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK |
         AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
-        10 * 10000, 0, &mix, nullptr);
+        10 * 10000, 0, &mix.Format, nullptr);
     const bool initOk = checked(hr,"Initialize AudioClient");
     if (!initOk) return false;
     if (!checked(client_->GetBufferSize(&bufferFrames_),"GetBufferSize")) return false;
@@ -376,7 +414,8 @@ bool AudioRenderer::pumpOnce(AudioPcmSource& pipeline, double* firstWrittenPtsMs
         const auto consumed=static_cast<uint64_t>(std::ceil(double(pos-anchorPos_)*sampleRate_/clockFrequency_));
         timelineWriteFrame_=std::max(timelineWriteFrame_.load(),consumed);
     }
-    chunk_.resize(static_cast<size_t>(avail) * 2);
+    if(pipeline.pcmFormat()!=inputFormat_)return checked(E_INVALIDARG,"PCM source channel layout changed without reset");
+    chunk_.resize(static_cast<size_t>(avail) * inputFormat_.channels);
     BYTE* dest = nullptr;
     if (!checked(render_->GetBuffer(avail, &dest),"GetBuffer")) return false;
     double firstPts = -1.0;
@@ -386,21 +425,21 @@ bool AudioRenderer::pumpOnce(AudioPcmSource& pipeline, double* firstWrittenPtsMs
     if (!started_ && !got) return checked(render_->ReleaseBuffer(0, 0),"Release empty prefill");
     const UINT32 written=started_&&pipeline.padUnderruns()?avail:static_cast<UINT32>(got);
     if (got > 0) {
-        lastRawLeft_=chunk_[(got-1)*2];lastRawRight_=chunk_[(got-1)*2+1];
+        for(unsigned c=0;c<inputFormat_.channels;++c)lastRaw_[c]=chunk_[(got-1)*inputFormat_.channels+c];
         const float target=std::clamp(gain_.load(),0.0f,1.0f);
-        applyStereoGain(chunk_.data(),got,target,smoothedGain_);
+        applyPcmGain(chunk_.data(),got,inputFormat_.channels,target,smoothedGain_);
         if(target!=loggedGain_&&std::abs(smoothedGain_-target)<.00001f){loggedGain_=target;log::info("audio-gain",std::format("target={} reached={} framesWritten={} clockPreserved=true applicationPCM=true",target,smoothedGain_,framesWritten_.load()));}
-        std::memcpy(dest, chunk_.data(), got * 8);
+        if(!copyPcm(dest,chunk_.data(),got)){render_->ReleaseBuffer(0,0);return false;}
         if (got < written) {
-            std::memset(dest + got * 8, 0, (written - got) * 8);
+            std::memset(dest + got * outputFormat_.channels*4, 0, (written - got) * outputFormat_.channels*4);
             underruns_.fetch_add(1);
         }
     } else {
-        std::memset(dest, 0, static_cast<size_t>(avail) * 8);
+        std::memset(dest, 0, static_cast<size_t>(avail) * outputFormat_.channels*4);
         underruns_.fetch_add(1);
     }
     if (!checked(render_->ReleaseBuffer(written, 0),"ReleaseBuffer")) return false;
-    if(written>got)lastRawLeft_=lastRawRight_=0;
+    if(written>got)std::fill(lastRaw_.begin(),lastRaw_.end(),0);
     {
         std::lock_guard lock(timelineMutex_);
         if(got&&endPts){timedPcm_=true;outputTimeline_.append(timelineWriteFrame_,got,firstPts,*endPts);}
@@ -439,7 +478,7 @@ void AudioRenderer::stopAndReset()
     timelineWriteFrame_=0;
     bufferedMs_=0;smoothedGain_=0;
     {std::lock_guard lock(timelineMutex_);outputTimeline_.clear();timedPcm_=false;}
-    fading_=false;pausedEndpoint_=false;lastRawLeft_=lastRawRight_=0;
+    fading_=false;pausedEndpoint_=false;std::fill(lastRaw_.begin(),lastRaw_.end(),0);
 }
 
 AudioFadeResult AudioRenderer::fadeAndReset(AudioPcmSource& source,const std::atomic<bool>& cancel)
@@ -450,7 +489,7 @@ AudioFadeResult AudioRenderer::fadeAndReset(AudioPcmSource& source,const std::at
     fading_=true;
     const auto begin=std::chrono::steady_clock::now();
     constexpr UINT32 frames=kAudioRate/200;
-    std::array<float,frames*2> tail{};
+    std::vector<float> tail(size_t(frames)*inputFormat_.channels);
     bool submitted=false;AudioFadeResult result=AudioFadeResult::TimedOut;
     while(std::chrono::steady_clock::now()-begin<std::chrono::milliseconds(80)){
         if(cancel){result=AudioFadeResult::Cancelled;break;}
@@ -462,13 +501,12 @@ AudioFadeResult AudioRenderer::fadeAndReset(AudioPcmSource& source,const std::at
             BYTE* dest=nullptr;
             if(!checked(render_->GetBuffer(frames,&dest),"Fade GetBuffer")){result=AudioFadeResult::Failed;break;}
             double pts=-1;const size_t got=source.pull(tail.data(),frames,&pts);
-            const float left=got?tail[(got-1)*2]:(padding?lastRawLeft_:0),right=got?tail[(got-1)*2+1]:(padding?lastRawRight_:0);
-            for(size_t i=got;i<frames;++i){tail[i*2]=left;tail[i*2+1]=right;}
-            fadeStereoTail(tail.data(),frames,smoothedGain_);
-            std::memcpy(dest,tail.data(),sizeof(tail));
+            for(unsigned c=0;c<inputFormat_.channels;++c){const float last=got?tail[(got-1)*inputFormat_.channels+c]:(padding?lastRaw_[c]:0);for(size_t i=got;i<frames;++i)tail[i*inputFormat_.channels+c]=last;}
+            fadePcmTail(tail.data(),frames,inputFormat_.channels,smoothedGain_);
+            if(!copyPcm(dest,tail.data(),frames)){render_->ReleaseBuffer(0,0);result=AudioFadeResult::Failed;break;}
             if(!checked(render_->ReleaseBuffer(frames,0),"Fade ReleaseBuffer")){result=AudioFadeResult::Failed;break;}
             submitted=true;framesWritten_+=frames;
-            log::info("audio-fade",std::format("submitted frames={} realPcm={} finalLeft={} finalRight={}",frames,got,tail[frames*2-2],tail[frames*2-1]));
+            log::info("audio-fade",std::format("submitted frames={} realPcm={} finalLeft={} finalRight={}",frames,got,tail[tail.size()-inputFormat_.channels],tail.back()));
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -486,6 +524,7 @@ void AudioRenderer::shutdown()
     if (client_) { (void)client_->Stop(); (void)client_->Reset(); }
     #define REL(x) if (x) { x->Release(); x = nullptr; }
     REL(clock_); REL(render_); REL(client_); REL(device_); REL(enum_);
+    swr_free(&channelMix_);
     #undef REL
     if (event_ != nullptr) { CloseHandle(event_); event_ = nullptr; }
     running_ = false;
@@ -507,7 +546,7 @@ void AudioRenderer::setPaused(bool value)
 void AudioPipeline::runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint)
 {
     const auto t0 = std::chrono::steady_clock::now();
-    bool endpointReady = renderer && (!ownEndpoint || renderer->start());
+    bool endpointReady = renderer && (!ownEndpoint || renderer->start(pcmFormat_));
     double lastClockMs = 0, recoveryTargetMs = 0;
     auto retryAt = t0;
     // Steady-state under-rate must never stop sound: the audio device clock is
@@ -627,7 +666,7 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint)
         if(renderer&&ownEndpoint&&!endpointReady){
             if(clockExhausted_){endpointRecovering_=false;}
             else if(std::chrono::steady_clock::now()>=retryAt){
-                if(renderer->start()){
+                if(renderer->start(pcmFormat_)){
                     endpointReady=true;
                     const bool rewound=rewind(recoveryTargetMs);
                     pauseApplied=shouldPause();

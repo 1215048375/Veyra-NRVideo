@@ -1967,3 +1967,14 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 
 ## 2026-09-14 — HDR/多声道实施节点 A
 用户授权施工、PS5真实多声道排除。本地分支codex/hdr-multichannel，checkpoint/pre-hdr-multichannel-20260914。HDR基底保留、NR/VideoSR代理合成、RGB10 DLSS/XeSS补帧首轮GPU通过；20帧真实NR/SR及18/16生成，1000nit输出998.932nit，零残差广色域/高光身份通过。完整构建成功，具体命令/失败/证据和未测边界见docs/HDR_MULTICHANNEL_EXECUTION_2026-09-14.md。其他入口、音频及产品收尾继续施工，未发布。
+
+
+## 2026-09-14 — HDR/多声道实施节点 B：软件交付、等待实机验收
+
+完成文件/P010-P016采集PQ与HLG输入、手动颜色覆盖、HDR保留NR/两种SR/DLSS-XeSS补帧、HEVC Main10 PQ导出、浮点JXR截图；文件/采集PCM保持声道掩码，共用音频时钟/增益/补偿，输出端明确降混，采集上游6ch同样协商10ms。PS5双声道保持，不伪造5.1。双语README标明本地开发、未发布，致谢仍在底部。
+
+构建命令cmd /c out\release-1.1.0-build.cmd通过。最终delivery23/23、44.67秒，logs/delivery/e344611bab454e2d9a23c510aac08215/result.json；EXE 9F28BE16AC94AA33F013C7A29E32E8CE49753C445BE10AA22E572C948EEFD045。pipeline52/52、capture contract零失败、30采集GPU+16HDR颜色用例通过；三NR运行库在5070组合20次Evaluate、DLSS18/XeSS16生成；六声道28检查通过，快/慢时钟各120秒通过；文件音频时间线、欠速和抖动最终exit0。HDR4K NR+VideoSR+FG Main10导出24帧完整解码，六声道音轨保持；JXR最终逐像素比较通过。patched FFmpeg哈希仍0710F0D8…284F。
+
+本轮发现并纠正FP16截图只拷半行、六声道上游缓冲仍限定8字节、旧测试/播放器probe将单声道送进立体声renderer；首轮JXR自回读不能证明原图完整、首轮audio-timeline包含4失败，均保留失败日志并由独立检查/重跑覆盖。其他编译/夹具失败和真实Create/Evaluate结果详见docs/HDR_MULTICHANNEL_EXECUTION_2026-09-14.md及logs/hdr-multichannel。没有把失败删掉或把尾部PASS当整套通过。
+
+桌面Veyra PS5测试版快捷方式指向当前构建。当前桌面HDR未启用、音频输出2ch，真实UI测试明确走HDR转SDR和6→2降混；HDR输出数值/接口验证与HDR实屏是分开的证据。未测真实5.1扬声器、HDR实卡、30/40系列、PS5新会话、OBS HDR及跨显示器切换。只完成软件实施，不宣称所有设备和画质验收。下一步用户在HDR屏与真5.1设备上验收；没有新push、Release、运行库替换或关机。

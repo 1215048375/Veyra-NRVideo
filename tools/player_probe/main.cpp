@@ -482,7 +482,7 @@ int main(int argc, char** argv)
 
         // --- Audio start (after GPU init) ------------------------------------
         if (hasAudio) {
-            if (!audio.start()) {
+            if (!audio.start(audioPipe.pcmFormat())) {
                 veyra::log::error("player", "audio renderer open failed");
                 break;
             }

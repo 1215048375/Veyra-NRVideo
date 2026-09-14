@@ -56,7 +56,7 @@ Stream input is up to 1080p. 2K / 4K / 8K are local upscaling targets. H.264 / H
 
 Pairing and PSN credentials are encrypted in **%LOCALAPPDATA%/Veyra/remoteplay**, bound to the Windows user and retained across upgrades. Do not share this directory. Signing out retains console pairing. Pinless first registration and Internet streaming are not implemented.
 
-**Experimental HDR:** native output requires Windows HDR and all enhancements off. Otherwise HDR is tone-mapped to SDR before enhancement, not native HDR NR processing. Real PS5 HDR and Sony authorization need further validation.
+**Experimental HDR (development branch):** Windows HDR output can retain HDR with NR, SR and FG enabled. NR / RTX Video SR process an SDR proxy and composite changes onto the retained HDR base; this is not a native HDR NR model. SDR displays still use tone mapping. Real PS5 HDR and Sony authorization need further validation.
 
 ## Quick Guide
 
@@ -115,7 +115,7 @@ Video / image / capture card / PS5 -> color handling -> SR -> NR -> frame genera
 
 C++20, Win32, and D3D12. FFmpeg handles media files, DirectShow handles capture, and NVENC handles video encoding. Inputs share one enhancement graph; capture retains the latest frame, and optical flow supplies estimated motion.
 
-NR and DLSS frame generation are **community-experimental integrations**, not NVIDIA certification or complete native game integration. Captured pixels lack game-engine depth and motion data; ghosting and altered detail are possible. AMD NR is unavailable, FRUC has been removed, and HDR / AV1 / ProRes export are unsupported. Capture compatibility and long-term stability remain under testing.
+NR and DLSS frame generation are **community-experimental integrations**, not NVIDIA certification or complete native game integration. Captured pixels lack game-engine depth and motion data; ghosting and altered detail are possible. AMD NR is unavailable, FRUC has been removed, and AV1 / ProRes export are unsupported; development HDR support is scoped below. Capture compatibility and long-term stability remain under testing.
 
 ## Development and License
 
@@ -135,7 +135,18 @@ Video export validates completeness before success and may take extra time to
 finish. Embedded subtitles are not preserved. Avoid simultaneous exports from
 multiple instances to the same target file.
 
-In Professional mode, click **Screenshot** in the top toolbar to save the latest processed full-resolution picture as PNG under **Pictures / Veyra Screenshots**. Application UI and window zoom are excluded; native HDR screenshots are not supported.
+In Professional mode, click **Screenshot** in the top toolbar to save the latest processed full-resolution picture under **Pictures / Veyra Screenshots**: PNG for SDR, floating-point JPEG XR (`.jxr`) for development HDR output. Use an HDR-capable viewer. Application UI and window zoom are excluded.
+
+## Development branch: HDR and 5.1 (unreleased)
+
+These changes are local to `codex/hdr-multichannel`; **the GitHub 1.1.1 package does not include them**.
+
+- Files, P010/P016 capture and PS5 can use explicitly described BT.2020 NCL PQ/HLG input. Windows HDR enables retained HDR output with NR, DLSS SR / RTX Video SR and DLSS / XeSS FG. NR / Video SR use an SDR proxy plus the retained HDR base, with reduced changes near black and compressed highlights. This is not native HDR NR inference. HLG uses a 1000-nit, gamma-1.2 reference conversion.
+- Capture defaults to device color metadata. Manual PQ / HLG is available for devices that omit it, requiring P010/P016. Ten-bit storage alone does not identify HDR. RGB/YUY2 HDR and BT.2020 constant-luminance input are unsupported.
+- HDR video export uses HEVC Main10 / BT.2020 / PQ, including HLG-to-PQ conversion and optional NR, SR and internal DLSS FG. XeSS remains preview-only. H.264 HDR export is rejected. HDR screenshots use lossless scRGB FP16 JPEG XR. Original mastering/peak metadata is not invented or reused after processing.
+- File and capture PCM preserve speaker positions through one audio clock, compensation and volume path. Capture tries actual multichannel device formats first. Configure the Windows endpoint for 5.1; stereo endpoints receive an explicit downmix. Detailed status reports input/output channel counts. PS5 remains stereo. Compressed Dolby/DTS passthrough and Atmos object audio are not implemented.
+
+RTX 5070 GPU output, HDR export and software channel isolation have local test evidence. HDR display appearance, real 5.1 speaker positioning and individual capture cards require hardware acceptance. See the [execution record](docs/HDR_MULTICHANNEL_EXECUTION_2026-09-14.md). Fresh-install effects remain off.
 
 ## Acknowledgments
 

@@ -47,6 +47,7 @@ public:
     ~AudioPipeline();
 
     bool open(const std::wstring& path);
+    AudioFormat pcmFormat()const override{return pcmFormat_;}
 
     double bufferedMs() const;
     // PTS (ms) of the first unconsumed buffered sample; < 0 when empty.
@@ -61,7 +62,7 @@ public:
     double firstPtsAfterLastSeek() const;
     bool decodingComplete() const { return decodedEof_.load(); }
 
-    // Pull up to maxFrames stereo frames; sets the PTS of the first pulled
+    // Pull up to maxFrames source-layout frames; sets the PTS of the first pulled
     // frame. Returns frames pulled (0 legal; caller writes silence and it is
     // counted as an underrun by the pump only when the endpoint had space).
     size_t pull(float* dst, size_t maxFrames, double* firstPtsMs) override;
@@ -107,10 +108,12 @@ private:
 
     friend class AudioThread;
 
+    AudioFormat pcmFormat_;
     AVFormatContext* fmt_ = nullptr;
     AVCodecContext* codecCtx_ = nullptr;
     AVStream* stream_ = nullptr;
     AVPacket* packet_ = nullptr;
+    int swrInputRate_=0,swrInputFormat_=-1;
     SwrContext* swr_ = nullptr;
     int streamIndex_ = -1;
     bool havePacket_ = false;
@@ -122,7 +125,7 @@ private:
     static constexpr size_t kMaxRingFrames = kAudioRate * 2; // 2s hard bound
 
     mutable std::mutex mutex_;
-    std::deque<float> ring_{};         // stereo interleaved
+    std::deque<float> ring_{};         // source-layout interleaved
     size_t ringFrames_ = 0;
     std::deque<Segment> segments_{};   // PTS bookkeeping of ring contents
 
@@ -153,7 +156,8 @@ private:
 class AudioRenderer {
 public:
     ~AudioRenderer(){shutdown();}
-    bool start();
+    bool start(AudioFormat input = {});
+    AudioFormat outputFormat()const{std::lock_guard lock(endpointMutex_);return outputFormat_;}
     void setGain(float value){gain_.store(value);}
 
     // Write actual PCM before starting the endpoint and its media clock.
@@ -209,11 +213,15 @@ private:
     std::atomic<bool> started_{false};
     std::atomic<bool> running_{false};
     std::atomic<bool> fading_{false};bool pausedEndpoint_=false;
-    float lastRawLeft_=0,lastRawRight_=0;
+    std::vector<float> lastRaw_=std::vector<float>(2,0);
+    AudioFormat inputFormat_,outputFormat_;
+    SwrContext* channelMix_=nullptr;
+    std::vector<float> mixed_;
+    bool copyPcm(BYTE* destination,const float* input,size_t frames);
     bool comInited_ = false;
     std::atomic<uint64_t> underruns_{0};
     std::atomic<uint64_t> framesWritten_{0};
-    std::vector<float> chunk_{std::vector<float>(8192 * 2)};
+    std::vector<float> chunk_;
 };
 
 } // namespace veyra::sink

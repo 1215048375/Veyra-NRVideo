@@ -291,7 +291,7 @@ for(auto [id,help]:std::initializer_list<std::pair<int,const wchar_t*>>{
  {Fg,L"开关补帧。专业模式可选倍率和后端；数字翻倍，显卡工作量也会涨。"},
  {Realtime,L"实时档降低NR内部处理尺寸，减轻负担；原生档更费算力。"},
  {Multiplier,L"选择补帧倍率。帧数不是越多越好，跟不上时会跳过过期机会。"},
- {Save,L"保存当前处理后的完整画面为PNG，放到系统图片文件夹的 Veyra Screenshots。只拍画面，不拍工具栏；原生HDR暂不支持。"},
+ {Save,L"保存处理后的完整画面到系统图片文件夹的 Veyra Screenshots。SDR为PNG，HDR为保留高亮的JXR；只拍画面，不拍工具栏或驱动补帧。"},
  {Master,L"总增强开关。关闭后保留设置，重新开启不用重调配方。"},
  {DailyPreset,L"载入保存的增强预设，一键换口味。"},{Volume,L"播放音量，不改变音画同步偏移。"},{Mute,L"静音或恢复声音，让耳朵休息一下。"},
  {Subtitle,L"显示或隐藏字幕。字幕在增强后叠加，不让算法给字加戏。"},{SubtitleLoad,L"加载本地字幕文件。对白太快，给眼睛加个帮手。"},{SubtitleSize,L"调整字幕字号，不改变导出视频尺寸。"},
@@ -430,9 +430,10 @@ if(masterPendingRevision&&!s.applying){if(s.sessionId==masterPendingSession&&s.r
 if(smokeScreenshot&&screenshotStep==0&&s.frames>20){SendMessageW(hwnd,WM_COMMAND,Save,0);screenshotStep=1;}
 if(screenshotPending){
     std::error_code ec;
-    if(s.status.starts_with(L"图片已保存")&&std::filesystem::exists(screenshotPath,ec)){
+    if(s.status.starts_with(L"HDR截图已保存")){auto path=std::filesystem::path(screenshotPath);path.replace_extension(L".jxr");screenshotPath=path.wstring();}
+    if((s.status.starts_with(L"图片已保存")||s.status.starts_with(L"HDR截图已保存"))&&std::filesystem::exists(screenshotPath,ec)){
         screenshotPending=false;screenshotTick=GetTickCount64();setText(GetDlgItem(hwnd,Save),L"已保存");
-        if(smokeScreenshot){screenshotStep=2;veyra::log::info("screenshot-test","toolbar handler saved processed PNG");}
+        if(smokeScreenshot){screenshotStep=2;veyra::log::info("screenshot-test","toolbar handler saved processed screenshot");}
     }else if(s.status.find(L"保存失败")!=std::wstring::npos||s.status.find(L"保存异常")!=std::wstring::npos||s.status.find(L"截图尚未支持")!=std::wstring::npos||!s.running){
         screenshotPending=false;screenshotTick=GetTickCount64();setText(GetDlgItem(hwnd,Save),L"保存失败");
         MessageBoxW(hwnd,s.status.c_str(),L"截图未保存",MB_OK|MB_ICONINFORMATION);

@@ -1,4 +1,5 @@
 #include "veyra/sink/CaptureAudioSession.h"
+#include "veyra/sink/AudioFormat.h"
 #include <chrono>
 #include <thread>
 #include <iostream>
@@ -19,14 +20,16 @@ int main(int argc,char** argv){
             else std::this_thread::sleep_until(due);
         }
     } pacer;
-    const bool endpointTest=argc==2&&std::string_view(argv[1])=="--endpoint-loss";
-    const bool jitterTest=argc==2&&std::string_view(argv[1])=="--jitter";
-    const bool fastDrift=argc==2&&std::string_view(argv[1])=="--drift-fast";
-    const bool driftTest=fastDrift||(argc==2&&std::string_view(argv[1])=="--drift-slow");
+    const bool endpointTest=argc>=2&&std::string_view(argv[1])=="--endpoint-loss";
+    const bool jitterTest=argc>=2&&std::string_view(argv[1])=="--jitter";
+    const bool fastDrift=argc>=2&&std::string_view(argv[1])=="--drift-fast";
+    const bool driftTest=fastDrift||(argc>=2&&std::string_view(argv[1])=="--drift-slow");
     if(endpointTest)SetEnvironmentVariableW(L"VEYRA_TEST_CAPTURE_AUDIO_ENDPOINT_LOSS",L"1");
+    const bool multichannel=argc>=3&&std::string_view(argv[2])=="--5.1";
     CaptureAudioSession audio;WAVEFORMATEX f{};f.wFormatTag=WAVE_FORMAT_PCM;f.nChannels=2;f.nSamplesPerSec=48000;f.wBitsPerSample=16;f.nBlockAlign=4;f.nAvgBytesPerSec=192000;
-    if(!audio.configure(f)||!audio.start())return 2;audio.setGain(0);
-    std::vector<int16_t> pcm(960,0);const auto start=Clock::now();
+    auto extended=floatWave({6,0x60f});extended.SubFormat=KSDATAFORMAT_SUBTYPE_PCM;extended.Format.wBitsPerSample=16;extended.Samples.wValidBitsPerSample=16;extended.Format.nBlockAlign=12;extended.Format.nAvgBytesPerSec=576000;
+    if(!(multichannel?audio.configure(extended.Format,sizeof(extended)):audio.configure(f))||!audio.start())return 2;audio.setGain(0);
+    std::vector<int16_t> pcm(480*(multichannel?6:2),0);const auto start=Clock::now();
     if(jitterTest){
         uint64_t settledResets=0,settledUnderruns=0;unsigned missing=0;std::vector<double> errors;
         for(unsigned i=0;i<500;++i){

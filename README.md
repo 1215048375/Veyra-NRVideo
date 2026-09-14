@@ -55,7 +55,7 @@ BUG反馈与新功能
 
 ### 视频与图片
 
-专业模式顶部点击 **截图**，保存处理后的完整画面到系统“图片”文件夹下的 `Veyra Screenshots`，格式为 PNG。原生 HDR 截图暂不支持。
+专业模式顶部点击 **截图**，保存处理后的完整画面到系统“图片”文件夹下的 `Veyra Screenshots`，SDR 保存为 PNG，开发分支的 HDR 保存为保留浮点高亮的 JPEG XR（`.jxr`），需支持 HDR 的看图软件。
 
 点击底栏“打开”选择文件。底栏提供播放、进度、音量、字幕和全屏；切换到专业模式后，鼠标位于画面上时可用滚轮缩放。
 
@@ -78,7 +78,7 @@ BUG反馈与新功能
 
 主机和 PSN 凭据加密保存在 **%LOCALAPPDATA%/Veyra/remoteplay**，绑定当前 Windows 用户，升级不需搬运；不要分享这个目录。退出 PSN 不删除主机配对。首次免配对码注册、外网串流未实现。
 
-**实验 HDR**：H.265 HDR 在 Windows HDR 开启且所有增强关闭时可原生输出；开启增强或使用 SDR 显示器时先映射为 SDR，不是原生 HDR NR。真实 PS5 HDR 与 Sony 登录仍待进一步验收。
+**实验 HDR（开发分支，未发布）**：H.265 HDR 在 Windows HDR 开启时可保留 HDR 输出，也可同时开启 NR、超分和补帧。NR / RTX Video SR 处理映射副本，再与原 HDR 基底合成，属于 HDR 保留增强，不是原生 HDR NR 模型；SDR 显示器仍先映射为 SDR。真实 PS5 HDR 与 Sony 登录仍待进一步验收。
 
 ### 增强与补帧
 
@@ -125,13 +125,24 @@ BUG反馈与新功能
 
 C++20、Win32、D3D12；文件由 FFmpeg 处理，采集使用 DirectShow，视频导出使用 NVENC。各入口共享增强管线，采集保留最新帧，光流提供估算的运动信息。
 
-NR 与 DLSS 帧生成属于 **community experimental / 社区实验集成**，不是 NVIDIA 官方认证或完整游戏原生集成。采集画面没有游戏引擎的原生深度和运动数据，效果可能存在拖影或细节变化。AMD NR 暂未提供；FRUC 已移除；仅 PS5 有上述实验 HDR 路径，文件 / 采集 HDR、HDR 导出、AV1 / ProRes 导出尚不支持。实卡兼容性与长期稳定性仍需持续验证。
+NR 与 DLSS 帧生成属于 **community experimental / 社区实验集成**，不是 NVIDIA 官方认证或完整游戏原生集成。采集画面没有游戏引擎的原生深度和运动数据，效果可能存在拖影或细节变化。AMD NR 暂未提供；FRUC 已移除；HDR 适用范围见下文；AV1 / ProRes 导出尚不支持。实卡兼容性与长期稳定性仍需持续验证。
 
 ## 开发与许可
 
 [构建说明](docs/BUILD.md) · [组件清单](docs/RUNTIME_COMPONENTS_1.1.1.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
 
 Veyra 原有源码采用 [GPLv3](LICENSE)；含串流的组合程序同时适用 [AGPLv3 与上游 OpenSSL 例外](licenses/remoteplay/CHIAKI_AGPL3_OPENSSL.txt)。应用源码对应版本标签，Release 另附串流依赖与 FFmpeg 对应源码包，普通用户无需下载。SDK、模型和运行时不进入源码仓库；Release 组件按各自许可与实验发布范围单独提供。
+
+## 开发分支：HDR 与 5.1（尚未发布）
+
+以下能力属于 `codex/hdr-multichannel` 的本地开发版，**GitHub 1.1.1 不包含**。
+
+- **HDR 输入 / 增强**：文件、P010/P016 采集与 PS5 HDR；支持明确标记的 BT.2020 NCL / PQ 或 HLG。Windows HDR 开启时，可组合 NR、DLSS SR / RTX Video SR、DLSS / XeSS 补帧。NR / Video SR 使用 SDR 代理和 HDR 基底合成，压缩高光和近黑区域的增强会衰减；不把 SDR 结果逆造为原始 HDR。HLG 使用 1000nit / gamma 1.2 参考转换。
+- **采集颜色**：默认使用设备元数据。设备漏报时，在采集面板选择手动 PQ 或 HLG，且必须选择 P010/P016。10bit 本身不代表 HDR；RGB / YUY2 HDR 及 BT.2020 constant-luminance 暂不支持。
+- **HDR 导出 / 截图**：视频选择 HEVC，输出 Main10 / BT.2020 / PQ；HLG 也统一输出 PQ。支持 NR、超分和内部 DLSS 补帧。XeSS 仍只支持预览；H.264 不承载此 HDR 导出。截图为 FP16 scRGB JPEG XR。导出不虚构或沿用处理前的峰值元数据；普通 PNG/JPEG 保持 SDR。
+- **5.1 音频**：文件解码与采集 PCM 保留声道位置，共用一套音频时钟、补偿和音量处理。采集优先尝试设备真实提供的多声道模式。Windows 输出设备须配置成 5.1；仅支持立体声时明确降混，在详细状态中显示输入 / 输出声道数。PS5 保持上游提供的立体声，不伪装成 5.1；本轮不提供 Dolby/DTS 压缩码流直通或 Atmos 对象音频。
+
+本机 RTX 5070 已验证 GPU 输出、HDR 文件导出及多声道软件数据；真实 HDR 屏观感、5.1 扬声器定位和各采集卡仍需实机验收。各组合记录及边界见 [施工记录](docs/HDR_MULTICHANNEL_EXECUTION_2026-09-14.md)。新安装默认仍关闭全部效果。
 
 ## 致谢
 

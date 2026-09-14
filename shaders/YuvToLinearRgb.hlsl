@@ -95,6 +95,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         const float m1=2610.0/16384.0,m2=2523.0/32.0;
         float3 p=pow(rgb,1.0/m2);
         float3 nits=10000.0*pow(max(p-3424.0/4096.0,0.0)/max(2413.0/128.0-2392.0/128.0*p,1e-6),1.0/m1);
+        if(colorParams0.z>4.5){
+            // BT.2100 HLG reference display: 1000-nit peak, gamma 1.2,
+            // ideal black. HLG scene light needs its OOTF before PQ/scRGB.
+            float3 scene=select(rgb<=.5,rgb*rgb/3.0,(exp((rgb-.55991073)/.17883277)+.28466892)/12.0);
+            nits=1000.0*scene*pow(max(dot(scene,float3(.2627,.6780,.0593)),0),.2);
+        }
         float3 linear709=mul(float3x3(1.660491,-0.587641,-0.072850,-0.124550,1.132900,-0.008349,-0.018151,-0.100579,1.118730),nits);
         if(yuvDimensions.z!=0)rgb=linear709/80.0; // scRGB: 1.0 = 80 nits.
         else{

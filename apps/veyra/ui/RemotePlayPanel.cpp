@@ -136,7 +136,7 @@ case WM_CREATE:{window=h;closing=false;font=makeFont(h);titleTheme(h);
         {Account,L"配对用的Base64 PSN Account ID，不是在线昵称。名字相同不代表身份证号码相同。"},
         {PairPin,L"PS5远程游玩页面显示的8位配对码，有时效。过期了再领一张票。"},
         {Quality,L"选择PS5发送的分辨率和帧率。更改后点击应用设置并重连；当前生效值看下方状态，不要被下拉框骗了。"},
-        {CodecChoice,L"H.264兼容性好，H.265通常更省码率；更改后重连生效。HDR需要PS5实际输出HDR；关闭增强且Windows HDR开启时原生显示，开启增强则先转SDR，别把两种效果认错。"},
+        {CodecChoice,L"H.264兼容性好，H.265通常更省码率；更改后重连生效。HDR需要PS5实际输出HDR和Windows HDR开启；增强保留HDR基底并处理映射副本，NR本身不是原生HDR模型。SDR显示器会映射为SDR。"},
         {Pair,L"用账户ID和8位码注册主机，凭据在本机加密保存。"},
         {Connect,L"使用保存的配对信息连接PS5，把画面送进当前增强链路。"},
         {Cancel,L"取消当前操作或断开串流，让连接安静收工。"},

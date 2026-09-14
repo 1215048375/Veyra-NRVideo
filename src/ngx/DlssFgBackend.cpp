@@ -229,6 +229,12 @@ bool DlssFgBackend::evaluate(ID3D12GraphicsCommandList* cmdList,
         return false;
     }
 
+    if(desc.hdr&&(!desc.backbuffer||!desc.outputInterpolated||
+       desc.backbuffer->GetDesc().Format!=DXGI_FORMAT_R10G10B10A2_UNORM||
+       desc.outputInterpolated->GetDesc().Format!=DXGI_FORMAT_R10G10B10A2_UNORM)){
+        log::error("fg-backend","HDR Evaluate requires RGB10/PQ input and output textures");
+        status=Status::InvalidArgument;return false;
+    }
     NVSDK_NGX_D3D12_DLSSG_Eval_Params evalParams{};
     evalParams.pBackbuffer = desc.backbuffer;
     evalParams.pDepth = desc.depth;
