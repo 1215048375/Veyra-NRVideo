@@ -1928,3 +1928,7 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 便携/RemotePlay源码/FFmpeg源码及各自SHA256共六资产生成，逐文件及排除扫描通过；七运行文件与patched FFmpeg沿用，社区NR继续HashMismatch，源码没有SDK/DLL/模型/凭据。桌面普通程序已为1.1.0，EXE SHA256 F4106617DD743E2913729D3BDF9DF8A8DE911E1E28EAC482F3204ECD4967AE39。下一步推送main/tag、上传草稿、核实服务端digest后公开latest，再保存记录关机。
 
 1.1.0发布完成：main/v1.1.0（1523ddb）已推送；2026-09-13T18:50:38Z公开为latest，Release ID 387998437，非draft/prerelease。六资产均uploaded、服务端size及SHA256逐项匹配；远端README与标签一致。地址https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.1.0 。证据logs/release-1.1.0/published-release.json、remote-assets-verified.json。未移动tag或修改验证后的压缩包。本记录保存后按用户明确请求关机。
+
+## 2026-09-14 — 精简双语 README 致谢
+
+用户授权将确认的简短致谢更新到 GitHub。先 fetch 并 fast-forward 到用户远端修改 83de594，保留其 README 内容。README.md / README_EN.md 底部统一为 Magpie Experimental（研究启发）、chiaki-ng（串流基础）、XeSS-GPU-Motion（GPU DIS 实现）及第三方说明链接；原完整依赖、参考和已搁置 AMD 调研清单移入 THIRD_PARTY_NOTICES.md，原许可证与组件记录保留。git diff --check 通过，核对双语段落及迁移后的相对链接。仅文档改动，未构建、未执行 GPU Create/Evaluate、未修改运行组件或 Release 资产。随后提交并推送 main。

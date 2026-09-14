@@ -134,42 +134,8 @@ multiple instances to the same target file.
 
 In Professional mode, click **Screenshot** in the top toolbar to save the latest processed full-resolution picture as PNG under **Pictures / Veyra Screenshots**. Application UI and window zoom are excluded; native HDR screenshots are not supported.
 
-## Acknowledgments and Project Sources
+## Acknowledgments
 
-Thank you to these projects and their contributors. Integrated code, dependencies, and development references are identified separately below. Pinned versions, modifications, and licenses are recorded in [Third-Party Notices](THIRD_PARTY_NOTICES.md).
+Thanks to [Magpie Experimental](https://github.com/SAOG0721/Magpie/tree/experimental) for research insights into NR residual composition, optical flow, and enhancement pipelines; to [chiaki-ng](https://github.com/streetpea/chiaki-ng) for the PS5 streaming foundation; and to [XeSS-GPU-Motion](https://github.com/gggz114514-oss/XeSS-GPU-Motion) for its GPU DIS optical-flow implementation.
 
-### Integrated Code and Dependencies
-
-| Project | Contribution to Veyra |
-| --- | --- |
-| [chiaki-ng](https://github.com/streetpea/chiaki-ng) | PS5 Remote Play protocol, pairing and sessions; controller, haptics and PSN authorization integration and adaptations. Also credit to grill2010 for the upstream Account ID approach. |
-| [XeSS-GPU-Motion](https://github.com/gggz114514-oss/XeSS-GPU-Motion) / [OpenCV](https://github.com/opencv/opencv) | Ported GPU DIS provider and shaders, retaining attribution and licenses for the OpenCV DIS-derived portions. |
-| [FFmpeg](https://github.com/FFmpeg/FFmpeg) / [nv-codec-headers](https://github.com/FFmpeg/nv-codec-headers) | Media demuxing, decoding, muxing and NVENC API declarations. Releases provide the actual FFmpeg patches and corresponding source. |
-| [SDL](https://github.com/libsdl-org/SDL) | PC controller input, DualSense support and haptic audio output. |
-| [AMD FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) | Optical flow and its D3D12 backend. |
-| [Lucide](https://github.com/lucide-icons/lucide) | UI icons, retaining Lucide and Feather-derived license notices. |
-| [Intel XeSS / XeLL](https://github.com/intel/xess) | Experimental XeSS frame generation and related runtime interfaces. |
-| [NVIDIA DLSS](https://github.com/NVIDIA/DLSS), [RTX Video SDK](https://developer.nvidia.com/rtx-video-sdk), [Optical Flow SDK](https://developer.nvidia.com/opticalflow-sdk), [Video Codec SDK](https://developer.nvidia.com/video-codec-sdk) | Upscaling, optical flow, encoding and enhancement interfaces. Experimental NR components have separate identities and boundaries in [Runtime Components](docs/RUNTIME_COMPONENTS_1.1.0.md); this is not vendor certification. |
-| [vcpkg](https://github.com/microsoft/vcpkg) | Dependency builds, version records and license provenance. |
-
-Remote Play also depends on **OpenSSL, Opus, json-c, libevent, miniupnpc, curl, nanopb, Jerasure and gf-complete**. Their attribution and license notices are retained in [licenses/remoteplay](licenses/remoteplay), with corresponding source supplied in Releases.
-
-### Architecture, Implementation Ideas and Comparisons
-
-| Project | Reference areas |
-| --- | --- |
-| [Magpie Experimental](https://github.com/SAOG0721/Magpie/tree/experimental) | NR / SR / FG combinations, configurable processing order, motion guidance, residual composition, resource synchronization and presentation pacing; an important practical comparison during development. |
-| [OBS Studio](https://github.com/obsproject/obs-studio) | DirectShow capture, pixel formats, color metadata, buffering and window-capture behavior. |
-| [NVEnc](https://github.com/rigaya/NVEnc) / [RTXVideoProcessor](https://github.com/DrC0ns0le/RTXVideoProcessor) | Video upscaling, GPU frame resources, codecs and scheduling. FRUC was also researched; it has since been removed from Veyra. |
-| [mpv](https://github.com/mpv-player/mpv) | RTX upscaling integration and video-processing approaches in a media player. |
-| [video2dlssnr](https://github.com/DaniilSokolyuk/video2dlssnr) / [dlss5-nr-player](https://github.com/Zonnery/dlss5-nr-player) | Research comparisons for NR pipelines, stage order and data transfers; their code was not copied. |
-| [dlss5-video-player](https://github.com/2600th/dlss5-video-player) / [dlss5-visual-enhancer](https://github.com/Merserk/dlss5-visual-enhancer) / [dlss5-infinity-studio](https://github.com/SamG-Coder/dlss5-infinity-studio) | Playback, offline enhancement, export and caching workflow references. |
-| [DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder) / [DLSS5-Reshade-AIO](https://github.com/kibblerz/DLSS5-Reshade-AIO) / [Assassin’s Creed Odyssey DLAA](https://github.com/SAOG0721/Assassins-Creed-Odyssey-DLAA) | Research into motion/depth inputs, color transfer, NR protection regions and temporal contracts. Veyra does not load or distribute ReShade / RenoDX add-ons. |
-| [Video2X](https://github.com/k4yt3x/video2x) / [RIFE](https://github.com/hzwer/ECCV2022-RIFE) | Research into video upscaling and interpolation approaches; these algorithms are not integrated. |
-
-<details>
-<summary>Deferred AMD NR research references</summary>
-
-[DLSS-NR-on-AMD](https://github.com/danielblnc/DLSS-NR-on-AMD), [dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting), [dlss5-image-enhancer-zluda](https://github.com/RedDukeDev/dlss5-image-enhancer-zluda) and its [ZLUDA fork](https://github.com/RedDukeDev/ZLUDA), [dlss5-neural-amd](https://github.com/zmodelerlover/dlss5-neural-amd), and [DLSS5-AMD-Video](https://github.com/eikkapine/DLSS5-AMD-Video). These informed feasibility and performance research. AMD NR is not available in the current release.
-
-</details>
+See [Third-Party Notices](THIRD_PARTY_NOTICES.md) for other dependencies, sources, and licenses.

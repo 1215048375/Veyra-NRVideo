@@ -130,10 +130,8 @@ NR 与 DLSS 帧生成属于 **community experimental / 社区实验集成**，�
 
 Veyra 原有源码采用 [GPLv3](LICENSE)；含串流的组合程序同时适用 [AGPLv3 与上游 OpenSSL 例外](licenses/remoteplay/CHIAKI_AGPL3_OPENSSL.txt)。应用源码对应版本标签，Release 另附串流依赖与 FFmpeg 对应源码包，普通用户无需下载。SDK、模型和运行时不进入源码仓库；Release 组件按各自许可与实验发布范围单独提供。
 
+## 致谢
 
-<details>
-<summary>已搁置的 AMD NR 方向：调研参考</summary>
+感谢 [Magpie Experimental](https://github.com/SAOG0721/Magpie/tree/experimental) 在 NR 残差合成、光流与增强处理链方面提供的研究启发；感谢 [chiaki-ng](https://github.com/streetpea/chiaki-ng) 提供 PS5 串流基础，以及 [XeSS-GPU-Motion](https://github.com/gggz114514-oss/XeSS-GPU-Motion) 的 GPU DIS 光流实现。
 
-[DLSS-NR-on-AMD](https://github.com/danielblnc/DLSS-NR-on-AMD)、[dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting)、[dlss5-image-enhancer-zluda](https://github.com/RedDukeDev/dlss5-image-enhancer-zluda) 及其 [ZLUDA 分支](https://github.com/RedDukeDev/ZLUDA)、[dlss5-neural-amd](https://github.com/zmodelerlover/dlss5-neural-amd)、[DLSS5-AMD-Video](https://github.com/eikkapine/DLSS5-AMD-Video)。这些项目用于可行性与性能路线研究，当前版本不提供 AMD NR。
-
-</details>
+其他依赖、来源与许可证见 [第三方说明](THIRD_PARTY_NOTICES.md)。
