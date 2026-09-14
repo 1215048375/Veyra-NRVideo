@@ -1956,3 +1956,11 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 更新双语README、Release Notes、组件/源码说明；命令、资产大小/哈希、测试证据见docs/RELEASE_1.1.1_EXECUTION.md和logs/release-1.1.1/。RTX30实卡尚未验证，未声明全型号成功。下一步快进main、推送tag、草稿上传后核对服务端六资产digest再公开latest；本次无关机请求。
 
 1.1.1已发布：146f035已合入并推送main，v1.1.1保持此发布提交。2026-09-14T07:10:02Z公开latest，Release ID388201201，非草稿/预发布。六资产服务端size/digest均匹配本地审计；完整便携ZIP421715775字节，SHA256 17D1F9C6A56043014E62F598AB1C6DA492DF5BC040168B42AA9D836594951D6A。公开地址https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.1.1 ，证据logs/release-1.1.1/published-release.json。未修改已验证ZIP或移动tag；后续仍等待30系持卡验收。
+
+## 2026-09-14 — HDR全增强与5.1可行性研究
+
+用户要求研究完整HDR输入/增强/输出和5.1能否全部实现。本轮读取当前源代码、固定SDK本地文档/样例、NVIDIA/Intel/Microsoft/Opus官方文档及Chiaki上游源码；无产品代码修改、无构建、无新Create/Evaluate/主机连接/声卡测试、无组件变更或发布。
+
+结论与分阶段计划落盘docs/HDR_ALL_EFFECTS_MULTICHANNEL_RESEARCH_PLAN_2026-09-14.md。发现HDR限制同时在Engine和图入口，增强前先SDR映射；NR已有浮点原底/代理/残差结构，可研究保留HDR原底的变化合成，不必把NR模型原生HDR当唯一出路。DLSS SR有HDR接口；DLSS FG/XeSS公开合同要求HDR10/RGB10，不能直接用当前scRGB。RTX Video的10-bit样例仍要求SDR，不把10-bit或TrueHDR转换当原生HDR保留证据。
+
+音频需端到端声道布局与统一音频帧计数：文件当前降混，采集入口当前直接拒绝>2声道，纠正“所有输入都混成立体声”的笼统说法。当前Chiaki单流Opus链仅1/2声道，PS5真实5.1需另找到上游协商/传输证据；无法从2.0恢复六个独立声道。HDR合成路线尚属待测设计，不能以文档当实现完成。git diff --check通过，未推送研究文档；下一步先验证NR保留HDR与RGB10补帧组合的隔离原型，再贯通全部入口/5.1/导出及UI。
