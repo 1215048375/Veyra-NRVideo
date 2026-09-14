@@ -1995,3 +1995,5 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 1.2.0 EXE SHA256 E49D90E1217E0DE1B59C9C889DE318DC46337DF51FCF838038D7F5AF896EE457。delivery23/23、48.85秒；HDR 五种真实 GPU 组合、30采集颜色与16 HDR颜色组合、预设/SDR开关、六声道与音频抖动均通过。最终完整便携包在独立解压、隔离PATH、临时移走manifest后7/7通过；首次默认无增强。三ZIP逐文件审计通过，无SDK、凭据、个人配置、日志或测试媒体混入。所有资产、命令、哈希和未执行实机边界记录于 docs/RELEASE_1.2.0_EXECUTION.md。
 
 待执行：提交、推送 main 与 v1.2.0、上传草稿、核验 GitHub 服务端六资产尺寸/digest 后公开 latest。真实 HDR 屏/采集卡、5.1 扬声器、PS5新会话、RTX30/40 实卡仍不因本次发布被伪装为已验收。
+
+1.2.0 发布完成：main 的发布提交 62be2ef187352bfefe8c264cdef24d3a89c1beff 与带注释标签 v1.2.0（ab1bf0ce1644cfe895ba8fd32fc7de7f1d520834）已推送。Release ID 388272314 于 2026-09-14T09:22:30Z 公开为 Latest，非草稿、非预发布：<https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.2.0>。六个资产服务端大小和 SHA-256 逐项匹配最终本地包：便携包 421736651 字节，SHA256 0A0D65DA75BE45F79587C1CBABE33062AFB32D2007F59E9270DFDDDA0973687E；对应 RemotePlay 与 patched FFmpeg 源码包及三份 .sha256 同步公开。证据为 logs/release-1.2.0-upload/remote-assets-verified.json；未更改已核验的 ZIP 或移动发布标签。物理硬件验收边界保持上述记录。
