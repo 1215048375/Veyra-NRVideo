@@ -217,8 +217,8 @@ case WM_CREATE:{window=h;font=makeFont(h);items.clear();displayedBackendWarning.
     button(L"2K",730,0,12,100,80);button(L"4K",731,0,100,100,80);button(L"8K",732,0,188,100,80);
     for(auto& entry:items)if(entry.page==0&&entry.y>=56)entry.y+=80;
     add(L"STATIC",L"NR 运行版本",1117,0,0,12,56,-1,24);
-    combo(218,0,84,{L"NVIDIA 原版 · RTX 50",L"社区兼容 · RTX 40/50 实验"});
-    SetPropW(item(218),L"veyra.tip",HANDLE(L"社区版为用户提供的修改版；RTX 40 兼容性需实机验证。切换会重建增强管线。"));
+    combo(218,0,84,{L"NVIDIA 原版 · RTX 50",L"社区兼容 · RTX 40/50 实验",L"RTX 30 兼容 · 实验"});
+    SetPropW(item(218),L"veyra.tip",HANDLE(L"社区版为修改运行时。RTX 30 档需单独组件，性能与兼容性待持卡验证；不解锁 DLSS 补帧。切换会重建管线，失败恢复原设置。"));
     // Final layout in reading order; existing control IDs and bindings stay intact.
     for(auto& entry:items){
         const int id=GetDlgCtrlID(entry.h);

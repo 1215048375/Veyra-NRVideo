@@ -1935,4 +1935,14 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 
 ## 2026-09-14 — 用户提供 NeuralScreen 1.8.2 的 RTX30 调研
 
-仅静态读取用户包、Get-FileHash/Authenticode/VersionInfo、dumpbin exports 和包内固定提交的 worker 源码。确认 DLL 为 DCC0DC24…/165840496 bytes/310.8.0.0/HashMismatch，与包清单一致但不同于已批准两版；五项 NGX 入口存在。架构查询进程 hook 是额外兼容条件，发现索引0/未知句柄回退、无恢复生命周期等不适合直接照搬的边界。详见 docs/RTX30_NEURALSCREEN_AUDIT_2026-09-14.md。未启动第三方程序、未加载/复制/修改 DLL、未执行 Create/Evaluate、未构建；没有 RTX30 实机验收。git diff --check 通过。未提交、未推送、未发布。下一步如授权实施，先隔离验证 NR 适配器与可恢复的老架构兼容。
+仅静态读取用户包、Get-FileHash/Authenticode/VersionInfo、dumpbin exports 和包内固定提交的 worker 源码。确认 DLL 为 DCC0DC24…/165840496 bytes/310.8.0.0/HashMismatch，与包清单一致但不同于已批准两版；五项 NGX 入口存在。架构查询进程 hook 是额外兼容条件，发现索引0/未知句柄回退、无恢复生命周期等不适合直接照搬的边界。详见 docs/RTX30_NEURALSCREEN_AUDIT_2026-09-14.md。未启动第三方程序、未加载/复制/修改 DLL、未执行 Create/Evaluate、未构建；没有 RTX30 实机验收。git diff --check 通过。当时未提交、未推送、未发布；后续开工前提交为11977ab。
+
+## 2026-09-14 — RTX30 NR 实验选项与首次默认全关
+
+- 用户授权后在 codex/rtx30-nr-safe-defaults 施工。NR选择器追加RTX30独立档，复用现有处理图和重建事务。独立编写仅NR模块作用域的架构查询适配，按D3D12 LUID匹配显卡；只兼容成功查询的选中Ampere，未知句柄不猜索引0；恢复IAT再卸载，不改系统驱动入口或磁盘DLL。
+- 用户指定DCC0DC24…组件原样置于忽略目录 runtime_local/nvidia/nr-ampere/，哈希与原件一致、HashMismatch不伪装为原版。未扩大Release资产白名单，未把组件/SDK/配置加入Git。THIRD_PARTY_NOTICES追加一行NeuralScreen行为参考归因。
+- EnhancementSettings/PlayerOptions/UiSessionState及启动UI统一首次NR/SR/FG全关；保留已有预设/上次确认设置。便携扫描禁止个人配置，统一delivery显式传--nr，避免默认改变后漏测NR。
+- 实际执行out/release-1.1.0-build.cmd构建通过；预设回归（含42迁移及48架构策略组合）、UI合同（首次全关/已有参数恢复/布局）、真实NVAPI三次装卸通过。命令与日志见docs/RTX30_NR_AND_SAFE_DEFAULTS_2026-09-14.md。
+- 本机RTX5070加载实验组件：Feature18 Create=0x1、SEH=0；12秒软件smoke输出162帧且NR Evaluate162次、NVOF161次、failed=false。新增共享Engine同进程切换测试16项通过：全关→Ampere→Original→Community→Ampere→全关，四张实际3840×2160 PNG有效；两次兼容卸载restore=true。未执行RTX30真机，5070查询无需架构改写，不能据此声称30系成功。
+- delivery23/23，47.26秒，logs/delivery/e4d638da6ada4df58e208c1545a35171/result.json。播放、暂停seek、截图、原生4K、带音轨NVENC H264/HEVC及取消通过。最初单独--smoke-save未生成截图，之后同进程测试保存实际PNG补齐输出验证；历史追加日志已按本次时间划界。
+- 本地out/remoteplay/product-repair/veyra.exe（现有桌面PS5测试快捷方式目标）SHA256 7E3A86371544D27173195E9D6E9071B467CB6261F2E1370D2FF3AC1E69F785B5。未改GitHub下载包、未push/发布；下一步RTX30持卡用户验收NR单项、耗时、显存与切换。没有PS5/采集实卡、长时或Smooth Motion叠加的新验收。

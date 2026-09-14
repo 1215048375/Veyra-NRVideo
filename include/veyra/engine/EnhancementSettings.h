@@ -7,11 +7,12 @@
 #include "veyra/pipeline/ResolutionPlan.h"
 namespace veyra::engine {
 enum class FrameGenerationBackend { Dlss, XeSS };
-enum class NrRuntime { Original, Community };
+enum class NrRuntime { Original, Community, Ampere };
 constexpr std::string_view nrRuntimeName(NrRuntime runtime) {
     switch(runtime) {
     case NrRuntime::Original:return "NVIDIA-original";
     case NrRuntime::Community:return "community-RTX40-RTX50";
+    case NrRuntime::Ampere:return "community-RTX30-experimental";
     }
     return "unknown";
 }
@@ -65,7 +66,7 @@ struct EnhancementSettings {
     NrSettings model;
     ResidualSettings residual;
     ProtectionSettings protection;
-    bool nr=true,sr=false;
+    bool nr=false,sr=false;
     bool lowLatency=false; // preview only: NR before SR, opt-in
     NrRuntime nrRuntime=NrRuntime::Original;
     bool captureCompatible=false;
@@ -100,7 +101,7 @@ struct EnhancementSettings {
         auto range=[](float v,float hi){return std::isfinite(v)&&v>=0&&v<=hi;};
         if(auto error=protection.validate();!error.empty())return error;
         if(!revision)return "settingsRevision must be nonzero";
-        if(nrRuntime!=NrRuntime::Original&&nrRuntime!=NrRuntime::Community)return "invalid NR runtime";
+        if(nrRuntime!=NrRuntime::Original&&nrRuntime!=NrRuntime::Community&&nrRuntime!=NrRuntime::Ampere)return "invalid NR runtime";
         if(audioSync<AudioSyncMode::Automatic||audioSync>AudioSyncMode::Off||audioOffsetMs<-250||audioOffsetMs>250)return "invalid audio sync setting";
         if(!range(model.intensity,1)||!range(model.tone,1)||!range(model.structure,1))return "model parameter out of range";
         if(model.skin!=-1&&!range(model.skin,2))return "skin parameter out of range";

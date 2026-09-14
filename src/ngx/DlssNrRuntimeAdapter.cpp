@@ -3,9 +3,12 @@
 #include <windows.h>
 
 #include <format>
+#include <atomic>
+#include <cstring>
 
 #include "veyra/Log.h"
 #include "veyra/NgxResult.h"
+#include "veyra/ngx/NrArchitecturePolicy.h"
 
 namespace veyra::ngx {
 
@@ -123,6 +126,80 @@ void** FindImportedFunctionSlot(HMODULE module, const char* functionName)
         }
     }
     return nullptr;
+}
+
+// Independently implemented against the NVAPI public query ABI. This is scoped
+// to the selected NR DLL's import table, not a patch to the process-wide driver.
+// All state is immutable between installation and the drained NR teardown.
+using QueryNvApi = void* (__cdecl*)(unsigned);
+struct NvArchInfo { unsigned version, architecture, implementation, revision; };
+using GetNvArch = int (__cdecl*)(void*, NvArchInfo*);
+struct LogicalGpuData {
+    unsigned version;
+    void* osAdapterId;
+    unsigned physicalGpuCount;
+    void* physicalGpuHandles[64];
+    unsigned reserved[8];
+};
+struct AmpereContext {
+    HMODULE nvapi = nullptr;
+    QueryNvApi query = nullptr;
+    GetNvArch getArch = nullptr;
+    decltype(&GetProcAddress) getProc = nullptr;
+    void* selected[64]{};
+    unsigned count = 0;
+    std::atomic_uint64_t lookups{0}, queries{0}, rewrites{0};
+};
+AmpereContext g_ampere;
+constexpr unsigned kArchQuery = 0xD8265D24u;
+
+int __cdecl AmpereGetArch(void* gpu, NvArchInfo* info)
+{
+    g_ampere.queries.fetch_add(1, std::memory_order_relaxed);
+    const int result = g_ampere.getArch(gpu, info);
+    if(result != 0 || !info) return result;
+    // Unknown handles are never treated as the selected adapter.
+    bool selected=false;
+    for(unsigned i=0;i<g_ampere.count;++i)selected|=gpu==g_ampere.selected[i];
+    if(rewriteNrAmpereArchitecture(info->architecture,selected,result)) {
+        g_ampere.rewrites.fetch_add(1, std::memory_order_relaxed);
+    }
+    return result;
+}
+void* __cdecl AmpereQuery(unsigned id)
+{
+    if(id==kArchQuery)return reinterpret_cast<void*>(&AmpereGetArch);
+    return g_ampere.query(id);
+}
+FARPROC WINAPI AmpereGetProc(HMODULE module, LPCSTR name)
+{
+    // GetProcAddress also accepts integer ordinals.
+    if(module==g_ampere.nvapi && reinterpret_cast<uintptr_t>(name)>0xFFFF &&
+       std::strcmp(name,"nvapi_QueryInterface")==0) {
+        g_ampere.lookups.fetch_add(1, std::memory_order_relaxed);
+        return reinterpret_cast<FARPROC>(&AmpereQuery);
+    }
+    return g_ampere.getProc(module,name);
+}
+
+bool ExchangeImport(void** slot, void* replacement, void*& previous)
+{
+    DWORD old=0;
+    if(!VirtualProtect(slot,sizeof(void*),PAGE_READWRITE,&old))return false;
+    previous=InterlockedExchangePointer(slot,replacement);
+    DWORD ignored=0;
+    if(VirtualProtect(slot,sizeof(void*),old,&ignored))return true;
+    // The page is still writable. Roll back before reporting failure.
+    InterlockedExchangePointer(slot,previous);
+    VirtualProtect(slot,sizeof(void*),old,&ignored);
+    return false;
+}
+
+void ClearAmpereContext()
+{
+    if(g_ampere.nvapi)FreeLibrary(g_ampere.nvapi);
+    g_ampere.nvapi=nullptr;g_ampere.query=nullptr;g_ampere.getArch=nullptr;
+    g_ampere.getProc=nullptr;g_ampere.count=0;
 }
 
 } // namespace
@@ -332,7 +409,7 @@ bool DlssNrRuntimeAdapter::load(const std::wstring& runtimeDir, Status& status)
 
     // Development staging and the explicitly named experimental Release pack.
     const auto allowed=[&](const wchar_t* suffix){const size_t n=wcslen(suffix);return dllPath_.size()>n&&_wcsicmp(dllPath_.c_str()+dllPath_.size()-n,suffix)==0;};
-    if (!allowed(L"\\runtime_local\\nvidia\\nvngx_dlssnr.dll")&&!allowed(L"\\runtime\\experimental\\nvngx_dlssnr.dll")&&!allowed(L"\\runtime_local\\nvidia\\nr-community\\nvngx_dlssnr.dll")&&!allowed(L"\\runtime\\experimental\\nr-community\\nvngx_dlssnr.dll")) {
+    if (!allowed(L"\\runtime_local\\nvidia\\nvngx_dlssnr.dll")&&!allowed(L"\\runtime\\experimental\\nvngx_dlssnr.dll")&&!allowed(L"\\runtime_local\\nvidia\\nr-community\\nvngx_dlssnr.dll")&&!allowed(L"\\runtime\\experimental\\nr-community\\nvngx_dlssnr.dll")&&!allowed(L"\\runtime_local\\nvidia\\nr-ampere\\nvngx_dlssnr.dll")&&!allowed(L"\\runtime\\experimental\\nr-ampere\\nvngx_dlssnr.dll")) {
         status = Status::InvalidArgument;
         veyra::log::error("ngx", "nr-adapter: resolved runtime path is outside approved staging/experimental directory; refusing to load");
         return false;
@@ -470,8 +547,82 @@ void DlssNrRuntimeAdapter::restoreCallerCompatibility()
     shimInstalled_ = false;
 }
 
+bool DlssNrRuntimeAdapter::installAmpereCompatibility(ID3D12Device* device, Status& status)
+{
+    if(!module_||!shimInstalled_||!device||archLookupSlot_||g_ampere.nvapi){status=Status::InvalidArgument;return false;}
+    auto fail=[&](const char* reason){veyra::log::error("nr-ampere",reason);ClearAmpereContext();status=Status::DeviceFailure;return false;};
+    wchar_t system[MAX_PATH]{};
+    if(!GetSystemDirectoryW(system,MAX_PATH))return fail("system directory lookup failed");
+    const std::wstring path=std::wstring(system)+L"\\nvapi64.dll";
+    g_ampere.nvapi=LoadLibraryExW(path.c_str(),nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if(!g_ampere.nvapi)return fail("system NVAPI unavailable");
+    g_ampere.query=reinterpret_cast<QueryNvApi>(GetProcAddress(g_ampere.nvapi,"nvapi_QueryInterface"));
+    if(!g_ampere.query)return fail("NVAPI query entry missing");
+    const auto init=reinterpret_cast<int(__cdecl*)()>(g_ampere.query(0x0150E828u));
+    const auto enumerate=reinterpret_cast<int(__cdecl*)(void**,unsigned*)>(g_ampere.query(0x48B3EA59u));
+    const auto getLogical=reinterpret_cast<int(__cdecl*)(void*,LogicalGpuData*)>(g_ampere.query(0x842B066Eu));
+    g_ampere.getArch=reinterpret_cast<GetNvArch>(g_ampere.query(kArchQuery));
+    if(!init||!enumerate||!getLogical||!g_ampere.getArch)return fail("required NVAPI adapter/architecture query missing");
+    const int initResult=init();
+    if(initResult!=0){veyra::log::error("nr-ampere",std::format("NvAPI_Initialize={}",initResult));return fail("NVAPI initialization failed");}
+    void* logical[64]{};unsigned count=0;
+    const int enumResult=enumerate(logical,&count);
+    if(enumResult!=0||count>64){veyra::log::error("nr-ampere",std::format("EnumLogicalGPUs={} count={}",enumResult,count));return fail("GPU enumeration failed");}
+    const LUID target=device->GetAdapterLuid();
+    for(unsigned i=0;i<count;++i){
+        LUID luid{};LogicalGpuData data{};data.version=sizeof(data)|(1u<<16);data.osAdapterId=&luid;
+        const int result=getLogical(logical[i],&data);
+        if(result!=0){veyra::log::warn("nr-ampere",std::format("GetLogicalGpuInfo={}",result));continue;}
+        if(luid.LowPart!=target.LowPart||luid.HighPart!=target.HighPart)continue;
+        if(data.physicalGpuCount==0||data.physicalGpuCount>64)return fail("invalid selected physical GPU count");
+        g_ampere.count=data.physicalGpuCount;
+        for(unsigned j=0;j<data.physicalGpuCount;++j){
+            g_ampere.selected[j]=data.physicalGpuHandles[j];
+            NvArchInfo arch{sizeof(NvArchInfo)|(1u<<16),0,0,0};
+            const int resultArch=g_ampere.getArch(g_ampere.selected[j],&arch);
+            veyra::log::info("nr-ampere",std::format("selected LUID={:X}:{:X} archResult={} architecture=0x{:X} rewrite={}",target.HighPart,target.LowPart,resultArch,arch.architecture,(arch.architecture&0xFFFFFFF0u)==0x170u));
+            if(resultArch!=0)return fail("selected adapter architecture unavailable");
+            const unsigned family=arch.architecture&0xFFFFFFF0u;
+            if(family!=0x170u&&family!=0x190u&&family<0x1A0u)return fail("this experimental route requires RTX30 or newer; RTX20 is unverified");
+        }
+        break;
+    }
+    if(!g_ampere.count)return fail("cannot match NVAPI adapter to selected D3D12 LUID");
+    auto slot=FindImportedFunctionSlot(module_,"GetProcAddress");
+    if(!slot)return fail("NR GetProcAddress import missing; refusing wider driver hooks");
+    g_ampere.getProc=reinterpret_cast<decltype(&GetProcAddress)>(*slot);
+    g_ampere.lookups=0;g_ampere.queries=0;g_ampere.rewrites=0;
+    if(!ExchangeImport(slot,reinterpret_cast<void*>(&AmpereGetProc),originalGetProcAddress_))return fail("NR import install failed and rolled back");
+    archLookupSlot_=slot;
+    veyra::log::info("nr-ampere","scoped NR NVAPI lookup installed; system entry point unchanged");
+    return true;
+}
+
+bool DlssNrRuntimeAdapter::verifyAmpereCompatibilityForTest()
+{
+    if(!archLookupSlot_)return false;
+    auto lookup=reinterpret_cast<decltype(&GetProcAddress)>(*archLookupSlot_);
+    auto query=reinterpret_cast<QueryNvApi>(lookup(g_ampere.nvapi,"nvapi_QueryInterface"));
+    auto arch=reinterpret_cast<GetNvArch>(query(kArchQuery));
+    if(arch==g_ampere.getArch||query(0x0150E828u)!=g_ampere.query(0x0150E828u))return false;
+    for(unsigned i=0;i<g_ampere.count;++i){
+        NvArchInfo original{sizeof(NvArchInfo)|(1u<<16),0,0,0},scoped=original;
+        if(g_ampere.getArch(g_ampere.selected[i],&original)!=0||arch(g_ampere.selected[i],&scoped)!=0)return false;
+        auto expected=original;if((expected.architecture&0xFFFFFFF0u)==0x170u)expected.architecture=0x1B0u;
+        if(std::memcmp(&expected,&scoped,sizeof(expected))!=0)return false;
+    }
+    return reinterpret_cast<GetNvArch>(g_ampere.query(kArchQuery))==g_ampere.getArch;
+}
+
 void DlssNrRuntimeAdapter::unload()
 {
+    const bool hadAmpere=archLookupSlot_!=nullptr;
+    if(hadAmpere){
+        void* previous=nullptr;
+        const bool restored=ExchangeImport(archLookupSlot_,originalGetProcAddress_,previous);
+        veyra::log::info("nr-ampere",std::format("restore={} lookups={} queries={} rewrites={}",restored,g_ampere.lookups.load(),g_ampere.queries.load(),g_ampere.rewrites.load()));
+        archLookupSlot_=nullptr;originalGetProcAddress_=nullptr;
+    }
     if (shimInstalled_) {
         restoreCallerCompatibility();
     }
@@ -481,6 +632,7 @@ void DlssNrRuntimeAdapter::unload()
         module_ = nullptr;
         veyra::log::info("ngx", "nr-adapter: snippet module freed");
     }
+    if(hadAmpere)ClearAmpereContext();
     exports_ = Exports{};
 }
 

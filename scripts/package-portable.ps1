@@ -108,7 +108,7 @@ $payload = @(Get-ChildItem -LiteralPath $stage -Recurse -File)
 $forbidden = '\.(pdb|lib|obj|h|hpp|cpp|c|zip|pth|onnx|log|mp4|partial|addon64)$'
 foreach ($file in $payload) {
   $relative = $file.FullName.Substring($stage.Length+1).Replace('\','/')
-  if ($relative -notin $allowed -or $relative -match $forbidden -or $relative -match '(^|/)(third_party_local|logs|captures|\.git)/') { throw "Unexpected payload: $relative" }
+  if ($relative -notin $allowed -or $relative -match $forbidden -or $relative -match '(^|/)(third_party_local|logs|captures|\.git)/' -or $relative -match '(^|/)(last-applied\.v1|ui-preferences\.v1|presets\.v1|veyra\.ini)$') { throw "Unexpected payload: $relative" }
 }
 $fileManifest = @($payload | ForEach-Object {[ordered]@{path=$_.FullName.Substring($stage.Length+1).Replace('\','/');size=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash}})
 [ordered]@{schema=1;version=$Version;files=$fileManifest} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stage 'package-manifest.json') -Encoding UTF8

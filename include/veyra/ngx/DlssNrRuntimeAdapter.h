@@ -66,6 +66,10 @@ public:
     // slot (Playbook 8.3). Exactly one adapter session may own the slot.
     // P1.3 implements install/restore; load() alone never touches the IAT.
     bool installCallerCompatibility(Status& status);
+    // Opt-in RTX30 route. Intercepts only this NR module's NVAPI lookup;
+    // the driver entry point and other NGX consumers remain untouched.
+    bool installAmpereCompatibility(ID3D12Device* device, Status& status);
+    bool verifyAmpereCompatibilityForTest();
     void restoreCallerCompatibility();
     bool callerCompatibilityInstalled() const { return shimInstalled_; }
 
@@ -106,6 +110,8 @@ private:
     bool shimInstalled_ = false;
     void** iatSlot_ = nullptr;
     void* originalGetModuleFileNameW_ = nullptr;
+    void** archLookupSlot_ = nullptr;
+    void* originalGetProcAddress_ = nullptr;
 };
 
 } // namespace veyra::ngx

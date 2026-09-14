@@ -17,7 +17,7 @@ namespace veyra::sink { struct RgbaImage; }
 namespace veyra::gfx { class D3D12DeviceContext; class CommandSlotRing; }
 namespace veyra::engine {
 class FrameFlowWindow;
-struct PlayerOptions { bool nr=true,sr=false,fg=false,realtime=true; uint32_t fgMultiplier=2; EnhancementSettings settings;
+struct PlayerOptions { bool nr=false,sr=false,fg=false,realtime=true; uint32_t fgMultiplier=2; EnhancementSettings settings;
     bool captureReplayForTest=false; // file-backed live scheduler test; never enabled by UI
     bool captureReplayDisableFgAdmissionForTest=false; // controlled scheduler A/B only
     EnhancementSettings snapshot()const{auto s=settings;s.nr=nr;s.sr=sr;s.multiplier=fg?fgMultiplier:1;s.nrPolicy=realtime?pipeline::NrSizePolicy::Realtime:pipeline::NrSizePolicy::Native;return s;}

@@ -1,4 +1,5 @@
 #include "veyra/engine/PresetStore.h"
+#include "veyra/ngx/NrArchitecturePolicy.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -48,6 +49,10 @@ bool legacyBackends(const std::filesystem::path& path) {
 }
 }
 int main(int argc,char** argv){if(argc!=2)return 2;using namespace veyra::engine;const std::filesystem::path p=argv[1];PresetStore a(p);bool ok=a.load();EnhancementSettings s;s.videoSrQuality=2;s.frameGenerationBackend=FrameGenerationBackend::Dlss;s.opticalFlowBackend=OpticalFlowBackend::AmdFidelityFx;s.amdFlowHalfResolution=true;s.protection.enabled=true;s.protection.featherPixels=3.5f;s.protection.regions[0]={.1f,.2f,.7f,.8f};s.protection.regions[3]={0,0,1,1};s.model.intensity=.375f;s.model.skin=1.5f;s.residual.darken=1.2f;s.multiplier=4;s.flow=FlowQuality::Quality;s.content=ContentRate::Fps50;s.nrPolicy=veyra::pipeline::NrSizePolicy::Native;
+ for(uint32_t family:{0x160u,0x170u,0x171u,0x190u,0x1A0u,0x1B0u})for(bool selected:{false,true})for(int result:{0,-1}){
+  auto value=family;const bool expected=selected&&result==0&&(family==0x170u||family==0x171u);
+  ok=ok&&(veyra::ngx::rewriteNrAmpereArchitecture(value,selected,result)==expected)&&value==(expected?0x1B0u:family);
+ }
  s.srTarget=veyra::pipeline::SrTarget::Uhd8K;
  s.audioSync=AudioSyncMode::Manual;s.audioOffsetMs=137;
  s.nrRuntime=NrRuntime::Community;s.captureCompatible=true;s.lowLatency=true;
@@ -58,7 +63,8 @@ int main(int argc,char** argv){if(argc!=2)return 2;using namespace veyra::engine
  auto badBackend=s;badBackend.frameGenerationBackend=static_cast<FrameGenerationBackend>(3);ok=ok&&!b.put(L"invalid backend",badBackend);
  auto dis=s;dis.opticalFlowBackend=OpticalFlowBackend::GpuDis;ok=ok&&b.put(L"GPU DIS",dis)&&b.save();PresetStore disReload(p);ok=ok&&disReload.load()&&disReload.entries().back().settings==dis&&b.erase(1);
  auto badFlow=s;badFlow.opticalFlowBackend=static_cast<OpticalFlowBackend>(3);ok=ok&&!b.put(L"invalid flow backend",badFlow);
- auto badNr=s;badNr.nrRuntime=static_cast<NrRuntime>(2);ok=ok&&!b.put(L"invalid NR runtime",badNr);
+ auto ampere=s;ampere.nr=true;ampere.nrRuntime=NrRuntime::Ampere;ok=ok&&b.put(L"RTX30",ampere);PresetStore ampereReload(p);ok=ok&&ampereReload.load()&&ampereReload.entries().back().settings==ampere&&b.erase(1);
+ auto badNr=s;badNr.nrRuntime=static_cast<NrRuntime>(3);ok=ok&&!b.put(L"invalid NR runtime",badNr);
  auto half=s;half.content=ContentRate::Capture60To30;ok=ok&&b.put(L"capture half rate",half);PresetStore halfReload(p);ok=ok&&halfReload.load()&&halfReload.entries().back().settings.content==ContentRate::Capture60To30&&b.erase(1);
  auto badSr=s;badSr.videoSrQuality=5;ok=ok&&!b.put(L"invalid video SR",badSr);
  auto invalid=s;invalid.model.tone=9;ok=ok&&!b.put(L"bad",invalid)&&b.entries().size()==1&&b.erase(0)&&b.entries().empty();

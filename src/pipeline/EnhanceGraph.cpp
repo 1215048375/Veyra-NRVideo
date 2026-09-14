@@ -390,12 +390,14 @@ bool EnhanceGraph::initNgxFeatures()
     }
 
     if(nrEnabled_){
-    if(desc_.nrRuntime!=engine::NrRuntime::Original&&desc_.nrRuntime!=engine::NrRuntime::Community)return false;
+    if(desc_.nrRuntime!=engine::NrRuntime::Original&&desc_.nrRuntime!=engine::NrRuntime::Community&&desc_.nrRuntime!=engine::NrRuntime::Ampere)return false;
     auto nrDirectory=std::filesystem::path(desc_.runtimeAbsPath);if(desc_.nrRuntime==engine::NrRuntime::Community)nrDirectory/=L"nr-community";
+    if(desc_.nrRuntime==engine::NrRuntime::Ampere)nrDirectory/=L"nr-ampere";
     veyra::log::info("nr-runtime",std::format("selected={} path={}",engine::nrRuntimeName(desc_.nrRuntime),nrDirectory.string()));
     nrAdapter_ = std::make_unique<ngx::DlssNrRuntimeAdapter>();
     if (!nrAdapter_->load(nrDirectory.wstring(), st) ||
         !nrAdapter_->installCallerCompatibility(st) ||
+        (desc_.nrRuntime==engine::NrRuntime::Ampere && !nrAdapter_->installAmpereCompatibility(context_.device(), st)) ||
         !nrAdapter_->snippetInitExt(context_.device(), nrDirectory.c_str(), nrResult_, nrSeh_) ||
         nrResult_ != static_cast<uint64_t>(NVSDK_NGX_Result_Success)) {
         veyra::log::error("graph", std::format("NR snippet init failed 0x{:X}", nrResult_));

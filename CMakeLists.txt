@@ -141,6 +141,10 @@ veyra_add_compute_shader(veyra_shader_parity_encode ParityEncode)
 veyra_add_compute_shader(veyra_shader_parity_decode ParityDecode)
 if(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR)
   veyra_add_compute_shader(veyra_shader_test_pattern GenerateTestPattern)
+  add_executable(veyra_nr_ampere_tests tests/integration/NrAmpereTests.cpp)
+  target_compile_features(veyra_nr_ampere_tests PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_nr_ampere_tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_link_libraries(veyra_nr_ampere_tests PRIVATE veyra_gfx veyra_ngx)
   add_executable(veyra_nr_harness
     tools/nr_harness/main.cpp
     tools/nr_harness/frame_loop.cpp
@@ -472,6 +476,9 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_compile_definitions(veyra_realtime_preview_tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
   target_include_directories(veyra_realtime_preview_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_executable(veyra_live_presentation_tests tests/integration/LivePresentationTests.cpp)
+  add_executable(veyra_nr_runtime_switch_tests tests/integration/NrRuntimeSwitchTests.cpp)
+  target_compile_features(veyra_nr_runtime_switch_tests PRIVATE cxx_std_20)
+  target_link_libraries(veyra_nr_runtime_switch_tests PRIVATE veyra_engine)
   add_executable(veyra_audio_timeline_tests tests/integration/AudioTimelineTests.cpp)
   target_compile_features(veyra_audio_timeline_tests PRIVATE cxx_std_20)
   target_link_libraries(veyra_audio_timeline_tests PRIVATE veyra_sinks)

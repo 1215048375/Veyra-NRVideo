@@ -104,6 +104,7 @@ Remote Play also depends on **OpenSSL, Opus, json-c, libevent, miniupnpc, curl, 
 | --- | --- |
 | [Magpie Experimental](https://github.com/SAOG0721/Magpie/tree/experimental) | NR / SR / FG combinations, configurable processing order, motion guidance, residual composition, resource synchronization and presentation pacing; an important practical comparison during development. |
 | [OBS Studio](https://github.com/obsproject/obs-studio) | DirectShow capture, pixel formats, color metadata, buffering and window-capture behavior. |
+| [DLSS5-NeuralScreen](https://github.com/perseval-BLR/DLSS5-NeuralScreen/tree/8098ccf261bedc16e4b5fe7887c51a07eb41720e) | RTX30 NR compatibility research and architecture-query behavior reference. Veyra's scoped adapter is independently implemented; the user-provided modified runtime has a separate identity and is not covered by the application's MIT license. See [local integration record](docs/RTX30_NR_AND_SAFE_DEFAULTS_2026-09-14.md). |
 | [NVEnc](https://github.com/rigaya/NVEnc) / [RTXVideoProcessor](https://github.com/DrC0ns0le/RTXVideoProcessor) | Video upscaling, GPU frame resources, codecs and scheduling. FRUC was also researched; it has since been removed from Veyra. |
 | [mpv](https://github.com/mpv-player/mpv) | RTX upscaling integration and video-processing approaches in a media player. |
 | [video2dlssnr](https://github.com/DaniilSokolyuk/video2dlssnr) / [dlss5-nr-player](https://github.com/Zonnery/dlss5-nr-player) | Research comparisons for NR pipelines, stage order and data transfers; their code was not copied. |

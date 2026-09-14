@@ -4,7 +4,7 @@ namespace veyra::ui {
 enum class Mode { Daily, Professional };
 struct UiSessionState {
     Mode mode=Mode::Daily;
-    bool enhanced=true,subtitles=true,diagnostics=false,drawer=false;
+    bool enhanced=false,subtitles=true,diagnostics=false,drawer=false;
     int inspector=0,preferredComparison=0;
     engine::EnhancementSettings configured;
     // An explicit user toggle creates a settings transaction. Mode changes do

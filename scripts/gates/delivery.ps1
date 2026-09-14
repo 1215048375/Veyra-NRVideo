@@ -46,20 +46,20 @@ try{
     Run quality4k "$bin/veyra_quality_probe.exe" @('--input',$clip4k,'--native','--guidance','motion','--frames','12','--json-file',"$dir/quality4k.json",'--dump',"$dir/enhanced4k.png")
     $q4=Get-Content "$dir/quality4k.json" -Raw|ConvertFrom-Json
     Check native4k ($q4.failures -eq 0 -and $q4.sourceExtent.width -eq 3840 -and $q4.workingExtent.width -eq 3840 -and $q4.nrEvaluateCount -eq 12) 'native4K correctness only; not a realtime60 claim'
-    Run player $PlayerExe @($clip4k,'--realtime','--fg','--smoke-seconds','6') 20
+    Run player $PlayerExe @($clip4k,'--nr','--realtime','--fg','--smoke-seconds','6') 20
     $log=Get-Content "$dir/player.stdout.log" -Raw
     Check player-sync ($log -match 'smoke frames=(\d+).*generated=(\d+).*failed=false.*absLatenessP95Ms=([\d.]+)' -and [int]$Matches[1] -gt 60 -and [int]$Matches[2] -gt 0 -and [double]$Matches[3] -le 50) 'real-time profile 4K ingress, generated frames, observed abs lateness P95 <=50ms'
-    Run controls $PlayerExe @($clip1080,'--realtime','--smoke-seconds','6','--smoke-controls','--smoke-save',"$dir/snapshot.jpg") 20
+    Run controls $PlayerExe @($clip1080,'--nr','--realtime','--smoke-seconds','6','--smoke-controls','--smoke-save',"$dir/snapshot.jpg") 20
     $controlLog=Get-Content "$dir/controls.stdout.log" -Raw
     Check paused-seek ($controlLog -match 'seek done' -and $controlLog -match 'controlsStep=4' -and (Test-Path "$dir/snapshot.jpg")) 'pause / seek while paused / resume / real WIC JPEG'
-    Run image $PlayerExe @("$dir/enhanced.png",'--smoke-seconds','3') 15
-    Run image4k $PlayerExe @("$dir/enhanced4k.png",'--realtime','--smoke-seconds','6','--smoke-controls','--smoke-save',"$dir/image4k.jpg") 15
+    Run image $PlayerExe @("$dir/enhanced.png",'--nr','--smoke-seconds','3') 15
+    Run image4k $PlayerExe @("$dir/enhanced4k.png",'--nr','--realtime','--smoke-seconds','6','--smoke-controls','--smoke-save',"$dir/image4k.jpg") 15
     Run inspect-image4k $ffprobe @('-v','error','-show_streams','-of','json',"$dir/image4k.jpg") 10
     $img=(Get-Content "$dir/inspect-image4k.stdout.log" -Raw|ConvertFrom-Json).streams[0]
     Check native4k-image ($img.width -eq 3840 -and $img.height -eq 2160) 'realtime default must not shrink image export'
     foreach($codec in @('h264','hevc')){
         $file="$dir/$codec.mp4"
-        $a=@($clip4k,'--export-out',$file,'--max-frames','12','--fg');if($codec -eq 'hevc'){$a+='--hevc'}
+        $a=@($clip4k,'--nr','--export-out',$file,'--max-frames','12','--fg');if($codec -eq 'hevc'){$a+='--hevc'}
         Run "export-$codec" $PlayerExe $a 30
         Run "inspect-$codec" $ffprobe @('-v','error','-count_frames','-show_streams','-of','json',$file) 10
         $streams=(Get-Content "$dir/inspect-$codec.stdout.log" -Raw|ConvertFrom-Json).streams
@@ -71,7 +71,7 @@ try{
         Check "frame-kinds-$codec" ($exportLog -match 'export-counts\] source=12 generated=11 hold=1 output=24 multiplier=2') '12 real + 11 generated + 1 declared CFR tail hold; never count hold as DLSSG'
         Check "decode-$codec" ($v.width -eq 3840 -and $v.height -eq 2160 -and $v.codec_name -eq $codec -and [int]$v.nb_read_frames -eq 24 -and $v.avg_frame_rate -eq '120/1' -and [math]::Abs([double]$v.duration-0.2) -lt 0.00001 -and $a.Count -ge 1) 'all short frames decoded; native4K 2X CFR frame count, duration, rate and audio'
     }
-    Run cancel $PlayerExe @($clip4k,'--export-out',"$dir/cancel.mp4",'--cancel-after-ms','3000') 15 3
+    Run cancel $PlayerExe @($clip4k,'--nr','--export-out',"$dir/cancel.mp4",'--cancel-after-ms','3000') 15 3
     Check cancel-not-success ((-not (Test-Path "$dir/cancel.mp4")) -and (Test-Path "$dir/cancel.mp4.partial")) 'cancel drains with live callback; never promotes incomplete output'
     Check test-budget ($timer.Elapsed.TotalSeconds -lt 300) "$($timer.Elapsed.TotalSeconds)s; short validation is not endurance proof"
     $result=[ordered]@{runId=$run;status='software_short_gate_passed';capture='awaiting_user_capture_test';distribution='not_assessed_by_software_gate';seconds=$timer.Elapsed.TotalSeconds;exeHash=(Get-FileHash $PlayerExe -Algorithm SHA256).Hash;checks=$checks}
