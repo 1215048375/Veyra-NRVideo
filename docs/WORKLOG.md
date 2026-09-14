@@ -1954,3 +1954,5 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 版本资源1.1.1构建通过，EXE SHA256 4C7144A6F3160AF9A0B6446F40A7CC7A7E36AB65B76F9E9ADA9613FEBBF7FF99。同轮产品基线已有delivery23/23，此次版本/打包增量做独立解压便携7/7：首次默认全关824帧、Ampere NR725帧、原版与社区/VideoSR内补帧均实际执行；包内路径/去manifest/隔离PATH通过。三ZIP逐文件审计通过，无SDK/凭据/个人配置混入；patched avcodec仍0710F0D8…，对应源码和许可证保留。
 
 更新双语README、Release Notes、组件/源码说明；命令、资产大小/哈希、测试证据见docs/RELEASE_1.1.1_EXECUTION.md和logs/release-1.1.1/。RTX30实卡尚未验证，未声明全型号成功。下一步快进main、推送tag、草稿上传后核对服务端六资产digest再公开latest；本次无关机请求。
+
+1.1.1已发布：146f035已合入并推送main，v1.1.1保持此发布提交。2026-09-14T07:10:02Z公开latest，Release ID388201201，非草稿/预发布。六资产服务端size/digest均匹配本地审计；完整便携ZIP421715775字节，SHA256 17D1F9C6A56043014E62F598AB1C6DA492DF5BC040168B42AA9D836594951D6A。公开地址https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.1.1 ，证据logs/release-1.1.1/published-release.json。未修改已验证ZIP或移动tag；后续仍等待30系持卡验收。

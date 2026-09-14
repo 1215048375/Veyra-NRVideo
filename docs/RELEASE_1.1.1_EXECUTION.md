@@ -30,3 +30,5 @@ RTX30实卡、PS5/采集实卡新回归、长时压力及Smooth Motion叠加未�
 ## 发布步骤
 
 验收完成后快进合入main，提交并推送main/v1.1.1；先创建草稿上传六资产，逐项核对服务端size与digest，再公开为latest。实际发布结果另记WORKLOG，不改动已经核实的压缩包。
+
+完成：main与v1.1.1指向发布提交146f035；2026-09-14T07:10:02Z正式公开latest，Release ID 388201201，draft=false、prerelease=false。六资产均uploaded，发布前已逐项匹配服务端size/SHA256；发布后latest接口再次确认完整资产。地址https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.1.1 。证据logs/release-1.1.1/remote-assets-verified.json和published-release.json。草稿按tag读取返回404，改按列表获得的release ID查询成功；未重复创建或更换资产。
