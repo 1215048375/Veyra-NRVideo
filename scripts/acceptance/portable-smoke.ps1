@@ -15,13 +15,18 @@ try {
     # Prove the distributed application does not need the publisher manifests.
     foreach($file in $manifests){Move-Item -LiteralPath $file.FullName -Destination ($file.FullName+'.test-disabled')}
     $env:PATH="$env:SystemRoot/System32;$env:SystemRoot"
-    foreach($case in @(
+    $cases=@(
         @{name='empty';args=@('--smoke-empty','--no-nr','--no-sr','--no-fg');modules=@()},
         @{name='baseline';args=@($inputPath,'--no-nr','--no-sr','--no-fg');modules=@()},
         @{name='community-sr-nr-fg';args=@($inputPath,'--nr-community','--sr','--nr','--fg','--realtime');modules=@('nvngx_dlss.dll','nvngx_dlssnr.dll','nvngx_dlssg.dll')},
         @{name='dlss-sr-nr-fg';args=@($inputPath,'--sr','--nr','--fg','--realtime');modules=@('nvngx_dlss.dll','nvngx_dlssnr.dll','nvngx_dlssg.dll')},
         @{name='video-sr-nr-fg';args=@($inputPath,'--video-sr','1','--nr','--fg','--realtime');modules=@('nvngx_dlssnr.dll','nvngx_dlssg.dll')}
-    )) {
+    )
+    if (Test-Path -LiteralPath (Join-Path $package 'runtime/experimental/nr-ampere/nvngx_dlssnr.dll')) {
+        $cases+=@{name='fresh-defaults';args=@($inputPath);modules=@()}
+        $cases+=@{name='ampere-nr';args=@($inputPath,'--nr-ampere','--nr','--realtime');modules=@('nvngx_dlssnr.dll')}
+    }
+    foreach($case in $cases) {
         $name=$case.name
         $argv=@($case.args)+@('--smoke-seconds',"$CaseSeconds")
         if($name -ne 'empty'){$argv+=@('--smoke-controls','--smoke-save',"$output/$name.jpg")}
@@ -41,7 +46,9 @@ try {
         if($log -notmatch 'smoke frames=(\d+) generated=(\d+) failed=false'){throw "$name missing successful smoke output"}
         $frames=[int]$Matches[1];$generated=[int]$Matches[2]
         if($name -ne 'empty' -and ($frames -le 0 -or !(Test-Path -LiteralPath "$output/$name.jpg"))){throw "$name missing rendered output"}
-        if($case.modules.Count -gt 0 -and $generated -le 0){throw "$name did not generate frames"}
+        if($case.modules.Count -gt 0 -and $name -ne 'ampere-nr' -and $generated -le 0){throw "$name did not generate frames"}
+        if($name -eq 'ampere-nr' -and $log -notmatch 'nrEvaluated=[1-9]\d*'){throw 'Ampere runtime did not evaluate NR'}
+        if($name -eq 'fresh-defaults' -and ($generated -ne 0 -or $log -notmatch 'nrEvaluated=0 nvofExecuted=0' -or $loaded.ContainsKey('nvngx_dlssnr.dll') -or $loaded.ContainsKey('nvngx_dlss.dll') -or $loaded.ContainsKey('nvngx_dlssg.dll'))){throw 'Fresh package unexpectedly enabled enhancement'}
         if($name -eq 'video-sr-nr-fg'){
             # NGX may provide VSR from the installed driver instead of nvngx_vsr.dll.
             if($log -notmatch '\[video-sr\] op=0 result=0x1 seh=0x0' -or $log -notmatch 'gpuSrP95Ms=[1-9]' -or -not $loaded.ContainsKey('_nvngx.dll')){throw 'VSR creation or GPU execution missing'}
@@ -50,7 +57,7 @@ try {
             if(-not $loaded.ContainsKey($module) -or -not $loaded[$module].StartsWith($package+'\',[StringComparison]::OrdinalIgnoreCase)){throw "$name missing app-local module $module ($($loaded[$module]))"}
         }
         if($case.modules -contains 'nvngx_dlssnr.dll'){
-            $nrFolder=if($name -eq 'community-sr-nr-fg'){'runtime/experimental/nr-community'}else{'runtime/experimental'}
+            $nrFolder=if($name -eq 'ampere-nr'){'runtime/experimental/nr-ampere'}elseif($name -eq 'community-sr-nr-fg'){'runtime/experimental/nr-community'}else{'runtime/experimental'}
             $expectedNr=[IO.Path]::GetFullPath((Join-Path $package "$nrFolder/nvngx_dlssnr.dll"))
             if(-not [StringComparer]::OrdinalIgnoreCase.Equals($loaded['nvngx_dlssnr.dll'],$expectedNr)){throw "$name loaded the wrong NR variant"}
         }

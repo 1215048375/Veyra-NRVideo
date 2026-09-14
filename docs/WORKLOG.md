@@ -1946,3 +1946,11 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 - 本机RTX5070加载实验组件：Feature18 Create=0x1、SEH=0；12秒软件smoke输出162帧且NR Evaluate162次、NVOF161次、failed=false。新增共享Engine同进程切换测试16项通过：全关→Ampere→Original→Community→Ampere→全关，四张实际3840×2160 PNG有效；两次兼容卸载restore=true。未执行RTX30真机，5070查询无需架构改写，不能据此声称30系成功。
 - delivery23/23，47.26秒，logs/delivery/e4d638da6ada4df58e208c1545a35171/result.json。播放、暂停seek、截图、原生4K、带音轨NVENC H264/HEVC及取消通过。最初单独--smoke-save未生成截图，之后同进程测试保存实际PNG补齐输出验证；历史追加日志已按本次时间划界。
 - 本地out/remoteplay/product-repair/veyra.exe（现有桌面PS5测试快捷方式目标）SHA256 7E3A86371544D27173195E9D6E9071B467CB6261F2E1370D2FF3AC1E69F785B5。未改GitHub下载包、未push/发布；下一步RTX30持卡用户验收NR单项、耗时、显存与切换。没有PS5/采集实卡、长时或Smooth Motion叠加的新验收。
+
+## 2026-09-14 — 1.1.1 发布准备与验收
+
+用户明确授权发布新版本。分支codex/release-1.1.1，存档checkpoint/pre-release-1.1.1-20260914，包含831432f的RTX30实验选择器和初始全关；八增强运行文件按manifest检查，新增DCC0DC24…组件保留HashMismatch，与已批准40社区版分别独立；不修改磁盘DLL，不放入Git。
+
+版本资源1.1.1构建通过，EXE SHA256 4C7144A6F3160AF9A0B6446F40A7CC7A7E36AB65B76F9E9ADA9613FEBBF7FF99。同轮产品基线已有delivery23/23，此次版本/打包增量做独立解压便携7/7：首次默认全关824帧、Ampere NR725帧、原版与社区/VideoSR内补帧均实际执行；包内路径/去manifest/隔离PATH通过。三ZIP逐文件审计通过，无SDK/凭据/个人配置混入；patched avcodec仍0710F0D8…，对应源码和许可证保留。
+
+更新双语README、Release Notes、组件/源码说明；命令、资产大小/哈希、测试证据见docs/RELEASE_1.1.1_EXECUTION.md和logs/release-1.1.1/。RTX30实卡尚未验证，未声明全型号成功。下一步快进main、推送tag、草稿上传后核对服务端六资产digest再公开latest；本次无关机请求。

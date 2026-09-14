@@ -13,7 +13,7 @@
 
 Windows 视频播放器与采集卡增强工具。支持视频、图片、采集卡实时预览和 PS5 局域网串流，可组合使用超分辨率、NR 画面增强与补帧。
 
-[下载 1.1.0 免安装版](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.1.0) · [更新记录](docs/RELEASE_NOTES_1.1.0.md) · [反馈问题](https://github.com/Likely7/Veyra-NRVideo/issues)
+[下载 1.1.1 免安装版](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.1.1) · [更新记录](docs/RELEASE_NOTES_1.1.1.md) · [反馈问题](https://github.com/Likely7/Veyra-NRVideo/issues)
 
 ## 功能
 
@@ -31,12 +31,13 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片、采集
 
 日常模式以观看为主；专业模式展开增强参数、诊断和导出工具。切换模式不需要重新打开视频。
 
-1.1.0 增加 Smooth Motion 使用支持与软件内教程，扩展采集卡像素格式支持，修复 P010 / RGB 等格式显示为 GUID 的问题。保留此前的 PS5 重连与采集音频修复。
+1.1.1 新增 RTX 30 实验 NR 选项，首次启动所有增强默认关闭。保留 Smooth Motion 教程、采集格式扩展及此前修复；RTX30 实卡表现仍待验收。
 
 ## 下载与运行
 
-1. 在 [Releases](https://github.com/Likely7/Veyra-NRVideo/releases) 下载 **Veyra-1.1.0-win64-portable.zip**，不要下载 Source code。
+1. 在 [Releases](https://github.com/Likely7/Veyra-NRVideo/releases) 下载 **Veyra-1.1.1-win64-portable.zip**，不要下载 Source code。
 2. 完整解压到一个可写文件夹，双击 **Veyra.exe**。无需安装 SDK、Python 或开发工具。
+   首次启动 NR、超分和内部补帧均关闭，确认基础画面后按需开启；导入旧设置会恢复原来的开关。
 3. 使用当前显卡驱动。要使用 NVIDIA NR、DLSS、RTX Video SR 和 NVENC，需兼容的 NVIDIA RTX 显卡；本版本主要在 RTX 5070 上验证。
 
 系统要求：Windows 11 x64、DirectX 12。便携包含当前功能所需运行组件，显卡驱动和采集卡驱动由系统提供。8K 超分和原生高分辨率增强需要更多显存，不保证每个组合都能实时运行。
@@ -107,7 +108,9 @@ BUG反馈与新功能
 
 ### NR 运行版本
 
-专业模式 → 增强 → NR 运行版本，可选 NVIDIA 原版或 RTX 40/50 社区兼容版。切换会短暂停顿，失败恢复上一套设置。社区版已随包放在 `runtime/experimental/nr-community/`，无需手动覆盖原版。它是社区修改文件，签名状态为 `HashMismatch`，不是有效 NVIDIA 签名原件；两版目前均在 RTX 5070 验证。
+专业模式 → 增强 → NR 运行版本，可选 NVIDIA 原版、RTX 40/50 社区版或 **RTX 30 兼容 · 实验**。选择版本后再手动开启 NR。切换会短暂停顿，失败恢复上一套设置。
+
+两种社区组件分别在 `runtime/experimental/nr-community/` 和 `nr-ampere/`，无需覆盖原版；均为修改文件，签名状态 `HashMismatch`。三种运行版本已在 RTX5070 验证切换和 NR 执行，**RTX30 实卡性能、画质与稳定性仍待验收**。30系先试实时 NR，关闭 SR/FG；该选项不解锁 DLSS 补帧。
 
 ### OBS 直播与录制
 
@@ -126,7 +129,7 @@ NR 与 DLSS 帧生成属于 **community experimental / 社区实验集成**，�
 
 ## 开发与许可
 
-[构建说明](docs/BUILD.md) · [组件清单](docs/RUNTIME_COMPONENTS_1.1.0.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
+[构建说明](docs/BUILD.md) · [组件清单](docs/RUNTIME_COMPONENTS_1.1.1.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
 
 Veyra 原有源码采用 [GPLv3](LICENSE)；含串流的组合程序同时适用 [AGPLv3 与上游 OpenSSL 例外](licenses/remoteplay/CHIAKI_AGPL3_OPENSSL.txt)。应用源码对应版本标签，Release 另附串流依赖与 FFmpeg 对应源码包，普通用户无需下载。SDK、模型和运行时不进入源码仓库；Release 组件按各自许可与实验发布范围单独提供。
 

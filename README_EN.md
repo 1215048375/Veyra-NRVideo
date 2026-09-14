@@ -14,7 +14,7 @@ English | [简体中文](README.md)
 
 A Windows video player and capture-card enhancement tool. Play videos, process images, and preview capture devices with optional super resolution, NR enhancement, and frame generation.
 
-[Download 1.1.0 Portable](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.1.0) · [Release Notes](docs/RELEASE_NOTES_1.1.0.md) · [Report an Issue](https://github.com/Likely7/Veyra-NRVideo/issues)
+[Download 1.1.1 Portable](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.1.1) · [Release Notes](docs/RELEASE_NOTES_1.1.1.md) · [Report an Issue](https://github.com/Likely7/Veyra-NRVideo/issues)
 
 ## Features
 
@@ -31,12 +31,13 @@ A Windows video player and capture-card enhancement tool. Play videos, process i
 
 Daily mode focuses on watching. Professional mode expands the controls, diagnostics, and export tools without reopening the video. The application currently uses a Chinese interface.
 
-Version 1.1.0 adds Smooth Motion usage support and an in-app setup guide, expands capture pixel formats, and fixes GUID labels shown for P010 / RGB formats. Previous PS5 reconnection and capture-audio fixes are retained.
+Version 1.1.1 adds an experimental RTX30 NR option and disables all enhancements on fresh installations. Smooth Motion instructions, capture format support and previous fixes remain available. RTX30 hardware validation is still pending.
 
 ## Download and Run
 
-1. Download **Veyra-1.1.0-win64-portable.zip** from [Releases](https://github.com/Likely7/Veyra-NRVideo/releases). The Source code archives are for developers.
+1. Download **Veyra-1.1.1-win64-portable.zip** from [Releases](https://github.com/Likely7/Veyra-NRVideo/releases). The Source code archives are for developers.
 2. Extract the entire archive into a writable directory and run **Veyra.exe**. No SDK, Python, or development tools are needed.
+   NR, upscaling and internal frame generation start disabled. Enable them as needed; importing old preferences restores their switches.
 3. Use a current GPU driver. NVIDIA NR, DLSS, RTX Video SR, and NVENC require compatible NVIDIA RTX hardware; this version was primarily tested on an RTX 5070.
 
 Requirements: Windows 11 x64 and DirectX 12. Required application runtimes are included; GPU and capture-device drivers are supplied by the system. 8K upscaling and native-resolution enhancement need more VRAM and may not run in real time.
@@ -96,7 +97,9 @@ You may replace DLLs while Veyra is closed. NVIDIA components belong in `runtime
 
 ### NR Runtime Selection
 
-In Professional mode, open Enhancement and select the NR runtime. Choose the NVIDIA original or the community RTX 40/50 experimental variant. Switching briefly interrupts playback; failed changes restore the previous configuration. The community DLL is included in `runtime/experimental/nr-community/`, separate from the original. It is a modified binary with Authenticode status `HashMismatch`, not a valid NVIDIA-signed original. Both variants were tested on RTX 5070; a user reported community NR working on RTX 4060.
+In Professional mode, select the NVIDIA original, community RTX40/50, or **RTX30 compatibility · Experimental** runtime, then enable NR. Switching briefly interrupts playback; failed changes restore the previous configuration. Community variants are included separately in `runtime/experimental/nr-community/` and `nr-ampere/`; both have Authenticode status `HashMismatch`.
+
+All three runtime paths were tested on RTX5070; a user reported the RTX40/50 variant working on RTX4060. **RTX30 hardware performance, quality and stability remain unverified.** Start with realtime NR and SR/FG disabled. This option does not unlock DLSS frame generation.
 
 ### OBS Streaming and Recording
 
@@ -116,7 +119,7 @@ NR and DLSS frame generation are **community-experimental integrations**, not NV
 
 ## Development and License
 
-[Build Instructions](docs/BUILD.md) · [Runtime Components](docs/RUNTIME_COMPONENTS_1.1.0.md) · [Third-Party Notices](THIRD_PARTY_NOTICES.md)
+[Build Instructions](docs/BUILD.md) · [Runtime Components](docs/RUNTIME_COMPONENTS_1.1.1.md) · [Third-Party Notices](THIRD_PARTY_NOTICES.md)
 
 Original Veyra source is [GPLv3](LICENSE); the combined streaming program also falls under [AGPLv3 and the upstream OpenSSL exception](licenses/remoteplay/CHIAKI_AGPL3_OPENSSL.txt). Application source matches the release tag. The RemotePlay-source and FFmpeg-source assets provide dependency source and are not needed to run the player. SDKs, models, and runtimes are excluded from this source repository. Release components retain their separate licenses and experimental distribution boundaries.
 
