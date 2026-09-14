@@ -2027,3 +2027,16 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 用户将Optical_Flow_SDK_5.0.7.zip放在根目录并询问是否上传239049440字节整包。核对SHA256=89B0923ADC6F34FBE86E63CC17D5DB452E34B945C03BA90D8E09BD1A0158E917；源码NvOfSession.cpp实际只包含nvOpticalFlowCommon.h和nvOpticalFlowD3D12.h，二者分别33648/19086字节，其依赖仅stdint、D3D12系统头和彼此。原样暂存两头文件与LicenseAgreement.pdf（143682字节）到忽略的third_party_local/nvidia/Optical_Flow_SDK_5.0.7，共196416字节，未复制样例、运行DLL或其他大文件。
 
 .gitignore增加根SDK压缩包的精确规则，git check-ignore和git diff --check通过，未上传/提交任何SDK。首次ZIP列表脚本误读__MACOSX资源叉造成UTF8失败，排除该目录后成功；没有把资源叉当头文件。只做包结构和本地准备，未构建、未执行NR/NVOF Create/Evaluate或云端CI；最小文件不需要公开提交或Git LFS，后续CI仍需私有受控输入。docs/debug.log为本轮开始时已有未跟踪文件，未改动。
+
+
+## 2026-09-15 GitHub 自动构建依赖（进行中，可续接）
+
+用户继续授权完成 GitHub Actions 构建。替换旧私有整包 URL/SHA 方案：公开依赖按 `scripts/ci/dependencies.lock.json` 固定提交/归档哈希自动准备，唯一 Secret 为 `VEYRA_NVOF_HEADERS_B64`。用户原 ZIP 不进 Git，两个原始头文件的本机 Secret 文件为 `out/ci-dependencies/nvof-secret.txt`，21888 字符，内容未打印。源码和 CI artifact 不包含 SDK/运行组件。默认分支 push / 手动完整构建，PR 仅源码检查，无 push/Release 授权或执行。
+
+修改：Windows workflow、prepare-dependencies.ps1、build-windows.ps1，新增 dependencies.py / lock.json / toolchain.ps1，重写 GITHUB_ACTIONS_BUILD.md。原记录 vcpkg commit 查询不可用，改用已核对 2026.07.29 tag 对应 `9e593bb18ea69cc5095e012465dcd675a822ed0d`；FFmpeg 与 SDL3 等原配方从已发布 1.2.0 对应源码资产恢复并校验 ZIP SHA256。FFmpeg 继续应用 PS5 slice 补丁并绑定新编译 DLL 哈希，不拿旧机器哈希拒绝合法重编译。
+
+已执行：Python py_compile、PowerShell AST 解析、YAML 解析、NVOF 正常解码及错误/超长/解压过量/错误键集合拒绝、源码 ZIP 哈希及 overlay 生成、git check-ignore 均通过。`python scripts/ci/dependencies.py export-nvof-secret` 成功。固定 SDK/Chiaki/vcpkg 源码下载成功。本机临时安装 CMake 3.31.6 / Ninja 1.11.1.4 至忽略的 out/ci-tools。
+
+实际构建：`scripts/ci/prepare-dependencies.ps1` 正在构建 vcpkg 依赖，日志 `out/ci-dependencies/prepare.log`。独立先行执行 FidelityFX CMake configure/build，目标 ffx_opticalflow_x64 与 ffx_backend_dx12_x64 已成功，日志 `out/ci-dependencies/amd.log`。第一次 AMD 配置因本机重复 PATH/Path 环境使 MSBuild MSB6001 失败；改用 Python 规范化子进程环境后成功，并纳入统一 run 函数。串流代码生成补充 Python protobuf 6.33.4、protoc 路径和 nanopb 临时生成目录。
+
+待完成：完成依赖编译，运行 build-windows.ps1 实际链接 Veyra，核查 artifact 白名单，补最终结果。GitHub 云端运行、Secret 设置、NR/FG Create/Evaluate、实卡和播放连播均未执行。
