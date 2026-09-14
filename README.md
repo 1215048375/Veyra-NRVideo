@@ -48,6 +48,9 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片、采集
 
 <img width="276" height="374" alt="7baf2084b2310a7e685c5355bf9307d3" src="https://github.com/user-attachments/assets/1438c8f7-08b4-46fd-ad5e-6d83c46cdec2" />
 
+BUG反馈与新功能
+<img width="1206" height="1362" alt="155618d86eb091cf64b94b5c2a0c622f" src="https://github.com/user-attachments/assets/ffeceadc-1c53-4ad0-bfaf-3491d8dc2476" />
+
 ### 视频与图片
 
 专业模式顶部点击 **截图**，保存处理后的完整画面到系统“图片”文件夹下的 `Veyra Screenshots`，格式为 PNG。原生 HDR 截图暂不支持。
