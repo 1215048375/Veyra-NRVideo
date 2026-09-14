@@ -75,3 +75,23 @@ HLG参考：[ITU-R BT.2100-2](https://www.itu.int/dms_pubrec/itu-r/rec/bt/R-REC-
 - 修复后的JXR独立逐像素检查、采集6ch/10ms协商、完整HDR/SDR颜色检查及最终交付短测均以当前代码通过。`git diff --check`通过；无SDK、运行库、模型、用户配置或媒体进入Git。
 - XeSS验证的是HDR10初始化、真实SDK生成计数与软件原帧数值；本轮没有独立回读XeSS驱动交换链生成帧作逐像素比较。实际生成帧观感仍需用户验收。
 - 对外状态：本地开发版可测，非发布版、非全部硬件验收完成。下一步只需用户进行上节列出的HDR屏/采集卡/5.1实机验收，收到日志后针对问题修复；未经新授权不发布。
+
+
+## C — 2026-09-14 手动 SDR 预览输出
+
+用户要求在 HDR 输入下自行选择 SDR 显示。采集面板增加“转为 SDR 显示（所有预览，立即生效）”，默认关闭；输入自动选项改为“自动识别 SDR / HDR · 设备元数据”。这是全局预览显示设置，作用于文件、采集和串流；不改变源 PQ/HLG 元数据，不修改 Windows HDR，不关闭 NR/SR/FG。视频导出仍按独立的 HDR 合同，截图跟随当前预览。
+
+实现：EnhancementSettings.forceSdrPreview 与 useHdrPreview 统一启动、实时事务、显示器状态轮询和尺寸变更的输出判定，避免强制 SDR 时被 2 秒轮询反复恢复 HDR。实时切换沿用原子 drain/reset/rebuild 与失败恢复；关闭总增强时单独提交显示设置。采集面板保持开关同步，关闭后重开不丢；设置通过 v12 预设/最近应用设置保存，旧 v1–v11 默认关闭。新增 display-color 日志报告实际 hdrInput/hdrOutput/forceSdrPreview。
+
+修改文件：apps/veyra/ui/{AppShell.cpp,CapturePanel.cpp,CapturePanel.h}、include/veyra/engine/EnhancementSettings.h、src/engine/{EngineController.cpp,PresetStore.cpp}、tests/unit/{RepairPresetTests.cpp,UiContractTests.cpp}、双语 README 与本记录/WORKLOG。没有改变 SDK、运行库、颜色 shader 或导出流程。
+
+实际检查：
+- `cmd /c out\release-1.1.0-build.cmd`：最终 exit 0，out/force-sdr-build-verified.log。首次链接失败 LNK1104 是旧 veyra.exe 仍运行，占用输出；用户确认已关闭后向残留进程正常发送关闭请求，进程退出，再构建通过。原失败记录 out/force-sdr-build.log 保留。
+- `veyra_repair_preset_tests.exe out/force-sdr-presets-final.v1`：exit 0，48 组旧预设迁移、新开关 roundtrip；out/force-sdr-presets-final.log。
+- `veyra_ui_contract_tests.exe out/force-sdr-ui-final`：exit 0；检查 8 种输入/显示器/强制 SDR 组合、关闭增强保留显示选择、持久化与已有布局合同；out/force-sdr-ui-final.log。
+- `veyra_hdr_color_tests.exe`：exit 0，30 采集颜色 GPU 用例与 16 PQ/HLG、planar/P010、range、HDR/SDR 输出数值组合通过；out/force-sdr-color.log。测试末尾销毁未提交列表的诊断不是测试失败。
+- `python out/force_sdr_ui_check.py`：真实产品加载 PQ 文件，总增强关闭，开关默认关闭，连续切换四次、关闭面板重开保持、控件在窗口内均通过；out/force-sdr-ui-live-result.txt。out/force-sdr-live.log 记录 revisions 3–6 Applied、source kept open、hdrInput=true 始终保留；18 秒 smoke 30 帧、failed=false，exit 0。素材约 1 秒，后半段为末帧显示，不冒充 18 秒持续运动视频。
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/gates/delivery.ps1 -Root . -BuildDirectory out/remoteplay/product-repair`：23/23、45.20 秒，logs/delivery/6a7c3d4a27e140ec9145e8e016bc7453/result.json。实际 NR CreateFeature id18 result0x1、SEH0；60 次 Evaluate、NVOF 非零运动，SDR4K导出等原有回归通过。
+- `git diff --check` 通过。EXE SHA256 9D3DFFA2D397F00F512B962A349453430CD3F0039ECF55FAB9961279291B2C76。patched avcodec-63.dll 仍为 0710F0D87A7FFCC9F998F1A35D0500345F6C66EB9A5A39C51D60D293142BD84F。
+
+当前 Windows HDR 关闭：本轮 UI 实测均 hdrOutput=false；开关从 HDR 交换链切到 SDR 的物理显示验收、跨 HDR 屏移动及 HDR 实卡仍未执行。GPU 色调映射数值通过不等于 HDR 显示器观感通过。下一步用户从桌面“Veyra PS5 测试版”打开采集面板，在实际 HDR 输入/显示器上开关比较；不用重连采集卡。未发布或推送 GitHub。

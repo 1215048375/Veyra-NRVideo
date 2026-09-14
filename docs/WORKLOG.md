@@ -1978,3 +1978,12 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 本轮发现并纠正FP16截图只拷半行、六声道上游缓冲仍限定8字节、旧测试/播放器probe将单声道送进立体声renderer；首轮JXR自回读不能证明原图完整、首轮audio-timeline包含4失败，均保留失败日志并由独立检查/重跑覆盖。其他编译/夹具失败和真实Create/Evaluate结果详见docs/HDR_MULTICHANNEL_EXECUTION_2026-09-14.md及logs/hdr-multichannel。没有把失败删掉或把尾部PASS当整套通过。
 
 桌面Veyra PS5测试版快捷方式指向当前构建。当前桌面HDR未启用、音频输出2ch，真实UI测试明确走HDR转SDR和6→2降混；HDR输出数值/接口验证与HDR实屏是分开的证据。未测真实5.1扬声器、HDR实卡、30/40系列、PS5新会话、OBS HDR及跨显示器切换。只完成软件实施，不宣称所有设备和画质验收。下一步用户在HDR屏与真5.1设备上验收；没有新push、Release、运行库替换或关机。
+
+
+## 2026-09-14 — 手动转为 SDR 显示
+
+用户授权增加 SDR 输出开关。采集面板默认关闭的“转为 SDR 显示”立即作用于所有预览，源 HDR 元数据保留、总增强关闭时也生效；启动/显示器轮询/尺寸变更/实时事务统一输出策略，避免轮询恢复 HDR。v12 预设保存，旧设置默认关闭；导出 HDR 合同不变，截图跟随预览。双语 README 更新，致谢仍在底部。
+
+最终构建 cmd /c out\release-1.1.0-build.cmd 成功；首次旧进程占用造成 LNK1104，正常关闭后重建成功，失败日志保留。48 组预设迁移与 roundtrip、UI/输出策略合同、30 采集 GPU 颜色 +16 HDR 组合通过；真实 UI 加载 PQ 文件，在总增强关闭下连续切换/重开面板通过，源保持开启，日志记录实际 HDR 输入/SDR 输出。delivery23/23、45.20秒，logs/delivery/6a7c3d4a27e140ec9145e8e016bc7453/result.json；NR Create0x1 SEH0、60次Evaluate。EXE SHA256 9D3DFFA2D397F00F512B962A349453430CD3F0039ECF55FAB9961279291B2C76，patched FFmpeg未变。
+
+完整命令/文件/证据与失败见 docs/HDR_MULTICHANNEL_EXECUTION_2026-09-14.md C节。当前Windows HDR关闭，物理HDR↔SDR交换链与实卡视觉切换未测；下一步用户用桌面测试版在HDR设备上验收。只更新本地开发版，没有push/Release。

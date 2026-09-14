@@ -53,7 +53,7 @@ std::wstring smokeView;bool smokeViewApplied=false;
 std::wstring smokeDualOutput;bool smokeEmpty=false;DWORD modeGdiStart=0,modeHandlesStart=0;SIZE_T modePrivateStart=0;
 bool smokeDual=false,smokeDualPause=false,smokeMaster=false,smokeMasterReject=false,smokeAudio=false,smokeJob=false,smokeJobCancel=false,smokeJobExit=false;int dualStep=0,masterStep=0,audioStep=0,jobStep=0;double pausedPosition=-1,jobPosition=0;uint64_t pausedFrames=0;ULONGLONG jobPauseTick=0;HANDLE workerMapping=nullptr;
 void switchMode();void selectInspector(int);void refreshDailyPresets();
-bool applySettings(veyra::engine::EnhancementSettings s){if(masterPendingRevision)return false;uiState.configured=s;if(uiState.enhanced)engine.requestSettings(s);else {auto effective=engine.snapshot().desired;if(effective.captureCompatible!=s.captureCompatible){effective.captureCompatible=s.captureCompatible;engine.requestSettings(effective);}veyra::log::info("ui-settings","enhancement off: draft saved; presentation setting applied independently");}veyra::ui::settingsEnabled(uiState.enhanced,uiState.configured);return true;}
+bool applySettings(veyra::engine::EnhancementSettings s){if(masterPendingRevision)return false;uiState.configured=s;if(uiState.enhanced)engine.requestSettings(s);else {auto effective=engine.snapshot().desired;if(effective.captureCompatible!=s.captureCompatible||effective.forceSdrPreview!=s.forceSdrPreview){effective.captureCompatible=s.captureCompatible;effective.forceSdrPreview=s.forceSdrPreview;engine.requestSettings(effective);}veyra::log::info("ui-settings","enhancement off: draft saved; presentation setting applied independently");}veyra::ui::settingsEnabled(uiState.enhanced,uiState.configured);return true;}
 
 struct ToolbarItem{HWND hwnd;int width;};std::vector<ToolbarItem> toolbar;
 bool full=false,holdOriginal=false,referenceBase=false;int compareMode=0;float compareSplit=.5f;WINDOWPLACEMENT windowPlacement{sizeof(windowPlacement)};
@@ -373,7 +373,7 @@ case RemotePlay:veyra::ui::showRemotePlayPanel(hwnd,[](veyra::source::RemotePlay
     }return result;
 },[]{engine.stop();},[]{return remoteController.calibrate();});break;
 #endif
-case Capture:case ProRailCapture:veyra::ui::showCapturePanel(hwnd,[](const std::wstring& path){openFile(path);layout();});break;
+case Capture:case ProRailCapture:veyra::ui::showCapturePanel(hwnd,[](const std::wstring& path){openFile(path);layout();},[]{return (uiState.enhanced?engine.snapshot().desired:uiState.configured).forceSdrPreview;},[](bool enabled){auto s=uiState.enhanced?engine.snapshot().desired:uiState.configured;s.forceSdrPreview=enabled;return applySettings(s);});break;
 case Export:if(uiState.mode==veyra::ui::Mode::Professional)startVideoExport(false);break;
 case Info:showDiagnostics=!showDiagnostics;layout();break;
 }return 0;

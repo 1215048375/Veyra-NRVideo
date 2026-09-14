@@ -148,6 +148,8 @@ These changes are local to `codex/hdr-multichannel`; **the GitHub 1.1.1 package 
 
 RTX 5070 GPU output, HDR export and software channel isolation have local test evidence. HDR display appearance, real 5.1 speaker positioning and individual capture cards require hardware acceptance. See the [execution record](docs/HDR_MULTICHANNEL_EXECUTION_2026-09-14.md). Fresh-install effects remain off.
 
+The capture panel also offers **Convert to SDR display**, off by default. It controls all live previews, maps HDR to SDR without changing input metadata or disabling enhancement, and can be toggled during playback without reconnecting. Disabling it follows the display HDR state. Screenshots follow the preview; video export retains its existing HDR policy.
+
 ## Acknowledgments
 
 Thanks to [Magpie Experimental](https://github.com/SAOG0721/Magpie/tree/experimental) for research insights into NR residual composition, optical flow, and enhancement pipelines; to [chiaki-ng](https://github.com/streetpea/chiaki-ng) for the PS5 streaming foundation; and to [XeSS-GPU-Motion](https://github.com/gggz114514-oss/XeSS-GPU-Motion) for its GPU DIS optical-flow implementation.

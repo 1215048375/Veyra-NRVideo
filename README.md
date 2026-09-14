@@ -138,6 +138,7 @@ Veyra 原有源码采用 [GPLv3](LICENSE)；含串流的组合程序同时适用
 以下能力属于 `codex/hdr-multichannel` 的本地开发版，**GitHub 1.1.1 不包含**。
 
 - **HDR 输入 / 增强**：文件、P010/P016 采集与 PS5 HDR；支持明确标记的 BT.2020 NCL / PQ 或 HLG。Windows HDR 开启时，可组合 NR、DLSS SR / RTX Video SR、DLSS / XeSS 补帧。NR / Video SR 使用 SDR 代理和 HDR 基底合成，压缩高光和近黑区域的增强会衰减；不把 SDR 结果逆造为原始 HDR。HLG 使用 1000nit / gamma 1.2 参考转换。
+- **SDR 显示开关**：采集卡面板的“转为 SDR 显示”默认关闭，控制所有实时预览。打开后将 HDR 映射为 SDR，增强照常可用；播放中切换无需重连，可能短暂停顿。关闭后跟随显示器 HDR 状态。截图跟随当前画面，视频导出保持原有 HDR 规则。
 - **采集颜色**：默认使用设备元数据。设备漏报时，在采集面板选择手动 PQ 或 HLG，且必须选择 P010/P016。10bit 本身不代表 HDR；RGB / YUY2 HDR 及 BT.2020 constant-luminance 暂不支持。
 - **HDR 导出 / 截图**：视频选择 HEVC，输出 Main10 / BT.2020 / PQ；HLG 也统一输出 PQ。支持 NR、超分和内部 DLSS 补帧。XeSS 仍只支持预览；H.264 不承载此 HDR 导出。截图为 FP16 scRGB JPEG XR。导出不虚构或沿用处理前的峰值元数据；普通 PNG/JPEG 保持 SDR。
 - **5.1 音频**：文件解码与采集 PCM 保留声道位置，共用一套音频时钟、补偿和音量处理。采集优先尝试设备真实提供的多声道模式。Windows 输出设备须配置成 5.1；仅支持立体声时明确降混，在详细状态中显示输入 / 输出声道数。PS5 保持上游提供的立体声，不伪装成 5.1；本轮不提供 Dolby/DTS 压缩码流直通或 Atmos 对象音频。

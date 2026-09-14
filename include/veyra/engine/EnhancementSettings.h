@@ -70,6 +70,8 @@ struct EnhancementSettings {
     bool lowLatency=false; // preview only: NR before SR, opt-in
     NrRuntime nrRuntime=NrRuntime::Original;
     bool captureCompatible=false;
+    bool forceSdrPreview=false; // display only; retain actual HDR source metadata
+    bool useHdrPreview(bool hdrInput,bool hdrDisplayActive)const{return hdrInput&&hdrDisplayActive&&!forceSdrPreview;}
     pipeline::SrTarget srTarget=pipeline::SrTarget::Uhd4K;
     uint32_t videoSrQuality=0; // 0 DLSS SR; 1–4 RTX Video SR
     uint32_t multiplier=1;
