@@ -34,11 +34,11 @@ function(veyra_add_compute_shader target_name shader_name)
     OUTPUT "${output}"
     COMMAND "${DXC_EXE}" -T cs_6_0 -E main ${config_flags}
             -Fo "${output}" "${source}"
-    DEPENDS "${source}"
+    DEPENDS "${source}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/HdrColor.hlsli"
     COMMENT "dxc ${shader_name}.hlsl (${CMAKE_BUILD_TYPE})"
     VERBATIM)
   add_custom_target(${target_name} DEPENDS "${output}")
-  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${source}")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${source}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/HdrColor.hlsli")
 endfunction()
 
 # Compiles a vertex+pixel shader pair (entry vsMain/psMain) into two DXIL
@@ -56,14 +56,14 @@ function(veyra_add_graphics_shader_pair target_name shader_name)
     OUTPUT "${vs_out}"
     COMMAND "${DXC_EXE}" -T vs_6_0 -E vsMain ${config_flags}
             -Fo "${vs_out}" "${source}"
-    DEPENDS "${source}"
+    DEPENDS "${source}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/HdrColor.hlsli"
     COMMENT "dxc ${shader_name}.hlsl VS (${CMAKE_BUILD_TYPE})"
     VERBATIM)
   add_custom_command(
     OUTPUT "${ps_out}"
     COMMAND "${DXC_EXE}" -T ps_6_0 -E psMain ${config_flags}
             -Fo "${ps_out}" "${source}"
-    DEPENDS "${source}"
+    DEPENDS "${source}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/HdrColor.hlsli"
     COMMENT "dxc ${shader_name}.hlsl PS (${CMAKE_BUILD_TYPE})"
     VERBATIM)
   add_custom_target(${target_name} DEPENDS "${vs_out}" "${ps_out}")

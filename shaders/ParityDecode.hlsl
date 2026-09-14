@@ -4,6 +4,7 @@
 // correction and the AP1 gamut clamp. Must stay identical to
 // src/parity/RenoDxParityCodec.cpp.
 
+#include "HdrColor.hlsli"
 cbuffer ParityParams : register(b0)
 {
     float4 paritySettings; // x=paperWhiteScale y=transferStrength z=colorStrength w=unused
@@ -117,6 +118,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     const float3 original = max(originalSample.rgb, 0.0) / paritySettings.x;
     const float3 proxy = SrgbDecode(proxyTex[dispatchThreadId.xy].rgb);
     const float3 neural = SrgbDecode(neuralTex[dispatchThreadId.xy].rgb);
+    if(paritySettings.w>0.5){
+        finalTex[dispatchThreadId.xy]=float4(HdrRestore(originalSample.rgb,proxy,neural),originalSample.a);return;
+    }
 
     const float originalY = Luminance(original);
     const float proxyY = Luminance(proxy);

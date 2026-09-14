@@ -1,5 +1,7 @@
 # Veyra 项目 Agent 执行规则
 
+> 2026-09-14 用户授权实施 HDR 全增强与文件/采集 5.1，PS5 串流真实多声道不在本次范围。按 docs/HDR_ALL_EFFECTS_MULTICHANNEL_RESEARCH_PLAN_2026-09-14.md 施工，经过显式颜色合同扩展旧 SDR 边界；HDR 基底保留合成不宣称 NR 模型原生 HDR 推理。默认效果全关、共享处理图、直接 NGX、现有运行组件身份及 patched FFmpeg 保持。未授权新发布。
+
 > 2026-09-14 用户授权发布1.1.1到Likely7/Veyra-NRVideo，包含RTX30 NR实验选项和首次效果全关。发布范围新增用户已指定的NeuralScreen1.8.2 NR原件：DCC0DC2414AEDEC4A8E084647070383BE068554042587180C20C784D4772D36F / 165840496 bytes / 310.8.0.0 / HashMismatch，独立放在Release的runtime/experimental/nr-ampere/，逐文件manifest记录；原七组件与patched FFmpeg沿用。此授权扩展上次仅本地范围，不允许修改DLL或进入源码Git。RTX30实卡尚未验收，不能宣称全型号成功。更新双语README、完整便携包和对应源码；本轮未请求关机。
 
 > 2026-09-14 用户授权实施 RTX30 NR 兼容选项与首次启动全部效果关闭。允许将用户提供的 NeuralScreen 1.8.2 包内 native/nvngx_dlssnr.dll 原样用于隔离本地接入测试：SHA256 DCC0DC2414AEDEC4A8E084647070383BE068554042587180C20C784D4772D36F，165840496 bytes，310.8.0.0，HashMismatch。独立 runtime_local/nvidia/nr-ampere/，不覆盖原版/RTX40社区版；调用方兼容限定所选NR模块，不修改磁盘驱动或运行库。不授予新Release或将此文件入源码权限。初始NR/SR/FG全部关闭，已有明确保存的设置保留；RTX30实际性能需持卡验收，不能用本机RTX50通过代替。

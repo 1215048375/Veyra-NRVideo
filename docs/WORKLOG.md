@@ -1964,3 +1964,6 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 结论与分阶段计划落盘docs/HDR_ALL_EFFECTS_MULTICHANNEL_RESEARCH_PLAN_2026-09-14.md。发现HDR限制同时在Engine和图入口，增强前先SDR映射；NR已有浮点原底/代理/残差结构，可研究保留HDR原底的变化合成，不必把NR模型原生HDR当唯一出路。DLSS SR有HDR接口；DLSS FG/XeSS公开合同要求HDR10/RGB10，不能直接用当前scRGB。RTX Video的10-bit样例仍要求SDR，不把10-bit或TrueHDR转换当原生HDR保留证据。
 
 音频需端到端声道布局与统一音频帧计数：文件当前降混，采集入口当前直接拒绝>2声道，纠正“所有输入都混成立体声”的笼统说法。当前Chiaki单流Opus链仅1/2声道，PS5真实5.1需另找到上游协商/传输证据；无法从2.0恢复六个独立声道。HDR合成路线尚属待测设计，不能以文档当实现完成。git diff --check通过，未推送研究文档；下一步先验证NR保留HDR与RGB10补帧组合的隔离原型，再贯通全部入口/5.1/导出及UI。
+
+## 2026-09-14 — HDR/多声道实施节点 A
+用户授权施工、PS5真实多声道排除。本地分支codex/hdr-multichannel，checkpoint/pre-hdr-multichannel-20260914。HDR基底保留、NR/VideoSR代理合成、RGB10 DLSS/XeSS补帧首轮GPU通过；20帧真实NR/SR及18/16生成，1000nit输出998.932nit，零残差广色域/高光身份通过。完整构建成功，具体命令/失败/证据和未测边界见docs/HDR_MULTICHANNEL_EXECUTION_2026-09-14.md。其他入口、音频及产品收尾继续施工，未发布。

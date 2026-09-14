@@ -3,6 +3,7 @@
 // PRESENT and RENDER_TARGET (not UAV), so the present path is a fullscreen
 // triangle sample instead of a compute write.
 
+#include "HdrColor.hlsli"
 Texture2D<float4> sourceTex : register(t0);
 
 cbuffer PresentBlitConstants : register(b0)
@@ -75,5 +76,6 @@ float4 psMain(VSOut input) : SV_Target
     uint flags=uint(srcDims.z+0.5);
     float4 color=(flags&2)?FineSample(uv):sourceTex.SampleLevel(linearClamp,uv,0);
     if(flags&1){float3 c=max(color.rgb,0);color.rgb=lerp(1.055*pow(c,1.0/2.4)-0.055,c*12.92,step(c,0.0031308));}
+    if(flags&4)color.rgb=HdrEncodePq(color.rgb);
     return color;
 }

@@ -181,7 +181,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                 width=activeSource->info().width;height=activeSource->info().height;duration=isCapture?0:activeSource->info().duration.toDouble();
             }
             if(!pipeline::Extent{width,height}.valid()){status(L"图像尺寸超出单张GPU纹理能力，需要分块处理",true);break;}
-            pipeline::EnhanceGraphDesc gd;gd.sourceWidth=width;gd.sourceHeight=height;gd.hdrInput=isRemote&&activeSource->info().color.isHdrPath();
+            pipeline::EnhanceGraphDesc gd;gd.sourceWidth=width;gd.sourceHeight=height;gd.hdrInput=!isImage&&activeSource->info().color.isHdrPath();
             gd.highQualityPresentation=isRemote&&activeSource->info().color.reconstructChroma;
             gd.rgbInput=isImage||(isCapture&&activeSource->info().color.pixelFormat==pipeline::SourcePixelFormat::Bgra8);
             if(physicalCapture)gd.captureBitDepth=activeSource->info().color.pixelFormat==pipeline::SourcePixelFormat::P010?10:activeSource->info().color.pixelFormat==pipeline::SourcePixelFormat::P016?16:8;
@@ -193,19 +193,19 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
             gd.nrBeforeSr=!isImage&&options.settings.lowLatency&&options.nr&&resolution.srApplied;gd.enableSr=resolution.srApplied&&nvidiaAdapter;gd.videoSrQuality=options.settings.videoSrQuality;gd.enableNr=options.nr&&nvidiaAdapter;gd.nrRuntime=options.settings.nrRuntime;gd.enableFg=options.fg&&(nvidiaAdapter||xessFg);gd.fgMultiplier=options.fgMultiplier;gd.frameGenerationBackend=options.settings.frameGenerationBackend;gd.enableNvofStandalone=gd.enableNr;
             gd.noFeatures=false;gd.model=options.settings.model;gd.residual=options.settings.residual;gd.protection=options.settings.protection;gd.settingsRevision=options.settings.revision;gd.flowQuality=options.settings.flow;gd.contentRate=options.settings.content;
             gd.opticalFlowBackend=options.settings.opticalFlowBackend;gd.amdFlowHalfResolution=options.settings.amdFlowHalfResolution;
-            gd.hdrOutput=gd.hdrInput&&!gd.enableNr&&!gd.enableSr&&!gd.enableFg&&gfx::PresentSink::hdrDisplayActive(window);
+            gd.hdrOutput=gd.hdrInput&&gfx::PresentSink::hdrDisplayActive(window);
             gd.runtimeAbsPath=runtime::localRuntimeDirectory().wstring();
             if(!graph.initialize(gd)||!presenter.open(ctx,window,graph,options.settings.captureCompatible)||!graph.createViews()){status(L"增强初始化失败，请核对本地运行时",true);break;}
             if(!nvidiaAdapter&&(options.nr||options.sr||(options.fg&&!xessFg))){
                 veyra::log::warn("capability",std::format("non-NVIDIA adapter disabled requested features: nr={} sr={} fgBackend={} flowBackend={}",options.nr,options.sr,frameGenerationBackendName(options.settings.frameGenerationBackend),opticalFlowBackendName(options.settings.opticalFlowBackend)));
                 status(L"当前非 NVIDIA 适配器：NR、NVIDIA 超分与 DLSS 已禁用；可使用 XeSS 预览和 AMD 光流",false);
             }
-            if(gd.hdrInput)status(gd.hdrOutput?L"PS5 HDR输入 · 原生HDR显示（关闭增强）":L"PS5 HDR输入 · SDR色调映射后增强/显示（1000nit参考峰值）",false);
+            if(gd.hdrInput)status(gd.hdrOutput?L"HDR输入 · HDR保留增强/显示":L"HDR输入 · SDR色调映射后增强/显示（1000nit参考峰值）",false);
             if(graph.xessEnabled()&&!presenter.xessActive())status(L"XeSS 未启用：运行时或设备不兼容；当前为普通呈现",false);
             {
                 std::lock_guard lock(mutex_);
                 if(!nvidiaAdapter&&(options.nr||options.sr||(options.fg&&!xessFg)))snapshot_.backendWarning=L"当前 GPU 不支持所选 NVIDIA 增强";
-                if(gd.hdrInput)snapshot_.backendWarning=gd.hdrOutput?L"HDR输入 → 原生HDR显示；增强关闭":L"HDR输入 → SDR色调映射后增强/显示";
+                if(gd.hdrInput)snapshot_.backendWarning=gd.hdrOutput?L"HDR输入 → HDR保留增强/显示":L"HDR输入 → SDR色调映射后增强/显示";
                 if(graph.xessEnabled()&&!presenter.xessActive())snapshot_.backendWarning=L"XeSS 初始化失败；当前为普通呈现";
             }
             captureSource.setAudioSync(unsigned(options.settings.audioSync),options.settings.audioOffsetMs);
@@ -372,7 +372,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
             while(!stop_){
                 if(gd.hdrInput&&GetTickCount64()-hdrDisplayCheck>2000){
                     hdrDisplayCheck=GetTickCount64();
-                    const bool native=!gd.enableNr&&!gd.enableSr&&!gd.enableFg&&gfx::PresentSink::hdrDisplayActive(window);
+                    const bool native=gfx::PresentSink::hdrDisplayActive(window);
                     if(native!=gd.hdrOutput){std::lock_guard lock(mutex_);if(desired_.revision==options.settings.revision){desired_.revision=++nextRevision_;snapshot_.desired=desired_;snapshot_.applying=true;}}
                 }
                 if(audioStarted)publishAudioStatus();
@@ -429,7 +429,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                     nextDesc.nrBeforeSr=!isImage&&requested.lowLatency&&requested.nr&&plan.srApplied;nextDesc.enableSr=plan.srApplied&&nvidiaAdapter;nextDesc.videoSrQuality=next.settings.videoSrQuality;nextDesc.enableNr=next.nr&&nvidiaAdapter;nextDesc.nrRuntime=next.settings.nrRuntime;nextDesc.enableFg=next.fg&&(nvidiaAdapter||xessFg);nextDesc.fgMultiplier=next.fgMultiplier;nextDesc.frameGenerationBackend=next.settings.frameGenerationBackend;nextDesc.enableNvofStandalone=nextDesc.enableNr;
                     nextDesc.model=requested.model;nextDesc.residual=requested.residual;nextDesc.protection=requested.protection;nextDesc.settingsRevision=requested.revision;nextDesc.flowQuality=requested.flow;nextDesc.contentRate=requested.content;
                     nextDesc.opticalFlowBackend=requested.opticalFlowBackend;nextDesc.amdFlowHalfResolution=requested.amdFlowHalfResolution;
-                    nextDesc.hdrOutput=nextDesc.hdrInput&&!nextDesc.enableNr&&!nextDesc.enableSr&&!nextDesc.enableFg&&gfx::PresentSink::hdrDisplayActive(window);
+                    nextDesc.hdrOutput=nextDesc.hdrInput&&gfx::PresentSink::hdrDisplayActive(window);
                     const bool rebuild=gd.hdrOutput!=nextDesc.hdrOutput||previous.captureCompatible!=requested.captureCompatible||gd.nrRuntime!=nextDesc.nrRuntime||gd.opticalFlowBackend!=nextDesc.opticalFlowBackend||gd.amdFlowHalfResolution!=nextDesc.amdFlowHalfResolution||gd.enableNr!=nextDesc.enableNr||gd.enableFg!=nextDesc.enableFg||gd.frameGenerationBackend!=nextDesc.frameGenerationBackend||gd.fgMultiplier!=nextDesc.fgMultiplier||gd.videoSrQuality!=nextDesc.videoSrQuality||gd.flowQuality!=nextDesc.flowQuality||gd.nrBeforeSr!=nextDesc.nrBeforeSr||gd.workWidth!=nextDesc.workWidth||gd.workHeight!=nextDesc.workHeight||gd.nrWidth!=nextDesc.nrWidth||gd.nrHeight!=nextDesc.nrHeight||gd.flowWidth!=nextDesc.flowWidth||gd.flowHeight!=nextDesc.flowHeight;
                     bool accepted=ring.drainQueue();out={};hasOutput=false;
                     resetRecord->rebuilt=rebuild;
@@ -445,7 +445,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                     }else if(accepted)accepted=graph.applySettings(requested);
                     if(accepted){
                         options=next;gd=nextDesc;transaction=true;reset=true;
-                        if(gd.hdrInput){std::lock_guard lock(mutex_);snapshot_.backendWarning=gd.hdrOutput?L"HDR输入 → 原生HDR显示；增强关闭":L"HDR输入 → SDR色调映射后增强/显示";}
+                        if(gd.hdrInput){std::lock_guard lock(mutex_);snapshot_.backendWarning=gd.hdrOutput?L"HDR输入 → HDR保留增强/显示":L"HDR输入 → SDR色调映射后增强/显示";}
                         resetRecord->epoch=0;
                         if(!nvidiaAdapter&&(next.nr||next.sr||(next.fg&&!xessFg)))veyra::log::warn("capability",std::format("non-NVIDIA adapter disabled requested settings revision={} nr={} sr={} fgBackend={} flowBackend={}",requested.revision,next.nr,next.sr,frameGenerationBackendName(requested.frameGenerationBackend),opticalFlowBackendName(requested.opticalFlowBackend)));
                     }
@@ -523,7 +523,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                     width=uint32_t(frame->width);height=uint32_t(frame->height);
                     auto plan=pipeline::ResolutionPlan::make({width,height},options.sr,options.settings.nrPolicy,false,options.settings.revision,options.settings.srTarget,options.settings.lowLatency&&options.nr);
                     gd.nrBeforeSr=options.settings.lowLatency&&options.nr&&plan.srApplied;gd.enableSr=plan.srApplied&&ctx.adapter().isNvidia;
-                    gd.sourceWidth=width;gd.sourceHeight=height;gd.hdrInput=isRemote&&activeSource->info().color.isHdrPath();gd.hdrOutput=gd.hdrInput&&!gd.enableNr&&!gd.enableSr&&!gd.enableFg&&gfx::PresentSink::hdrDisplayActive(window);gd.workWidth=plan.base.width;gd.workHeight=plan.base.height;gd.nrWidth=plan.nr.width;gd.nrHeight=plan.nr.height;gd.flowWidth=plan.flow.width;gd.flowHeight=plan.flow.height;
+                    gd.sourceWidth=width;gd.sourceHeight=height;gd.hdrInput=!isImage&&activeSource->info().color.isHdrPath();gd.hdrOutput=gd.hdrInput&&gfx::PresentSink::hdrDisplayActive(window);gd.workWidth=plan.base.width;gd.workHeight=plan.base.height;gd.nrWidth=plan.nr.width;gd.nrHeight=plan.nr.height;gd.flowWidth=plan.flow.width;gd.flowHeight=plan.flow.height;
                     presenter.close();graph.shutdown();out={};hasOutput=false;
                     if(!graph.initialize(gd)||!presenter.open(ctx,window,graph,options.settings.captureCompatible)||!graph.createViews()){status(L"串流尺寸切换失败",true);break;}
                     reset=true;pendingResetCause=pipeline::ResetReason::Resize;

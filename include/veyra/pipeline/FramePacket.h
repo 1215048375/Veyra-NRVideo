@@ -102,8 +102,7 @@ struct ColorDescription {
     bool reconstructChroma = false;
 
     bool isHdrPath() const {
-        return transfer == TransferFunction::PQ || transfer == TransferFunction::HLG || pixelFormat == SourcePixelFormat::P010
-            || transfer == TransferFunction::BT2020_10;
+        return transfer == TransferFunction::PQ || transfer == TransferFunction::HLG;
     }
 };
 

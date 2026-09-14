@@ -3,6 +3,7 @@
 // Proxy    = sRGB-encoded soft-clipped value in R8G8B8A8_UNORM.
 // The math must stay identical to src/parity/RenoDxParityCodec.cpp.
 
+#include "HdrColor.hlsli"
 cbuffer ParityParams : register(b0)
 {
     float4 paritySettings; // x=paperWhiteScale y=transferStrength z=colorStrength w=unused
@@ -36,6 +37,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     const float4 original = originalTex[dispatchThreadId.xy];
+    if(paritySettings.w>0.5){proxyTex[dispatchThreadId.xy]=float4(SrgbEncode(HdrProxy(original.rgb)),original.a);return;}
     const float3 linearRgb = max(original.rgb, 0.0) / paritySettings.x;
     // shoulder(x) = 0.75 + 0.25 * (1 - exp(-5.7780 * (x - 0.75))); component-wise.
     const float3 shouldered = 0.75 + 0.25 * (1.0 - exp(-5.7780 * (linearRgb - 0.75)));

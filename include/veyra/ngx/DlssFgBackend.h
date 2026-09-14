@@ -61,6 +61,7 @@ public:
         ID3D12Resource* outputInterpolated;      // generated frame (same format as backbuffer)
         ID3D12Resource* outputDisableInterpolation = nullptr; // optional 4-byte UAV buffer
         bool reset;
+        bool hdr=false;
         uint64_t frameId;                        // monotonically increasing real-frame id
         float mvecScaleX;                        // convention under test (Playbook 14.2)
         float mvecScaleY;

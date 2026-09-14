@@ -89,7 +89,7 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
     diagnostics::DiagnosticEvent initDiagnostic;initDiagnostic.stage="initialize";initDiagnostic.identity={epoch_+1,desc.settingsRevision,0};initDiagnostic.resolution.source={srcW_,srcH_};initDiagnostic.resolution.base=initDiagnostic.resolution.fg=initDiagnostic.resolution.output={workW_,workH_};initDiagnostic.resolution.nr={nrW_,nrH_};initDiagnostic.resolution.flow={nvofW_,nvofH_};initDiagnostic.flowApplied=std::to_string(unsigned(desc.flowQuality));initDiagnostic.runtimeHash="unverified-user-replaceable";Logger::diagnosticContext(initDiagnostic);
     veyra::log::info("resolution",std::format("source={}x{} base={}x{} nr={}x{} flow={}x{} fg={}x{} output={}x{}",srcW_,srcH_,workW_,workH_,nrW_,nrH_,nvofW_,nvofH_,workW_,workH_,workW_,workH_));
     veyra::log::info("pipeline-order",desc.nrBeforeSr?"NR -> residual(source) -> SR -> FG (experimental preview)":"SR -> NR -> residual -> FG");
-    if(desc.hdrOutput&&(!desc.hdrInput||desc.enableNr||desc.enableSr||desc.enableFg)){veyra::log::error("hdr","Native HDR enhancement combination is not validated");return false;}
+    if(desc.hdrOutput&&!desc.hdrInput){veyra::log::error("hdr","HDR output requires an explicit HDR input contract");return false;}
     srEnabled_ = desc.enableSr && (srcW_ != workW_ || srcH_ != workH_);
     nrEnabled_ = desc.enableNr && !desc.noFeatures && !desc.noNgx;
     fgEnabled_ = desc.enableFg && !desc.noNgx && !desc.stillImage && desc.frameGenerationBackend!=engine::FrameGenerationBackend::XeSS;
@@ -178,14 +178,14 @@ bool EnhanceGraph::createResources()
     proxyTex_ = makeTexture(context_.device(), nrW_, nrH_, DXGI_FORMAT_R8G8B8A8_UNORM, true);
     neuralTex_ = makeTexture(context_.device(), nrW_, nrH_, DXGI_FORMAT_R8G8B8A8_UNORM, true);
     finalRgba_ = makeTexture(context_.device(), nrW_, nrH_, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
-    videoFrame_[0] = makeTexture(context_.device(), workW_, workH_, desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, true);
-    videoFrame_[1] = makeTexture(context_.device(), workW_, workH_, desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, true);
+    videoFrame_[0] = makeTexture(context_.device(), workW_, workH_, outputFormat(), true);
+    videoFrame_[1] = makeTexture(context_.device(), workW_, workH_, outputFormat(), true);
     confTex_ = makeTexture(context_.device(), nvofW_, nvofH_, DXGI_FORMAT_R8_UNORM, true);
     flowTex_ = makeTexture(context_.device(), nvofW_, nvofH_, DXGI_FORMAT_R16G16_FLOAT, true);
     depthTex_ = makeTexture(context_.device(), workW_, workH_, DXGI_FORMAT_R32_FLOAT, false);
     // Valid placeholder descriptors keep disabled FG inexpensive. Enabling it
     // is a graph rebuild, so no in-flight descriptor is resized in place.
-    for(auto& frame:genFrame_){frame=makeTexture(context_.device(),fgEnabled_?workW_:1,fgEnabled_?workH_:1,DXGI_FORMAT_R8G8B8A8_UNORM,true);if(!frame)return false;}
+    for(auto& frame:genFrame_){frame=makeTexture(context_.device(),fgEnabled_?workW_:1,fgEnabled_?workH_:1,outputFormat(),true);if(!frame)return false;}
     nrZeroMotion_ = makeTexture(context_.device(), workW_, workH_, DXGI_FORMAT_R16G16_FLOAT, false);
     nrZeroDepth_ = makeTexture(context_.device(), workW_, workH_, DXGI_FORMAT_R32_FLOAT, false);
     rawW_ = (nvofW_ + nvofGrid_ - 1) / nvofGrid_;
@@ -460,7 +460,7 @@ bool EnhanceGraph::initNgxFeatures()
         ngx::DlssFgBackend::CreateDesc fd{};
         fd.width = workW_; fd.height = workH_;
         fd.renderWidth = workW_; fd.renderHeight = workH_;
-        fd.backbufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        fd.backbufferFormat = outputFormat();
         ID3D12GraphicsCommandList* list = ring_.acquire(0, st);
         if (list == nullptr) return false;
         if (!fgBackend_->create(*coreHost_, list, ngxParams_, fd, st) || !fgBackend_->created()) {
@@ -491,7 +491,7 @@ bool EnhanceGraph::initNgxFeatures()
         fe.depth = depthTex_.Get();
         fe.mvecs = nrZeroMotion_.Get();
         fe.outputInterpolated = genFrame_[0].Get();
-        fe.reset = true;
+        fe.reset = true;fe.hdr=hdr10Output();
         fe.multiFrameCount=desc_.enableFg?desc_.fgMultiplier-1:1;fe.multiFrameIndex=1;
         fe.frameId = 0; // warm-up has its own identity; product IDs start at 1
         fe.mvecScaleX = 1.0f;
@@ -533,7 +533,8 @@ bool EnhanceGraph::createComputePasses()
     if (!uploadPass_.loadShader("Nv12Upload.dxil", cs) || !uploadPass_.create(context_.device(), cs, 4, 1, 2)) return false;
     if (!densifyPass_.loadShader("NvofDensify.dxil", cs) ||
         !densifyPass_.create(context_.device(), cs, 7, 5, 2)) return false;
-    if (!stager_.initialize(context_.device(), 64)) {
+    if(desc_.hdrOutput&&videoSrInput_&&(!hdrVideoSrPass_.loadShader("HdrVideoSrRestore.dxil",cs)||!hdrVideoSrPass_.create(context_.device(),cs,7,3,1)))return false;
+    if (!stager_.initialize(context_.device(), 80)) {
         veyra::log::error("graph", "descriptor stager init failed");
         return false;
     }
@@ -584,6 +585,15 @@ bool EnhanceGraph::createViews()
     stagedSrv(flowTex_.Get(),DXGI_FORMAT_R16G16_FLOAT,flowAdaptPass_,0);
     makeUav(context_.device(),nrFlow_.Get(),DXGI_FORMAT_R16G16_FLOAT,cpu(flowAdaptPass_,1));
     makeUav(context_.device(),baseFlow_.Get(),DXGI_FORMAT_R16G16_FLOAT,cpu(flowAdaptPass_,2));
+    if(desc_.hdrOutput&&videoSrInput_){
+        stagedSrv(srcRgba_.Get(),DXGI_FORMAT_R16G16B16A16_FLOAT,hdrVideoSrPass_,0);
+        stagedSrv(videoSrInput_.Get(),DXGI_FORMAT_R8G8B8A8_UNORM,hdrVideoSrPass_,1);
+        stagedSrv(videoSrOutput_.Get(),DXGI_FORMAT_R8G8B8A8_UNORM,hdrVideoSrPass_,2);
+        makeUav(context_.device(),workRgba_.Get(),DXGI_FORMAT_R16G16B16A16_FLOAT,cpu(hdrVideoSrPass_,3));
+        stagedSrv(residualRgba_.Get(),DXGI_FORMAT_R16G16B16A16_FLOAT,hdrVideoSrPass_,4);
+        stagedSrv(videoSrInput_.Get(),DXGI_FORMAT_R8G8B8A8_UNORM,hdrVideoSrPass_,5);
+        stagedSrv(videoSrOutput_.Get(),DXGI_FORMAT_R8G8B8A8_UNORM,hdrVideoSrPass_,6);
+    }
     // Immutable per-resource views.
     if(desc_.rgbInput||desc_.yuy2Input){
         stagedSrv(rgbTex_.Get(),DXGI_FORMAT_R8G8B8A8_UNORM,rgbPass_,0);
@@ -614,17 +624,17 @@ bool EnhanceGraph::createViews()
     if (viewsTex) stagedSrv(srcRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, blitPass_, 0);
     if (viewsUav) makeUav(context_.device(), workRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, cpu(blitPass_, 1));
     if (viewsTex) stagedSrv(nrEnabled_&&!desc_.nrBeforeSr ? residualRgba_.Get() : workRgba_.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, blitPass_, 2);
-    if (viewsUav) makeUav(context_.device(), videoFrame_[0].Get(), desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, cpu(blitPass_, 3));
-    if (viewsUav) makeUav(context_.device(), videoFrame_[1].Get(), desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, cpu(blitPass_, 4));
+    if (viewsUav) makeUav(context_.device(), videoFrame_[0].Get(), outputFormat(), cpu(blitPass_, 3));
+    if (viewsUav) makeUav(context_.device(), videoFrame_[1].Get(), outputFormat(), cpu(blitPass_, 4));
     if (viewsTex) stagedSrv(nvofInB_.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, blitPass_, 5);
     if (viewsUav) makeUav(context_.device(), nvofInA_.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, cpu(blitPass_, 6));
-    if (viewsTex) stagedSrv(videoFrame_[0].Get(), desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 7);
-    if (viewsTex) stagedSrv(videoFrame_[1].Get(), desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 8);
+    if (viewsTex) stagedSrv(videoFrame_[0].Get(), outputFormat(), blitPass_, 7);
+    if (viewsTex) stagedSrv(videoFrame_[1].Get(), outputFormat(), blitPass_, 8);
     if (viewsUav) makeUav(context_.device(), nvofInB_.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, cpu(blitPass_, 9));
-    if (viewsTex) stagedSrv(genFrame_[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 10);
-    if (viewsTex) stagedSrv(genFrame_[1].Get(), DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 13);
-    if (viewsTex) stagedSrv(videoFrame_[0].Get(), desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 11);
-    if (viewsTex) stagedSrv(videoFrame_[1].Get(), desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, blitPass_, 12);
+    if (viewsTex) stagedSrv(genFrame_[0].Get(), outputFormat(), blitPass_, 10);
+    if (viewsTex) stagedSrv(genFrame_[1].Get(), outputFormat(), blitPass_, 13);
+    if (viewsTex) stagedSrv(videoFrame_[0].Get(), outputFormat(), blitPass_, 11);
+    if (viewsTex) stagedSrv(videoFrame_[1].Get(), outputFormat(), blitPass_, 12);
 
     // Densify pass views: 0=rawFlow SRV(int2) 1=cost SRV(uint)
     // 2=previous RGB,3=current RGB,4=AMD SCD;5=flow UAV,6=confidence UAV.
@@ -915,7 +925,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             tracker_.transition(list,nvofInA_.Get(),D3D12_RESOURCE_STATE_COMMON);
         }
         tracker_.transition(list,nvofInB_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        const float encodedDims[8] = {uintBits(srcW_),uintBits(srcH_),uintBits(nvofW_),uintBits(nvofH_),1,0,0,0};
+        const float encodedDims[8] = {uintBits(srcW_),uintBits(srcH_),uintBits(nvofW_),uintBits(nvofH_),desc_.hdrOutput?3.0f:1.0f,0,0,0};
         blitPass_.bind(list,encodedDims,gpuHandleOf(blitPass_,15).ptr,gpuHandleOf(blitPass_,9).ptr);
         list->Dispatch((nvofW_+15)/16,(nvofH_+15)/16,1);
         tracker_.uavBarrier(list,nvofInB_.Get());
@@ -994,13 +1004,16 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     if(srEnabled_&&videoSrBackend_){
         gpuTimer_.mark(list,GpuStage::Sr);
         tracker_.transition(list,videoSrInput_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        const float enc[8]={uintBits(srcW_),uintBits(srcH_),uintBits(srcW_),uintBits(srcH_),1,0,0,0};
+        const float enc[8]={uintBits(srcW_),uintBits(srcH_),uintBits(srcW_),uintBits(srcH_),desc_.hdrOutput?3.0f:1.0f,0,0,0};
         blitPass_.bind(list,enc,gpuHandleOf(blitPass_,desc_.nrBeforeSr?18:0).ptr,gpuHandleOf(blitPass_,16).ptr);list->Dispatch((srcW_+15)/16,(srcH_+15)/16,1);tracker_.uavBarrier(list,videoSrInput_.Get());
         tracker_.transition(list,videoSrInput_.Get(),D3D12_RESOURCE_STATE_COMMON);tracker_.transition(list,videoSrOutput_.Get(),D3D12_RESOURCE_STATE_COMMON);
         if(!videoSrBackend_->evaluate(list,videoSrInput_.Get(),videoSrOutput_.Get(),desc_.videoSrQuality))return false;
         tracker_.uavBarrier(list,videoSrOutput_.Get());tracker_.transition(list,videoSrOutput_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);tracker_.transition(list,workRgba_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         const float dec[8]={uintBits(workW_),uintBits(workH_),uintBits(workW_),uintBits(workH_),-1,0,0,0};
-        blitPass_.bind(list,dec,gpuHandleOf(blitPass_,17).ptr,gpuHandleOf(blitPass_,1).ptr);list->Dispatch((workW_+15)/16,(workH_+15)/16,1);tracker_.uavBarrier(list,workRgba_.Get());tracker_.transition(list,workRgba_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        if(desc_.hdrOutput){
+            tracker_.transition(list,videoSrInput_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            hdrVideoSrPass_.bind(list,dec,gpuHandleOf(hdrVideoSrPass_,desc_.nrBeforeSr?4:0).ptr,gpuHandleOf(hdrVideoSrPass_,3).ptr);
+        }else blitPass_.bind(list,dec,gpuHandleOf(blitPass_,17).ptr,gpuHandleOf(blitPass_,1).ptr);list->Dispatch((workW_+15)/16,(workH_+15)/16,1);tracker_.uavBarrier(list,workRgba_.Get());tracker_.transition(list,workRgba_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         ++metrics_.srEvaluateCount;gpuTimer_.mark(list,GpuStage::Sr,true);
     } else if (srEnabled_ && srBackend_ && srBackend_->created()) {
         gpuTimer_.mark(list,GpuStage::Sr);
@@ -1055,7 +1068,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         list->Dispatch((nrW_+15)/16,(nrH_+15)/16,1);tracker_.uavBarrier(list,nrInput_.Get());tracker_.transition(list,nrInput_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         }
         tracker_.transition(list, proxyTex_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        const float constants[8] = { 1.0f, 1.0f, 1.0f, 0.0f,
+        const float constants[8] = { 1.0f, 1.0f, 1.0f, desc_.hdrOutput?1.0f:0.0f,
             uintBits(nrW_), uintBits(nrH_), 0.0f, 0.0f };
         encPass_.bind(list, constants, gpuHandleOf(encPass_, 0).ptr, gpuHandleOf(encPass_, 1).ptr);
         list->Dispatch((nrW_ + 15) / 16, (nrH_ + 15) / 16, 1);
@@ -1118,7 +1131,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             }
             // 4c. Parity decode.
             tracker_.transition(nlist, finalRgba_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            const float constants[8] = { 1.0f, 1.0f, 1.0f, 0.0f,
+            const float constants[8] = { 1.0f, 1.0f, 1.0f, desc_.hdrOutput?1.0f:0.0f,
                 uintBits(nrW_), uintBits(nrH_), 0.0f, 0.0f };
             decPass_.bind(nlist, constants, gpuHandleOf(decPass_, 0).ptr, gpuHandleOf(decPass_, 3).ptr);
             nlist->Dispatch((nrW_ + 15) / 16, (nrH_ + 15) / 16, 1);
@@ -1132,7 +1145,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
     if(nrEnabled_&&nrHandle_){
         gpuTimer_.mark(list,GpuStage::Residual);
         tracker_.transition(list,residualRgba_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        const auto& r=desc_.residual;float c[24]={r.total,r.darken,r.brighten,r.color,r.luminance,desc_.protection.enabled?1.0f:0.0f,desc_.protection.featherPixels,0};
+        const auto& r=desc_.residual;float c[24]={r.total,r.darken,r.brighten,r.color,r.luminance,desc_.protection.enabled?1.0f:0.0f,desc_.protection.featherPixels,desc_.hdrOutput?1.0f:0.0f};
         for(size_t i=0;i<4;++i){const auto q=desc_.protection.regions[i];c[8+i*4]=q.left;c[9+i*4]=q.top;c[10+i*4]=q.right;c[11+i*4]=q.bottom;}
         residualPass_.bind(list,c,gpuHandleOf(residualPass_,0).ptr,gpuHandleOf(residualPass_,3).ptr);
         list->Dispatch(((desc_.nrBeforeSr?srcW_:workW_)+15)/16,((desc_.nrBeforeSr?srcH_:workH_)+15)/16,1);tracker_.uavBarrier(list,residualRgba_.Get());tracker_.transition(list,residualRgba_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);gpuTimer_.mark(list,GpuStage::Residual,true);
@@ -1148,7 +1161,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         tracker_.transition(list, videoFrame_[parity].Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         const float constants[8] = {
             uintBits(workW_), uintBits(workH_),
-            uintBits(workW_), uintBits(workH_), desc_.hdrOutput?0.0f:1.0f, 0, 0, 0 };
+            uintBits(workW_), uintBits(workH_), hdr10Output()?2.0f:desc_.hdrOutput?0.0f:1.0f, 0, 0, 0 };
         blitPass_.bind(list, constants, gpuHandleOf(blitPass_, srcSlot).ptr, gpuHandleOf(blitPass_, uavSlot).ptr);
         list->Dispatch((workW_ + 15) / 16, (workH_ + 15) / 16, 1);
         tracker_.uavBarrier(list, videoFrame_[parity].Get());
@@ -1195,7 +1208,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         }
         tracker_.transition(flist,fgDisable_[parity].Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         ngx::DlssFgBackend::EvalDesc fe{};
-        fe.backbuffer=videoFrame_[parity].Get(); fe.depth=depthTex_.Get(); fe.mvecs=motion;
+        fe.hdr=hdr10Output();fe.backbuffer=videoFrame_[parity].Get(); fe.depth=depthTex_.Get(); fe.mvecs=motion;
         fe.outputInterpolated=genFrame_[generatedSlot].Get(); fe.reset=resetFg;
         fe.outputDisableInterpolation=fgDisable_[parity].Get();
         fe.multiFrameCount=desc_.fgMultiplier-1;fe.multiFrameIndex=sub;
@@ -1386,7 +1399,7 @@ void EnhanceGraph::shutdown()
     nrInput_.Reset();residualRgba_.Reset();nrFlow_.Reset();baseFlow_.Reset();
     for(unsigned i=0;i<6;++i){fgDisable_[i].Reset();fgDisableReadback_[i].Reset();generatedLeases_[i].reset();genFrame_[i].Reset();}for(auto& lease:realLeases_)lease.reset();fgDisableInit_.Reset();
     encPass_ = ComputePass{};
-    blitPass_ = ComputePass{};
+    blitPass_ = ComputePass{};hdrVideoSrPass_={};
     yuvPass_ = ComputePass{};
     densifyPass_ = ComputePass{};
     confTex_.Reset();

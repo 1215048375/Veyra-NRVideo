@@ -261,7 +261,7 @@ bool DlssFgBackend::evaluate(ID3D12GraphicsCommandList* cmdList,
     optParams.cameraFar = 1000.0f;
     optParams.cameraFOV = 1.5707963f; // pi/2
     optParams.cameraAspectRatio = static_cast<float>(width_) / static_cast<float>(height_);
-    optParams.colorBuffersHDR = 0;   // V1 is SDR
+    optParams.colorBuffersHDR = desc.hdr ? 1u : 0u; // HDR10 / RGB10 contract
     optParams.depthInverted = 0;
     optParams.cameraMotionIncluded = 1;
     optParams.reset = desc.reset ? 1u : 0u;

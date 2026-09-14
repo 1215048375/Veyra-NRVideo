@@ -111,7 +111,7 @@ bool PresentSink::initialize(ID3D12Device* device, ID3D12CommandQueue* queue,
     DXGI_SWAP_CHAIN_DESC1 scd{};
     scd.Width = width_;
     scd.Height = height_;
-    scd.Format = desc.hdr?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM;
+    scd.Format = desc.hdr10?DXGI_FORMAT_R10G10B10A2_UNORM:desc.hdr?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM;
     scd.SampleDesc.Count = 1;
     scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     scd.BufferCount = 3;
@@ -143,10 +143,10 @@ bool PresentSink::initialize(ID3D12Device* device, ID3D12CommandQueue* queue,
         return false;
     }
     }
-    const auto space=desc.hdr?DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709:DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+    const auto space=desc.hdr10?DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020:desc.hdr?DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709:DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
     UINT support=0;const auto check=swapChain_->CheckColorSpaceSupport(space,&support);
     if(FAILED(check)||!(support&DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT)||FAILED(swapChain_->SetColorSpace1(space))){log::error("present","Requested output color space is unavailable");status=Status::WindowFailure;return false;}
-    log::info("present",desc.hdr?"output=scRGB FP16 (1=80 nits)":"output=SDR RGB G22");
+    log::info("present",desc.hdr10?"output=HDR10 RGB10 PQ/BT2020":desc.hdr?"output=scRGB FP16 (1=80 nits)":"output=SDR RGB G22");
     // Block ALT+ENTER; the engine owns mode changes.
     (void)factory_->MakeWindowAssociation(hwnd_, DXGI_MWA_NO_WINDOW_CHANGES | DXGI_MWA_NO_ALT_ENTER);
     queue_ = queue;
@@ -299,7 +299,7 @@ void PresentSink::resize(uint32_t width, uint32_t height)
     if (!waitForQueueIdle()) return;
     for (auto& b : backBuffers_) b.Reset();
     HRESULT hr = swapChain_->ResizeBuffers(3, width, height,
-        desc_.hdr?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, flags);
+        desc_.hdr10?DXGI_FORMAT_R10G10B10A2_UNORM:desc_.hdr?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM, flags);
     if (FAILED(hr)) {
         log::error("present", std::format("ResizeBuffers FAILED hr=0x{:X} (queue idle, buffers released)",
             static_cast<unsigned>(hr)));

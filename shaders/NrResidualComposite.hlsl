@@ -31,5 +31,6 @@ cbuffer Params:register(b0){float total;float darken;float brighten;float color;
     delta/=max(weights,1e-6);
     if(darken!=1||brighten!=1)delta=min(delta,0)*darken+max(delta,0)*brighten;
     if(color!=1||luminance!=1){float dy=dot(delta,float3(0.2126,0.7152,0.0722));delta=dy*luminance+(delta-dy)*color;}
-    outputTex[id.xy]=float4(max(0,base.rgb+total*(1-protection)*delta),base.a);
+    float3 result=base.rgb+total*(1-protection)*delta;
+    outputTex[id.xy]=float4(unused>0.5?result:max(0,result),base.a);
 }

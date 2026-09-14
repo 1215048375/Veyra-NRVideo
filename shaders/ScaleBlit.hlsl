@@ -2,6 +2,7 @@
 // working-extent frame onto the swapchain backbuffer (video extent may differ
 // from window extent). SDR path only: straight RGBA8 in, RGBA8 out.
 
+#include "HdrColor.hlsli"
 Texture2D<float4> sourceTex : register(t0);
 RWTexture2D<float4> outputTex : register(u0);
 
@@ -51,6 +52,8 @@ void main(uint3 groupId : SV_GroupID, uint3 localId : SV_GroupThreadID, uint3 gl
     const float4 bottom = lerp(s01, s11, fx);
     value = lerp(top, bottom, fy);
     }
+    if(encodeSrgb>2.5){value.rgb=HdrProxy(value.rgb);}
+    if(encodeSrgb>1.5&&encodeSrgb<2.5){outputTex[globalId.xy]=float4(HdrEncodePq(value.rgb),value.a);return;}
     if (encodeSrgb > 0.5) {
         const float3 c = max(value.rgb, 0.0);
         value.rgb = select(c <= 0.0031308, c * 12.92, 1.055 * pow(c, 1.0/2.4) - 0.055);

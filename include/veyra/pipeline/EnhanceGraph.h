@@ -189,6 +189,8 @@ public:
     bool nrEnabled() const { return nrEnabled_; }
     bool fgEnabled() const { return fgEnabled_; }
     bool hdrOutput() const { return desc_.hdrOutput; }
+    bool hdr10Output() const { return desc_.hdrOutput && desc_.enableFg; }
+    DXGI_FORMAT outputFormat() const { return hdr10Output()?DXGI_FORMAT_R10G10B10A2_UNORM:desc_.hdrOutput?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_R8G8B8A8_UNORM; }
     bool highQualityPresentation() const { return desc_.highQualityPresentation; }
     bool xessEnabled() const { return desc_.enableFg && !desc_.noFeatures && !desc_.stillImage && desc_.frameGenerationBackend==engine::FrameGenerationBackend::XeSS; }
     ID3D12Resource* presentMotion(uint32_t slot) const { return presentMotion_[slot%2].Get(); }
@@ -283,7 +285,7 @@ private:
     std::vector<uint8_t> nv12Buf_;
 
     ComputePass yuvPass_, encPass_, decPass_, blitPass_, uploadPass_, densifyPass_;
-    ComputePass rgbPass_;
+    ComputePass rgbPass_,hdrVideoSrPass_;
     ComputePass downsamplePass_,residualPass_,flowAdaptPass_;
     DescriptorStager stager_;
     Microsoft::WRL::ComPtr<ID3D12Resource> sourceReferences_[2],baseReferences_[2];
