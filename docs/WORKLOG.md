@@ -1997,3 +1997,33 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 待执行：提交、推送 main 与 v1.2.0、上传草稿、核验 GitHub 服务端六资产尺寸/digest 后公开 latest。真实 HDR 屏/采集卡、5.1 扬声器、PS5新会话、RTX30/40 实卡仍不因本次发布被伪装为已验收。
 
 1.2.0 发布完成：main 的发布提交 62be2ef187352bfefe8c264cdef24d3a89c1beff 与带注释标签 v1.2.0（ab1bf0ce1644cfe895ba8fd32fc7de7f1d520834）已推送。Release ID 388272314 于 2026-09-14T09:22:30Z 公开为 Latest，非草稿、非预发布：<https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.2.0>。六个资产服务端大小和 SHA-256 逐项匹配最终本地包：便携包 421736651 字节，SHA256 0A0D65DA75BE45F79587C1CBABE33062AFB32D2007F59E9270DFDDDA0973687E；对应 RemotePlay 与 patched FFmpeg 源码包及三份 .sha256 同步公开。证据为 logs/release-1.2.0-upload/remote-assets-verified.json；未更改已核验的 ZIP 或移动发布标签。物理硬件验收边界保持上述记录。
+
+## 2026-09-14 — 视频播放列表（源码与独立测试，完整应用待验证）
+
+用户要求增加视频播放列表；基线6a54659，原工作区干净。新增Playlist模型和独立Win32列表窗口，接入AppShell现有open/sessionId/Ended；支持批量添加、拖入、双击播放、上一项/下一项、重排、移除/清空、顺序/列表循环/单项循环。保留最近打开入口，图片/采集/PS5不入队，失败/停止不触发续播，当前项被移除时只解除续播而不删除文件。跨重启保存不在本轮实现。
+
+修改AppShell、CMake、双语README；新增Playlist.h、PlaylistWindow.h/.cpp、队列及窗口测试、scripts/acceptance/playlist.ps1和docs/PLAYLIST_PLAN_2026-09-14.md。实际运行powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance/playlist.ps1 -Root .：队列21项通过、窗口735项（96/144/192 DPI）通过、既有UI合同通过，AppShell普通及RemotePlay两种定义编译通过。具体命令、失败修正、日志和最后复测路径见对应方案。git diff --check通过；未新增运行二进制/SDK/配置/媒体入Git，未push/发布。
+
+完整构建尝试因本机无所指定CMake路径失败；当前源码checkout无third_party_local、runtime_local、patched FFmpeg开发库或历史out产物。测试EXE只验证真实列表控件与队列，不含播放器Engine运行。完整Veyra链接、真实媒体自动连播、delivery以及NR/FG Create/Evaluate均未执行，不冒充软件验收完成。已向用户询问另有完整开发目录的路径。下一步取得依赖后生成完整程序并做队列实播和delivery回归。
+
+## 2026-09-14 — GitHub Actions Windows构建配置
+
+用户要求GitHub帮助build，新增.github/workflows/windows-build.yml、scripts/ci/prepare-dependencies.ps1、scripts/ci/build-windows.ps1及docs/GITHUB_ACTIONS_BUILD.md。保留播放列表未提交改动。自动push(main/codex/**)/PR/手动源码检查复用已通过的scripts/acceptance/playlist.ps1；不把AppShell翻译单元编译称为完整应用。手动full_build仅默认分支允许，使用windows-build environment的私有依赖ZIP URL/SHA256，GitHub windows-2022临时runner编译真实veyra目标并开启RemotePlay；缺库失败不静默删功能。
+
+依赖ZIP不进入Git/cache/artifact，校验SHA256、解压路径和禁止的增强运行DLL；编译使用配套私有开发库，固定已批准PS5 patched avcodec身份0710F0D8…284F。输出只复制EXE、DXIL和许可/构建说明，未调用Runtime Pack打包/发布，读权限contents:read。完整依赖包与Secrets尚未配置，不把工作流当成已经可独立生成便携包。
+
+实际验证：python out/ci-validation/check.py（PyYAML 6.0.2）检查YAML、触发器、权限、任务条件和artifact路径通过；PowerShell Parser::ParseFile对两脚本语法检查通过。powershell.exe -NoProfile -ExecutionPolicy Bypass -File分别调用两脚本，缺GitHub上下文预期退出1；设置测试上下文但缺Secret时prepare-dependencies也预期失败且未下载。证据out/ci-validation/*missing*.log，git diff --check通过。默认验收脚本未变，沿用本对话上一轮本地21队列/735窗口/UI及双定义编译证据，不声称GitHub运行通过。
+
+未执行云端Actions、完整CMake/链接、GPU Create/Evaluate、媒体播放或delivery；未上传依赖、未提交/push/Release。下一步按docs/GITHUB_ACTIONS_BUILD.md准备可迁移的完整开发依赖ZIP和两项Secret，再在默认分支手动运行，核实首次云端日志与产物。参考GitHub官方workflow语法、runner镜像清单及artifact说明；固定checkout v4.2.2/upload-artifact v4.6.2提交。
+
+## 2026-09-14 — CI依赖获取来源核对
+
+用户表示不知道依赖从哪里取得。纠正之前把完整私有开发ZIP准备工作全部交给用户的方案：补充docs/GITHUB_ACTIONS_BUILD.md来源表，公开依赖应由后续脚本准备，当前工作流并未因此自动具备完整编译能力。核对NVIDIA DLSS v310.7.0、Intel XeSS v3.0.2、AMD FidelityFX 1.1.4官方发布和Veyra1.2.0对应源码入口；Optical Flow官网5.0按钮实际指向optical_flow_sdk_5.0.7.zip，访问明确重定向NVIDIA登录页，需用户登录接受许可后下载。没有用公开旧头文件仓库冒充当前D3D12 SDK。
+
+只读检查当前Downloads及有限的历史开发目录位置，未发现原C:/veyra-deps或E:/Ai/mg；Downloads存在Veyra便携包，但它不是开发库。未下载SDK、未接受许可、未复制第三方组件、未构建、未执行Create/Evaluate或云端Action。git diff --check通过。下一步用户给出官方5.0.7 ZIP本地位置，再接自动准备和固定源码重建；不能要求用户先组装全部开发库，也不宣称云端构建已经完成。
+
+## 2026-09-14 — 用户提供Optical Flow SDK ZIP，最小本地开发文件
+
+用户将Optical_Flow_SDK_5.0.7.zip放在根目录并询问是否上传239049440字节整包。核对SHA256=89B0923ADC6F34FBE86E63CC17D5DB452E34B945C03BA90D8E09BD1A0158E917；源码NvOfSession.cpp实际只包含nvOpticalFlowCommon.h和nvOpticalFlowD3D12.h，二者分别33648/19086字节，其依赖仅stdint、D3D12系统头和彼此。原样暂存两头文件与LicenseAgreement.pdf（143682字节）到忽略的third_party_local/nvidia/Optical_Flow_SDK_5.0.7，共196416字节，未复制样例、运行DLL或其他大文件。
+
+.gitignore增加根SDK压缩包的精确规则，git check-ignore和git diff --check通过，未上传/提交任何SDK。首次ZIP列表脚本误读__MACOSX资源叉造成UTF8失败，排除该目录后成功；没有把资源叉当头文件。只做包结构和本地准备，未构建、未执行NR/NVOF Create/Evaluate或云端CI；最小文件不需要公开提交或Git LFS，后续CI仍需私有受控输入。docs/debug.log为本轮开始时已有未跟踪文件，未改动。

@@ -1,6 +1,7 @@
 # Proprietary and local-only inputs
 /nvngx_dlssnr.dll
 /renodx-dlss5-1.addon64
+/Optical_Flow_SDK_5.0.7.zip
 /runtime_local/
 /runtime/
 /third_party_local/

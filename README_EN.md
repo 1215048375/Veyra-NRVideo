@@ -64,6 +64,8 @@ Pairing and PSN credentials are encrypted in **%LOCALAPPDATA%/Veyra/remoteplay**
 
 Choose Open on the bottom bar. Playback, seeking, volume, subtitles, and fullscreen are available there. In Professional mode, use the mouse wheel over the picture to zoom.
 
+The current development branch adds an **unreleased playlist**: use the list button or `Ctrl+L` to add multiple videos, double-click to play, reorder, remove or clear entries. Dropping several videos adds them and starts the first; `Ctrl+PageUp/PageDown` selects the previous/next entry. Sequential playback stops at the end; repeat-all and repeat-one are optional. Playback errors stop advancement. Removing entries never deletes files; removing the current entry disables automatic advancement. The list lasts for the current app session; images and live sources are excluded.
+
 ### Capture Cards
 
 1. Connect the device and close other applications using the same capture card.
