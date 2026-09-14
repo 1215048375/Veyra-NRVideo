@@ -14,7 +14,7 @@ English | [简体中文](README.md)
 
 A Windows video player and capture-card enhancement tool. Play videos, process images, and preview capture devices with optional super resolution, NR enhancement, and frame generation.
 
-[Download 1.1.1 Portable](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.1.1) · [Release Notes](docs/RELEASE_NOTES_1.1.1.md) · [Report an Issue](https://github.com/Likely7/Veyra-NRVideo/issues)
+[Download 1.2.0 Portable](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.2.0) · [Release Notes](docs/RELEASE_NOTES_1.2.0.md) · [Report an Issue](https://github.com/Likely7/Veyra-NRVideo/issues)
 
 ## Features
 
@@ -31,11 +31,11 @@ A Windows video player and capture-card enhancement tool. Play videos, process i
 
 Daily mode focuses on watching. Professional mode expands the controls, diagnostics, and export tools without reopening the video. The application currently uses a Chinese interface.
 
-Version 1.1.1 adds an experimental RTX30 NR option and disables all enhancements on fresh installations. Smooth Motion instructions, capture format support and previous fixes remain available. RTX30 hardware validation is still pending.
+Version 1.2.0 adds HDR file/capture enhancement, HDR10 export and HDR screenshots, retained 5.1 PCM, and a live Convert to SDR display switch. Fresh installations still disable all enhancements. RTX30 hardware validation is still pending.
 
 ## Download and Run
 
-1. Download **Veyra-1.1.1-win64-portable.zip** from [Releases](https://github.com/Likely7/Veyra-NRVideo/releases). The Source code archives are for developers.
+1. Download **Veyra-1.2.0-win64-portable.zip** from [Releases](https://github.com/Likely7/Veyra-NRVideo/releases). The Source code archives are for developers.
 2. Extract the entire archive into a writable directory and run **Veyra.exe**. No SDK, Python, or development tools are needed.
    NR, upscaling and internal frame generation start disabled. Enable them as needed; importing old preferences restores their switches.
 3. Use a current GPU driver. NVIDIA NR, DLSS, RTX Video SR, and NVENC require compatible NVIDIA RTX hardware; this version was primarily tested on an RTX 5070.
@@ -56,7 +56,7 @@ Stream input is up to 1080p. 2K / 4K / 8K are local upscaling targets. H.264 / H
 
 Pairing and PSN credentials are encrypted in **%LOCALAPPDATA%/Veyra/remoteplay**, bound to the Windows user and retained across upgrades. Do not share this directory. Signing out retains console pairing. Pinless first registration and Internet streaming are not implemented.
 
-**Experimental HDR (development branch):** Windows HDR output can retain HDR with NR, SR and FG enabled. NR / RTX Video SR process an SDR proxy and composite changes onto the retained HDR base; this is not a native HDR NR model. SDR displays still use tone mapping. Real PS5 HDR and Sony authorization need further validation.
+**Experimental HDR:** Windows HDR output can retain HDR with NR, SR and FG enabled. NR / RTX Video SR process an SDR proxy and composite changes onto the retained HDR base; this is not a native HDR NR model. SDR displays still use tone mapping. Real PS5 HDR and Sony authorization need further validation.
 
 ## Quick Guide
 
@@ -119,7 +119,7 @@ NR and DLSS frame generation are **community-experimental integrations**, not NV
 
 ## Development and License
 
-[Build Instructions](docs/BUILD.md) · [Runtime Components](docs/RUNTIME_COMPONENTS_1.1.1.md) · [Third-Party Notices](THIRD_PARTY_NOTICES.md)
+[Build Instructions](docs/BUILD.md) · [Runtime Components](docs/RUNTIME_COMPONENTS_1.2.0.md) · [Third-Party Notices](THIRD_PARTY_NOTICES.md)
 
 Original Veyra source is [GPLv3](LICENSE); the combined streaming program also falls under [AGPLv3 and the upstream OpenSSL exception](licenses/remoteplay/CHIAKI_AGPL3_OPENSSL.txt). Application source matches the release tag. The RemotePlay-source and FFmpeg-source assets provide dependency source and are not needed to run the player. SDKs, models, and runtimes are excluded from this source repository. Release components retain their separate licenses and experimental distribution boundaries.
 
@@ -135,11 +135,11 @@ Video export validates completeness before success and may take extra time to
 finish. Embedded subtitles are not preserved. Avoid simultaneous exports from
 multiple instances to the same target file.
 
-In Professional mode, click **Screenshot** in the top toolbar to save the latest processed full-resolution picture under **Pictures / Veyra Screenshots**: PNG for SDR, floating-point JPEG XR (`.jxr`) for development HDR output. Use an HDR-capable viewer. Application UI and window zoom are excluded.
+In Professional mode, click **Screenshot** in the top toolbar to save the latest processed full-resolution picture under **Pictures / Veyra Screenshots**: PNG for SDR and floating-point JPEG XR (`.jxr`) for HDR output. Use an HDR-capable viewer. Application UI and window zoom are excluded.
 
-## Development branch: HDR and 5.1 (unreleased)
+## HDR and 5.1 (1.2.0)
 
-These changes are local to `codex/hdr-multichannel`; **the GitHub 1.1.1 package does not include them**.
+These capabilities ship in 1.2.0. Individual HDR displays, 5.1 endpoints, and capture cards still require hardware acceptance.
 
 - Files, P010/P016 capture and PS5 can use explicitly described BT.2020 NCL PQ/HLG input. Windows HDR enables retained HDR output with NR, DLSS SR / RTX Video SR and DLSS / XeSS FG. NR / Video SR use an SDR proxy plus the retained HDR base, with reduced changes near black and compressed highlights. This is not native HDR NR inference. HLG uses a 1000-nit, gamma-1.2 reference conversion.
 - Capture defaults to device color metadata. Manual PQ / HLG is available for devices that omit it, requiring P010/P016. Ten-bit storage alone does not identify HDR. RGB/YUY2 HDR and BT.2020 constant-luminance input are unsupported.

@@ -13,7 +13,7 @@
 
 Windows 视频播放器与采集卡增强工具。支持视频、图片、采集卡实时预览和 PS5 局域网串流，可组合使用超分辨率、NR 画面增强与补帧。
 
-[下载 1.1.1 免安装版](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.1.1) · [更新记录](docs/RELEASE_NOTES_1.1.1.md) · [反馈问题](https://github.com/Likely7/Veyra-NRVideo/issues)
+[下载 1.2.0 免安装版](https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.2.0) · [更新记录](docs/RELEASE_NOTES_1.2.0.md) · [反馈问题](https://github.com/Likely7/Veyra-NRVideo/issues)
 
 ## 功能
 
@@ -31,11 +31,11 @@ Windows 视频播放器与采集卡增强工具。支持视频、图片、采集
 
 日常模式以观看为主；专业模式展开增强参数、诊断和导出工具。切换模式不需要重新打开视频。
 
-1.1.1 新增 RTX 30 实验 NR 选项，首次启动所有增强默认关闭。保留 Smooth Motion 教程、采集格式扩展及此前修复；RTX30 实卡表现仍待验收。
+1.2.0 新增 HDR 文件/采集增强、HDR10 导出与 HDR 截图、5.1 PCM 保留，以及“转为 SDR 显示”预览开关。首次启动仍默认关闭所有增强；RTX30 实卡表现仍待验收。
 
 ## 下载与运行
 
-1. 在 [Releases](https://github.com/Likely7/Veyra-NRVideo/releases) 下载 **Veyra-1.1.1-win64-portable.zip**，不要下载 Source code。
+1. 在 [Releases](https://github.com/Likely7/Veyra-NRVideo/releases) 下载 **Veyra-1.2.0-win64-portable.zip**，不要下载 Source code。
 2. 完整解压到一个可写文件夹，双击 **Veyra.exe**。无需安装 SDK、Python 或开发工具。
    首次启动 NR、超分和内部补帧均关闭，确认基础画面后按需开启；导入旧设置会恢复原来的开关。
 3. 使用当前显卡驱动。要使用 NVIDIA NR、DLSS、RTX Video SR 和 NVENC，需兼容的 NVIDIA RTX 显卡；本版本主要在 RTX 5070 上验证。
@@ -55,7 +55,7 @@ BUG反馈与新功能
 
 ### 视频与图片
 
-专业模式顶部点击 **截图**，保存处理后的完整画面到系统“图片”文件夹下的 `Veyra Screenshots`，SDR 保存为 PNG，开发分支的 HDR 保存为保留浮点高亮的 JPEG XR（`.jxr`），需支持 HDR 的看图软件。
+专业模式顶部点击 **截图**，保存处理后的完整画面到系统“图片”文件夹下的 `Veyra Screenshots`，SDR 保存为 PNG，HDR 保存为保留浮点高亮的 JPEG XR（`.jxr`），需支持 HDR 的看图软件。
 
 点击底栏“打开”选择文件。底栏提供播放、进度、音量、字幕和全屏；切换到专业模式后，鼠标位于画面上时可用滚轮缩放。
 
@@ -78,7 +78,7 @@ BUG反馈与新功能
 
 主机和 PSN 凭据加密保存在 **%LOCALAPPDATA%/Veyra/remoteplay**，绑定当前 Windows 用户，升级不需搬运；不要分享这个目录。退出 PSN 不删除主机配对。首次免配对码注册、外网串流未实现。
 
-**实验 HDR（开发分支，未发布）**：H.265 HDR 在 Windows HDR 开启时可保留 HDR 输出，也可同时开启 NR、超分和补帧。NR / RTX Video SR 处理映射副本，再与原 HDR 基底合成，属于 HDR 保留增强，不是原生 HDR NR 模型；SDR 显示器仍先映射为 SDR。真实 PS5 HDR 与 Sony 登录仍待进一步验收。
+**实验 HDR**：H.265 HDR 在 Windows HDR 开启时可保留 HDR 输出，也可同时开启 NR、超分和补帧。NR / RTX Video SR 处理映射副本，再与原 HDR 基底合成，属于 HDR 保留增强，不是原生 HDR NR 模型；SDR 显示器仍先映射为 SDR。真实 PS5 HDR 与 Sony 登录仍待进一步验收。
 
 ### 增强与补帧
 
@@ -129,13 +129,13 @@ NR 与 DLSS 帧生成属于 **community experimental / 社区实验集成**，�
 
 ## 开发与许可
 
-[构建说明](docs/BUILD.md) · [组件清单](docs/RUNTIME_COMPONENTS_1.1.1.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
+[构建说明](docs/BUILD.md) · [组件清单](docs/RUNTIME_COMPONENTS_1.2.0.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
 
 Veyra 原有源码采用 [GPLv3](LICENSE)；含串流的组合程序同时适用 [AGPLv3 与上游 OpenSSL 例外](licenses/remoteplay/CHIAKI_AGPL3_OPENSSL.txt)。应用源码对应版本标签，Release 另附串流依赖与 FFmpeg 对应源码包，普通用户无需下载。SDK、模型和运行时不进入源码仓库；Release 组件按各自许可与实验发布范围单独提供。
 
-## 开发分支：HDR 与 5.1（尚未发布）
+## HDR 与 5.1（1.2.0）
 
-以下能力属于 `codex/hdr-multichannel` 的本地开发版，**GitHub 1.1.1 不包含**。
+以下能力已进入 1.2.0。真实 HDR 屏、5.1 扬声器和不同采集卡仍须逐台验收。
 
 - **HDR 输入 / 增强**：文件、P010/P016 采集与 PS5 HDR；支持明确标记的 BT.2020 NCL / PQ 或 HLG。Windows HDR 开启时，可组合 NR、DLSS SR / RTX Video SR、DLSS / XeSS 补帧。NR / Video SR 使用 SDR 代理和 HDR 基底合成，压缩高光和近黑区域的增强会衰减；不把 SDR 结果逆造为原始 HDR。HLG 使用 1000nit / gamma 1.2 参考转换。
 - **SDR 显示开关**：采集卡面板的“转为 SDR 显示”默认关闭，控制所有实时预览。打开后将 HDR 映射为 SDR，增强照常可用；播放中切换无需重连，可能短暂停顿。关闭后跟随显示器 HDR 状态。截图跟随当前画面，视频导出保持原有 HDR 规则。

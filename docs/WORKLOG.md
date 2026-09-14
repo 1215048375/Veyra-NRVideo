@@ -1987,3 +1987,11 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 最终构建 cmd /c out\release-1.1.0-build.cmd 成功；首次旧进程占用造成 LNK1104，正常关闭后重建成功，失败日志保留。48 组预设迁移与 roundtrip、UI/输出策略合同、30 采集 GPU 颜色 +16 HDR 组合通过；真实 UI 加载 PQ 文件，在总增强关闭下连续切换/重开面板通过，源保持开启，日志记录实际 HDR 输入/SDR 输出。delivery23/23、45.20秒，logs/delivery/6a7c3d4a27e140ec9145e8e016bc7453/result.json；NR Create0x1 SEH0、60次Evaluate。EXE SHA256 9D3DFFA2D397F00F512B962A349453430CD3F0039ECF55FAB9961279291B2C76，patched FFmpeg未变。
 
 完整命令/文件/证据与失败见 docs/HDR_MULTICHANNEL_EXECUTION_2026-09-14.md C节。当前Windows HDR关闭，物理HDR↔SDR交换链与实卡视觉切换未测；下一步用户用桌面测试版在HDR设备上验收。只更新本地开发版，没有push/Release。
+
+## 2026-09-14 — 1.2.0 发布准备与验收
+
+用户明确授权发布 1.2.0 到 Likely7/Veyra-NRVideo。整合 HDR 全增强/导出/截图、文件与采集 5.1 PCM、手动 SDR 预览开关和既有 PS5 路径；运行时保持既有八文件，FFmpeg PS5 slice patch 保持。更新双语 README、Release Notes、组件清单、构建与对应源码说明；新装默认仍关闭增强。
+
+1.2.0 EXE SHA256 E49D90E1217E0DE1B59C9C889DE318DC46337DF51FCF838038D7F5AF896EE457。delivery23/23、48.85秒；HDR 五种真实 GPU 组合、30采集颜色与16 HDR颜色组合、预设/SDR开关、六声道与音频抖动均通过。最终完整便携包在独立解压、隔离PATH、临时移走manifest后7/7通过；首次默认无增强。三ZIP逐文件审计通过，无SDK、凭据、个人配置、日志或测试媒体混入。所有资产、命令、哈希和未执行实机边界记录于 docs/RELEASE_1.2.0_EXECUTION.md。
+
+待执行：提交、推送 main 与 v1.2.0、上传草稿、核验 GitHub 服务端六资产尺寸/digest 后公开 latest。真实 HDR 屏/采集卡、5.1 扬声器、PS5新会话、RTX30/40 实卡仍不因本次发布被伪装为已验收。
