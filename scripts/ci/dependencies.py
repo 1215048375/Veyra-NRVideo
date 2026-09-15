@@ -1,6 +1,7 @@
-"""Recreate development dependencies; never puts SDK/runtime files in source Git.
+"""Recreate development dependencies; runtime files never enter source Git.
 
-The only private input is two original NVOF headers via an Actions secret.
+The only private input is two original NVOF headers via a private-repository
+file (user-authorized exception) or an Actions secret.
 All remaining sources are pinned public checkouts or SHA-256 verified archives.
 """
 import argparse
@@ -24,6 +25,7 @@ LOCK = json.loads(LOCK_FILE.read_text(encoding='utf-8'))
 DEPS = ROOT / 'third_party_local'
 WORK = ROOT / 'out' / 'ci-dependencies'
 NVOF = DEPS / 'nvidia/Optical_Flow_SDK_5.0.7/NvOFInterface'
+NVOF_FILE = ROOT / 'ci-private/nvof-headers.b64'
 
 
 def digest(path):
@@ -81,18 +83,30 @@ def decode_headers(secret):
 
 
 def stage_nvof():
-    secret = os.environ.get('VEYRA_NVOF_HEADERS_B64', '')
+    if NVOF_FILE.is_file():
+        # The user authorized this one SDK input in a private repository only.
+        if os.environ.get('GITHUB_ACTIONS') == 'true':
+            event_path = os.environ.get('GITHUB_EVENT_PATH')
+            event = json.loads(Path(event_path).read_text(encoding='utf-8')) if event_path else {}
+            if event.get('repository', {}).get('private') is not True:
+                raise ValueError('ci-private/nvof-headers.b64 is only authorized for a private repository.')
+        if NVOF_FILE.stat().st_size > 48000:
+            raise ValueError('NVOF input file exceeds the supported size')
+        secret = NVOF_FILE.read_text(encoding='utf-8-sig')
+        print('Using NVOF repository file; any old Actions secret is ignored.', flush=True)
+    else:
+        secret = os.environ.get('VEYRA_NVOF_HEADERS_B64', '')
     if secret:
         for name, data in decode_headers(secret).items():
             write_same(NVOF / name, data)
     for name, expected in LOCK['nvof']['headers'].items():
         path = NVOF / name
         if not path.exists() or digest(path) != expected:
-            raise RuntimeError('Configure VEYRA_NVOF_HEADERS_B64; see docs/GITHUB_ACTIONS_BUILD.md')
+            raise RuntimeError('Supply ci-private/nvof-headers.b64 in a private repository, or configure VEYRA_NVOF_HEADERS_B64; see docs/GITHUB_ACTIONS_BUILD.md')
     print('NVOF original headers verified (contents not logged).', flush=True)
 
 
-def export_secret():
+def export_secret(repository_file=False):
     if not all((NVOF / name).is_file() for name in LOCK['nvof']['headers']):
         sdk_zip = ROOT / 'Optical_Flow_SDK_5.0.7.zip'
         if not sdk_zip.is_file() or digest(sdk_zip) != LOCK['nvof']['provided_archive_sha256']:
@@ -109,9 +123,13 @@ def export_secret():
     secret = base64.b64encode(gzip.compress(json.dumps(document).encode(), mtime=0)).decode('ascii')
     decode_headers(secret)
     WORK.mkdir(parents=True, exist_ok=True)
-    target = WORK / 'nvof-secret.txt'
+    target = NVOF_FILE if repository_file else WORK / 'nvof-secret.txt'
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(secret, encoding='ascii')
-    print(f'Secret saved locally: {target} ({len(secret)} characters). Do not commit or upload as an artifact.')
+    if repository_file:
+        print(f'Private-repository input saved locally: {target} ({len(secret)} characters). Never upload to a public repository or an artifact.')
+    else:
+        print(f'Secret saved locally: {target} ({len(secret)} characters). Do not commit or upload as an artifact.')
 
 
 def checkout(spec):
@@ -280,10 +298,11 @@ def verify_ffmpeg(prefix):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['export-nvof-secret', 'prepare', 'nvof', 'verify-ffmpeg'])
+    parser.add_argument('command', choices=['export-nvof-secret', 'export-nvof-file', 'prepare', 'nvof', 'verify-ffmpeg'])
     parser.add_argument('--prefix', type=Path)
     args = parser.parse_args()
     if args.command == 'export-nvof-secret': export_secret()
+    elif args.command == 'export-nvof-file': export_secret(repository_file=True)
     elif args.command == 'nvof': stage_nvof()
     elif args.command == 'prepare': build_dependencies()
     else: verify_ffmpeg(args.prefix)

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       full_build:
-        description: 'Build Veyra.exe (requires VEYRA_NVOF_HEADERS_B64 secret)'
+        description: 'Build Veyra.exe (private NVOF file or VEYRA_NVOF_HEADERS_B64 secret)'
         type: boolean
         default: true
 
@@ -82,4 +82,4 @@ jobs:
       - name: Explain validation scope
         if: always()
         run: |
-          'Dependencies use pinned public sources plus two original NVOF headers from a secret. Artifact contains application/shaders/notices only, not a portable Runtime Pack. No NR/FG execution, GPU/PS5 acceptance or Release publishing is performed.' >> $env:GITHUB_STEP_SUMMARY
+          'Dependencies use pinned public sources plus two original NVOF headers from a private repository file or secret. Artifact contains application/shaders/notices only, not a portable Runtime Pack. No NR/FG execution, GPU/PS5 acceptance or Release publishing is performed.' >> $env:GITHUB_STEP_SUMMARY

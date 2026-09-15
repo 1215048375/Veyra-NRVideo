@@ -3,6 +3,9 @@ import base64
 import gzip
 import hashlib
 import json
+import os
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -50,6 +53,45 @@ class SecretTests(unittest.TestCase):
         for value in (' ' * 48001, base64.b64encode(gzip.compress(b'x' * 100001)).decode()):
             with self.assertRaises(ValueError):
                 deps.decode_headers(value)
+
+    def test_private_file_overrides_broken_secret(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / 'headers.b64'
+            source.write_text(self.secret)
+            event = root / 'event.json'
+            event.write_text(json.dumps({'repository': {'private': True}}))
+            with patch.object(deps, 'NVOF_FILE', source), patch.object(deps, 'NVOF', root / 'sdk'), patch.dict(os.environ, {
+                'GITHUB_ACTIONS': 'true', 'GITHUB_EVENT_PATH': str(event), 'VEYRA_NVOF_HEADERS_B64': 'broken-secret'
+            }):
+                deps.stage_nvof()
+                for name, data in self.headers.items():
+                    self.assertEqual((root / 'sdk' / name).read_bytes(), data)
+
+    def test_public_or_unverified_repository_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / 'headers.b64'
+            source.write_text(self.secret)
+            event = root / 'event.json'
+            for metadata in ({'repository': {'private': False}}, {}):
+                event.write_text(json.dumps(metadata))
+                with patch.object(deps, 'NVOF_FILE', source), patch.object(deps, 'NVOF', root / 'sdk'), patch.dict(os.environ, {
+                    'GITHUB_ACTIONS': 'true', 'GITHUB_EVENT_PATH': str(event)
+                }):
+                    with self.assertRaisesRegex(ValueError, 'private repository'):
+                        deps.stage_nvof()
+                    self.assertFalse((root / 'sdk').exists())
+
+    def test_invalid_file_does_not_fall_back_to_secret(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / 'headers.b64'
+            source.write_text('invalid-file')
+            with patch.object(deps, 'NVOF_FILE', source), patch.dict(os.environ, {
+                'GITHUB_ACTIONS': 'false', 'VEYRA_NVOF_HEADERS_B64': self.secret
+            }):
+                with self.assertRaises(ValueError):
+                    deps.stage_nvof()
 
 
 if __name__ == '__main__':

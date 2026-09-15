@@ -2065,3 +2065,12 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 用户提供云端日志：prepare 在 decode_headers 的严格外层 Base64 解析报 Excess data after padding，尚未进入依赖下载/编译。无法读取 GitHub Secret 原文，因此不能断言具体复制错误。decode_headers 现在仅移除空白和起始 BOM；不截断 padding 后内容、不忽略重复粘贴，仍逐头文件校验 SHA256。无效格式给出完整替换 Secret 的提示，不输出内容。
 
 修改 dependencies.py，新增纯合成数据 test_dependencies.py 并接入完整构建步骤，更新 GITHUB_ACTIONS_BUILD.md 的剪贴板复制/替换说明。本机执行 `python scripts/ci/test_dependencies.py`：5 个测试方法通过，覆盖原值/BOM/换行、尾随/重复/引号/截断、头文件改动/额外键、编码及解压大小限制；实际本地 21888 字符 Secret 与插入 CRLF 的版本还原出的两份头文件完全一致且 SHA 校验通过。`python scripts/ci/dependencies.py export-nvof-secret` 成功，未输出 SDK 内容。仅输入解析修复，本轮不重建 EXE、不执行 GPU/NR/FG 或上传；下一步用户替换 GitHub 实际生效的 Secret 后重试，云端是否通过待新日志确认。
+
+
+## 2026-09-15 用户授权 NVOF 私有仓库文件输入
+
+用户连续两次 Secret 解析失败后明确要求直接放文件并将仓库设为 Private。本次按最新指令，仅对 `ci-private/nvof-headers.b64` 这一份约 22KB、包含两份固定身份头文件的输入作私有源码仓库例外；不扩大到公开 Git、整个 SDK ZIP、DLL、模型、artifact 或 Release。origin 当前为 https://github.com/1215048375/Veyra-NRVideo；无 gh，匿名查询无法确认当前可见性，所以仅本机生成文件并保留精确 gitignore，未暂存、提交、push 或更改可见性。用户确认设为 Private 后可 git add -f 此单文件。
+
+dependencies.py 新增 export-nvof-file，文件优先于旧 Secret；Actions 文件模式必须有事件 repository.private=true，否则拒绝；解码大小限制、原始头文件 SHA256 和产物隔离保持。工作流说明及 GITHUB_ACTIONS_BUILD.md 更新。文件已生成 21888 字符，`python scripts/ci/dependencies.py nvof` 实际读取并校验成功；没有打印内容。
+
+`python scripts/ci/test_dependencies.py` 8 项测试通过，新增私有文件覆盖错误 Secret、公开/缺失可见性拒绝、损坏文件不静默回退。仅变更依赖输入流程，未重新编译 C++ 或运行 GPU/NR/FG；云端尚待用户将文件加入已设 Private 的仓库后验证。
