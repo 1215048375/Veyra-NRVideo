@@ -2092,3 +2092,9 @@ VS DevShell 下 `cmake --build out/ci-full --target veyra --parallel 4` 完成 E
 
 未执行真实视频队列、GPU/NR/FG Create/Evaluate、跨 HDR/分辨率播放或完整 delivery gate；下一项验收为真实素材列表的连续播放与手动重播。没有 push/Release，没有修改运行时或 patched FFmpeg，也没有将 SDK/DLL/模型/测试媒体加入源码。
 程序启动短测：out/ci-full/veyra.exe --smoke-empty --smoke-seconds 5 --smoke-view daily / small / fullscreen，三个模式均正常退出（exit=0），日志 out/ci-dependencies/transport-smoke.log；属于空媒体启动检查，未观察真实媒体画面。git diff --check 通过。
+
+## 2026-09-15 日常模式显示对比按钮
+
+用户要求日常模式也显示“按住原图 V”“分屏拖动”。修改 apps/veyra/ui/AppShell.cpp：复用原按钮与对比处理，在日常底栏播放列表一排右侧显示，适配影院底色与控件层级；V 键不再限定专业模式。专业模式位置保持。未修改增强图、运行组件或 FFmpeg。
+
+完整构建命令：VS x64 DevShell 下 `cmake --build out/ci-full --target veyra --parallel 4`，成功链接，日志 out/ci-dependencies/daily-comparison-build.log。临时验证脚本 `python out/ci-dependencies/daily-comparison-smoke.py` 启动空媒体日常模式，只操作该进程自有 HWND，检查720×540、800×600、1440×900下七个列表/对比控件的显示样式和矩形互不重叠；程序12秒自动退出。日志 out/ci-dependencies/daily-comparison-smoke.log。GPU/NR/FG Create/Evaluate及真实媒体原图/分屏效果本轮未执行；下一步为真实素材视觉验收。未push/发布。

@@ -220,8 +220,8 @@ void layout(){
     icon(GetDlgItem(mainWindow,Open),Icon::Video,controls.captions);icon(GetDlgItem(mainWindow,Capture),Icon::Capture,controls.captions);
     icon(GetDlgItem(mainWindow,Master),Icon::Enhance,pro||controls.captions);icon(GetDlgItem(mainWindow,Sr),Icon::Upscale,true);
     icon(GetDlgItem(mainWindow,ModeSwitch),pro?Icon::PanelClose:Icon::PanelOpen,pro||controls.captions);
-    for(int id:{Open,Capture,Recent,PlaylistButton,PlaylistPrevious,PlaylistNext,PlaylistRestart,PlaylistOrder,PlaylistLoop,Master,Save,Sr,Play,Stop,Mute,Volume,Subtitle,Fullscreen,TimeLabel,MediaTitle,FpsLabel,ModeSwitch})surface(GetDlgItem(mainWindow,id),pro&&!full?panel:cinemaPanel);
-    put(OriginalHold,tx,barTop+208,96,32,!full&&pro);put(Split,tx+102,barTop+208,92,32,!full&&pro);put(CompareToggle,tx+200,barTop+208,96,32,!full&&pro&&tw>=600);
+    for(int id:{Open,Capture,Recent,PlaylistButton,PlaylistPrevious,PlaylistNext,PlaylistRestart,PlaylistOrder,PlaylistLoop,OriginalHold,Split,Master,Save,Sr,Play,Stop,Mute,Volume,Subtitle,Fullscreen,TimeLabel,MediaTitle,FpsLabel,ModeSwitch})surface(GetDlgItem(mainWindow,id),pro&&!full?panel:cinemaPanel);
+    put(OriginalHold,daily?tx+tw-194:tx,barTop+(daily?24:208),96,32,!full&&(pro||daily));put(Split,daily?tx+tw-92:tx+102,barTop+(daily?24:208),92,32,!full&&(pro||daily));put(CompareToggle,tx+200,barTop+208,96,32,!full&&pro&&tw>=600);
     put(Reference,tx+(tw>=600?302:200),barTop+208,std::min(172,tw-(tw>=600?302:200)-88),180,!full&&pro&&tw>=500);
     put(Details,tx+tw-76,barTop+208,76,32,!full&&pro);put(Info,12,h-66,44,44,!full&&pro);pos(metricLabel,tx,barTop+260,tw,120,!full&&pro&&uiState.diagnostics);
     pos(statusBar,0,0,1,1,false);pos(diagnosticPanel,g.left,g.top,g.viewWidth,h-g.top-20,!full&&pro&&showDiagnostics);
@@ -234,7 +234,7 @@ void layout(){
     auto batch=BeginDeferWindowPos(int(placements.size()));for(const auto& p:placements){if(!batch)break;batch=DeferWindowPos(batch,p.child,nullptr,p.x,p.y,p.width,p.height,p.flags);}
     if(batch)EndDeferWindowPos(batch);else for(const auto& p:placements)SetWindowPos(p.child,nullptr,p.x,p.y,p.width,p.height,p.flags);
     auto front=[&](HWND child){if(child&&IsWindowVisible(child))SetWindowPos(child,HWND_TOP,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_NOREDRAW);};
-    front(playbackBar);front(seekBar);front(GetDlgItem(mainWindow,RemotePlay));for(int id:{Open,Capture,Recent,PlaylistButton,PlaylistPrevious,PlaylistNext,PlaylistRestart,PlaylistOrder,PlaylistLoop,Master,Save,Sr,Play,Stop,Mute,Volume,Subtitle,Fullscreen,WindowMin,WindowClose,TimeLabel,MediaTitle,FpsLabel,ModeSwitch,JobProgress,EmptyTitle,EmptyHint})front(GetDlgItem(mainWindow,id));front(inspector);front(subtitleLabel);if(showDiagnostics&&pro&&!full)front(diagnosticPanel);
+    front(playbackBar);front(seekBar);front(GetDlgItem(mainWindow,RemotePlay));for(int id:{Open,Capture,Recent,PlaylistButton,PlaylistPrevious,PlaylistNext,PlaylistRestart,PlaylistOrder,PlaylistLoop,OriginalHold,Split,Master,Save,Sr,Play,Stop,Mute,Volume,Subtitle,Fullscreen,WindowMin,WindowClose,TimeLabel,MediaTitle,FpsLabel,ModeSwitch,JobProgress,EmptyTitle,EmptyHint})front(GetDlgItem(mainWindow,id));front(inspector);front(subtitleLabel);if(showDiagnostics&&pro&&!full)front(diagnosticPanel);
     if(auto focused=GetFocus();focused&&IsChild(mainWindow,focused)&&!IsWindowVisible(focused))SetFocus(mainWindow);
     RedrawWindow(mainWindow,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN);
     if(smokeDual)veyra::log::info("ui-layout-timing",std::format("frameMs={:.3f} animation={}",std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-layoutBegin).count(),transition.running));
@@ -410,7 +410,7 @@ case Export:if(uiState.mode==veyra::ui::Mode::Professional)startVideoExport(fals
 case Info:showDiagnostics=!showDiagnostics;layout();break;
 }return 0;
 case WM_HSCROLL:if(reinterpret_cast<HWND>(lp)==GetDlgItem(hwnd,Volume)){engine.setVolume(float(SendDlgItemMessageW(hwnd,Volume,TBM_GETPOS,0,0))/100,false);return 0;}if(reinterpret_cast<HWND>(lp)==seekBar){dragging=LOWORD(wp)==TB_THUMBTRACK;auto s=engine.snapshot();if(!dragging&&LOWORD(wp)!=TB_ENDTRACK&&s.duration>0)engine.seek(s.duration*SendMessageW(seekBar,TBM_GETPOS,0,0)/10000.0);}return 0;
-case WM_KEYDOWN:if(wp==VK_ESCAPE&&protectionArmed){cancelProtection();return 0;}if(wp==VK_SPACE){SendMessageW(hwnd,WM_COMMAND,Play,0);return 0;}if(wp==VK_F11){toggleFullscreen();return 0;}if(wp==VK_ESCAPE&&full){toggleFullscreen();return 0;}if(wp=='V'&&uiState.mode==veyra::ui::Mode::Professional){holdOriginal=true;updateComparison();return 0;}break;
+case WM_KEYDOWN:if(wp==VK_ESCAPE&&protectionArmed){cancelProtection();return 0;}if(wp==VK_SPACE){SendMessageW(hwnd,WM_COMMAND,Play,0);return 0;}if(wp==VK_F11){toggleFullscreen();return 0;}if(wp==VK_ESCAPE&&full){toggleFullscreen();return 0;}if(wp=='V'){holdOriginal=true;updateComparison();return 0;}break;
 case WM_KEYUP:if(wp=='V'){holdOriginal=false;updateComparison();return 0;}break;
 case WM_SYSKEYDOWN:if(wp==VK_RETURN&&(lp&(1LL<<29))){toggleFullscreen();return 0;}break;
 case WM_THEMECHANGED:veyra::ui::glassTextTheme().reset();[[fallthrough]];
