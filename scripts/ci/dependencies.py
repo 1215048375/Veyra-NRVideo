@@ -5,6 +5,7 @@ All remaining sources are pinned public checkouts or SHA-256 verified archives.
 """
 import argparse
 import base64
+import binascii
 import gzip
 import hashlib
 import io
@@ -50,7 +51,18 @@ def write_same(path, data):
 def decode_headers(secret):
     if len(secret) > 48000:
         raise ValueError('NVOF secret exceeds the supported size')
-    compressed = base64.b64decode(secret.strip(), validate=True)
+    # Text editors may wrap the value. Only discard formatting whitespace;
+    # never truncate at '=' or ignore arbitrary trailing/duplicated content.
+    encoded_secret = ''.join(secret.lstrip('\ufeff').split())
+    try:
+        compressed = base64.b64decode(encoded_secret, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError(
+            'Invalid VEYRA_NVOF_HEADERS_B64 Base64. Replace the entire secret '
+            'with the raw contents of out/ci-dependencies/nvof-secret.txt; '
+            'do not append, include quotes, a filename, or Markdown. '
+            'Line breaks and whitespace are accepted. Secret contents are not logged.'
+        ) from None
     with gzip.GzipFile(fileobj=io.BytesIO(compressed)) as stream:
         raw = stream.read(100001)
     if len(raw) > 100000:

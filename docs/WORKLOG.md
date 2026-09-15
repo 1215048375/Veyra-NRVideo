@@ -2058,3 +2058,10 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 - 未执行：GitHub 云端 run、设置仓库 Secret、发布/上传、实际 NR/FG Create/Evaluate、GPU/PS5/视频连播测试。CI artifact 是编译产物，需配套运行组件，不是完整便携 Release。
 
 下一步唯一外部操作：用户把本地 `out/ci-dependencies/nvof-secret.txt` 全部内容存为仓库或 windows-build environment 的 `VEYRA_NVOF_HEADERS_B64` Secret，然后将上述源码（特别是新增文件）一起提交/push 到 main，检查首次云端 run。无需上传原 220 多 MB SDK ZIP。
+
+
+## 2026-09-15 CI Secret Base64 padding 报错修复
+
+用户提供云端日志：prepare 在 decode_headers 的严格外层 Base64 解析报 Excess data after padding，尚未进入依赖下载/编译。无法读取 GitHub Secret 原文，因此不能断言具体复制错误。decode_headers 现在仅移除空白和起始 BOM；不截断 padding 后内容、不忽略重复粘贴，仍逐头文件校验 SHA256。无效格式给出完整替换 Secret 的提示，不输出内容。
+
+修改 dependencies.py，新增纯合成数据 test_dependencies.py 并接入完整构建步骤，更新 GITHUB_ACTIONS_BUILD.md 的剪贴板复制/替换说明。本机执行 `python scripts/ci/test_dependencies.py`：5 个测试方法通过，覆盖原值/BOM/换行、尾随/重复/引号/截断、头文件改动/额外键、编码及解压大小限制；实际本地 21888 字符 Secret 与插入 CRLF 的版本还原出的两份头文件完全一致且 SHA 校验通过。`python scripts/ci/dependencies.py export-nvof-secret` 成功，未输出 SDK 内容。仅输入解析修复，本轮不重建 EXE、不执行 GPU/NR/FG 或上传；下一步用户替换 GitHub 实际生效的 Secret 后重试，云端是否通过待新日志确认。

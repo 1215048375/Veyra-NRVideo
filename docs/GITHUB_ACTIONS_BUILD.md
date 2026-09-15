@@ -51,3 +51,16 @@ CI 固定 Python 3.12、CMake 3.31.6、Ninja 1.11.1.4。DXC 来源：[微软官�
 ./scripts/ci/prepare-dependencies.ps1
 ./scripts/ci/build-windows.ps1
 ```
+
+
+## Secret 报错：Excess data after padding
+
+这表示 Secret 的 Base64 结束标记后还有内容，尚未进入依赖编译。仅凭日志无法判断是复制空白、重复粘贴还是混入其他文字。新版脚本接受换行/空白及开头 BOM，仍严格拒绝重复或额外文本，并保留两份头文件 SHA-256 校验。
+
+在项目目录 PowerShell 执行下面命令，将原始文件内容直接放进剪贴板（不在终端输出）：
+
+```powershell
+Get-Content -Raw -LiteralPath './out/ci-dependencies/nvof-secret.txt' | Set-Clipboard
+```
+
+打开 GitHub 中 `VEYRA_NVOF_HEADERS_B64` 的编辑页，把旧值完全替换为剪贴板内容，保存后重新运行。不要填文件名、路径、引号或 Markdown。如果仓库 Secret 和 `windows-build` environment 同时存在同名项，请更新实际生效的 environment 项。不要将 Secret 内容贴到 issue 或构建日志中。
