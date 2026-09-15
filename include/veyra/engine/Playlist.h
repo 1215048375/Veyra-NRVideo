@@ -4,11 +4,12 @@
 #include <cwctype>
 #include <filesystem>
 #include <optional>
+#include <random>
 #include <string>
 #include <vector>
 
 namespace veyra::engine {
-enum class PlaylistMode { Sequential, RepeatAll, RepeatOne };
+enum class PlaylistMode { Sequential, Shuffle, RepeatOne };
 
 // UI-thread queue. Playback stays in EngineController; entries never own a decoder.
 class Playlist {
@@ -17,6 +18,7 @@ public:
     std::vector<std::wstring> entries;
     std::optional<size_t> current;
     PlaylistMode mode = PlaylistMode::Sequential;
+    bool repeatAll = false;
 
     static bool isVideo(const std::wstring& path) {
         auto ext = std::filesystem::path(path).extension().wstring();
@@ -51,10 +53,27 @@ public:
     void bind(size_t index, uint64_t session) { current = index; session_ = session; consumed_ = false; }
     std::optional<size_t> adjacent(int direction) const {
         if (entries.empty()) return {};
+        if (mode == PlaylistMode::Shuffle) {
+            if (shuffleSource_ != entries || shuffled_.empty()) {
+                shuffleSource_ = entries;shuffled_ = entries;
+                std::shuffle(shuffled_.begin(), shuffled_.end(), random_);
+                if (current && *current < entries.size()) {
+                    auto found = std::find(shuffled_.begin(), shuffled_.end(), entries[*current]);
+                    std::iter_swap(shuffled_.begin(), found);
+                }
+            }
+            auto found = current && *current < entries.size() ? std::find(shuffled_.begin(), shuffled_.end(), entries[*current]) : shuffled_.end();
+            int next = found == shuffled_.end() ? (direction < 0 ? int(shuffled_.size())-1 : 0) : int(found-shuffled_.begin()) + (direction < 0 ? -1 : 1);
+            if (next < 0 || next >= int(shuffled_.size())) {
+                if (!repeatAll) return {};
+                next = next < 0 ? int(shuffled_.size())-1 : 0;
+            }
+            return size_t(std::find(entries.begin(), entries.end(), shuffled_[next])-entries.begin());
+        }
         if (!current) return direction < 0 ? entries.size() - 1 : 0;
         if (direction < 0 && *current > 0) return *current - 1;
         if (direction > 0 && *current + 1 < entries.size()) return *current + 1;
-        if (mode == PlaylistMode::RepeatAll) return direction < 0 ? entries.size() - 1 : 0;
+        if (repeatAll) return direction < 0 ? entries.size() - 1 : 0;
         return {};
     }
     // Consume each EOF once. Stale sessions, failures, stop, images and live sources cannot advance.
@@ -66,5 +85,7 @@ public:
 private:
     uint64_t session_ = 0;
     bool consumed_ = false;
+    mutable std::vector<std::wstring> shuffleSource_, shuffled_;
+    mutable std::mt19937 random_{std::random_device{}()};
 };
 }

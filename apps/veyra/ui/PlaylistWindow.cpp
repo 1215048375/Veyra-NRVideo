@@ -10,7 +10,7 @@ HFONT listFont = nullptr;
 engine::Playlist* queue = nullptr;
 std::function<void(size_t)> playEntry;
 std::function<void()> openRecent;
-enum { Items = 710, Add, PlayItem, Previous, Next, Up, Down, Remove, Clear, Mode, Summary, RecentFile };
+enum { Items = 710, Add, PlayItem, Previous, Next, Up, Down, Remove, Clear, Mode, Summary, RecentFile, Loop };
 int selection() { return int(SendMessageW(list, LB_GETCURSEL, 0, 0)); }
 void select(int index) { SendMessageW(list, LB_SETCURSEL, WPARAM(index), 0); }
 void refresh(int selected) {
@@ -33,6 +33,7 @@ void refresh(int selected) {
     const auto text = queue->entries.empty() ? L"列表为空 · 添加或拖入视频文件" : std::to_wstring(queue->entries.size()) + L" 个视频 · 双击播放 · 移除不会删除文件";
     SetDlgItemTextW(window, Summary, text.c_str());
     SendDlgItemMessageW(window, Mode, CB_SETCURSEL, int(queue->mode), 0);
+    SetDlgItemTextW(window,Loop,queue->repeatAll?L"列表循环 ✓":L"列表循环");
     for (int id : {PlayItem, Up, Down, Remove, Clear, Previous, Next}) EnableWindow(GetDlgItem(window, id), !queue->entries.empty());
 }
 void append(const std::vector<std::wstring>& paths) {
@@ -50,6 +51,7 @@ void resize() {
     place(Summary, 16, 12, w-32, 24);
     place(Add, 16, 44, 92, 32);place(RecentFile, 116, 44, 92, 32);
     place(Mode, w-180, 44, 164, 180);
+    place(Loop,w-136,h-92,120,32);
     place(Items, 16, 88, w-32, std::max(40,h-192));
     place(Previous, 16, h-92, 84, 32);place(PlayItem, 108, h-92, 100, 32);place(Next, 216, h-92, 84, 32);
     place(Up, 16, h-48, 64, 32);place(Down, 88, h-48, 64, 32);
@@ -69,9 +71,9 @@ LRESULT CALLBACK proc(HWND h, UINT message, WPARAM wp, LPARAM lp) {
         create(L"BUTTON", L"添加视频", Add, WS_TABSTOP|BS_PUSHBUTTON);
         create(L"BUTTON", L"最近打开", RecentFile, WS_TABSTOP|BS_PUSHBUTTON);
         auto mode = create(L"COMBOBOX", L"播放方式", Mode, WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL);
-        for (auto label : {L"顺序播放", L"列表循环", L"单项循环"}) SendMessageW(mode, CB_ADDSTRING, 0, LPARAM(label));
+        for (auto label : {L"顺序播放", L"随机播放", L"单曲循环"}) SendMessageW(mode, CB_ADDSTRING, 0, LPARAM(label));
         list = create(L"LISTBOX", L"视频播放列表", Items, WS_TABSTOP|WS_BORDER|WS_VSCROLL|WS_HSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT);
-        for (auto [id,label] : {std::pair{Previous,L"上一项"}, {PlayItem,L"播放选中"}, {Next,L"下一项"}, {Up,L"上移"}, {Down,L"下移"}, {Remove,L"移除"}, {Clear,L"清空"}})
+        for (auto [id,label] : {std::pair{Previous,L"上一项"}, {PlayItem,L"播放选中"}, {Next,L"下一项"}, {Up,L"上移"}, {Down,L"下移"}, {Remove,L"移除"}, {Clear,L"清空"},{Loop,L"列表循环"}})
             create(L"BUTTON", label, id, WS_TABSTOP|BS_PUSHBUTTON);
         DragAcceptFiles(h, TRUE);resize();refresh(queue->current ? int(*queue->current) : 0);return 0;
     }
@@ -82,7 +84,7 @@ LRESULT CALLBACK proc(HWND h, UINT message, WPARAM wp, LPARAM lp) {
     case WM_DPICHANGED: {
         auto r = reinterpret_cast<RECT*>(lp);
         auto old = listFont;listFont = makeFont(h,14,FW_NORMAL);
-        for (int id = Items; id <= RecentFile; ++id) SendDlgItemMessageW(h,id,WM_SETFONT,WPARAM(listFont),TRUE);
+        for (int id = Items; id <= Loop; ++id) SendDlgItemMessageW(h,id,WM_SETFONT,WPARAM(listFont),TRUE);
         DeleteObject(old);SetWindowPos(h,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);
         refresh(selection());return 0;
     }
@@ -100,6 +102,7 @@ LRESULT CALLBACK proc(HWND h, UINT message, WPARAM wp, LPARAM lp) {
         case Down: if (selected >= 0 && size_t(selected+1) < queue->entries.size()) {queue->move(selected,selected+1);refresh(selected+1);}break;
         case Remove: if (selected >= 0) {queue->remove(selected);refresh(selected);}break;
         case Clear: queue->clear();refresh(-1);break;
+        case Loop: queue->repeatAll=!queue->repeatAll;refresh(selected);break;
         case Mode: if (HIWORD(wp) == CBN_SELCHANGE) queue->mode = engine::PlaylistMode(SendDlgItemMessageW(h,Mode,CB_GETCURSEL,0,0));break;
         }
         return 0;
@@ -117,10 +120,11 @@ LRESULT CALLBACK proc(HWND h, UINT message, WPARAM wp, LPARAM lp) {
 }
 }
 
-std::vector<std::wstring> choosePlaylistFiles(HWND owner) {
+std::vector<std::wstring> choosePlaylistFiles(HWND owner, bool includeImages) {
     std::vector<wchar_t> names(1024*1024);
     OPENFILENAMEW d{sizeof(d)};d.hwndOwner = owner;d.lpstrFile = names.data();d.nMaxFile = DWORD(names.size());
     d.lpstrFilter = L"视频文件\0*.mp4;*.mkv;*.mov;*.avi;*.ts;*.m4v;*.mts;*.m2ts;*.webm\0";
+    if(includeImages)d.lpstrFilter=L"视频与图片\0*.mp4;*.mkv;*.mov;*.avi;*.ts;*.m4v;*.mts;*.m2ts;*.webm;*.png;*.jpg;*.jpeg\0";
     d.Flags = OFN_EXPLORER|OFN_ALLOWMULTISELECT|OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
     if (!GetOpenFileNameW(&d)) {
         if (CommDlgExtendedError()) MessageBoxW(owner,L"无法读取所选文件，请减少一次选择的文件数量后重试。",L"播放列表",MB_OK|MB_ICONERROR);

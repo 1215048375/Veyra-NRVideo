@@ -64,7 +64,7 @@ Pairing and PSN credentials are encrypted in **%LOCALAPPDATA%/Veyra/remoteplay**
 
 Choose Open on the bottom bar. Playback, seeking, volume, subtitles, and fullscreen are available there. In Professional mode, use the mouse wheel over the picture to zoom.
 
-The current development branch adds an **unreleased playlist**: use the list button or `Ctrl+L` to add multiple videos, double-click to play, reorder, remove or clear entries. Dropping several videos adds them and starts the first; `Ctrl+PageUp/PageDown` selects the previous/next entry. Sequential playback stops at the end; repeat-all and repeat-one are optional. Playback errors stop advancement. Removing entries never deletes files; removing the current entry disables automatic advancement. The list lasts for the current app session; images and live sources are excluded.
+The current development branch adds an **unreleased playlist**: use the list button or `Ctrl+L` to add multiple videos, double-click to play, reorder, remove or clear entries. The main Open dialog accepts multiple videos and starts the first selected video after adding them, as does dropping videos. The transport includes previous, next and restart buttons, plus a larger seek handle and drag area; `Ctrl+PageUp/PageDown` selects the previous/next entry. Choose sequential, shuffle or repeat-one playback, with a separate repeat-list toggle. Sequential playback stops at the end by default. Shuffle visits each entry once per traversal; Previous retraces the same shuffled order. Playback errors stop advancement. Removing entries never deletes files; removing the current entry disables automatic advancement. The list lasts for the current app session; images and live sources are excluded.
 
 ### Capture Cards
 

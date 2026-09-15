@@ -19,7 +19,7 @@ int main() {
         require(p.ended(11) == 1 && !p.ended(11), "EOF consumed once");
         p.bind(2, 12);
         require(!p.ended(12), "sequential stops at end");
-        p.mode = PlaylistMode::RepeatAll;p.bind(2, 13);
+        p.mode = PlaylistMode::Sequential;p.repeatAll=true;p.bind(2, 13);
         require(p.ended(13) == 0, "list loop wraps forward");
         p.bind(0, 14);require(p.adjacent(-1) == 2, "list loop wraps backward");
         p.mode = PlaylistMode::RepeatOne;
@@ -31,12 +31,20 @@ int main() {
         p.bind(0, 16);p.detach();require(!p.ended(16), "source switch cancels queue EOF");
         p.bind(0, 16);p.suspend();require(p.current == 0 && !p.ended(16), "stop preserves navigation but disables auto advance");
         p.bind(0, 17);p.clear();require(p.entries.empty() && !p.ended(17), "clear while playing");
-        p.add(L"one.mp4");p.mode=PlaylistMode::RepeatAll;p.bind(0, 18);
+        p.add(L"one.mp4");p.mode=PlaylistMode::Sequential;p.repeatAll=true;p.bind(0, 18);
         require(p.ended(18) == 0 && !p.ended(18), "single-item list loops once per session");
         p.remove(100);p.move(0,100);require(p.entries.size() == 1, "invalid edits ignored");
         p.clear();
         for (size_t i=0;i<Playlist::limit;++i) p.add(std::to_wstring(i)+L".mp4");
         require(!p.add(L"overflow.mp4") && p.entries.size()==Playlist::limit, "bounded queue");
+        p.clear();p.repeatAll=false;p.mode=PlaylistMode::Shuffle;
+        for(int i=0;i<20;++i)p.add(std::to_wstring(i)+L".mp4");
+        p.bind(0,100);std::vector<size_t> order{0};
+        for(int i=1;i<20;++i){auto next=p.ended(99+i);require(next.has_value(),"shuffle continues until every entry visited");require(std::find(order.begin(),order.end(),*next)==order.end(),"shuffle has no repeats in a traversal");auto previous=*p.current;p.bind(*next,100+i);require(p.adjacent(-1)==previous,"shuffle previous retraces traversal");order.push_back(*next);}
+        require(!p.ended(119),"shuffle stops without list loop");
+        p.repeatAll=true;require(p.adjacent(1)==order.front(),"shuffle list loop wraps");
+        p.mode=PlaylistMode::RepeatOne;p.repeatAll=false;p.bind(*p.current,120);require(p.ended(120)==p.current,"repeat one independent of list loop");
+        p.mode=PlaylistMode::Shuffle;p.remove(*p.current);require(!p.current&&!p.ended(120),"shuffle removal detaches EOF");require(p.adjacent(1).has_value(),"shuffle safely rebuilds after edit");
         std::cout << "PASS " << checks << " playlist checks\n";return 0;
     } catch (const std::exception& e) { std::cerr << "FAIL " << e.what() << '\n';return 1; }
 }

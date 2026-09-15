@@ -2081,3 +2081,14 @@ dependencies.py 新增 export-nvof-file，文件优先于旧 Secret；Actions �
 用户明确表示 fork 不能改为 Private，要求去掉 repository.private 限制。按此最新指令扩展前一条仅限私有仓库的单文件例外；只修改 ci-private/nvof-headers.b64 的读取限制，不扩大到其他 SDK/runtime/model 或 Release。已告知公开提交会公开其中两份 SDK 头文件，Base64 不提供保密性。未替用户 commit/push/upload。
 
 dependencies.py 删除 GITHUB_ACTIONS/GITHUB_EVENT_PATH/repository.private 判断，文件优先级、大小/结构/哈希校验保持；同步导出提示、工作流说明、GITHUB_ACTIONS_BUILD.md，并将原拒绝公开仓库测试改为公开/无仓库元数据均成功还原合成头文件。运行 python scripts/ci/test_dependencies.py（8项）、python scripts/ci/dependencies.py nvof、Python/YAML 解析及 git diff --check。此轮仅输入控制修复，未重建 EXE、未执行 GPU/NR/FG 或云端 CI；下一步提交改动后重跑 Actions。
+
+## 2026-09-15 放大进度条与完整列表控制
+
+任务：放大拖动区域，补上上一项/下一项/从头播放、顺序/随机/单曲循环、独立列表循环，多选打开追加并播放首个。修改 Playlist.h、AppShell、PlaylistWindow、Theme、TransportLayout、WorkspaceChrome、相关三组测试及双语 README；施工证据见 docs/PLAYLIST_PLAN_2026-09-14.md 新增节。保持共享播放器与原会话 EOF 防重复逻辑，没有新建解码或增强管线。
+
+`pwsh -NoProfile -File scripts/acceptance/playlist.ps1 -Root .`：83 队列检查、865 HWND 交互/布局检查、UiContractTests 与普通/REMOTEPLAY AppShell 编译通过，日志 out/ci-dependencies/transport-tests-final.log。之后仅补充工具提示和重播过渡状态保护，完整产品重新编译通过。
+
+VS DevShell 下 `cmake --build out/ci-full --target veyra --parallel 4` 完成 EXE 链接；日志 out/ci-dependencies/transport-build-unrestricted.log。两次沙箱内尝试分别被 Git 配置读取告警与子模块进程权限阻断，原失败日志 transport-build.log / transport-build-final.log 保留；改在正常权限下执行后验证及构建通过，没有绕过校验。
+
+未执行真实视频队列、GPU/NR/FG Create/Evaluate、跨 HDR/分辨率播放或完整 delivery gate；下一项验收为真实素材列表的连续播放与手动重播。没有 push/Release，没有修改运行时或 patched FFmpeg，也没有将 SDK/DLL/模型/测试媒体加入源码。
+程序启动短测：out/ci-full/veyra.exe --smoke-empty --smoke-seconds 5 --smoke-view daily / small / fullscreen，三个模式均正常退出（exit=0），日志 out/ci-dependencies/transport-smoke.log；属于空媒体启动检查，未观察真实媒体画面。git diff --check 通过。

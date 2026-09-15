@@ -2,6 +2,15 @@
 #include <algorithm>
 namespace veyra::ui {
 struct TransportSlot {int x=0,width=0;};
+struct QueueTransportLayout {
+    TransportSlot previous,next,restart,mode,loop;
+    bool compact;
+    explicit QueueTransportLayout(int width):compact(width<432) {
+        int x=0;auto take=[&](int size){TransportSlot slot{x,size};x+=size+4;return slot;};
+        previous=take(compact?32:64);next=take(compact?32:64);restart=take(compact?48:88);
+        mode=take(compact?78:100);loop=take(compact?76:100);
+    }
+};
 struct TransportLayout {
     TransportSlot open,capture,recent,master,sr,stop,play,mute,volume,subtitle,fullscreen,mode,minimize,close;
     bool captions;

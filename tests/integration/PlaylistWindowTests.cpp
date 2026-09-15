@@ -23,7 +23,7 @@ int main() {
                 SetWindowPos(window,nullptr,0,0,MulDiv(size.cx,dpi,96),MulDiv(size.cy,dpi,96),SWP_NOZORDER|SWP_NOACTIVATE);
                 RECT client{};GetClientRect(window,&client);
                 std::vector<RECT> rects;
-                for(int id=710;id<=721;++id) {
+                for(int id=710;id<=722;++id) {
                     RECT rect{};GetWindowRect(GetDlgItem(window,id),&rect);MapWindowPoints(nullptr,window,reinterpret_cast<POINT*>(&rect),2);
                     require(rect.left>=0&&rect.top>=0&&rect.right<=client.right&&rect.bottom<=client.bottom,"controls contained at all DPI/sizes");
                     for(auto previous:rects){RECT intersection{};require(!IntersectRect(&intersection,&rect,&previous),"controls do not overlap");}
@@ -37,6 +37,10 @@ int main() {
             SendMessageW(window,WM_COMMAND,713,0);require(plays==3&&queue.current==0,"previous invokes callback");
             SendDlgItemMessageW(window,719,CB_SETCURSEL,2,0);SendMessageW(window,WM_COMMAND,MAKEWPARAM(719,CBN_SELCHANGE),0);
             require(queue.mode==engine::PlaylistMode::RepeatOne,"mode selector updates policy");
+            SendMessageW(window,WM_COMMAND,722,0);require(queue.repeatAll,"separate list loop enabled");
+            SendMessageW(window,WM_COMMAND,722,0);require(!queue.repeatAll&&queue.mode==engine::PlaylistMode::RepeatOne,"list loop independent of repeat one");
+            SendDlgItemMessageW(window,719,CB_SETCURSEL,1,0);SendMessageW(window,WM_COMMAND,MAKEWPARAM(719,CBN_SELCHANGE),0);
+            require(queue.mode==engine::PlaylistMode::Shuffle,"shuffle selector updates policy");
             SendMessageW(window,WM_COMMAND,721,0);require(recents==1,"recent entry retained");
             SendMessageW(list,LB_SETCURSEL,0,0);MSG key{};key.hwnd=list;key.message=WM_KEYDOWN;key.wParam=VK_DELETE;
             require(ui::playlistWindowMessage(key)&&queue.entries.size()==2&&!queue.current,"Delete removes selected current without invoking playback");
@@ -44,6 +48,13 @@ int main() {
             SendMessageW(window,WM_COMMAND,718,0);require(queue.entries.empty()&&SendMessageW(list,LB_GETCOUNT,0,0)==0,"clear updates view");
             DestroyWindow(window);
         }
+        ui::smokeLayoutDpi=96;
+        auto track=CreateWindowExW(0,TRACKBAR_CLASSW,L"seek-test",WS_CHILD|WS_VISIBLE|TBS_HORZ|TBS_NOTICKS,0,0,300,28,owner,HMENU(800),GetModuleHandleW(nullptr),nullptr);
+        ui::themeControl(track);SetPropW(track,L"veyra.largeTrack",HANDLE(1));SendMessageW(track,TBM_SETRANGE,TRUE,MAKELPARAM(0,10000));
+        SendMessageW(track,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(150,26));require(SendMessageW(track,TBM_GETPOS,0,0)==5000,"seek accepts clicks near bottom of expanded hit area");
+        SendMessageW(track,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(400,26));require(SendMessageW(track,TBM_GETPOS,0,0)==10000,"seek drag clamps beyond right edge");
+        SendMessageW(track,WM_LBUTTONUP,0,MAKELPARAM(12,26));require(SendMessageW(track,TBM_GETPOS,0,0)==0&&GetCapture()!=track,"seek release clamps start and releases capture");
+        EnableWindow(track,FALSE);SendMessageW(track,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(150,10));require(SendMessageW(track,TBM_GETPOS,0,0)==0,"disabled seek ignores clicks");DestroyWindow(track);
         std::cout<<"PASS "<<checks<<" playlist window checks (96/144/192 DPI)\n";
     }catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';result=1;}
     DestroyWindow(owner);veyra::ui::glassTextTheme().reset();Gdiplus::GdiplusShutdown(graphics);return result;

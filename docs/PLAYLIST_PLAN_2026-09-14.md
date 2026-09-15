@@ -30,3 +30,16 @@
 尝试完整构建入口 `cmd /c out/playlist/full-build.cmd`，指定的Visual Studio内置CMake路径不存在，退出失败，记录 `out/playlist/full-build.log`。PATH未发现CMake/Ninja，且该checkout缺少已批准本地SDK、patched FFmpeg开发库和runtime。完整构建、`delivery.ps1`、真实媒体连续播放/音画尾部、NR/FG Create/Evaluate、实卡检查均**未执行**；不能根据上述独立测试声称完整应用验收通过。
 
 下一步唯一任务：取得本机完整依赖/开发目录，生成完整Veyra并实播短视频队列，验证自动衔接、失败停止、暂停/seek、跨分辨率与HDR切换及原delivery回归。没有此证据前不标记软件交付验收完成，不发布。
+
+## 2026-09-15 播放控制扩展
+
+按用户追加需求实现：进度条命中高度 12→28 DIP、滑块直径 10→18 DIP；主控制区新增上一个、下一个、从头播放、播放方式切换和独立列表循环。顺序/随机/单曲循环与列表循环分别设置，默认顺序且不循环。随机模式生成无重复的排列，上一项按相同排列返回，开启列表循环后重复此排列。主窗口“打开”支持多选并追加、播放本次选择的第一个视频；单张图片仍可打开，列表内“添加”只追加不打断播放。本次设置和列表仍仅在应用会话内保留。
+
+主窗口底栏增加 48 DIP，为进度条与按钮留出空间；普通、专业、小窗口、全屏布局同步调整。继续复用 EngineController 的 open/seek/pause 和原 EOF session 保护，单曲循环不限制手动切换。打开/停止过渡期间不接受从头播放，避免冲突。
+
+实际验证：`scripts/acceptance/playlist.ps1 -Root .` 通过 83 个队列检查、865 个真实 HWND 窗口/进度条检查（96/144/192 DPI）、UiContractTests 四种 DPI 布局与既有设置/PCM检查；AppShell 普通/REMOTEPLAY 两种编译均通过。日志 `out/ci-dependencies/transport-tests-final.log`。
+
+完整构建使用 VS x64 toolchain、项目本地 CMake/Ninja，执行 `cmake --build out/ci-full --target veyra --parallel 4`，成功链接 `out/ci-full/veyra.exe`，日志 `out/ci-dependencies/transport-build-unrestricted.log`。前两次沙箱内构建被 Git 用户配置权限告警/子模块进程阻断（transport-build.log、transport-build-final.log），正常权限下依赖校验及构建通过；没有修改或跳过依赖身份检查。
+
+这替代上文当时“缺少依赖、无法完整构建”的状态。实际媒体连续播放、音画尾部、跨 HDR/分辨率切换、GPU/NR/FG Create/Evaluate 及完整 delivery gate 本轮未执行；不得将队列/窗口验证当作实卡验收。下一步唯一验收任务：使用实际媒体列表验证连续播放、从头播放和随机/循环衔接。未 push、发布或新增 proprietary 文件入 Git。
+程序启动短测：out/ci-full/veyra.exe --smoke-empty --smoke-seconds 5 --smoke-view daily / small / fullscreen，三个模式均正常退出（exit=0），日志 out/ci-dependencies/transport-smoke.log；属于空媒体启动检查，未观察真实媒体画面。git diff --check 通过。

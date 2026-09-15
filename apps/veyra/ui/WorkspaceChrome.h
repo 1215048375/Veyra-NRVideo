@@ -10,7 +10,7 @@ struct ChromeLayout {
         panelWidth=pro?(w>=1180?std::clamp(inspectorWidth,296,420):w>=960?296:showDrawer?296:0):0;
         left=pro?(w>=960?84:68):0;top=pro?68:0;
         right=w-panelWidth-20;viewWidth=pro?((w>=960||showDrawer)?right-left-14:w-left-20):w-left*2;
-        viewHeight=pro?std::max(160,h-306):h-88;
+        viewHeight=pro?std::max(160,h-354):h-136;
         bottom=top+viewHeight+(pro?14:0);
         statusTop=std::min(h-186,std::max(top+336,h-330));
     }
@@ -26,7 +26,7 @@ inline void paintChrome(HWND window,HDC dc,const ChromeLayout& l,const engine::P
         const int column=std::min(154,(l.viewWidth-40)/3),size=l.viewWidth<600?13:17;
         const std::wstring dimensions[]={extent(resolution.source.width,resolution.source.height),extent(resolution.base.width,resolution.base.height),!s.applied.nr?L"关闭":extent(resolution.nr.width,resolution.nr.height)};
         const wchar_t* headings[]={L"SOURCE",L"OUTPUT",L"NR PROCESS"};
-        for(int i=0;i<3;++i){chromeText(dc,window,headings[i],l.left+20+i*column,l.bottom+94,column-4,20,10,secondary);chromeText(dc,window,dimensions[i],l.left+20+i*column,l.bottom+118,column-4,30,size,textColor);}
+        for(int i=0;i<3;++i){chromeText(dc,window,headings[i],l.left+20+i*column,l.bottom+142,column-4,20,10,secondary);chromeText(dc,window,dimensions[i],l.left+20+i*column,l.bottom+166,column-4,30,size,textColor);}
     }
 }
 }
