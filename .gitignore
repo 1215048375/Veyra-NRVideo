@@ -13,6 +13,7 @@
 /.vs/
 /vcpkg_installed/
 CMakeUserPresets.json
+__pycache__/
 
 # Diagnostics and captures
 /captures/

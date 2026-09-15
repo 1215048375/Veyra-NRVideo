@@ -9,7 +9,7 @@
 1. 本机运行 `python scripts/ci/dependencies.py export-nvof-secret`。当前已生成 `out/ci-dependencies/nvof-secret.txt`，约 22 KB。该文件只在本机忽略目录中，内容不要提交 Git、贴到日志或作为 artifact 上传。
 2. 打开 GitHub 仓库 **Settings → Secrets and variables → Actions → New repository secret**。
 3. 名称填 `VEYRA_NVOF_HEADERS_B64`，值填上面文本文件的全部内容。只需这一个 Secret；旧的 `VEYRA_CI_DEPS_URL` 和 `VEYRA_CI_DEPS_SHA256` 不再使用。
-4. 将工作流和脚本推送到默认分支 `main`，或打开 **Actions → Windows build → Run workflow**，在默认分支勾选 `full_build`。
+4. 将工作流和脚本（包括新增的 `scripts/ci/dependencies.py`、`dependencies.lock.json`、`toolchain.ps1`）一起推送到默认分支 `main`，或打开 **Actions → Windows build → Run workflow**，在默认分支勾选 `full_build`。
 5. 完整任务成功后，在本次运行页面底部 **Artifacts** 下载 `Veyra-win64-build-<commit>`。
 
 完整任务使用 `windows-build` environment。也可把 Secret 配置在同名 environment 内；若环境设有审批或分支限制，应按仓库设置放行默认分支。未设置 Secret 时完整任务明确失败，源码检查仍可运行。
@@ -24,6 +24,7 @@
 | --- | --- |
 | DLSS 310.7.0 | NVIDIA 官方仓库固定提交，稀疏取得头文件和 x64 NGX shim |
 | XeSS 3.0.2 | Intel 官方仓库固定提交，只取接口目录 |
+| DXC 1.8.2505.1 | 微软官方发布 ZIP，SHA-256 校验，显式供 CMake 编译现有着色器 |
 | NVENC 声明 | FFmpeg/nv-codec-headers 固定提交 |
 | NVOF 5.0.7 | Secret 内两份原始头文件，解码后逐文件核对 SHA-256 |
 | FidelityFX 1.1.4 | AMD 官方固定提交，编译 Optical Flow 与 DX12 后端静态库 |
@@ -40,7 +41,9 @@ FFmpeg 构建记录同时绑定项目补丁 SHA-256 和新编译 avcodec DLL 的
 
 完整编译启用 NR 和 Remote Play，保留 XeSS、AMD 后端。artifact 仅包含程序、编译着色器、许可证和构建信息，保留 7 天。**它不是可独立运行的便携包**，需要配套的既有运行组件；不包含 NVIDIA/Intel/FFmpeg 运行 DLL、SDK 或模型。
 
-GitHub 编译不会执行 NR/FG Create/Evaluate、真实视频连播、PS5/采集实卡或 GPU delivery gate。云端运行尚未执行；本地验证状态见 `docs/WORKLOG.md`，不能把脚本存在当成完整编译通过。
+GitHub 编译不会执行 NR/FG Create/Evaluate、真实视频连播、PS5/采集实卡或 GPU delivery gate。本机已用同一套脚本完成全部依赖构建、Veyra.exe 链接和 artifact 白名单检查；播放列表验收也通过。GitHub 云端运行尚未执行，Secret 尚未代设；详细命令和日志见 `docs/WORKLOG.md`。
+
+CI 固定 Python 3.12、CMake 3.31.6、Ninja 1.11.1.4。DXC 来源：[微软官方 v1.8.2505.1](https://github.com/microsoft/DirectXShaderCompiler/releases/tag/v1.8.2505.1)。旧 Windows SDK 的 DXC 可能不支持现有 `select` 语法，CI 不依赖它；未修改着色器算法。
 
 本地复现需 Windows x64、Visual Studio 2022 C++ 工具、CMake、Ninja、Python 3.11+、Git，工程路径不能含空格。原始 NVOF 头文件存在本地指定目录时，无需设置 Secret：
 

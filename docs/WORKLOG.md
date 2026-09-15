@@ -2040,3 +2040,21 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 实际构建：`scripts/ci/prepare-dependencies.ps1` 正在构建 vcpkg 依赖，日志 `out/ci-dependencies/prepare.log`。独立先行执行 FidelityFX CMake configure/build，目标 ffx_opticalflow_x64 与 ffx_backend_dx12_x64 已成功，日志 `out/ci-dependencies/amd.log`。第一次 AMD 配置因本机重复 PATH/Path 环境使 MSBuild MSB6001 失败；改用 Python 规范化子进程环境后成功，并纳入统一 run 函数。串流代码生成补充 Python protobuf 6.33.4、protoc 路径和 nanopb 临时生成目录。
 
 待完成：完成依赖编译，运行 build-windows.ps1 实际链接 Veyra，核查 artifact 白名单，补最终结果。GitHub 云端运行、Secret 设置、NR/FG Create/Evaluate、实卡和播放连播均未执行。
+
+续接结果：`scripts/acceptance/playlist.ps1 -Root .` 本次实际 exit 0，日志 `out/ci-dependencies/source-checks.log` 及 `out/playlist/acceptance-*.log`。FFmpeg 自动构建成功，`python scripts/ci/dependencies.py verify-ffmpeg --prefix third_party_local/ci/installed/x64-veyra-shared` 通过；新 avcodec SHA256 `2758c2354c54ca6ce99794dbd5a52c2fab9226de049ce087584160a01bbbce13`，补丁 SHA256 `e7d138926873faf479ebdb17b59cecfd654086f5062220ba45ab08ccee9fae26`。OpenSSL/Opus/json-c/libevent/miniupnpc 构建通过。Windows workflow 增加官方 setup-python v5.6.0 固定 SHA，明确 Python 3.12，避免依赖 runner 默认解释器。
+
+依赖全量构建已 exit 0（vcpkg 23 项首次 37 分钟），Chiaki 精确补丁验证和 AMD 构建均通过。首次 `build-windows.ps1` 在 DXC 编译 ParityEncode 时失败：本机 Windows SDK 22621 DXC 不识别现有 HLSL `select`。没有改算法，新增 `VEYRA_DXC_EXECUTABLE` CMake 显式入口，锁定微软 DXC v1.8.2505.1 官方 ZIP，SHA256 `9ad895a6b039e3a8f8c22a1009f866800b840a74b50db9218d13319e215ea8a4`。失败日志 `out/ci-dependencies/build.log`；更新脚本完整重跑日志 `prepare-final.log` / `build-final.log`。CI 同时固定 CMake/Ninja 与本机已用版本。
+
+
+### 2026-09-15 自动构建本机交付结果
+
+完成门槛：同一依赖脚本可自动准备公开依赖 + 两份原始私有头文件，保留 patched FFmpeg/完整 PS5/XeSS/AMD，完整应用实际链接，产物无 SDK/runtime/model。
+
+- `scripts/ci/prepare-dependencies.ps1` 最终 exit 0：`out/ci-dependencies/prepare-final.log`，固定提交/归档哈希、NVOF、Chiaki 精确补丁、FFmpeg 构建记录均通过，重新运行复用已编译库。
+- `scripts/ci/build-windows.ps1` 实际配置、编译、链接与打包 exit 0：`out/ci-dependencies/build-final.log` 最后 `[318/318] Linking CXX executable veyra.exe`。显式新 DXC 解决旧 Windows SDK 编译器不支持 select；没有修改 shader 数学。
+- `out/ci-artifact/veyra.exe` 10996736 bytes，SHA256 `8465D93D6131DED7D9F6A2582CAE3A0137D6775077742A1E38419282C3A86EB2`。artifact 共 59 文件，36 份 DXIL，文件白名单和 EXE 哈希检查通过，无 DLL/LIB/H/ZIP/PDB/模型。构建信息正确标注 sourceDirty=true（用户已提交 a06baaa，后续脚本/文档改动尚未提交）、remotePlay=true、gpuTestsExecuted=false、portableRuntimePack=false。随后将同等文件白名单检查纳入打包脚本末尾。
+- `scripts/acceptance/playlist.ps1 -Root .` exit 0，测试与 AppShell 两种编译通过；Python/PowerShell/YAML 解析、NVOF 错误输入拒绝、git diff --check 及 SDK/Secret 忽略检查通过。
+- 变更文件范围：`.github/workflows/windows-build.yml`、`.gitignore`、`cmake/VeyraShaders.cmake`、`scripts/ci/{prepare-dependencies.ps1,build-windows.ps1,toolchain.ps1,dependencies.py,dependencies.lock.json}`、`docs/GITHUB_ACTIONS_BUILD.md`、本日志。部分早先改动由用户在工作期间提交为 a06baaa，本 Agent 未 commit/push。
+- 未执行：GitHub 云端 run、设置仓库 Secret、发布/上传、实际 NR/FG Create/Evaluate、GPU/PS5/视频连播测试。CI artifact 是编译产物，需配套运行组件，不是完整便携 Release。
+
+下一步唯一外部操作：用户把本地 `out/ci-dependencies/nvof-secret.txt` 全部内容存为仓库或 windows-build environment 的 `VEYRA_NVOF_HEADERS_B64` Secret，然后将上述源码（特别是新增文件）一起提交/push 到 main，检查首次云端 run。无需上传原 220 多 MB SDK ZIP。
