@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "python_protobuf": "6.33.4",
+  "repositories": {
+    "dlss": {"url": "https://github.com/NVIDIA/DLSS.git", "commit": "a291cc7d2cc642a51566f3dfd5376f635cd1b284", "directory": "nvidia/DLSS_SDK_310.7.0", "sparse": ["include", "lib/Windows_x86_64/x64"]},
+    "xess": {"url": "https://github.com/intel/xess.git", "commit": "8fe81bdbbaf00b3c1b733fd0d830c333dc84e6f0", "directory": "intel/xess-3.0.2", "sparse": ["inc"]},
+    "codec": {"url": "https://github.com/FFmpeg/nv-codec-headers.git", "commit": "eddcea9e27f6b772057c9b3f87de2cc1737faffc", "directory": "nvidia/nv-codec-headers"},
+    "amd": {"url": "https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK.git", "commit": "c6efa6bf7f2027b3ec94f28578bb5965eabb9e55", "directory": "amd/FidelityFX-SDK", "sparse": ["sdk"]},
+    "chiaki": {"url": "https://github.com/streetpea/chiaki-ng.git", "commit": "0e16950165f06e5c3291537c2eeba6e852be7120", "directory": "remoteplay/chiaki-clean", "recursive": true},
+    "vcpkg": {"url": "https://github.com/microsoft/vcpkg.git", "commit": "9e593bb18ea69cc5095e012465dcd675a822ed0d", "directory": "ci/vcpkg"}
+  },
+  "archives": {
+    "dxc": {"url": "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2505.1/dxc_2025_07_14.zip", "sha256": "9ad895a6b039e3a8f8c22a1009f866800b840a74b50db9218d13319e215ea8a4"},
+    "ffmpeg": {"url": "https://github.com/Likely7/Veyra-NRVideo/releases/download/v1.2.0/Veyra-1.2.0-FFmpeg-source.zip", "sha256": "bc2f5ecf1cae1d5398a239985ca9895ec58f0dce414d1c9766a1840b224cf402"},
+    "remoteplay": {"url": "https://github.com/Likely7/Veyra-NRVideo/releases/download/v1.2.0/Veyra-1.2.0-RemotePlay-source.zip", "sha256": "9e6494f2ec510c4e793b341b64aa463513e40a0f5eb0c1abf87d0734f3c0c273"}
+  },
+  "nvof": {
+    "version": "5.0.7",
+    "provided_archive_sha256": "89b0923adc6f34fbe86e63cc17d5db452e34b945c03ba90d8e09bd1a0158e917",
+    "headers": {
+      "nvOpticalFlowCommon.h": "fb96fc6061c01ec2c5970ecebebacac7535c033717ff39810cada1f197c8ec9f",
+      "nvOpticalFlowD3D12.h": "d1952d0946a26f1b77e76c320b4dfe9077d946fdc1a6195e01f0460362026305"
+    }
+  }
+}
