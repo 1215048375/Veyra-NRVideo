@@ -68,7 +68,7 @@ class SecretTests(unittest.TestCase):
                 for name, data in self.headers.items():
                     self.assertEqual((root / 'sdk' / name).read_bytes(), data)
 
-    def test_public_or_unverified_repository_rejected(self):
+    def test_public_or_missing_repository_metadata_accepted(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             source = root / 'headers.b64'
@@ -79,9 +79,9 @@ class SecretTests(unittest.TestCase):
                 with patch.object(deps, 'NVOF_FILE', source), patch.object(deps, 'NVOF', root / 'sdk'), patch.dict(os.environ, {
                     'GITHUB_ACTIONS': 'true', 'GITHUB_EVENT_PATH': str(event)
                 }):
-                    with self.assertRaisesRegex(ValueError, 'private repository'):
-                        deps.stage_nvof()
-                    self.assertFalse((root / 'sdk').exists())
+                    deps.stage_nvof()
+                    for name, data in self.headers.items():
+                        self.assertEqual((root / 'sdk' / name).read_bytes(), data)
 
     def test_invalid_file_does_not_fall_back_to_secret(self):
         with tempfile.TemporaryDirectory() as folder:

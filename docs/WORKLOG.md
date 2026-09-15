@@ -2074,3 +2074,10 @@ GitHub Release https://github.com/Likely7/Veyra-NRVideo/releases/tag/v1.0.0 于 
 dependencies.py 新增 export-nvof-file，文件优先于旧 Secret；Actions 文件模式必须有事件 repository.private=true，否则拒绝；解码大小限制、原始头文件 SHA256 和产物隔离保持。工作流说明及 GITHUB_ACTIONS_BUILD.md 更新。文件已生成 21888 字符，`python scripts/ci/dependencies.py nvof` 实际读取并校验成功；没有打印内容。
 
 `python scripts/ci/test_dependencies.py` 8 项测试通过，新增私有文件覆盖错误 Secret、公开/缺失可见性拒绝、损坏文件不静默回退。仅变更依赖输入流程，未重新编译 C++ 或运行 GPU/NR/FG；云端尚待用户将文件加入已设 Private 的仓库后验证。
+
+
+## 2026-09-15 移除 NVOF 文件的私有仓库限制
+
+用户明确表示 fork 不能改为 Private，要求去掉 repository.private 限制。按此最新指令扩展前一条仅限私有仓库的单文件例外；只修改 ci-private/nvof-headers.b64 的读取限制，不扩大到其他 SDK/runtime/model 或 Release。已告知公开提交会公开其中两份 SDK 头文件，Base64 不提供保密性。未替用户 commit/push/upload。
+
+dependencies.py 删除 GITHUB_ACTIONS/GITHUB_EVENT_PATH/repository.private 判断，文件优先级、大小/结构/哈希校验保持；同步导出提示、工作流说明、GITHUB_ACTIONS_BUILD.md，并将原拒绝公开仓库测试改为公开/无仓库元数据均成功还原合成头文件。运行 python scripts/ci/test_dependencies.py（8项）、python scripts/ci/dependencies.py nvof、Python/YAML 解析及 git diff --check。此轮仅输入控制修复，未重建 EXE、未执行 GPU/NR/FG 或云端 CI；下一步提交改动后重跑 Actions。

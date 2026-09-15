@@ -1,6 +1,6 @@
 """Recreate development dependencies; runtime files never enter source Git.
 
-The only private input is two original NVOF headers via a private-repository
+The supplied input is two original NVOF headers via a repository
 file (user-authorized exception) or an Actions secret.
 All remaining sources are pinned public checkouts or SHA-256 verified archives.
 """
@@ -84,12 +84,6 @@ def decode_headers(secret):
 
 def stage_nvof():
     if NVOF_FILE.is_file():
-        # The user authorized this one SDK input in a private repository only.
-        if os.environ.get('GITHUB_ACTIONS') == 'true':
-            event_path = os.environ.get('GITHUB_EVENT_PATH')
-            event = json.loads(Path(event_path).read_text(encoding='utf-8')) if event_path else {}
-            if event.get('repository', {}).get('private') is not True:
-                raise ValueError('ci-private/nvof-headers.b64 is only authorized for a private repository.')
         if NVOF_FILE.stat().st_size > 48000:
             raise ValueError('NVOF input file exceeds the supported size')
         secret = NVOF_FILE.read_text(encoding='utf-8-sig')
@@ -102,7 +96,7 @@ def stage_nvof():
     for name, expected in LOCK['nvof']['headers'].items():
         path = NVOF / name
         if not path.exists() or digest(path) != expected:
-            raise RuntimeError('Supply ci-private/nvof-headers.b64 in a private repository, or configure VEYRA_NVOF_HEADERS_B64; see docs/GITHUB_ACTIONS_BUILD.md')
+            raise RuntimeError('Supply ci-private/nvof-headers.b64, or configure VEYRA_NVOF_HEADERS_B64; see docs/GITHUB_ACTIONS_BUILD.md')
     print('NVOF original headers verified (contents not logged).', flush=True)
 
 
@@ -127,7 +121,7 @@ def export_secret(repository_file=False):
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(secret, encoding='ascii')
     if repository_file:
-        print(f'Private-repository input saved locally: {target} ({len(secret)} characters). Never upload to a public repository or an artifact.')
+        print(f'Repository input saved locally: {target} ({len(secret)} characters). Contains SDK headers, not encrypted data. Do not include in artifacts.')
     else:
         print(f'Secret saved locally: {target} ({len(secret)} characters). Do not commit or upload as an artifact.')
 

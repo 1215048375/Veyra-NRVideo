@@ -2,21 +2,19 @@
 
 工作流：`.github/workflows/windows-build.yml`，名称 **Windows build**。
 
-## 文件方式（本次用户选择，仅私有仓库）
+## 文件方式（公开或私有仓库均可）
 
-已生成 `ci-private/nvof-headers.b64`，21888 字符。里面仅是两份原始 NVOF SDK 头文件，不含账号密码或运行 DLL。文件存在时优先读取，完全忽略同名 Actions Secret，因此不用删除或修复旧 Secret。
+构建优先读取 `ci-private/nvof-headers.b64`，忽略旧 Actions Secret，不再检查仓库可见性。目录名为兼容已有文件保留，不表示必须 Private。文件含两份原始 NVOF SDK 头文件；Base64 不是加密，提交到公开仓库后内容也会公开。
 
-1. 先确认 GitHub 仓库已是 **Private**。这次授权仅允许此文件进入私有仓库，不包括公开仓库或其他 SDK/运行组件。
-2. 文件默认被忽略，确认 Private 后，在项目目录执行一次：
+文件默认仍被 Git 忽略。若尚未跟踪，在项目目录执行一次：
 
 ```powershell
 git add -f -- ci-private/nvof-headers.b64
 ```
 
-3. 将它与本次脚本、工作流和测试修改一起提交并 push 到默认分支。无需上传原 SDK ZIP，也无需配置 Secret。
-4. Actions 会检查事件中的 `repository.private`，验证文件解码后的两份原始头文件哈希，再继续自动编译；文件不进入 artifact。该检查不能撤销已经发生的公开提交，所以应先改为 Private，再添加文件。
+把文件和脚本修改一起提交、push 到默认分支。文件已经提交过则无需再次 force add。无需上传完整 SDK ZIP，也无需配置 Secret。Actions 仍验证文件大小、结构和两份头文件 SHA-256，不将该文件放进编译 artifact。
 
-需要重新生成文件时运行 `python scripts/ci/dependencies.py export-nvof-file`。恢复公开源码分发前，应另行处理包含此文件的 Git 历史，不能直接把这份私有仓库切回公开。
+重新生成文件：`python scripts/ci/dependencies.py export-nvof-file`。本次用户指令仅扩展这个输入文件的使用范围，不增加其他 SDK/运行组件。
 
 ## Secret 方式（保留兼容，文件方式无需配置）
 
@@ -36,7 +34,7 @@ git add -f -- ci-private/nvof-headers.b64
 
 ## 自动准备的依赖
 
-`scripts/ci/dependencies.lock.json` 记录固定提交和归档 SHA-256；`dependencies.py` 负责取得源码、校验、构建，生成本机 `third_party_local/ci-build.json`。除本次授权的私有仓库输入文件外，SDK 和开发库均留在忽略目录；不缓存或上传开发依赖到 artifact。
+`scripts/ci/dependencies.lock.json` 记录固定提交和归档 SHA-256；`dependencies.py` 负责取得源码、校验、构建，生成本机 `third_party_local/ci-build.json`。除本次授权的仓库输入文件外，SDK 和开发库均留在忽略目录；不缓存或上传开发依赖到 artifact。
 
 | 依赖 | 来源与处理 |
 | --- | --- |
@@ -44,7 +42,7 @@ git add -f -- ci-private/nvof-headers.b64
 | XeSS 3.0.2 | Intel 官方仓库固定提交，只取接口目录 |
 | DXC 1.8.2505.1 | 微软官方发布 ZIP，SHA-256 校验，显式供 CMake 编译现有着色器 |
 | NVENC 声明 | FFmpeg/nv-codec-headers 固定提交 |
-| NVOF 5.0.7 | 私有仓库文件优先、Secret 兼容；两份原始头文件解码后逐文件核对 SHA-256 |
+| NVOF 5.0.7 | 仓库文件优先、Secret 兼容；两份原始头文件解码后逐文件核对 SHA-256 |
 | FidelityFX 1.1.4 | AMD 官方固定提交，编译 Optical Flow 与 DX12 后端静态库 |
 | FFmpeg 9.0.1 | 从 Veyra 1.2.0 对应源码资产恢复原 vcpkg 配方，并应用项目 PS5 H.264 32→256 slices 补丁 |
 | Chiaki 与串流库 | 固定 Chiaki 提交和子模块、项目两份补丁；从对应源码资产恢复 SDL3 3.4.14 等配方，编译匹配静态 CRT 的开发库 |
