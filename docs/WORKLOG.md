@@ -2143,3 +2143,11 @@ VS DevShell 下 `cmake --build out/ci-full --target veyra --parallel 4` 完成 E
 改动文件：AppShell.cpp、ComparisonLine.h、UiPreferenceStore.h、UiContractTests.cpp、README双语说明；保留本轮开工时尚未提交的EngineController图片对照纹理修复及WORKLOG。未修改GPU增强处理和运行组件。
 
 验证：scripts/acceptance/playlist.ps1 -Root .通过99队列/目录/缓存、865窗口检查、UI合同含新增显示/颜色偏好往返、两种AppShell编译；日志out/ci-dependencies/comparison-line-tests.log。VS DevShell下cmake --build out/ci-full --target veyra --parallel 4完成，comparison-line-build.log。实际运行comparison-line-smoke.py与comparison-line-video-smoke.py，PNG和40秒H.264分别确认彩色线HWND/颜色状态/尺寸、拖动位置变化、V隐藏/释放恢复、关闭分屏隐藏，退出0；对应同名log记录详细播放器日志路径。操作只针对测试进程的自有窗口。NR/SR/FG关闭，增强Create/Evaluate、HDR视觉亮度、大图分块与菜单鼠标手动体验未执行。未push/发布。下一步用户素材的分界线颜色/亮度视觉验收。
+
+## 2026-09-16 日常左栏与MINI模式
+
+按用户要求完成日常左栏和MINI布局。施工和边界见docs/MINI_MODE_PLAN_2026-09-16.md。新增Mode::Mini及左栏模式菜单，复用媒体入口；MINI保留画面、侧栏及大进度条，其余控制隐藏，支持480×440，返回日常/专业保证最小720×540。日常栏移除底部重复入口以避免720宽度重叠，图片打开不再强制进入专业。保持原播放会话和增强设置。
+
+命令：pwsh -NoProfile -File scripts/acceptance/playlist.ps1 -Root .，99队列/缓存、865HWND、UiContractTests（新增MINI几何、日常左栏与620DIP底栏宽度、配置不变）及普通/REMOTEPLAY AppShell编译通过；out/ci-dependencies/mini-mode-tests-final.log。完整VS DevShell cmake --build out/ci-full --target veyra --parallel 4，通过mini-mode-build-final.log；随后MINI小窗口保存尺寸兼容修正编译见mini-mode-build-verified.log。首轮std::max LONG/int不匹配导致编译失败，已明确转换，失败保留mini-mode-tests.log / mini-mode-build.log。
+
+实际运行python out/ci-dependencies/mini-mode-smoke.py：H.264基础播放中检查720/1280日常侧栏与对比按钮不重叠、480×440 MINI直接子控件仅画面/进度条/侧栏可见、三模式往返播放session及settings revision一致，退出0。证据mini-mode-smoke.log、mini-mode-app-1789568274195036600.log。增强全关，NR/SR/FG Create/Evaluate未执行；HDR/增强视觉与MINI保存配置实际重启未验证。未push/发布，未修改runtime/SDK/patched FFmpeg。下一步用户素材侧栏/MINI交互验收。

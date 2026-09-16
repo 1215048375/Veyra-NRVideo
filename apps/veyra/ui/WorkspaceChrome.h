@@ -6,11 +6,11 @@ namespace veyra::ui {
 struct ChromeLayout {
     int w,h,left,top,viewWidth,viewHeight,right,panelWidth,bottom,statusTop;
     bool pro,drawer;
-    ChromeLayout(int width,int height,bool professional,bool showDrawer,int inspectorWidth=320):w(width),h(height),pro(professional),drawer(showDrawer){
+    ChromeLayout(int width,int height,bool professional,bool showDrawer,int inspectorWidth=320,bool mini=false):w(width),h(height),pro(professional),drawer(showDrawer){
         panelWidth=pro?(w>=1180?std::clamp(inspectorWidth,296,420):w>=960?296:showDrawer?296:0):0;
-        left=pro?(w>=960?84:68):0;top=pro?68:0;
-        right=w-panelWidth-20;viewWidth=pro?((w>=960||showDrawer)?right-left-14:w-left-20):w-left*2;
-        viewHeight=pro?std::max(160,h-354):h-136;
+        left=pro?(w>=960?84:68):68;top=pro?68:0;
+        right=w-panelWidth-20;viewWidth=pro?((w>=960||showDrawer)?right-left-14:w-left-20):w-left;
+        viewHeight=pro?std::max(160,h-354):h-(mini?28:136);
         bottom=top+viewHeight+(pro?14:0);
         statusTop=std::min(h-186,std::max(top+336,h-330));
     }

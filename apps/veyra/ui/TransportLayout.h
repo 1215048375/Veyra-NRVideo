@@ -19,7 +19,7 @@ struct TransportLayout {
         auto takeLeft=[&](int size){TransportSlot result{left,size};left+=size+4;return result;};
         auto takeRight=[&](int size){right-=size;TransportSlot result{right,size};right-=4;return result;};
         if(daily){
-            open=takeLeft(captions?76:32);capture=takeLeft(captions?76:32);recent=takeLeft(32);left+=10;
+            // File/capture/playlist actions live in the shared sidebar.
             master=takeLeft(captions?114:36);sr=takeLeft(captions?70:60);
             close=takeRight(26);minimize=takeRight(26);right-=8;mode=takeRight(captions?126:32);
         }

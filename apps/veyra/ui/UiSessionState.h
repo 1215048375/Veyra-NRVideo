@@ -1,7 +1,7 @@
 #pragma once
 #include "veyra/engine/EnhancementSettings.h"
 namespace veyra::ui {
-enum class Mode { Daily, Professional };
+enum class Mode { Daily, Professional, Mini };
 struct UiSessionState {
     Mode mode=Mode::Daily;
     bool enhanced=false,subtitles=true,diagnostics=false,drawer=false;
