@@ -9,3 +9,7 @@
 验收证据：scripts/acceptance/playlist.ps1 -Root . 的99项队列/目录/缓存检查、865 HWND检查、UiContractTests与普通/REMOTEPLAY编译通过（out/ci-dependencies/image-prefetch-tests.log）。实际15张PNG目录测试确认后台解码10张且下一张在播放器命中（image-prefetch-smoke.log，详细image-prefetch-app-1789559225192683400.log）；增强全关，NGX Create/Evaluate未执行。实际小图验证不是大图性能基准，不承诺翻图加速倍数。
 
 完整编译使用 VS DevShell 与本机依赖，命令 cmake --build out/ci-full --target veyra --parallel 4。收尾构建日志见WORKLOG。下一项唯一验收：用户实际大图目录的翻页延迟与内存体验；若耗时主要在增强初始化，再单独优化GPU资源复用。
+
+## 2026-09-16 后续修复
+
+当前窗口已扩为20张，512MiB预算保持；这仍是CPU预解码。对于缓存命中且相同源尺寸/配置的小于等于16MP普通图片，EngineController复用现有GPU设备/图/运行时，只上传新图并触发SourceSwitch历史reset，不再反复初始化。容量1待切换请求避免无界排队。不同尺寸、设置变化、未缓存或分块大图继续完整打开。实际不同颜色PNG保存核验、同尺寸初始化次数不变与异尺寸回退验证通过，详见WORKLOG的image-reuse证据。NR开启后的用户大图性能尚未实测。

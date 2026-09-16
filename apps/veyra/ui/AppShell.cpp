@@ -169,11 +169,11 @@ ofn.lpstrFilter=save?L"PNG图片\0*.png\0JPEG图片\0*.jpg\0":L"视频 / 图片\
 ofn.Flags=OFN_EXPLORER|OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|(save?OFN_OVERWRITEPROMPT:OFN_FILEMUSTEXIST);ofn.lpstrDefExt=save?L"png":nullptr;
 return (save?GetSaveFileNameW(&ofn):GetOpenFileNameW(&ofn))?name.data():L"";}
 void openFile(const std::wstring& file){if(file.empty())return;std::error_code folderError;if(std::filesystem::is_directory(file,folderError)){openImageDirectory(file);return;}imageFolder.opened(file);if(!imageFolder.active(file))engine.prefetchImages({});playlist.detach();cancelProtection();auto openOptions=options();if(file!=currentFile){openOptions.settings.protection={};uiState.configured.protection={};}auto ext=std::filesystem::path(file).extension().wstring();for(auto& c:ext)c=towlower(c);engine.previewView({});currentFile=file;subtitles=veyra::engine::loadSrt(std::filesystem::path(file).replace_extension(L".srt").wstring());paused=false;SetWindowTextW(GetDlgItem(mainWindow,Play),L"暂停");engine.open(video,file,openOptions);if(auto index=playlist.add(file))playlist.bind(*index,engine.snapshot().sessionId);veyra::ui::refreshPlaylistWindow();SetWindowTextW(mainWindow,(L"Veyra — "+std::filesystem::path(file).filename().wstring()).c_str());if(smokeSeconds<=0)WritePrivateProfileStringW(L"Player",L"最近打开",file.c_str(),(veyra::runtime::localDataDirectory()/"veyra.ini").wstring().c_str());}
-void browseImage(size_t index){if(index>=imageFolder.files.size()||closing)return;auto path=imageFolder.files[index];openFile(path);layout();
+void browseImage(size_t index){if(index>=imageFolder.files.size()||closing)return;auto path=imageFolder.files[index];const bool alreadyImage=engine.snapshot().image;openFile(path);if(!alreadyImage)layout();
     std::vector<std::wstring> upcoming{path};
-    for(size_t step=1;upcoming.size()<10&&step<imageFolder.files.size();++step){
+    for(size_t step=1;upcoming.size()<20&&step<imageFolder.files.size();++step){
         if(index+step<imageFolder.files.size())upcoming.push_back(imageFolder.files[index+step]);
-        if(index>=step&&upcoming.size()<10)upcoming.push_back(imageFolder.files[index-step]);
+        if(index>=step&&upcoming.size()<20)upcoming.push_back(imageFolder.files[index-step]);
     }
     engine.prefetchImages(std::move(upcoming));
 }

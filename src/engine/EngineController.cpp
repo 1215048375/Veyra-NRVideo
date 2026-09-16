@@ -63,9 +63,17 @@ void EngineController::dispatch(){
         {std::lock_guard lock(mutex_);busy_=false;snapshot_.running=false;if(snapshot_.transport==TransportState::Stopping)snapshot_.transport=TransportState::Empty;}
     }
 }
-void EngineController::post(std::function<void()> task){ {std::lock_guard lock(mutex_);stop_=true;pending_=std::move(task);}wake_.notify_one(); }
+void EngineController::post(std::function<void()> task){ {std::lock_guard lock(mutex_);stop_=true;pendingImage_.reset();pendingImagePath_.clear();pending_=std::move(task);}wake_.notify_one(); }
 bool EngineController::idle()const{std::lock_guard lock(mutex_);return !busy_&&!pending_;}
 void EngineController::open(HWND video,const std::wstring& path,PlayerOptions opts){
+    if(auto cached=imageCache_->get(path)){
+        std::lock_guard lock(mutex_);const auto extent=snapshot_.metrics.resolution.source;
+        if(busy_&&!pending_&&!stop_&&snapshot_.image&&snapshot_.frames&&!snapshot_.failed&&!snapshot_.applying&&savePath_.empty()&&
+           pipeline::Extent{cached->width,cached->height}.valid()&&uint64_t(cached->width)*cached->height<=16777216&&extent.width==cached->width&&extent.height==cached->height&&opts.snapshot().sameVideoConfiguration(desired_)){
+            pendingImage_=std::move(cached);pendingImagePath_=path;paused_=false;snapshot_.transport=TransportState::Playing;snapshot_.status=L"正在使用缓存切换图片…";
+            veyra::log::info("image-switch","queued cached image; reusing GPU device, graph and runtime; capacity=1 latest request");return;
+        }
+    }
     const bool captureReplay=opts.captureReplayForTest;
     const bool disableAdmission=opts.captureReplayDisableFgAdmissionForTest;
     {std::lock_guard lock(mutex_);snapshot_={};activeFlow_.reset();previewView_={};snapshot_.sessionId=++sessionId_;snapshot_.transport=TransportState::Opening;savePath_.clear();desired_=opts.snapshot();desired_.revision=++nextRevision_;snapshot_.desired=desired_;opts=PlayerOptions::from(desired_);}
@@ -83,7 +91,7 @@ remoteplay::ControllerFeedback EngineController::remotePlayFeedback(){std::lock_
 void EngineController::remotePlayController(const remoteplay::ControllerState& state){std::lock_guard lock(mutex_);if(activeRemote_)activeRemote_->controller(state);}
 void EngineController::remotePlayLoginPin(std::string pin){std::lock_guard lock(mutex_);if(activeRemote_)activeRemote_->loginPin(std::move(pin));}
 #endif
-void EngineController::stop(){std::lock_guard lock(mutex_);stop_=true;pending_={};snapshot_.transport=busy_?TransportState::Stopping:TransportState::Empty;}
+void EngineController::stop(){std::lock_guard lock(mutex_);stop_=true;pending_={};pendingImage_.reset();pendingImagePath_.clear();snapshot_.transport=busy_?TransportState::Stopping:TransportState::Empty;}
 void EngineController::pause(bool p){paused_=p;std::lock_guard lock(mutex_);if(snapshot_.running)snapshot_.transport=p?TransportState::Paused:TransportState::Playing;}
 void EngineController::setVolume(float gain,bool mute){if(!std::isfinite(gain))return;volume_=std::clamp(gain,0.0f,1.0f);muted_=mute;}
 bool EngineController::requestSettings(EnhancementSettings s){
@@ -378,7 +386,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                 }
                 return lastAudioClockMs;
             };
-            uint64_t hdrDisplayCheck=0;
+            uint64_t hdrDisplayCheck=0,imageSequence=1;std::optional<Clock::time_point> imageSwitchStart;
             while(!stop_){
                 if(gd.hdrInput&&GetTickCount64()-hdrDisplayCheck>2000){
                     hdrDisplayCheck=GetTickCount64();
@@ -470,6 +478,19 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                     if(!ring.drainQueue()||!activeSource->seek({static_cast<int64_t>(seek*1000000),1000000})){status(L"跳转失败",true);break;}
                     discardBefore=seek*1000;seekPreviewPending=true;reset=true;pendingResetCause=pipeline::ResetReason::Seek;anchorMs=discardBefore;anchor=Clock::now();lastAudioClockMs=discardBefore;audioClockExhausted=false;audioRebuffering=false;if(audioStarted){audioPipe.setPaused(paused_);audioPipe.requestSeek(discardBefore);}
                 }
+                if(isImage&&!transaction){
+                    std::shared_ptr<const sink::RgbaImage> nextImage;std::wstring nextPath;
+                    {std::lock_guard lock(mutex_);nextImage=std::move(pendingImage_);nextPath=std::move(pendingImagePath_);}
+                    if(nextImage){
+                        imageSwitchStart=Clock::now();
+                        // One source-switch drain, never per frame/pass. The existing reset coordinator clears all histories.
+                        if(!ring.drainQueue()||av_frame_make_writable(imageFrame)<0){status(L"图片切换资源准备失败",true);break;}
+                        for(unsigned y=0;y<height;++y)memcpy(imageFrame->data[0]+size_t(y)*imageFrame->linesize[0],nextImage->pixels.data()+size_t(y)*width*4,size_t(width)*4);
+                        av_frame_free(&cachedFrame);cachedPacket={};out={};hasOutput=false;path=std::move(nextPath);++imageSequence;
+                        reset=true;pendingResetCause=pipeline::ResetReason::SourceSwitch;wasPaused=false;
+                        {std::lock_guard lock(mutex_);snapshot_.status=L"正在增强下一张图片…";}
+                    }
+                }
                 if(!transaction&&((paused_&&!seekPreviewPending)||(isImage&&hasOutput))){
                     drainLivePresentation();
                     if(!wasPaused){holdFileAudio();if(physicalCapture)captureSource.videoReset();
@@ -549,7 +570,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                     pkt.duration={interval*2,10000000};
                 }
                 if(!halfRate)captureSampler.reset();
-                if(isImage)pkt.sequence=1;
+                if(isImage)pkt.sequence=imageSequence;
                 if(!rereadCached)++sourceFrames;
                 const double decodeMs=elapsedMs(decodeStart);decodeTimes.add(decodeMs);
                 double pts=isImage?0:pkt.pts.toDouble()*1000;
@@ -894,6 +915,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                 measured.flow=frameFlow->snapshot(host100ns());
                 measured.sourceFrames=measured.flow.counters.sourceAccepted;measured.validGenerated=measured.flow.counters.fgReadyValid;measured.submitted=measured.flow.counters.realPresented+measured.flow.counters.generatedPresented;measured.expired=measured.flow.counters.generatedExpiredAfterEval;
                 const double ageP95=liveScheduler?completed.ageP95:captureAges.p95(),waitP95=liveScheduler?completed.waitP95:scheduleWaits.p95(),presentP95=liveScheduler?completed.presentP95:presentTimes.p95();
+                if(imageSwitchStart){veyra::log::info("image-switch",std::format("presented source={} elapsedMs={:.2f} reusedGraph=true reset=SourceSwitch",imageSequence,std::chrono::duration<double,std::milli>(Clock::now()-*imageSwitchStart).count()));imageSwitchStart.reset();status(L"图片已更新，可保存PNG/JPEG");}
                 ++frames;{std::lock_guard lock(mutex_);snapshot_.metrics=measured;snapshot_.colorStatus=gd.hdrOutput?(graph.hdr10Output()?L"HDR → HDR10 / PQ":L"HDR → scRGB / 浮点"):gd.hdrInput?L"HDR → SDR色调映射":L"SDR → SDR";snapshot_.position=(isCapture||isImage?pts:lastFilePresentedMs)/1000;snapshot_.frames=sourceFrames;snapshot_.generated=graphStats.fgGeneratedFrames;snapshot_.lateMs=lateness;snapshot_.lateP95Ms=sorted.empty()?0:sorted[size_t((sorted.size()-1)*0.95)];
                     // Measured playback speed: media-PTS advance per wall time
                     // over ~1s windows (1.0 = normal speed), resampled on seek.

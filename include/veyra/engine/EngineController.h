@@ -99,6 +99,7 @@ private:
     std::shared_ptr<source::RemotePlaySessionSource> activeRemote_;
     PreviewView previewView_;
     std::wstring savePath_;
+    std::shared_ptr<const sink::RgbaImage> pendingImage_;std::wstring pendingImagePath_;
     std::thread worker_;
     std::condition_variable wake_;std::function<void()> pending_;bool shutdown_=false,busy_=false;
     EnhancementSettings desired_;uint64_t nextRevision_=1;

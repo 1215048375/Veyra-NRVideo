@@ -2151,3 +2151,14 @@ VS DevShell 下 `cmake --build out/ci-full --target veyra --parallel 4` 完成 E
 命令：pwsh -NoProfile -File scripts/acceptance/playlist.ps1 -Root .，99队列/缓存、865HWND、UiContractTests（新增MINI几何、日常左栏与620DIP底栏宽度、配置不变）及普通/REMOTEPLAY AppShell编译通过；out/ci-dependencies/mini-mode-tests-final.log。完整VS DevShell cmake --build out/ci-full --target veyra --parallel 4，通过mini-mode-build-final.log；随后MINI小窗口保存尺寸兼容修正编译见mini-mode-build-verified.log。首轮std::max LONG/int不匹配导致编译失败，已明确转换，失败保留mini-mode-tests.log / mini-mode-build.log。
 
 实际运行python out/ci-dependencies/mini-mode-smoke.py：H.264基础播放中检查720/1280日常侧栏与对比按钮不重叠、480×440 MINI直接子控件仅画面/进度条/侧栏可见、三模式往返播放session及settings revision一致，退出0。证据mini-mode-smoke.log、mini-mode-app-1789568274195036600.log。增强全关，NR/SR/FG Create/Evaluate未执行；HDR/增强视觉与MINI保存配置实际重启未验证。未push/发布，未修改runtime/SDK/patched FFmpeg。下一步用户素材侧栏/MINI交互验收。
+
+## 2026-09-16 复用图片GPU资源，预解码扩为20张
+
+用户等待预加载后仍觉得翻图慢。确认前一版本仅10张CPU预解码，缓存命中后仍通过EngineController::open销毁/重建D3D设备、处理图和运行组件；不是已预渲染20张增强结果。本次预解码窗口扩为20张（512MiB预算保持），并为缓存命中、相同源尺寸/格式/增强设置、非分块大图建立复用路径：容量1最新请求交给原GPU线程，单次切源drain、更新可写AVFrame，source序号递增，SourceSwitch reset推进epoch，继续使用同一graph/presenter/runtime。新画面呈现前旧交换链画面保持。不同尺寸、设置变化、未命中缓存、无效/分块尺寸仍走完整原流程。停止/新普通任务清空待切图请求。图片到图片不再重做整个窗口布局，媒体标签/分界线沿用遥测刷新。
+
+不是20张增强结果预渲染，不承诺消除NR耗时。源码为AppShell、EngineController头/源和ImageDecodeCache；沿用共享图，未改运行组件。验收包括99项缓存/队列与865窗口检查、UiContractTests、普通/REMOTEPLAY AppShell编译，日志image-reuse-tests.log；完整构建image-reuse-build.log，后续状态与UI布局收尾见image-reuse-build-verified.log。
+
+实际使用25张PNG：确认后台20张decoded=true，首张蓝图→次张红图的缓存切换中graph初始化次数保持1；保存输出再由FFmpeg读取RGB均值[254,0,0]，排除仅改文件名或显示旧帧；下一张128×96不同尺寸触发正常重建。脚本python out/ci-dependencies/image-reuse-smoke.py，最终行为证据image-reuse-smoke-verified.log、image-reuse-app-1789570938975940900.log。后者切换source=2/epoch=2/reason=SourceSwitch，GPU线程更新至呈现CPU观测1.62ms；外部脚本轮询等待218ms，二者不混同为屏幕延迟。320×180基础图片，NR/SR/FG关闭，Create/Evaluate未执行，不是用户大图/NR性能基准。
+
+首轮沙箱中截图入口先检查系统Pictures目录，权限提示使测试超时（image-reuse-smoke.log）；正常权限复测输出明确在项目out且成功。未push/发布，未新增SDK/runtime/测试媒体入Git。下一步用户同尺寸图片开启NR后的实际翻页与历史残影验收；不同尺寸仍慢需单独扩展资源复用，不能宣称本次已覆盖。
+收尾后完整编译image-reuse-build-verified.log成功；再次运行实际像素/20张预解码/尺寸回退检查全部通过，image-reuse-smoke-final.log为最终结果。去掉重复布局后脚本轮询耗时以该日志为准，不作为NR速度或屏幕延迟承诺。

@@ -9,7 +9,7 @@
 #include <mutex>
 #include <thread>
 namespace veyra::engine {
-// One background decoder; at most ten retained images and a bounded RGBA budget.
+// One background decoder; at most twenty retained images and a bounded RGBA budget.
 class ImageDecodeCache {
 public:
     using Image=std::shared_ptr<const sink::RgbaImage>;
@@ -17,7 +17,7 @@ public:
     explicit ImageDecodeCache(Loader loader,size_t budget=512ull*1024*1024):loader_(std::move(loader)),budget_(budget),worker_([this]{run();}){}
     ~ImageDecodeCache(){{std::lock_guard lock(mutex_);stopping_=true;}wake_.notify_one();worker_.join();}
     void prefetch(std::vector<std::wstring> paths){
-        if(paths.size()>10)paths.resize(10);
+        if(paths.size()>20)paths.resize(20);
         std::lock_guard lock(mutex_);if(paths==wanted_)return;wanted_=std::move(paths);++epoch_;attempted_.clear();
         for(auto it=entries_.begin();it!=entries_.end();)if(std::find(wanted_.begin(),wanted_.end(),it->first)==wanted_.end()){bytes_-=it->second.image->pixels.size();it=entries_.erase(it);}else ++it;
         wake_.notify_one();
