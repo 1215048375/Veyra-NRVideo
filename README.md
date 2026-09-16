@@ -152,3 +152,5 @@ Veyra 原有源码采用 [GPLv3](LICENSE)；含串流的组合程序同时适用
 感谢 [Magpie Experimental](https://github.com/SAOG0721/Magpie/tree/experimental) 在 NR 残差合成、光流与增强处理链方面提供的研究启发；感谢 [chiaki-ng](https://github.com/streetpea/chiaki-ng) 提供 PS5 串流基础，以及 [XeSS-GPU-Motion](https://github.com/gggz114514-oss/XeSS-GPU-Motion) 的 GPU DIS 光流实现。
 
 其他依赖、来源与许可证见 [第三方说明](THIRD_PARTY_NOTICES.md)。
+
+图片目录浏览：点击专业模式的图片按钮 → **打开图片文件夹**，或按 `Ctrl+Shift+O`。只读取当前文件夹的 PNG/JPG/JPEG，忽略视频、音频和子文件夹，按文件名排序。鼠标在画面上滚轮向上/下翻上一张/下一张，每 450 毫秒最多翻一张；专业模式下 `Ctrl+滚轮` 仍可缩放。底栏显示当前序号，上一张/下一张按钮也可翻图，到边界停止。

@@ -1,5 +1,8 @@
 #include "veyra/engine/Playlist.h"
 #include <iostream>
+#include "../../apps/veyra/ui/ImageFolder.h"
+#include <fstream>
+#include <chrono>
 #include <stdexcept>
 
 int main() {
@@ -7,6 +10,21 @@ int main() {
     auto require = [&](bool ok, const char* why) { ++checks;if (!ok) throw std::runtime_error(why); };
     try {
         using namespace veyra::engine;
+        veyra::ui::ImageFolder images;
+        auto folder=std::filesystem::path("out/playlist")/("image-folder-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directories(folder/"nested");
+        for(auto name:{"c.jpeg","A.PNG","b.jpg","video.mp4","audio.wav"})std::ofstream(folder/name).put('x');
+        std::ofstream(folder/"nested"/"ignored.png").put('x');
+        std::error_code ec;require(images.load(folder,ec)&&images.files.size()==3,"folder includes only supported images and excludes subfolders");
+        require(std::filesystem::path(images.files[0]).filename()==L"A.PNG","case-insensitive filename order");
+        require(!images.wheel(-30,1000)&&!images.wheel(-30,1001)&&!images.wheel(-30,1002),"high-resolution wheel accumulates a notch");
+        require(images.wheel(-30,1003)==1,"one notch advances one image");images.opened(images.files[1]);
+        require(!images.wheel(-1200,1100),"wheel burst discarded during cooldown");
+        require(images.wheel(-1200,1500)==2,"large wheel delta advances at most one image");images.opened(images.files[2]);
+        require(!images.wheel(-120,2000),"last image does not wrap");
+        require(images.wheel(120,2500)==1,"wheel up goes back");
+        require(!images.load(folder/"nested"/"missing",ec)&&images.files.size()==3,"failed folder load preserves current gallery");
+        images.opened(L"unrelated.mp4");require(images.files.empty(),"opening unrelated media leaves folder browser");
         Playlist p;
         require(!p.adjacent(1) && !p.ended(1), "empty queue");
         require(!p.add(L"still.png") && !p.add(L"capture:device"), "non-video excluded");

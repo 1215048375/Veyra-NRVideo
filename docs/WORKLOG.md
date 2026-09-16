@@ -2106,3 +2106,14 @@ VS DevShell 下 `cmake --build out/ci-full --target veyra --parallel 4` 完成 E
 完整构建：VS x64 DevShell 下 `cmake --build out/ci-full --target veyra --parallel 4` 成功，日志 out/ci-dependencies/keyboard-click-build.log。使用本机 ffmpeg 的 testsrc2 生成320×180/30fps/40秒H.264测试片（忽略目录），运行 `python out/ci-dependencies/keyboard-click-smoke.py`，实际启动程序解码并通过自有HWND执行点击和按键：暂停、暂停时+5秒、-5秒、连续后退钳制0秒、恢复播放且媒体时间继续增加，全部通过，正常退出0。日志 out/ci-dependencies/keyboard-click-smoke-final.log；真实播放器日志 out/ci-full/logs/veyra-app.log。首轮脚本枚举控件过早导致时间控件等待超时，增加创建等待后通过，失败保留 keyboard-click-smoke.log。
 
 实际基础视频解码/呈现已运行；NR/SR/FG全部关闭，增强 Create/Evaluate未执行。未实测音轨同步、分屏增强画面与其他设备。git diff --check通过；未push/发布，未改运行组件或patched FFmpeg，媒体/日志均未入源码。下一步为用户实际视频操作体验验收。
+
+## 2026-09-16 图片文件夹浏览
+
+图片入口新增单张/文件夹菜单，Ctrl+Shift+O 可直接选择目录；拖入单个目录或以目录路径启动也进入同一浏览逻辑。只枚举该层 PNG/JPG/JPEG 常规文件，按文件名不区分大小写排序，忽略视频音频及子目录，空目录/访问失败保留原浏览状态并提示。图片继续走现有 open/共享处理图，不进入视频播放列表。
+
+新增 ImageFolder.h 保存会话内目录和索引、滚轮状态，AppShell.cpp接入入口、图片上一/下一按钮和底栏序号。滚轮上翻上一张、下翻下一张，每120累计刻度触发且450ms内最多一张，超量和冷却期间事件丢弃，不排队，不首尾循环；Ctrl+滚轮保留专业模式缩放，保护框选优先。离开目录打开其他媒体解除目录浏览。
+
+验证：scripts/acceptance/playlist.ps1 -Root . 通过93项队列/目录检查（新增过滤、排序、高精度刻度、冷却、边界、错误目录及退出），865 HWND窗口检查、UiContractTests及两种AppShell编译。日志 out/ci-dependencies/image-folder-tests.log。最终VS x64 DevShell执行 cmake --build out/ci-full --target veyra --parallel 4 成功，日志 image-folder-build-final.log。
+
+实际图片验证使用临时目录内3张320×180 PNG和无效mp4/wav，通过自有应用HWND检验目录首图及3张计数、滚轮下一张、快速滚动不跳图、末项停止、向上返回。脚本 out/ci-dependencies/image-folder-smoke.py，结果见 image-folder-smoke-final.log。首轮所有图片检查通过后，临时脚本残留上一任务视频断言引起NameError；清除残留后复测，失败保留image-folder-smoke.log。基础图片解码/共享图初始化实际运行，NR/SR/FG关闭；增强Create/Evaluate、文件夹选择器手动操作及海量/网络目录性能未验收。没有push/发布，SDK、运行组件、测试媒体均未入源码；下一步为用户目录实际浏览体验验收。
+补充：第二轮临时脚本过早取得尚未创建的视频子窗口句柄，首图计数通过但滚轮消息目标为空（image-folder-smoke-final.log）。改为等待并重新取得本进程VideoSurface句柄后，image-folder-smoke-verified.log所有图片检查通过，进程正常退出0。最终图片验证证据以此verified日志为准。

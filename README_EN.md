@@ -157,3 +157,5 @@ The capture panel also offers **Convert to SDR display**, off by default. It con
 Thanks to [Magpie Experimental](https://github.com/SAOG0721/Magpie/tree/experimental) for research insights into NR residual composition, optical flow, and enhancement pipelines; to [chiaki-ng](https://github.com/streetpea/chiaki-ng) for the PS5 streaming foundation; and to [XeSS-GPU-Motion](https://github.com/gggz114514-oss/XeSS-GPU-Motion) for its GPU DIS optical-flow implementation.
 
 See [Third-Party Notices](THIRD_PARTY_NOTICES.md) for other dependencies, sources, and licenses.
+
+Image folders: choose Open image folder from the professional Image button, or press Ctrl+Shift+O. Only PNG/JPG/JPEG files directly in the folder are listed, sorted by filename; videos, audio and subfolders are ignored. Wheel up/down over the image selects the previous/next image, limited to one image per 450 ms. Ctrl+wheel retains zoom in professional mode. The transport shows the image index and supports previous/next; navigation stops at either end.
