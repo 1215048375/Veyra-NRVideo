@@ -92,7 +92,8 @@ bool protectionArmed=false,protectionDragging=false;POINT protectionStart{};std:
 void cancelProtection(){protectionArmed=protectionDragging=false;if(protectionOverlay)ShowWindow(protectionOverlay,SW_HIDE);if(video&&GetCapture()==video)ReleaseCapture();}
 std::pair<float,float> protectionPoint(HWND h,POINT p){RECT r{};GetClientRect(h,&r);auto e=engine.snapshot().metrics.resolution.output;return engine.previewView().sourcePoint(float(p.x),float(p.y),float(r.right),float(r.bottom),float(e.width),float(e.height));}
 LRESULT CALLBACK interaction(HWND h,UINT m,WPARAM w,LPARAM l,UINT_PTR id,DWORD_PTR){
-    static POINT panPoint{};static bool panning=false;
+    static POINT panPoint{},clickPoint{};static bool panning=false,videoClick=false;
+    if(id==VideoSurface&&m==WM_CAPTURECHANGED)videoClick=false;
     if(id==VideoSurface&&protectionArmed){
         if(m==WM_SETCURSOR){SetCursor(LoadCursorW(nullptr,IDC_CROSS));return TRUE;}
         if(m==WM_KEYDOWN&&w==VK_ESCAPE){cancelProtection();return 0;}
@@ -128,7 +129,9 @@ LRESULT CALLBACK interaction(HWND h,UINT m,WPARAM w,LPARAM l,UINT_PTR id,DWORD_P
     if(id==VideoSurface&&m==WM_PAINT){veyra::ui::PaintBuffer paint(h);veyra::ui::opaqueBlack(paint.dc,paint.rect);return 0;}
     if(id==OriginalHold){if(m==WM_LBUTTONDOWN){holdOriginal=true;SetCapture(h);updateComparison();return 0;}if(m==WM_LBUTTONUP||m==WM_CAPTURECHANGED){holdOriginal=false;if(GetCapture()==h)ReleaseCapture();updateComparison();return 0;}}
     if(id==VideoSurface&&compareMode==2&&(m==WM_LBUTTONDOWN||m==WM_MOUSEMOVE)&&(m==WM_LBUTTONDOWN||(w&MK_LBUTTON))){if(m==WM_LBUTTONDOWN)SetCapture(h);RECT r{};GetClientRect(h,&r);auto extent=engine.snapshot().metrics.resolution.output;auto view=engine.previewView();float contentWidth=float(r.right);if(extent.width&&extent.height)contentWidth=std::min(float(r.right),float(r.bottom)*extent.width/extent.height);contentWidth*=view.zoom;float left=r.right*.5f-contentWidth*view.centerX;compareSplit=std::clamp((float(GET_X_LPARAM(l))-left)/std::max(1.0f,contentWidth),0.0f,1.0f);updateComparison();return 0;}
-    if(id==VideoSurface&&m==WM_LBUTTONUP&&GetCapture()==h){ReleaseCapture();return 0;}
+    if(id==VideoSurface&&m==WM_LBUTTONDOWN){clickPoint={GET_X_LPARAM(l),GET_Y_LPARAM(l)};videoClick=true;SetFocus(h);SetCapture(h);return 0;}
+    if(id==VideoSurface&&m==WM_MOUSEMOVE&&videoClick&&(std::abs(GET_X_LPARAM(l)-clickPoint.x)>GetSystemMetrics(SM_CXDRAG)||std::abs(GET_Y_LPARAM(l)-clickPoint.y)>GetSystemMetrics(SM_CYDRAG)))videoClick=false;
+    if(id==VideoSurface&&m==WM_LBUTTONUP&&GetCapture()==h){RECT r{};GetClientRect(h,&r);POINT p{GET_X_LPARAM(l),GET_Y_LPARAM(l)};const bool toggle=videoClick&&PtInRect(&r,p)&&!panning;videoClick=false;ReleaseCapture();if(toggle)SendMessageW(mainWindow,WM_COMMAND,Play,0);return 0;}
     return DefSubclassProc(h,m,w,l);
 }
 veyra::engine::PlayerOptions options(){return veyra::engine::PlayerOptions::from(engine.snapshot().desired);}
@@ -410,7 +413,7 @@ case Export:if(uiState.mode==veyra::ui::Mode::Professional)startVideoExport(fals
 case Info:showDiagnostics=!showDiagnostics;layout();break;
 }return 0;
 case WM_HSCROLL:if(reinterpret_cast<HWND>(lp)==GetDlgItem(hwnd,Volume)){engine.setVolume(float(SendDlgItemMessageW(hwnd,Volume,TBM_GETPOS,0,0))/100,false);return 0;}if(reinterpret_cast<HWND>(lp)==seekBar){dragging=LOWORD(wp)==TB_THUMBTRACK;auto s=engine.snapshot();if(!dragging&&LOWORD(wp)!=TB_ENDTRACK&&s.duration>0)engine.seek(s.duration*SendMessageW(seekBar,TBM_GETPOS,0,0)/10000.0);}return 0;
-case WM_KEYDOWN:if(wp==VK_ESCAPE&&protectionArmed){cancelProtection();return 0;}if(wp==VK_SPACE){SendMessageW(hwnd,WM_COMMAND,Play,0);return 0;}if(wp==VK_F11){toggleFullscreen();return 0;}if(wp==VK_ESCAPE&&full){toggleFullscreen();return 0;}if(wp=='V'){holdOriginal=true;updateComparison();return 0;}break;
+case WM_KEYDOWN:if(wp==VK_LEFT||wp==VK_RIGHT){auto s=engine.snapshot();if(s.running&&!s.capture&&!s.image&&!s.failed&&s.duration>0&&(s.transport==veyra::engine::TransportState::Playing||s.transport==veyra::engine::TransportState::Paused)){const double from=s.seekPresented<s.seekRequested?s.seekTarget:s.position;engine.seek(std::clamp(from+(wp==VK_RIGHT?5.0:-5.0),0.0,s.duration));}return 0;}if(wp==VK_ESCAPE&&protectionArmed){cancelProtection();return 0;}if(wp==VK_SPACE){SendMessageW(hwnd,WM_COMMAND,Play,0);return 0;}if(wp==VK_F11){toggleFullscreen();return 0;}if(wp==VK_ESCAPE&&full){toggleFullscreen();return 0;}if(wp=='V'){holdOriginal=true;updateComparison();return 0;}break;
 case WM_KEYUP:if(wp=='V'){holdOriginal=false;updateComparison();return 0;}break;
 case WM_SYSKEYDOWN:if(wp==VK_RETURN&&(lp&(1LL<<29))){toggleFullscreen();return 0;}break;
 case WM_THEMECHANGED:veyra::ui::glassTextTheme().reset();[[fallthrough]];
@@ -567,7 +570,8 @@ wchar_t focusedClass[32]{};GetClassNameW(GetFocus(),focusedClass,32);const bool 
 if(!editing&&msg.message==WM_KEYDOWN&&(GetKeyState(VK_CONTROL)&0x8000)&&(msg.wParam=='L'||msg.wParam==VK_PRIOR||msg.wParam==VK_NEXT)){SendMessageW(hwnd,WM_COMMAND,msg.wParam=='L'?PlaylistButton:msg.wParam==VK_PRIOR?PlaylistPrevious:PlaylistNext,0);continue;}
 if(!editing&&msg.message==WM_KEYDOWN&&(GetKeyState(VK_CONTROL)&0x8000)&&msg.wParam=='O'){SendMessageW(hwnd,WM_COMMAND,Open,0);continue;}
 if(!editing&&msg.message==WM_KEYDOWN&&(GetKeyState(VK_CONTROL)&0x8000)&&msg.wParam=='E'){if(uiState.mode==veyra::ui::Mode::Daily)switchMode();selectInspector(3);continue;}
-const bool key=(!editing)&&(msg.wParam==VK_F11||msg.wParam==VK_ESCAPE||(msg.wParam==VK_SPACE&&(GetFocus()==hwnd||GetFocus()==video))||msg.wParam=='V'||(msg.wParam==VK_RETURN&&msg.message==WM_SYSKEYDOWN));if(key){SendMessageW(hwnd,msg.message,msg.wParam,msg.lParam);continue;}}
+const bool seekKey=(msg.wParam==VK_LEFT||msg.wParam==VK_RIGHT)&&_wcsicmp(focusedClass,TRACKBAR_CLASSW)!=0&&_wcsicmp(focusedClass,L"ListBox")!=0&&!(GetKeyState(VK_CONTROL)&0x8000)&&!(GetKeyState(VK_MENU)&0x8000)&&!(GetKeyState(VK_SHIFT)&0x8000);
+const bool key=(!editing)&&(seekKey||msg.wParam==VK_F11||msg.wParam==VK_ESCAPE||(msg.wParam==VK_SPACE&&(GetFocus()==hwnd||GetFocus()==video))||msg.wParam=='V'||(msg.wParam==VK_RETURN&&msg.message==WM_SYSKEYDOWN));if(key){SendMessageW(hwnd,msg.message,msg.wParam,msg.lParam);continue;}}
 if(msg.message==WM_MOUSEWHEEL&&uiState.mode==veyra::ui::Mode::Professional&&GetAncestor(msg.hwnd,GA_ROOT)==hwnd){POINT p{GET_X_LPARAM(msg.lParam),GET_Y_LPARAM(msg.lParam)};if(WindowFromPoint(p)==video){SendMessageW(video,msg.message,msg.wParam,msg.lParam);continue;}}
 if(veyra::ui::playlistWindowMessage(msg))continue;
 if(IsDialogMessageW(hwnd,&msg))continue;TranslateMessage(&msg);DispatchMessageW(&msg);}CoUninitialize();return int(msg.wParam);

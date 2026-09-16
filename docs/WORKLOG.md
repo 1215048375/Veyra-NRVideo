@@ -2098,3 +2098,11 @@ VS DevShell 下 `cmake --build out/ci-full --target veyra --parallel 4` 完成 E
 用户要求日常模式也显示“按住原图 V”“分屏拖动”。修改 apps/veyra/ui/AppShell.cpp：复用原按钮与对比处理，在日常底栏播放列表一排右侧显示，适配影院底色与控件层级；V 键不再限定专业模式。专业模式位置保持。未修改增强图、运行组件或 FFmpeg。
 
 完整构建命令：VS x64 DevShell 下 `cmake --build out/ci-full --target veyra --parallel 4`，成功链接，日志 out/ci-dependencies/daily-comparison-build.log。临时验证脚本 `python out/ci-dependencies/daily-comparison-smoke.py` 启动空媒体日常模式，只操作该进程自有 HWND，检查720×540、800×600、1440×900下七个列表/对比控件的显示样式和矩形互不重叠；程序12秒自动退出。日志 out/ci-dependencies/daily-comparison-smoke.log。GPU/NR/FG Create/Evaluate及真实媒体原图/分屏效果本轮未执行；下一步为真实素材视觉验收。未push/发布。
+
+## 2026-09-16 左右键跳转与画面点击播放
+
+用户要求左右方向键分别后退/快进5秒，点击视频画面暂停/继续。修改 AppShell.cpp：左右键复用 EngineController::seek，以未完成的 seekTarget 累计连续按键并钳制到0～duration，保留暂停状态；仅有效文件播放/暂停时处理。编辑框、下拉框、列表、滑块保留其方向键功能，组合键不抢占。视频左键按下/松开且未超过拖动阈值、释放仍在画面内时复用 Play 命令；分屏拖动、保护框选优先，不触发暂停。捕获丢失取消点击。
+
+完整构建：VS x64 DevShell 下 `cmake --build out/ci-full --target veyra --parallel 4` 成功，日志 out/ci-dependencies/keyboard-click-build.log。使用本机 ffmpeg 的 testsrc2 生成320×180/30fps/40秒H.264测试片（忽略目录），运行 `python out/ci-dependencies/keyboard-click-smoke.py`，实际启动程序解码并通过自有HWND执行点击和按键：暂停、暂停时+5秒、-5秒、连续后退钳制0秒、恢复播放且媒体时间继续增加，全部通过，正常退出0。日志 out/ci-dependencies/keyboard-click-smoke-final.log；真实播放器日志 out/ci-full/logs/veyra-app.log。首轮脚本枚举控件过早导致时间控件等待超时，增加创建等待后通过，失败保留 keyboard-click-smoke.log。
+
+实际基础视频解码/呈现已运行；NR/SR/FG全部关闭，增强 Create/Evaluate未执行。未实测音轨同步、分屏增强画面与其他设备。git diff --check通过；未push/发布，未改运行组件或patched FFmpeg，媒体/日志均未入源码。下一步为用户实际视频操作体验验收。
