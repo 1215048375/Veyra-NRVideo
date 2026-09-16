@@ -76,6 +76,7 @@ public:
     void remotePlayLoginPin(std::string);
 #endif
     void prefetchImages(std::vector<std::wstring> paths);
+    std::pair<size_t,size_t> imagePrefetchProgress()const;
     void stop();
     void comparison(int mode,bool base,float split=.5f){comparisonMode_=mode;comparisonBase_=base;comparisonSplit_=std::clamp(split,0.0f,1.0f);}
     void pause(bool p);

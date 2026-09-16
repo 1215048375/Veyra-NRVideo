@@ -28,6 +28,7 @@ public:
         if(!stamp.valid||it->second.stamp!=stamp){bytes_-=it->second.image->pixels.size();entries_.erase(it);return {};}
         return it->second.image;
     }
+    std::pair<size_t,size_t> progress()const{std::lock_guard lock(mutex_);return {entries_.size(),wanted_.size()};}
     size_t bytes()const{std::lock_guard lock(mutex_);return bytes_;}
 private:
     struct Stamp {uintmax_t size=0;std::filesystem::file_time_type time{};bool valid=false;bool operator==(const Stamp&)const=default;};

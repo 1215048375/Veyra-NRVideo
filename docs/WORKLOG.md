@@ -2162,3 +2162,11 @@ VS DevShell 下 `cmake --build out/ci-full --target veyra --parallel 4` 完成 E
 
 首轮沙箱中截图入口先检查系统Pictures目录，权限提示使测试超时（image-reuse-smoke.log）；正常权限复测输出明确在项目out且成功。未push/发布，未新增SDK/runtime/测试媒体入Git。下一步用户同尺寸图片开启NR后的实际翻页与历史残影验收；不同尺寸仍慢需单独扩展资源复用，不能宣称本次已覆盖。
 收尾后完整编译image-reuse-build-verified.log成功；再次运行实际像素/20张预解码/尺寸回退检查全部通过，image-reuse-smoke-final.log为最终结果。去掉重复布局后脚本轮询耗时以该日志为准，不作为NR速度或屏幕延迟承诺。
+
+## 2026-09-17 MINI直接按钮与图片预解码分数
+
+用户要求MINI直接显示关闭/最小化，并显示图片预解码计数。AppShell在MINI左栏顶部用两个独立按钮替代Logo，保留原WindowMin/WindowClose处理；左栏298DIP位置显示就绪/目标，例如12/20，日常/专业复用右侧FPS标签显示“预解码12/20”。ImageDecodeCache新增锁内progress快照，EngineController转发；分子为当前缓存条目数，分母为当前预加载窗口目标数（最多20），失败/预算跳过不算就绪，目录清空归零。新增队列测试验证预算不足2/3和清空0/0。
+
+实际命令：scripts/acceptance/playlist.ps1 -Root .，101队列/目录/缓存检查、865HWND、UI合同和两种AppShell编译通过，out/ci-dependencies/mini-buttons-progress-tests.log。VS DevShell执行cmake --build out/ci-full --target veyra --parallel 4成功，mini-buttons-progress-build.log。
+
+python out/ci-dependencies/mini-progress-smoke.py：真实25张PNG目录就绪后日常显示20/20，切MINI显示20/20且关闭/最小化按钮可见不重叠；通过自有按钮BM_CLICK验证最小化IsIconic与恢复后关闭退出0。mini-progress-smoke.log记录实际日志路径。增强全关，NR/SR/FG Create/Evaluate未执行。改动仅窗口布局/缓存只读计数，未push/发布；下一步用户实际目录下进度与窗口按钮体验确认。

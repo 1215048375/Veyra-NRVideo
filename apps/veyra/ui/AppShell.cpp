@@ -43,7 +43,7 @@
 #include "veyra/engine/Subtitles.h"
 namespace {
 constexpr DWORD ShellStyle=WS_POPUP|WS_THICKFRAME|WS_MINIMIZEBOX|WS_MAXIMIZEBOX|WS_SYSMENU|WS_CLIPCHILDREN;
-enum {Open=101,Play,Stop,Save,Nr,Sr,Fg,Seek,Info,Capture,Export,Realtime,Recent,Multiplier,Settings,OriginalHold,CompareToggle,Split,Reference,Fullscreen,ModeSwitch=220,Master,DailyPreset,Volume,Mute,Subtitle,SubtitleLoad,SubtitleSize,ImageOpen,InspectorDrawer,TabEnhance,TabFg,TabPresets,TabExport,JobProgress,Details,Brand,MediaTitle,TimeLabel,EmptyTitle,EmptyHint,ProRailVideo,ProRailCapture,WindowMin,WindowMax,WindowClose,FpsLabel,RemotePlay,TabAudio,PlaylistButton=300,PlaylistPrevious,PlaylistNext,PlaylistRestart,PlaylistOrder,PlaylistLoop,ImageFolderOpen,ModeMenu,ModeDaily,ModeProfessional,ModeMini,VideoSurface=1000};
+enum {Open=101,Play,Stop,Save,Nr,Sr,Fg,Seek,Info,Capture,Export,Realtime,Recent,Multiplier,Settings,OriginalHold,CompareToggle,Split,Reference,Fullscreen,ModeSwitch=220,Master,DailyPreset,Volume,Mute,Subtitle,SubtitleLoad,SubtitleSize,ImageOpen,InspectorDrawer,TabEnhance,TabFg,TabPresets,TabExport,JobProgress,Details,Brand,MediaTitle,TimeLabel,EmptyTitle,EmptyHint,ProRailVideo,ProRailCapture,WindowMin,WindowMax,WindowClose,FpsLabel,RemotePlay,TabAudio,PlaylistButton=300,PlaylistPrevious,PlaylistNext,PlaylistRestart,PlaylistOrder,PlaylistLoop,ImageFolderOpen,ModeMenu,ModeDaily,ModeProfessional,ModeMini,ImageProgress,VideoSurface=1000};
 veyra::engine::EngineController engine;
 veyra::engine::Playlist playlist;
 veyra::ui::ImageFolder imageFolder;
@@ -288,8 +288,11 @@ void layout(){
     for(int id:{EmptyTitle,EmptyHint})surface(GetDlgItem(mainWindow,id),background);
     pos(subtitleLabel,full?20:g.left+20,full?h-(fullControls?250:118):g.top+g.viewHeight-118,full?w-40:g.viewWidth-40,108,uiState.subtitles&&GetWindowTextLengthW(subtitleLabel)>0);
     put(JobProgress,tx,barTop+58,std::min(300,tw),24,exportJob.poll().state!=veyra::engine::ExportState::Idle&&!full);
+    put(ImageProgress,8,298,52,18,mini&&imageFolder.active(currentFile));
     if(mini){
-        for(auto& p:placements){const int id=GetDlgCtrlID(p.child);const bool keep=p.child==video||p.child==seekBar||p.child==subtitleLabel||id==Brand||id==ProRailVideo||id==ProRailCapture||id==ImageOpen||id==PlaylistButton||id==RemotePlay||id==ModeMenu||id==Info;
+        put(Brand,0,0,1,1,false);put(WindowMin,6,12,26,32);put(WindowClose,36,12,26,32);
+        for(int id:{WindowMin,WindowClose,ImageProgress})surface(GetDlgItem(mainWindow,id),RGB(16,17,18));
+        for(auto& p:placements){const int id=GetDlgCtrlID(p.child);const bool keep=p.child==video||p.child==seekBar||p.child==subtitleLabel||id==Brand||id==ProRailVideo||id==ProRailCapture||id==ImageOpen||id==PlaylistButton||id==RemotePlay||id==ModeMenu||id==Info||id==WindowMin||id==WindowClose||id==ImageProgress;
             if(!keep){p.flags&=~SWP_SHOWWINDOW;p.flags|=SWP_HIDEWINDOW;}}
     }
     // Each HWND enters the batch once. Mixing HIDE/SHOW entries for a child
@@ -362,7 +365,7 @@ control(L"BUTTON",L"音频",TabAudio,BS_PUSHBUTTON,0,0,60,36);
 const wchar_t* tabs[]={L"增强",L"运动",L"预设",L"导出"};for(int i=0;i<4;++i)control(L"BUTTON",tabs[i],TabEnhance+i,BS_PUSHBUTTON,0,0,76,36);
 control(L"BUTTON",L"音量",Mute,BS_PUSHBUTTON,0,0,54,36);auto vol=control(TRACKBAR_CLASSW,L"音量",Volume,TBS_HORZ|TBS_NOTICKS,0,0,80,26);SendMessageW(vol,TBM_SETRANGE,TRUE,MAKELPARAM(0,100));SendMessageW(vol,TBM_SETPOS,TRUE,100);
 control(L"BUTTON",L"字幕",Subtitle,BS_PUSHBUTTON,0,0,62,36);control(L"STATIC",L"尚未打开媒体",MediaTitle,SS_LEFT|SS_ENDELLIPSIS,0,0,250,26);control(L"STATIC",L"00:00 / 00:00",TimeLabel,SS_LEFT,0,0,200,20);
-control(L"STATIC",L"处理 0.0 fps",FpsLabel,SS_RIGHT,0,0,154,20);
+control(L"STATIC",L"处理 0.0 fps",FpsLabel,SS_RIGHT,0,0,154,20);control(L"STATIC",L"0/0",ImageProgress,SS_CENTER,8,298,52,18);SetPropW(GetDlgItem(hwnd,ImageProgress),L"veyra.tip",HANDLE(L"预解码缓存：已就绪 / 本轮目标；内存不足或解码失败的图片不计为就绪"));
 control(L"STATIC",L"开始观看",EmptyTitle,SS_CENTER,0,0,500,48);emptyFont=veyra::ui::makeFont(hwnd,26,FW_NORMAL);SendDlgItemMessageW(hwnd,EmptyTitle,WM_SETFONT,WPARAM(emptyFont),TRUE);control(L"STATIC",L"打开本地视频，或连接采集卡\n精细调整与原生导出在专业模式中",EmptyHint,SS_CENTER,0,0,500,68);
 control(L"BUTTON",L"性能  ▾",Details,BS_PUSHBUTTON,0,0,112,32);control(L"BUTTON",L"",JobProgress,BS_PUSHBUTTON,0,0,280,32);metricLabel=control(L"STATIC",L"",0,SS_LEFT,0,0,500,132);
 control(L"BUTTON",L"最小化",WindowMin,BS_PUSHBUTTON,0,0,32,32);control(L"BUTTON",L"最大化",WindowMax,BS_PUSHBUTTON,0,0,32,32);control(L"BUTTON",L"关闭窗口",WindowClose,BS_PUSHBUTTON,0,0,32,32);
@@ -553,6 +556,8 @@ setText(GetDlgItem(hwnd,Mute),!s.audioAvailable?L"无音轨":s.muted?L"静音":L
 EnableWindow(GetDlgItem(hwnd,PlaylistPrevious),(imageFolder.active(currentFile)?imageFolder.adjacent(-1):playlist.adjacent(-1)).has_value());EnableWindow(GetDlgItem(hwnd,PlaylistNext),(imageFolder.active(currentFile)?imageFolder.adjacent(1):playlist.adjacent(1)).has_value());
 EnableWindow(GetDlgItem(hwnd,PlaylistRestart),!currentFile.empty()&&!s.capture&&!s.image);setText(GetDlgItem(hwnd,PlaylistOrder),playlist.mode==veyra::engine::PlaylistMode::Shuffle?L"随机播放":playlist.mode==veyra::engine::PlaylistMode::RepeatOne?L"单曲循环":L"顺序播放");setText(GetDlgItem(hwnd,PlaylistLoop),playlist.repeatAll?L"列表循环 ✓":L"列表循环");veyra::ui::marked(GetDlgItem(hwnd,PlaylistLoop),playlist.repeatAll);
 EnableWindow(seekBar,s.running&&!s.capture&&!s.image&&s.duration>0);ShowWindow(seekBar,(!full||fullControls)&&!s.capture&&!s.image&&!(showDiagnostics&&uiState.mode==veyra::ui::Mode::Professional&&!full)?SW_SHOW:SW_HIDE);EnableWindow(GetDlgItem(hwnd,Play),!currentFile.empty()&&!s.capture&&!s.image);EnableWindow(GetDlgItem(hwnd,Stop),s.running);
+if(imageFolder.active(currentFile)){auto [ready,total]=engine.imagePrefetchProgress();setText(GetDlgItem(hwnd,FpsLabel),std::format(L"预解码 {}/{}",ready,total));setText(GetDlgItem(hwnd,ImageProgress),std::format(L"{}/{}",ready,total));}
+ShowWindow(GetDlgItem(hwnd,ImageProgress),uiState.mode==veyra::ui::Mode::Mini&&!full&&imageFolder.active(currentFile)?SW_SHOW:SW_HIDE);
 refreshComparisonLine();setText(GetDlgItem(hwnd,MediaTitle),currentFile.empty()?L"尚未打开媒体":s.remotePlay?L"PS5 · LIVE":s.capture?L"采集卡 · LIVE":(imageFolder.active(currentFile)?std::format(L"[{} / {}] ",imageFolder.index+1,imageFolder.files.size()):L"")+std::filesystem::path(currentFile).filename().wstring());
 auto stamp=[](double v){int seconds=std::max(0,int(v));return std::format(L"{:02}:{:02}:{:02}",seconds/3600,seconds/60%60,seconds%60);};
 setText(GetDlgItem(hwnd,TimeLabel),s.remotePlay?(s.remoteRatesReady?std::format(L"接收 {:.1f} · 解码 {:.1f} fps",s.remoteReceivedFps,s.remoteDecodedFps):std::wstring(L"PS5 帧率采样中")):s.capture?std::format(L"输入 {:.1f} fps{}",s.captureFps,s.captureHalfRate?L" · 60→30":s.applied.content==veyra::engine::ContentRate::Capture60To30?L" · 不适用":L""):s.image?L"静态图片":stamp(s.seekPresented<s.seekRequested&&!s.failed?s.seekTarget:s.position)+L"  /  "+stamp(s.duration)+(s.seekPresented<s.seekRequested&&!s.failed?L"  ·  跳转中…":L"")+(s.transport==veyra::engine::TransportState::Opening?L"  ·  正在打开…":s.failed?L"  ·  发生错误，详见专业诊断":L""));

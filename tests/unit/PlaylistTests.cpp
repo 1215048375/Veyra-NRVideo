@@ -36,8 +36,8 @@ int main() {
             auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
             while(!cache.get(paths[1])&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(std::chrono::milliseconds(5));
             require(cache.get(paths[0])&&cache.get(paths[1])&&cache.bytes()==8,"background decoding retains images within budget");
-            require(!cache.get(paths[2]),"budget excludes extra image");
-            auto held=cache.get(paths[0]);cache.prefetch({});require(cache.bytes()==0&&!cache.get(paths[0])&&held->pixels.size()==4,"clear evicts cache without invalidating displayed shared image");
+            require(!cache.get(paths[2]),"budget excludes extra image");require(cache.progress()==std::pair<size_t,size_t>{2,3},"progress counts ready images, not failed or budget-skipped attempts");
+            auto held=cache.get(paths[0]);cache.prefetch({});require(cache.progress()==std::pair<size_t,size_t>{0,0},"progress clears with folder");require(cache.bytes()==0&&!cache.get(paths[0])&&held->pixels.size()==4,"clear evicts cache without invalidating displayed shared image");
             cache.prefetch({paths[0]});deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
             while(!cache.get(paths[0])&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(std::chrono::milliseconds(5));
             require(bool(cache.get(paths[0])),"refill after clear");
