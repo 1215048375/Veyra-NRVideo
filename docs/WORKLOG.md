@@ -2125,3 +2125,21 @@ VS DevShell 下 `cmake --build out/ci-full --target veyra --parallel 4` 完成 E
 命令：pwsh -NoProfile -File scripts/acceptance/playlist.ps1 -Root .，99项队列/目录/缓存检查、865窗口检查、既有UI合同、两种AppShell编译通过；日志out/ci-dependencies/image-prefetch-tests.log。python out/ci-dependencies/image-prefetch-smoke.py使用15张真实PNG，验证后台预解码10张及下一张播放器命中，退出0；image-prefetch-smoke.log与image-prefetch-app-1789559225192683400.log。全关增强，实际PNG加载/呈现管线运行，NR/SR/FG Create/Evaluate未执行；大图峰值和增强启用下速度未实测。
 
 完整构建命令 cmake --build out/ci-full --target veyra --parallel 4；初始成功image-prefetch-build.log。脚本首次读中文C++用了默认GBK导致编辑中断，随后显式UTF8完成；检查时去掉重复的预算判断。最终编译见image-prefetch-build-verified.log。未push/发布，未新增SDK/DLL/模型/测试媒体到Git。下一项为用户真实目录的内存/翻图延迟体验验收，GPU初始化复用尚未实施，不将预解码命中宣称为瞬时增强。
+
+## 2026-09-16 图片原图/分屏对比修复
+
+用户报告图片按V和分屏无效。确认不是没有UI：普通图片首次graph.process使用comparisonMode_!=0作为retainReferences，初始模式0导致lease.referencesValid=false；之后图片进入hasOutput静态呈现分支，不再处理源帧，VideoPresenter拒绝引用无效对照纹理。视频持续处理下一帧通常掩盖问题。大图分块路径已有独立原图/增强合成，本轮不修改。
+
+修复src/engine/EngineController.cpp两处process（正常及失败恢复）：isImage始终保留源图/base对照纹理。后续V/分屏沿用现有呈现逻辑，不重开、不重新增强，不新增CPU回读。视频原策略保持。
+
+完整构建：VS DevShell下cmake --build out/ci-full --target veyra --parallel 4通过，日志out/ci-dependencies/image-comparison-build.log。实际运行python out/ci-dependencies/image-comparison-smoke.py，加载320×180 PNG，在首次绘制后按V、松开V、启用分屏及鼠标拖动，日志确认reference=input mode=1、释放后停止对照绘制、mode=2随split变化；全部对比记录保持同一source/epoch/revision，程序正常退出0。证据image-comparison-smoke.log与其中列出的image-comparison-app日志。使用VEYRA_VERBOSE_FRAME_LOGS=1，仅测试进程开启。
+
+实际D3D12图片对照呈现分支已执行；NR/SR/FG全关，未执行增强Create/Evaluate，未做增强开启后的画质差异视觉验收或大图分块回归。git diff --check通过；无push/发布、无SDK/runtime变更。下一步唯一验收为用户开启增强后的图片V/分屏目视比较。
+
+## 2026-09-16 可选彩色对比分割线
+
+用户要求图片/视频对比分界更明显且可选。新增ComparisonLine.h，按输出长宽比、缩放/平移、分屏比例计算屏幕位置，用窄条layered子窗口叠加5DIP分割线（3DIP亮色与两侧深色描边），复用现有鼠标穿透overlay机制。图片、视频及分块大图共用UI几何；仅分屏时显示，V按住/关闭分屏/切换来源未出帧时隐藏，不写入截图保存或导出像素。右键“分屏拖动”可隐藏/显示，选择亮青、洋红、亮黄，默认亮青。UI偏好格式v3保存两项并兼容v1/v2，更新工具提示。
+
+改动文件：AppShell.cpp、ComparisonLine.h、UiPreferenceStore.h、UiContractTests.cpp、README双语说明；保留本轮开工时尚未提交的EngineController图片对照纹理修复及WORKLOG。未修改GPU增强处理和运行组件。
+
+验证：scripts/acceptance/playlist.ps1 -Root .通过99队列/目录/缓存、865窗口检查、UI合同含新增显示/颜色偏好往返、两种AppShell编译；日志out/ci-dependencies/comparison-line-tests.log。VS DevShell下cmake --build out/ci-full --target veyra --parallel 4完成，comparison-line-build.log。实际运行comparison-line-smoke.py与comparison-line-video-smoke.py，PNG和40秒H.264分别确认彩色线HWND/颜色状态/尺寸、拖动位置变化、V隐藏/释放恢复、关闭分屏隐藏，退出0；对应同名log记录详细播放器日志路径。操作只针对测试进程的自有窗口。NR/SR/FG关闭，增强Create/Evaluate、HDR视觉亮度、大图分块与菜单鼠标手动体验未执行。未push/发布。下一步用户素材的分界线颜色/亮度视觉验收。
