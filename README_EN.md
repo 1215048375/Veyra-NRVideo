@@ -159,3 +159,4 @@ Thanks to [Magpie Experimental](https://github.com/SAOG0721/Magpie/tree/experime
 See [Third-Party Notices](THIRD_PARTY_NOTICES.md) for other dependencies, sources, and licenses.
 
 Image folders: choose Open image folder from the professional Image button, or press Ctrl+Shift+O. Only PNG/JPG/JPEG files directly in the folder are listed, sorted by filename; videos, audio and subfolders are ignored. Wheel up/down over the image selects the previous/next image, limited to one image per 450 ms. Ctrl+wheel retains zoom in professional mode. The transport shows the image index and supports previous/next; navigation stops at either end.
+Image folders predecode up to 10 nearby images in a background queue, with a 512 MiB RGBA cache budget. Large images reduce the retained count; cache misses use normal loading. GPU initialization and enhancement still take time.

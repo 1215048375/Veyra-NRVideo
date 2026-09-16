@@ -1,4 +1,5 @@
 #include "veyra/engine/EngineController.h"
+#include "veyra/engine/ImageDecodeCache.h"
 #include "veyra/engine/VideoPresenter.h"
 #include "veyra/engine/VideoExportJob.h"
 #include "veyra/engine/LivePresentationTiming.h"
@@ -48,7 +49,13 @@ void logFrameFlow(const diagnostics::FrameFlowMetrics& m,const char* state){
     veyra::log::info("frame-flow",std::format("state={} session={} revision={} epoch={} source={} batch={} readyFence={} consumerFence={} captureReceived={} mailboxOverwritten={} sourceAccepted={} sourceSkippedBeforeGraph={} realSubmitted={} fgCandidate={} fgSkippedBeforeEval={} fgEvaluated={} fgWarmup={} fgReadyValid={} fgInvalid={} realPresented={} generatedPresented={} generatedExpiredAfterEval={} cancelledBeforePresent={} commandSlots={} commandHighWater={} presentationHighWater={} slotWaitCount={} slotWaitMs={:.3f} generatedFps={:.2f} presentSubmitFps={:.2f} resetRevision={} resetEpoch={} resetReason={} resetOutcome={} resetDrainMs={:.3f} resetDestroyMs={:.3f} resetCreateMs={:.3f} resetWarmupMs={:.3f} resetFirstValidMs={:.3f} resetTotalMs={:.3f}",state,id.sessionId,id.frame.settingsRevision,id.frame.epoch,id.frame.sourceFrameId,id.batchId,id.readyFence,id.consumerFence,c.captureReceived,c.mailboxOverwritten,c.sourceAccepted,c.sourceSkippedBeforeGraph,c.realSubmitted,c.fgCandidate,c.fgSkippedBeforeEval,c.fgEvaluated,c.fgWarmup,c.fgReadyValid,c.fgInvalid,c.realPresented,c.generatedPresented,c.generatedExpiredAfterEval,c.cancelledBeforePresent,c.commandSlotsInFlight,c.commandSlotHighWater,c.presentationBatchHighWater,m.slotReuseWaitCount,m.slotReuseWaitMs.value_or(0),m.validGeneratedFps,m.presentSubmitFps,r.settingsRevision,r.epoch,unsigned(r.reason),unsigned(r.outcome),ms(diagnostics::ResetStage::Drain),ms(diagnostics::ResetStage::Destroy),ms(diagnostics::ResetStage::Create),ms(diagnostics::ResetStage::Warmup),ms(diagnostics::ResetStage::FirstValid),r.totalMs.value_or(-1.0)));
 }
 }
-EngineController::EngineController(){worker_=std::thread(&EngineController::dispatch,this);}
+void EngineController::prefetchImages(std::vector<std::wstring> paths){imageCache_->prefetch(std::move(paths));}
+EngineController::EngineController(){imageCache_=std::make_unique<ImageDecodeCache>([](const std::wstring& path,sink::RgbaImage& image,size_t limit){
+    const auto hr=CoInitializeEx(nullptr,COINIT_MULTITHREADED);if(FAILED(hr))return false;
+    struct ComScope{~ComScope(){CoUninitialize();}} scope;
+    const auto start=Clock::now();const bool ok=sink::loadImage(path,image,limit);
+    veyra::log::info("image-prefetch",std::format("decoded={} bytes={} limit={} ms={:.2f}",ok,image.pixels.size(),limit,std::chrono::duration<double,std::milli>(Clock::now()-start).count()));return ok;
+});worker_=std::thread(&EngineController::dispatch,this);}
 EngineController::~EngineController(){ {std::lock_guard lock(mutex_);shutdown_=true;pending_={};stop_=true;}wake_.notify_one();if(worker_.joinable())worker_.join(); }
 void EngineController::dispatch(){
     for(;;){std::function<void()> task;{std::unique_lock lock(mutex_);wake_.wait(lock,[&]{return shutdown_||bool(pending_);});if(shutdown_)break;task=std::move(pending_);pending_={};busy_=true;stop_=false;}
@@ -140,10 +147,13 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
             if(!ctx.initialize(dd,st)||!ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),6,st)){status(L"D3D12初始化失败，请查看诊断",true);break;}
             auto ext=std::filesystem::path(path).extension().wstring();for(auto& c:ext)c=towlower(c);
             const bool isImage=ext==L".png"||ext==L".jpg"||ext==L".jpeg";
-            sink::RgbaImage image;
+            sink::RgbaImage decodedImage;
+            auto cachedImage=isImage?imageCache_->get(path):nullptr;
+            const auto& image=cachedImage?*cachedImage:decodedImage;
             uint32_t width=0,height=0;double duration=0;
             if(isImage){
-                if(!sink::loadImage(path,image)){status(L"无法解码PNG/JPEG",true);break;}
+                if(!cachedImage&&!sink::loadImage(path,decodedImage)){status(L"无法解码PNG/JPEG",true);break;}
+                veyra::log::info("image-cache",std::format("hit={} bytes={} retainedBytes={}",bool(cachedImage),image.pixels.size(),imageCache_->bytes()));
                 if(!pipeline::Extent{image.width,image.height}.valid()||uint64_t(image.width)*image.height>16777216){
                     runLargeImage(window,image,options,ctx,ring);break;
                 }

@@ -74,7 +74,7 @@ bool saveHdrScreenshot(const std::wstring& path,gfx::D3D12DeviceContext& ctx,gfx
     if(!MoveFileExW(partial.c_str(),path.c_str(),MOVEFILE_WRITE_THROUGH))return false;guard.active=false;
     log::info("hdr-screenshot","saved and lossless-verified scRGB FP16 JPEG XR; 1=80 nits, includes software processing only");return true;
 }
-bool loadImage(const std::wstring& path,RgbaImage& img) {
+bool loadImage(const std::wstring& path,RgbaImage& img,size_t maxBytes) {
     ComPtr<IWICImagingFactory> fac;ComPtr<IWICBitmapDecoder> dec;ComPtr<IWICBitmapFrameDecode> frame;ComPtr<IWICFormatConverter> conv;
     if(FAILED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&fac)))||
        FAILED(fac->CreateDecoderFromFilename(path.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&dec))||
@@ -86,6 +86,8 @@ bool loadImage(const std::wstring& path,RgbaImage& img) {
     if(uint64_t(img.width)*img.height>std::numeric_limits<UINT>::max()/4){
         log::error("image","decoded RGBA exceeds WIC CopyPixels buffer capacity");return false;
     }
+    if(uint64_t(img.width)*img.height*4>maxBytes)return false;
+    if(uint64_t(img.width)*img.height*4>maxBytes)return false;
     ComPtr<IWICMetadataQueryReader> metadata;
     UINT orientation=1;
     if(SUCCEEDED(frame->GetMetadataQueryReader(&metadata))){PROPVARIANT value{};

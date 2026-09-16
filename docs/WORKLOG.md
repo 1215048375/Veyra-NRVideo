@@ -2117,3 +2117,11 @@ VS DevShell 下 `cmake --build out/ci-full --target veyra --parallel 4` 完成 E
 
 实际图片验证使用临时目录内3张320×180 PNG和无效mp4/wav，通过自有应用HWND检验目录首图及3张计数、滚轮下一张、快速滚动不跳图、末项停止、向上返回。脚本 out/ci-dependencies/image-folder-smoke.py，结果见 image-folder-smoke-final.log。首轮所有图片检查通过后，临时脚本残留上一任务视频断言引起NameError；清除残留后复测，失败保留image-folder-smoke.log。基础图片解码/共享图初始化实际运行，NR/SR/FG关闭；增强Create/Evaluate、文件夹选择器手动操作及海量/网络目录性能未验收。没有push/发布，SDK、运行组件、测试媒体均未入源码；下一步为用户目录实际浏览体验验收。
 补充：第二轮临时脚本过早取得尚未创建的视频子窗口句柄，首图计数通过但滚轮消息目标为空（image-folder-smoke-final.log）。改为等待并重新取得本进程VideoSurface句柄后，image-folder-smoke-verified.log所有图片检查通过，进程正常退出0。最终图片验证证据以此verified日志为准。
+
+## 2026-09-16 图片目录10张预解码队列
+
+按用户批量排队解码10～20张建议，默认当前及相邻10张、单后台线程、512MiB RGBA缓存预算。施工/边界见 docs/IMAGE_PREFETCH_PLAN_2026-09-16.md。修改AppShell、EngineController、ImageExportSink与PlaylistTests，新增ImageDecodeCache；保留WIC方向校正、共享图和大图处理，缓存未命中仍按原路径加载。过期窗口丢弃结果，文件大小/时间变更使缓存失效，退出目录/PS5释放缓存。
+
+命令：pwsh -NoProfile -File scripts/acceptance/playlist.ps1 -Root .，99项队列/目录/缓存检查、865窗口检查、既有UI合同、两种AppShell编译通过；日志out/ci-dependencies/image-prefetch-tests.log。python out/ci-dependencies/image-prefetch-smoke.py使用15张真实PNG，验证后台预解码10张及下一张播放器命中，退出0；image-prefetch-smoke.log与image-prefetch-app-1789559225192683400.log。全关增强，实际PNG加载/呈现管线运行，NR/SR/FG Create/Evaluate未执行；大图峰值和增强启用下速度未实测。
+
+完整构建命令 cmake --build out/ci-full --target veyra --parallel 4；初始成功image-prefetch-build.log。脚本首次读中文C++用了默认GBK导致编辑中断，随后显式UTF8完成；检查时去掉重复的预算判断。最终编译见image-prefetch-build-verified.log。未push/发布，未新增SDK/DLL/模型/测试媒体到Git。下一项为用户真实目录的内存/翻图延迟体验验收，GPU初始化复用尚未实施，不将预解码命中宣称为瞬时增强。

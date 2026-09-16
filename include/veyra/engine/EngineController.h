@@ -17,6 +17,7 @@ namespace veyra::sink { struct RgbaImage; }
 namespace veyra::gfx { class D3D12DeviceContext; class CommandSlotRing; }
 namespace veyra::engine {
 class FrameFlowWindow;
+class ImageDecodeCache;
 struct PlayerOptions { bool nr=false,sr=false,fg=false,realtime=true; uint32_t fgMultiplier=2; EnhancementSettings settings;
     bool captureReplayForTest=false; // file-backed live scheduler test; never enabled by UI
     bool captureReplayDisableFgAdmissionForTest=false; // controlled scheduler A/B only
@@ -74,6 +75,7 @@ public:
     void remotePlayController(const remoteplay::ControllerState&);
     void remotePlayLoginPin(std::string);
 #endif
+    void prefetchImages(std::vector<std::wstring> paths);
     void stop();
     void comparison(int mode,bool base,float split=.5f){comparisonMode_=mode;comparisonBase_=base;comparisonSplit_=std::clamp(split,0.0f,1.0f);}
     void pause(bool p);
@@ -85,6 +87,7 @@ public:
     void startExport(const std::wstring& input,const std::wstring& output,PlayerOptions,bool hevc);
     PlayerSnapshot snapshot()const;
 private:
+    std::unique_ptr<ImageDecodeCache> imageCache_;
     void run(HWND,std::wstring,PlayerOptions,std::shared_ptr<source::RemotePlayConnectDesc> remoteRequest={});
     void runLargeImage(HWND,const sink::RgbaImage&,PlayerOptions,gfx::D3D12DeviceContext&,gfx::CommandSlotRing&);
     void post(std::function<void()>);

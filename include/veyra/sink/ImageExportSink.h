@@ -10,5 +10,5 @@ struct RgbaImage { uint32_t width=0, height=0; std::vector<uint8_t> pixels; };
 bool readRgba8(gfx::D3D12DeviceContext&, gfx::CommandSlotRing&, ID3D12Resource*, RgbaImage&);
 bool saveImage(const std::wstring& path, const RgbaImage&, bool jpeg=false);
 bool saveHdrScreenshot(const std::wstring& path,gfx::D3D12DeviceContext&,gfx::CommandSlotRing&,ID3D12Resource*);
-bool loadImage(const std::wstring& path, RgbaImage&);
+bool loadImage(const std::wstring& path, RgbaImage&, size_t maxBytes=SIZE_MAX);
 }

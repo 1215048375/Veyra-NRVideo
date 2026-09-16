@@ -3,6 +3,9 @@
 #include "../../apps/veyra/ui/ImageFolder.h"
 #include <fstream>
 #include <chrono>
+#include "veyra/engine/ImageDecodeCache.h"
+#include <atomic>
+#include <thread>
 #include <stdexcept>
 
 int main() {
@@ -25,6 +28,31 @@ int main() {
         require(images.wheel(120,2500)==1,"wheel up goes back");
         require(!images.load(folder/"nested"/"missing",ec)&&images.files.size()==3,"failed folder load preserves current gallery");
         images.opened(L"unrelated.mp4");require(images.files.empty(),"opening unrelated media leaves folder browser");
+        {
+            std::atomic<int> decoded=0;
+            ImageDecodeCache cache([&](const std::wstring&,veyra::sink::RgbaImage& image,size_t limit){++decoded;if(limit<4)return false;image.width=image.height=1;image.pixels.resize(4);return true;},8);
+            std::vector<std::wstring> paths={(folder/"A.PNG").wstring(),(folder/"b.jpg").wstring(),(folder/"c.jpeg").wstring()};
+            cache.prefetch(paths);
+            auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
+            while(!cache.get(paths[1])&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            require(cache.get(paths[0])&&cache.get(paths[1])&&cache.bytes()==8,"background decoding retains images within budget");
+            require(!cache.get(paths[2]),"budget excludes extra image");
+            auto held=cache.get(paths[0]);cache.prefetch({});require(cache.bytes()==0&&!cache.get(paths[0])&&held->pixels.size()==4,"clear evicts cache without invalidating displayed shared image");
+            cache.prefetch({paths[0]});deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
+            while(!cache.get(paths[0])&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            require(bool(cache.get(paths[0])),"refill after clear");
+            std::ofstream(folder/"A.PNG",std::ios::app).put('y');require(!cache.get(paths[0]),"changed source is never served stale");
+        }
+        {
+            std::atomic<bool> started=false;
+            auto old=(folder/"A.PNG").wstring(),next=(folder/"b.jpg").wstring();
+            ImageDecodeCache cache([&](const std::wstring& path,veyra::sink::RgbaImage& image,size_t){if(path==old){started=true;std::this_thread::sleep_for(std::chrono::milliseconds(80));}image.width=image.height=1;image.pixels.resize(4);return true;});
+            cache.prefetch({old});auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
+            while(!started&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            cache.prefetch({next});deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
+            while(!cache.get(next)&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            require(!cache.get(old)&&cache.get(next),"obsolete in-flight decode discarded after new window");
+        }
         Playlist p;
         require(!p.adjacent(1) && !p.ended(1), "empty queue");
         require(!p.add(L"still.png") && !p.add(L"capture:device"), "non-video excluded");
