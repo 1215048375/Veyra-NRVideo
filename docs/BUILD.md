@@ -49,6 +49,20 @@ Veyra and FidelityFX code are compiled into the executable; FFmpeg is dynamicall
 
 ## Verification and Packaging
 
+### Clean local build / 干净的本地运行目录
+
+已构建 `out/ci-full/veyra.exe` 后，在项目根目录执行（PowerShell 7）：
+
+```powershell
+pwsh -NoProfile -File scripts/package-build.ps1
+```
+
+输出到 `out/packages/Veyra-版本-local-日期时间/`，直接运行其中的 `veyra.exe`。只复制程序、编译后的着色器、已验证的 patched FFmpeg DLL、VC++ 运行库和许可文件；不会混入 PDB、CMake 文件、SDK、测试媒体、日志或个人设置。现有目录不会覆盖。此命令只整理已编译的程序，不重新编译。
+
+可以用 `-BuildDirectory` 指定构建目录、`-OutputDirectory` 指定新的目标目录。`build-info.json` 记录版本、源码提交、工作区是否有未提交修改和程序哈希；`package-manifest.json` 记录文件清单与哈希。
+
+此本地目录包含基础播放依赖，不包含 NVIDIA/Intel 增强运行包，不等同于完整 Release。添加 `-ApplicationOnly` 可生成与 GitHub Actions 相同的不带运行 DLL 的构建产物；CI 也使用本脚本，上传范围保持仅程序/着色器/许可与构建记录。
+
 Run targeted tests and `scripts/gates/delivery.ps1`; each individual test must stay below300seconds. Physical capture and screen scanout require separate hardware verification. The legacy Loop gate is not part of the current process.
 
 ```powershell

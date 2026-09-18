@@ -47,6 +47,9 @@ public:
     ~AudioPipeline();
 
     bool open(const std::wstring& path);
+    // Applied by the audio owner at startup or the next explicit seek/reset.
+    void setPlaybackRate(double rate){if(std::isfinite(rate))requestedRate_=std::clamp(rate,0.2,3.0);}
+    double playbackRate()const override{return double(kAudioRate)/conversionRate_;}
     AudioFormat pcmFormat()const override{return pcmFormat_;}
 
     double bufferedMs() const;
@@ -114,6 +117,8 @@ private:
     AVStream* stream_ = nullptr;
     AVPacket* packet_ = nullptr;
     int swrInputRate_=0,swrInputFormat_=-1;
+    std::atomic<double> requestedRate_{1.0};
+    uint32_t conversionRate_=kAudioRate;
     SwrContext* swr_ = nullptr;
     int streamIndex_ = -1;
     bool havePacket_ = false;
@@ -210,6 +215,7 @@ private:
     UINT64 clockFrequency_ = 0;
     std::atomic<UINT64> anchorPos_{0};
     std::atomic<double> anchorPtsMs_{0.0};
+    double anchorRate_=1.0; // protected by endpointMutex_; file resampling only
     std::atomic<bool> started_{false};
     std::atomic<bool> running_{false};
     std::atomic<bool> fading_{false};bool pausedEndpoint_=false;

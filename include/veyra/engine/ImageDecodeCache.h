@@ -36,16 +36,16 @@ private:
     struct Entry{Stamp stamp;Image image;};
     void run(){
         for(;;){
-            std::wstring path;uint64_t epoch;size_t available;
+            std::wstring path;size_t available;
             {std::unique_lock lock(mutex_);wake_.wait(lock,[&]{return stopping_||std::any_of(wanted_.begin(),wanted_.end(),[&](const auto& p){return !entries_.contains(p)&&std::find(attempted_.begin(),attempted_.end(),p)==attempted_.end();});});
                 if(stopping_)return;
                 auto it=std::find_if(wanted_.begin(),wanted_.end(),[&](const auto& p){return !entries_.contains(p)&&std::find(attempted_.begin(),attempted_.end(),p)==attempted_.end();});
-                path=*it;attempted_.push_back(path);epoch=epoch_;available=budget_-bytes_;
+                path=*it;attempted_.push_back(path);available=budget_-bytes_;
             }
             auto before=identity(path);std::shared_ptr<sink::RgbaImage> image;
             try{if(before.valid&&available){auto decoded=std::make_shared<sink::RgbaImage>();if(loader_(path,*decoded,available)&&!decoded->pixels.empty()&&decoded->pixels.size()<=available)image=std::move(decoded);}}catch(const std::exception&){/* A failed speculative decode must not stop browsing. */}
             auto after=identity(path);
-            {std::lock_guard lock(mutex_);if(!stopping_&&epoch==epoch_&&image&&before==after&&image->pixels.size()<=budget_-bytes_){bytes_+=image->pixels.size();entries_[path]={after,std::move(image)};}}
+            {std::lock_guard lock(mutex_);if(!stopping_&&std::find(wanted_.begin(),wanted_.end(),path)!=wanted_.end()&&!entries_.contains(path)&&image&&before==after&&image->pixels.size()<=budget_-bytes_){bytes_+=image->pixels.size();entries_[path]={after,std::move(image)};}}
         }
     }
     Loader loader_;size_t budget_;mutable std::mutex mutex_;std::condition_variable wake_;

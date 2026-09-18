@@ -2170,3 +2170,115 @@ VS DevShell 下 `cmake --build out/ci-full --target veyra --parallel 4` 完成 E
 实际命令：scripts/acceptance/playlist.ps1 -Root .，101队列/目录/缓存检查、865HWND、UI合同和两种AppShell编译通过，out/ci-dependencies/mini-buttons-progress-tests.log。VS DevShell执行cmake --build out/ci-full --target veyra --parallel 4成功，mini-buttons-progress-build.log。
 
 python out/ci-dependencies/mini-progress-smoke.py：真实25张PNG目录就绪后日常显示20/20，切MINI显示20/20且关闭/最小化按钮可见不重叠；通过自有按钮BM_CLICK验证最小化IsIconic与恢复后关闭退出0。mini-progress-smoke.log记录实际日志路径。增强全关，NR/SR/FG Create/Evaluate未执行。改动仅窗口布局/缓存只读计数，未push/发布；下一步用户实际目录下进度与窗口按钮体验确认。
+
+## 2026-09-17 原图缩略图浏览器、双击返回与预解码顺序
+
+按用户最新要求完成原图列表与单张按需处理；双击图片或左栏返回按钮回到列表，保留选中位置，上一张/下一张继续可用。Ctrl+Shift+O及打开目录默认进入列表，传统预解码保留独立菜单入口。ImageBrowser单后台WIC线程加载可见区域原图缩略图，不建立增强图；选图后不提交相邻完整图片预解码。缩略图最长边160、缓存最多512个。修复列表鼠标松开穿透：双击返回后的button-up不再误打开列表项。
+
+预解码慢的两个已确认因素：旧队列按后1/前1/后2/前2交错安排；窗口更新使仍需的在途解码失效。改为当前及后续优先，保留仍需且身份未变的在途结果。20张CPU预解码不等于NR结果预渲染，尺寸/设置变化及增强成本仍可能导致等待。
+
+文件：apps/veyra/ui/ImageBrowser.h/.cpp、AppShell.cpp、ImageFolder.h、include/veyra/engine/ImageDecodeCache.h、tests/unit/PlaylistTests.cpp、CMakeLists.txt、README.md，以及本次方案IMAGE_BROWSER_PLAN_2026-09-17.md。
+
+命令与结果：pwsh -NoProfile -File scripts/acceptance/playlist.ps1 -Root . 通过新增顺序/在途结果用例、既有缓存/队列、窗口与UI合同、普通/REMOTEPLAY AppShell编译，日志out/ci-dependencies/image-browser-tests.log。VS Developer PowerShell下cmake --build out/ci-full --target veyra --parallel 4完成，image-browser-build-final.log。初次ImageBrowser.cpp的LONG/int std::max模板推导失败，改显式int转换后成功；非运行时问题。
+
+实际执行python out/ci-dependencies/image-browser-smoke.py，25张PNG目录的原图缩略图ready=true、选中之前没有graph或image-prefetch日志；点击第一张、下一张、双击返回、尾随button-up不误打开、键盘选择/Enter重开、返回按钮均通过，退出0。最终证据image-browser-smoke-final.log，应用日志image-browser-app-1789601875799103900.log。操作仅测试进程自有窗口；验证STATIC类支持CS_DBLCLKS。未执行NR/SR/FG Create/Evaluate（测试全部关闭），大图开启NR性能、JPEG方向视觉及真实鼠标体验待用户验收。没有push、Release或运行组件变更，测试媒体和日志保留忽略的out目录。下一步仅用户真实目录体验验收。
+
+## 2026-09-17 干净本地构建目录
+
+用户要求本地输出像GitHub Actions一样整洁。新增scripts/package-build.ps1，提取原CI白名单打包流程；CI以-ApplicationOnly调用仍不包含runtime DLL。本地默认补齐构建目录五个FFmpeg DLL和VS CRT，校验FFmpeg的256-slice补丁记录、实际avcodec哈希以及五个DLL与依赖prefix一致，再复制着色器/许可。先检查全部来源，再创建新的输出目录；拒绝覆盖已有目录。默认out/packages/Veyra-版本-local-时间，包含build-info和逐文件SHA256 manifest。仅整理已编译文件，不重新编译。docs/BUILD.md增加命令。保留前轮所有未提交图片浏览器改动。
+
+本次实际生成out/packages/Veyra-1.2.0-local-20260917；命令pwsh -NoProfile -File scripts/package-build.ps1 -OutputDirectory out/packages/Veyra-1.2.0-local-20260917，日志out/ci-dependencies/package-local-build.log。另执行-ApplicationOnly到out/ci-dependencies/package-ci-check，验证无DLL，与CI上传范围一致。python out/ci-dependencies/package-local-smoke.py通过逐文件哈希、禁入文件扫描；系统限定PATH、TEMP工作目录下运行新目录程序7秒，真实H.264视频出帧、failed=false、退出0，证据package-local-smoke.log / package-local-stdout.log / package-local-app.log。打包只使用上一轮成功构建的exe，没有修改C++，没有重复构建或声称新的增强验收。
+
+当前机器缺少runtime_local增强文件，因此本次只提供基础播放可运行目录，未复制未知组件、未执行NR/SR/FG Create/Evaluate。没有上传/发布，没有删除旧out文件。下一步使用新目录的veyra.exe；后续编译后重复打包命令即可生成新的独立目录。
+
+## 2026-09-17 用户复测：缩略图缓存淘汰、缩放和待看计数修复
+
+用户反馈缩略图像马赛克、滚回顶部停在加载提示，以及20/20长期不变、等待后下一张仍慢。查实缩略图512项满后按最小文件索引淘汰，回到顶部时会淘汰刚加载的可见图；改保护当前可见区域/缓冲行，按最近使用情况淘汰其他图，离开请求范围的在途缩略图不入缓存。原160px最近邻放大改320px+HALFTONE，增加顶部/底部/拖动位置滚动处理。没有把看不见的缩略图处理成增强任务。
+
+连续目录计数改为仅后续待看最多20张，当前和已看不参与分母；末尾0/0。显示“待看缓存”，单独显示当前图处理中/已呈现。EngineController在UI移动窗口前持有已选解码缓存，异尺寸异步重开仍使用该对象；同尺寸继续复用GPU图。用户提到尺寸“差不多”，但GPU复用要求精确相同；不同尺寸资源重建仍保留，不宣称消除所有偶发等待。该计数一直是CPU原图缓存，尚无20张增强结果预渲染。
+
+本轮修改：ImageBrowser.cpp、ImageFolder.h、AppShell.cpp、EngineController.h/.cpp、EngineControllerImage.cpp、PlaylistTests.cpp、新增tests/integration/ImageBrowserTests.cpp、scripts/acceptance/playlist.ps1、README及图片浏览器方案。新增--image-folder-prefetch诊断/命令行入口，普通目录仍默认缩略图浏览。
+
+实际验证：VS DevShell cmake --build out/ci-full --target veyra --parallel 4成功，out/ci-dependencies/image-cache-repair-build-final.log。pwsh -File scripts/acceptance/playlist.ps1 -Root .通过队列/缓存、既有UI合同和两种AppShell编译，以及新增620图真实WIC/GDI缩略图回归；100%/200% DPI填满缓存滚回顶部，逐个可见图的颜色像素均通过。日志image-cache-repair-tests-final.log；单独运行out/playlist/ImageBrowserTests.exe也通过thumbnail-integration.log。
+
+python out/ci-dependencies/image-cache-repair-smoke.py：真实25张PNG，后续20张解码、同尺寸切换graph初始化数不增、异尺寸完整重建但image-cache hit=true、最后一张待看0/0，通过并退出0。日志image-cache-repair-smoke.log / image-reuse-app-1789606013316677200.log。未开启NR/SR/FG，Create/Evaluate未执行；用户实际素材慢的完整根因仍需其复测或运行日志，不能用小图通过代替。
+
+测试过程：跨进程隐藏窗口PrintWindow得到黑色缓冲，不能作为绘制证据；改为同进程真实窗口WM_PRINTCLIENT加逐像素检查的独立集成测试，最终通过，未将黑图算成功。首个滚动脚本等待过短未填满512，后续完善为每页等待图像完成并纳入上述集成测试。
+
+运行pwsh -File scripts/package-build.ps1 -OutputDirectory out/packages/Veyra-1.2.0-local-20260917-image-fix，生成新干净目录，保留旧目录。随后python out/ci-dependencies/image-cache-package-smoke.py验证manifest/禁入扫描和仅系统PATH的7秒基础播放，证据image-cache-package-smoke.log。未上传/发布，无SDK/runtime入Git。下一步是用户同一素材目录复测此新版，若仍出现长等待，按缓存命中与尺寸重建日志继续定位，不能再用20/20冒充预渲染完成。
+
+### 继续修复：异尺寸图片保留D3D12设备
+
+用户“继续”后检查实际日志：旧异尺寸切图创建D3D12设备单步约0.5秒，即使原图缓存命中也不能省略。EngineController扩大普通图片队列复用到异尺寸输入，保留同一device/queue；只在尺寸变化时排空一次、释放输出lease、关闭旧graph/presenter并以真实尺寸重建。AVFrame同步重新分配；不改变原图尺寸，不建立新的播放循环。增加当前源和目标源均为合法≤16MP普通图门槛，避免向runLargeImage投递无人消费的pendingImage。SourceSwitch history和reset lifecycle分阶段记录保持真实，失败正常报错停止。README和本轮方案更新。
+
+VS DevShell cmake --build out/ci-full --target veyra --parallel 4通过，out/ci-dependencies/image-resize-device-build-final.log。python out/ci-dependencies/image-resize-device-smoke.py在普通权限下执行实际保存像素检查：320×180蓝→同尺寸红→128×96绿→320×180蓝；每次保存尺寸/颜色吻合；只一次device context initialized；source/epoch从1递增到4。最终日志image-resize-device-smoke-final.log、image-reuse-app-1789619411079385400.log。同尺寸CPU观测1.59ms，异尺寸71.69/85.04ms；外部轮询同尺寸109ms，不混同为屏幕延迟。NR/SR/FG关闭，Create/Evaluate未执行；不同尺寸的NR功能重建仍有成本，用户素材实际延迟需复测。
+
+执行pwsh -File scripts/package-build.ps1 -OutputDirectory out/packages/Veyra-1.2.0-local-20260917-image-fix2生成最终干净目录；python out/ci-dependencies/image-resize-package-smoke.py验证文件hash、无开发文件、系统PATH/TEMP工作目录基础视频出帧和退出0，image-resize-package-smoke.log。没有删除旧包、上传或发布。下一步用fix2目录在用户同一批图片上复测，不将之前fix包误当最新。
+
+## 2026-09-17 缩略图色彩和可选跨会话保留GPU设备
+
+用户反馈列表缩略图偏亮、要求可一直保留GPU设备。ImageBrowser补内嵌ICC/EXIF颜色上下文到sRGB的WIC转换，未标记图不任意降低亮度。色彩转换失败记录HRESULT；保留320px/HALFTONE与可见缓存保护。尚无用户原图，不能断言其过曝完全复现或消除。
+
+新增图片菜单“保留图片 GPU 设备（减少重开等待）”，默认关闭且保存到UiPreferences v4，向后兼容v1–v3。EngineController工作线程持有ImageDeviceState，包含同一ctx/ring，跨返回浏览器/手动选图/缓存未命中的会话保留；COM apartment覆盖worker生命周期，fence序列不中途回零。图/Presenter/图片缓冲正常释放；关闭后空闲释放，切非图片来源/设备故障/退出释放。依然不是20张NR预渲染，也不保证省去每次NR功能初始化。现有同尺寸/异尺寸在会话内复用仍保留。
+
+改动文件：ImageBrowser.cpp、AppShell.cpp、UiPreferenceStore.h、EngineController.h/.cpp、UiContractTests.cpp、ImageBrowserTests.cpp、README和本轮方案。没有修改运行组件/SDK。完整构建cmake --build out/ci-full --target veyra --parallel 4成功，out/ci-dependencies/image-color-retain-build-verified.log。pwsh -File scripts/acceptance/playlist.ps1 -Root .通过队列/UI/两种AppShell编译、620缩略图100%/200% DPI、设置v4保存和v3迁移，image-color-retain-tests-final.log。
+
+实际颜色测试：以Pillow/LittleCMS生成sRGB灰阶、高光及gamma3 ICC样本，out/playlist/ImageBrowserTests.exe out/ci-dependencies/thumbnail-colors，通过真实WIC转换和GDI绘制像素；128→128，245→246/245/245，gamma3 128→99（独立LittleCMS参考100）。thumbnail-color-test-final.log记录结果；用户原图、显示器配置/HDR视觉未验收，没有以降低全局曝光代替颜色合同。
+
+python out/ci-dependencies/retained-image-device-smoke.py真实原图列表点击/下一张/返回/重新打开，三次会话device context initialized仅一次，禁用时释放，退出0；retained-image-device-smoke-verified.log，image-browser-app-1789622098901882600.log。首轮日志缓冲导致等待释放消息超时，给设备保留/释放边界日志显式flush后通过，不在逐帧路径flush。NR/SR/FG Create/Evaluate与设备丢失注入未执行。
+
+pwsh -File scripts/package-build.ps1 -OutputDirectory out/packages/Veyra-1.2.0-local-20260917-image-fix3生成新干净目录；python out/ci-dependencies/image-color-retain-package-smoke.py通过manifest/禁入检查、系统PATH基础视频播放退出0，image-color-retain-package-smoke.log。没有覆盖旧包、push或发布。下一步用户原图目视复测，并在图片菜单启用保留设备。
+
+## 2026-09-17 缩略图白色蒙层：修复 DWM glass 下的 alpha
+
+用户提供截图继续反馈整体发白。定位 ImageBrowser GDI 绘制没有恢复 alpha：玻璃客户区得到非零 RGB / 零 alpha，违背预乘合成约定。此前 RGB/ICC 测试未检测透明度，因此未覆盖此问题。修改 Theme.h 的 PaintBuffer，增加显式 makeOpaque，ImageBrowser.cpp 绘制结束调用；只将 alpha 置255，不改 RGB、不改变其他控件玻璃效果。测试 ImageBrowserTests.cpp 对真正 WM_PRINTCLIENT 输出增加全画布 alpha 检查。
+
+修复前用 MSVC cl 编译并运行 ImageBrowserTests：out/ci-dependencies/browser-alpha-build-before.log 编译成功，browser-alpha-before.log 失败为 browser output has transparent alpha under DWM glass。修复后执行 pwsh -File scripts/acceptance/playlist.ps1 -Root . 通过，browser-alpha-tests.log；包含620图缓存淘汰/回顶部、96/192 DPI、全画布 alpha、队列与UI设置以及普通/远程 AppShell 编译。执行 out/playlist/ImageBrowserTests.exe out/ci-dependencies/thumbnail-colors 通过，browser-alpha-color-tests.log，RGB为128/128/128、246/245/245、99/99/99，没有全局压暗。
+
+cmake --build out/ci-full --target veyra --parallel 4 成功，browser-alpha-build.log。pwsh -File scripts/package-build.ps1 -OutputDirectory out/packages/Veyra-1.2.0-local-20260917-image-fix4 成功，browser-alpha-package.log；python out/ci-dependencies/browser-alpha-package-smoke.py 通过清单哈希与禁入检查、系统PATH/临时工作目录基础视频播放，browser-alpha-package-smoke.log。git diff --check 通过，仅换行警告。没有覆盖旧包、改运行组件或SDK、push或发布。
+
+此轮验证的是实际浏览器画布 RGB/alpha 与基础播放，未执行用户原图在其桌面上的最终合成目视验收，未执行 NR/SR/FG Create/Evaluate。下一步唯一验收：用户使用 image-fix4 复测图片列表的白色蒙层。
+
+## 2026-09-17 已渲染图片磁盘缓存与统一单张/目录浏览
+
+用户确认白色蒙层恢复正常，新增可选 `_cache` 保存渲染结果并直接复用、原图对比保留；随后要求单张与目录浏览联通。按 docs/IMAGE_DISK_CACHE_PLAN_2026-09-17.md 完成。本轮改动：新增 ImageRenderCache.h/.cpp、ImageComparison.h、ImageRenderCacheTests.cpp；修改 EngineController.h/.cpp、EngineControllerImage.cpp、AppShell.cpp、UiPreferenceStore.h、UiContractTests.cpp、CMakeLists.txt、.gitignore、README 与施工记录。此前工作区改动保留。
+
+开关默认关闭并保存到UiPreferences v5；完整SDR结果无损PNG及尺寸/像素SHA256记录保存在原图旁 `_cache`，临时文件后替换。原图、效果参数、构建或组件文件大小/时间戳变化时失效；损坏回退、写入失败不中断预览，尝试失败不会逐帧重试。读取缓存在NR/SR初始化之前，共用已有大图结果浏览路径，保留原图/分屏与完整保存；普通图片设置切换重新查缓存。只在启用图片缓存时回读一次结果，不扩展到视频路径。打开单张自动加载父目录，可前后翻图和双击/返回列表；直接预解码模式也可返回列表。
+
+实际构建：VS DevShell 中 cmake --build out/ci-full --target veyra veyra_image_render_cache_tests --parallel 4 成功，out/ci-dependencies/image-disk-cache-delivery-build.log。随后仅扩展GPU测试，cmake --build out/ci-full --target veyra_image_render_cache_tests --parallel 4 成功，image-disk-cache-gpu-test-build.log。
+
+执行 pwsh -File scripts/acceptance/playlist.ps1 -Root .，image-disk-cache-final-ui-tests.log 通过：队列、真实列表、620图两种DPI、设置保存/迁移及普通/远程AppShell编译。out/ci-full/veyra_image_render_cache_tests.exe --gpu 通过，image-disk-cache-gpu-tests.log：PNG尺寸/像素完整往返、源与参数失效、损坏/校验不符、失败写入回退；不同尺寸原图/V/分屏采样；真实D3D12显示人工构造缓存，在请求NR时NR Evaluate为0，保存完整结果一致，切换另一套已有缓存成功，正常释放。该测试没有用真实NR生成结果冒充证据。
+
+真实AppShell回归 python out/ci-dependencies/image-disk-cache-smoke.py：初轮失败记录image-disk-cache-smoke.log，打开单张时创建列表后未刷新布局，返回按钮不可见；补layout后通过。最终image-disk-cache-pixel-smoke.log与disk-cache-gallery-1789638642355751400/app.log验证中间单张打开、缓存开关、上一张/下一张、双击回列表、再打开、禁用回正常处理、退出0；将原图绿色320×180对应的测试缓存构造成粉色640×360，软件截图入口保存出的完整尺寸/像素完全一致。测试截图用工作区路径，入口查询系统Pictures目录，所以此项在普通权限执行。python out/ci-dependencies/image-disk-cache-large-smoke.py通过4097×4097大图同一流程，image-disk-cache-large-smoke.log与disk-cache-gallery-1789638869429692900/app.log。
+
+最终 pwsh -File scripts/package-build.ps1 -OutputDirectory out/packages/Veyra-1.2.0-local-20260917-image-cache2 成功，image-disk-cache-delivery-package.log；python out/ci-dependencies/image-disk-cache-package-smoke.py 通过包内清单哈希/禁入检查与系统PATH、TEMP工作目录独立基础视频播放186帧、退出0，image-disk-cache-delivery-package-smoke.log。git diff --check 通过，仅换行警告。早期 image-cache 包保留，最终应使用 image-cache2。没有覆盖旧包、修改运行组件、提交SDK、push或发布。
+
+限制：缓存仍需原图和结果PNG解码、显示资源及磁盘空间，不是零等待；不自动清理缓存。NR/SR/FG模型Create/Evaluate未执行，本轮实际GPU验证为无增强显示与缓存复用；用户实际增强图片目视验收为下一步唯一任务。
+
+## 2026-09-17 用户纠正需求：后续20张必须完成增强
+
+用户确认需要实际增强预渲染，不是CPU预解码；此前解码计数无法解决增强等待，本轮按 docs/IMAGE_PRERENDER_PLAN_2026-09-17.md 实现。新增 ImagePrerenderQueue.h、StillImageRenderer.h/.cpp；修改 EngineController.h/.cpp、EngineControllerImage.cpp、AppShell.cpp、PlaylistTests.cpp、ImageRenderCacheTests.cpp、CMakeLists.txt、README。历史本地改动保留。
+
+连续浏览先处理当前图片，随后在同一EngineController GPU线程/device/queue逐张调用共享EnhanceGraph处理后续20张，分块图复用TiledImageProcessor。完成并落盘才计入完成，NR/SR被请求但无Evaluate拒绝结果；失败单独计数。增强CPU结果512MiB按浏览顺序优先保留，磁盘继续保留全部完成项；选中结果在移动窗口前固定持有，翻页跳过再次增强。当前打开/停止/参数变更置取消标志，当前GPU调用等不可抢占步骤完成后让出，不宣称即时中断。队列滑动保留仍需要的结果，失败不循环重试，末尾0/0。返回列表停止；关闭缓存转手动模式，防止解码计数重新被显示为预渲染数。连续浏览自动启用磁盘缓存，手动列表仍按需处理。
+
+构建命令：VS DevShell 执行 cmake --build out/ci-full --target veyra veyra_image_render_cache_tests --parallel 4，通过out/ci-dependencies/image-prerender-final-build.log；追加失败回归后仅编译测试目标，通过image-prerender-failure-test-build.log；关闭缓存退出模式的UI修正后编译veyra，通过image-prerender-delivery-build.log。pwsh -File scripts/acceptance/playlist.ps1 -Root . 通过，image-prerender-ui-tests.log，含队列顺序、取消重试、窗口完成项保留、参数失效、失败不计数、末尾0/0和既有列表/DPI/设置/普通远程AppShell检查。
+
+out/ci-full/veyra_image_render_cache_tests.exe --gpu 通过，image-prerender-final-gpu-tests.log。真实D3D12在首次翻页前完成并保存20张未来图；下一张内存命中、新末尾补齐、清空目标0/0；真实缓存原图/分屏采样与完整保存仍通过。正向处理测试为增强全关，日志记录nrEvaluate=0/srEvaluate=0，不冒充模型增强。负向配置请求NR，实际错误为 [graph] ngx-local.json missing；两张任务completed=false，ready=0 total=2 failed=2，当前缓存图仍可查看。本机项目根/已指定本地路径均没有NR DLL，因此本轮未执行真实NR/SR成功Create/Evaluate，也未复制或修改运行组件。
+
+python out/ci-dependencies/image-prerender-smoke.py 实际操作AppShell，通过image-prerender-final-smoke.log，应用日志prerender-gallery-1789642731708991000/app.log：没有翻页前恰好21个PNG（当前加后续20）、21次真实基础GPU处理；下一张命中增强结果内存并补入下一项；快速连续翻至第26/26，显示预渲染0/0；关闭缓存退出连续预渲染，无误标解码数；返回列表停止后台工作，退出0。此轮不是用PNG人工填充来假装后台任务完成。
+
+pwsh -File scripts/package-build.ps1 -OutputDirectory out/packages/Veyra-1.2.0-local-20260917-prerender2 成功，image-prerender-delivery-package.log。python out/ci-dependencies/image-prerender-package-smoke.py 通过包内清单哈希/禁入文件检查、系统PATH与TEMP工作目录独立基础视频播放185帧/退出0，image-prerender-package-smoke.log。git diff --check 通过，仅换行警告。最终交付prerender2，旧包保留，无push、发布或SDK/运行时入Git。
+
+剩余验收唯一项：用户使用其原有增强运行组件，在连续浏览中确认真实NR/SR参数下的后20张效果与等待体验。本轮代码已走共享增强图，成功NR/SR模型效果未在缺组件的本机验收；不承诺零等待或跨图保留NR Feature。
+
+## 2026-09-17 全目录预渲染、增量扫描与忽略参数缓存
+
+用户新增全目录渲染/进度条/新增文件增量要求，随后明确“不考虑参数，就算调整参数也不影响缓存命中”。已按 docs/IMAGE_FOLDER_BATCH_PLAN_2026-09-17.md 完成：新ImageBatchWindow.h/.cpp、EngineControllerImageBatch.cpp；修改EngineController.h/.cpp、EngineControllerImage.cpp、ImageRenderCache.cpp、AppShell.cpp、ImageRenderCacheTests.cpp、CMakeLists和README。此前更改保留。
+
+参数身份现在固定，缓存只跟随源文件名/尺寸/像素身份；旧参数命名按源前缀验证后仍可复用。已缓存图保留旧效果，参数调整不再清除连续队列就绪项，也不会让缓存预览一直处于applying。整目录任务开始时固定参数，逐张查询缓存，只对未缓存项创建共享增强图；首次未命中才创GPU设备，任务内复用。进度窗口包含选择目录、开始/重扫、取消和原生进度条，显示新渲染/已有缓存/失败；100%代表处理完成而非全成功。新增后再次开始即补齐，没有自动监视目录。
+
+VS DevShell 执行 cmake --build out/ci-full --target veyra veyra_image_render_cache_tests --parallel 4 成功，out/ci-dependencies/image-folder-batch-build.log；测试扩展后cmake --build out/ci-full --target veyra_image_render_cache_tests --parallel 4成功，image-folder-batch-test-build.log。pwsh -File scripts/acceptance/playlist.ps1 -Root .通过，image-folder-batch-ui-tests.log（队列、列表/DPI、设置及普通/远程AppShell编译）。out/ci-full/veyra_image_render_cache_tests.exe --gpu通过，image-folder-batch-gpu-tests.log：旧缓存兼容、参数变化仍同身份、完整输出保存、20张队列；全目录首次3张渲染、改为NR设置后3张全跳过且无模型初始化、新增第4张仅1张生成、取消任务。
+
+python out/ci-dependencies/image-folder-batch-smoke.py 真实UI通过，image-folder-batch-smoke.log，应用日志folder-batch-gallery-1789644619527452900/app.log：首轮27张全部保存，PBM_GETPOS=10000；添加1张后新渲染1/跳过27，之前27个缓存mtime完全不变；新增坏JPG后处理29项、跳过28、失败1、新渲染0，进度仍正确到100%。无SDK/运行时更改，NR/SR成功Create/Evaluate未执行；GPU成功路径为增强全关，参数改为NR的重复任务只命中既有缓存。
+
+pwsh -File scripts/package-build.ps1 -OutputDirectory out/packages/Veyra-1.2.0-local-20260917-folder-batch 成功，image-folder-batch-package.log；python out/ci-dependencies/image-folder-batch-package-smoke.py通过包内哈希/禁入检查与系统PATH/TEMP工作目录独立基础播放，image-folder-batch-package-smoke.log。git diff --check通过，仅换行警告。旧包保留，没有push或发布。下一步唯一验收为用户使用原有增强组件检查实际目录的全量/新增任务；旧图要采用新参数需主动移走缓存，否则按用户决定保持命中。

@@ -1,5 +1,8 @@
 #include "veyra/engine/EngineController.h"
 #include "veyra/engine/ImageDecodeCache.h"
+#include "veyra/engine/ImageRenderCache.h"
+#include "veyra/engine/ImagePrerenderQueue.h"
+#include "veyra/engine/StillImageRenderer.h"
 #include "veyra/engine/VideoPresenter.h"
 #include "veyra/engine/VideoExportJob.h"
 #include "veyra/engine/LivePresentationTiming.h"
@@ -49,38 +52,51 @@ void logFrameFlow(const diagnostics::FrameFlowMetrics& m,const char* state){
     veyra::log::info("frame-flow",std::format("state={} session={} revision={} epoch={} source={} batch={} readyFence={} consumerFence={} captureReceived={} mailboxOverwritten={} sourceAccepted={} sourceSkippedBeforeGraph={} realSubmitted={} fgCandidate={} fgSkippedBeforeEval={} fgEvaluated={} fgWarmup={} fgReadyValid={} fgInvalid={} realPresented={} generatedPresented={} generatedExpiredAfterEval={} cancelledBeforePresent={} commandSlots={} commandHighWater={} presentationHighWater={} slotWaitCount={} slotWaitMs={:.3f} generatedFps={:.2f} presentSubmitFps={:.2f} resetRevision={} resetEpoch={} resetReason={} resetOutcome={} resetDrainMs={:.3f} resetDestroyMs={:.3f} resetCreateMs={:.3f} resetWarmupMs={:.3f} resetFirstValidMs={:.3f} resetTotalMs={:.3f}",state,id.sessionId,id.frame.settingsRevision,id.frame.epoch,id.frame.sourceFrameId,id.batchId,id.readyFence,id.consumerFence,c.captureReceived,c.mailboxOverwritten,c.sourceAccepted,c.sourceSkippedBeforeGraph,c.realSubmitted,c.fgCandidate,c.fgSkippedBeforeEval,c.fgEvaluated,c.fgWarmup,c.fgReadyValid,c.fgInvalid,c.realPresented,c.generatedPresented,c.generatedExpiredAfterEval,c.cancelledBeforePresent,c.commandSlotsInFlight,c.commandSlotHighWater,c.presentationBatchHighWater,m.slotReuseWaitCount,m.slotReuseWaitMs.value_or(0),m.validGeneratedFps,m.presentSubmitFps,r.settingsRevision,r.epoch,unsigned(r.reason),unsigned(r.outcome),ms(diagnostics::ResetStage::Drain),ms(diagnostics::ResetStage::Destroy),ms(diagnostics::ResetStage::Create),ms(diagnostics::ResetStage::Warmup),ms(diagnostics::ResetStage::FirstValid),r.totalMs.value_or(-1.0)));
 }
 }
-std::pair<size_t,size_t> EngineController::imagePrefetchProgress()const{return imageCache_->progress();}
-void EngineController::prefetchImages(std::vector<std::wstring> paths){imageCache_->prefetch(std::move(paths));}
-EngineController::EngineController(){imageCache_=std::make_unique<ImageDecodeCache>([](const std::wstring& path,sink::RgbaImage& image,size_t limit){
+std::pair<size_t,size_t> EngineController::imagePrefetchProgress()const{return prerenderImages_?prerenderQueue_->progress():imageCache_->progress();}
+struct EngineController::ImageDeviceState {
+    gfx::D3D12DeviceContext context;
+    gfx::CommandSlotRing ring;
+};
+size_t EngineController::imagePrerenderFailures()const{return prerenderQueue_->failures();}
+void EngineController::prefetchImages(std::vector<std::wstring> paths){prerenderQueue_->paths(paths);imageCache_->prefetch(std::move(paths));}
+EngineController::EngineController(){prerenderQueue_=std::make_unique<ImagePrerenderQueue>();imageCache_=std::make_unique<ImageDecodeCache>([](const std::wstring& path,sink::RgbaImage& image,size_t limit){
     const auto hr=CoInitializeEx(nullptr,COINIT_MULTITHREADED);if(FAILED(hr))return false;
     struct ComScope{~ComScope(){CoUninitialize();}} scope;
     const auto start=Clock::now();const bool ok=sink::loadImage(path,image,limit);
     veyra::log::info("image-prefetch",std::format("decoded={} bytes={} limit={} ms={:.2f}",ok,image.pixels.size(),limit,std::chrono::duration<double,std::milli>(Clock::now()-start).count()));return ok;
 });worker_=std::thread(&EngineController::dispatch,this);}
-EngineController::~EngineController(){ {std::lock_guard lock(mutex_);shutdown_=true;pending_={};stop_=true;}wake_.notify_one();if(worker_.joinable())worker_.join(); }
+EngineController::~EngineController(){ {std::lock_guard lock(mutex_);shutdown_=true;pending_={};stop_=true;prerenderCancel_=true;}wake_.notify_one();if(worker_.joinable())worker_.join(); }
 void EngineController::dispatch(){
-    for(;;){std::function<void()> task;{std::unique_lock lock(mutex_);wake_.wait(lock,[&]{return shutdown_||bool(pending_);});if(shutdown_)break;task=std::move(pending_);pending_={};busy_=true;stop_=false;}
+    const auto com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+    for(;;){std::function<void()> task;{std::unique_lock lock(mutex_);wake_.wait(lock,[&]{return shutdown_||bool(pending_)||(imageDevice_&&!keepImageDevice_&&!prerenderImages_);});if(shutdown_)break;
+        if(imageDevice_&&!keepImageDevice_&&!prerenderImages_){imageDevice_.reset();veyra::log::info("image-device","released retained device (option disabled)");Logger::instance().flush();}
+        if(!pending_)continue;task=std::move(pending_);pending_={};busy_=true;stop_=false;}
         try{task();}catch(const std::exception&){status(L"任务异常，已停止；请查看诊断",true);}
         {std::lock_guard lock(mutex_);busy_=false;snapshot_.running=false;if(snapshot_.transport==TransportState::Stopping)snapshot_.transport=TransportState::Empty;}
     }
+    imageDevice_.reset();if(SUCCEEDED(com))CoUninitialize();
 }
-void EngineController::post(std::function<void()> task){ {std::lock_guard lock(mutex_);stop_=true;pendingImage_.reset();pendingImagePath_.clear();pending_=std::move(task);}wake_.notify_one(); }
+void EngineController::post(std::function<void()> task,bool imageBatch){ {std::lock_guard lock(mutex_);stop_=true;prerenderCancel_=true;if(!imageBatch&&imageBatch_.active){imageBatch_.active=false;imageBatch_.cancelled=true;}pendingImage_.reset();pendingImagePath_.clear();pending_=std::move(task);}wake_.notify_one(); }
 bool EngineController::idle()const{std::lock_guard lock(mutex_);return !busy_&&!pending_;}
 void EngineController::open(HWND video,const std::wstring& path,PlayerOptions opts){
-    if(auto cached=imageCache_->get(path)){
+    auto rendered=prerenderQueue_->get(path,ImageRenderCache::settingsKey(opts.snapshot()));
+    // Hold the selected cache entry before the UI advances the prefetch window.
+    // A full reopen (for example, a slightly different image size) is asynchronous.
+    auto cached=imageCache_->get(path);if(cached){
         std::lock_guard lock(mutex_);const auto extent=snapshot_.metrics.resolution.source;
-        if(busy_&&!pending_&&!stop_&&snapshot_.image&&snapshot_.frames&&!snapshot_.failed&&!snapshot_.applying&&savePath_.empty()&&
-           pipeline::Extent{cached->width,cached->height}.valid()&&uint64_t(cached->width)*cached->height<=16777216&&extent.width==cached->width&&extent.height==cached->height&&opts.snapshot().sameVideoConfiguration(desired_)){
-            pendingImage_=std::move(cached);pendingImagePath_=path;paused_=false;snapshot_.transport=TransportState::Playing;snapshot_.status=L"正在使用缓存切换图片…";
-            veyra::log::info("image-switch","queued cached image; reusing GPU device, graph and runtime; capacity=1 latest request");return;
+        if(!cacheRenderedImages_&&busy_&&!pending_&&!stop_&&snapshot_.image&&snapshot_.frames&&!snapshot_.failed&&!snapshot_.applying&&savePath_.empty()&&
+           extent.valid()&&uint64_t(extent.width)*extent.height<=16777216&&pipeline::Extent{cached->width,cached->height}.valid()&&uint64_t(cached->width)*cached->height<=16777216&&opts.snapshot().sameVideoConfiguration(desired_)){
+            pendingImage_=cached;pendingImagePath_=path;snapshot_.imageLoading=true;paused_=false;snapshot_.transport=TransportState::Playing;snapshot_.status=L"正在使用缓存切换图片…";
+            veyra::log::info("image-switch","queued cached image; retaining GPU device; same-size images also retain graph/runtime; capacity=1 latest request");return;
         }
     }
+    if(cached){const auto current=snapshot().metrics.resolution.source;veyra::log::info("image-switch",std::format("cached=true reusedGraph=false current={}x{} next={}x{}; preserving decoded image across reopen",current.width,current.height,cached->width,cached->height));}
     const bool captureReplay=opts.captureReplayForTest;
     const bool disableAdmission=opts.captureReplayDisableFgAdmissionForTest;
     {std::lock_guard lock(mutex_);snapshot_={};activeFlow_.reset();previewView_={};snapshot_.sessionId=++sessionId_;snapshot_.transport=TransportState::Opening;savePath_.clear();desired_=opts.snapshot();desired_.revision=++nextRevision_;snapshot_.desired=desired_;opts=PlayerOptions::from(desired_);}
     opts.captureReplayForTest=captureReplay;
     opts.captureReplayDisableFgAdmissionForTest=disableAdmission;
-    post([this,video,path,opts]{paused_=false;seekSeconds_=-1;run(video,path,opts);});
+    post([this,video,path,opts,cached,rendered]{paused_=false;seekSeconds_=-1;run(video,path,opts,{},cached,rendered);});
 }
 #ifdef VEYRA_ENABLE_REMOTEPLAY
 void EngineController::openRemotePlay(HWND window,source::RemotePlayConnectDesc desc,PlayerOptions opts){
@@ -92,12 +108,12 @@ remoteplay::ControllerFeedback EngineController::remotePlayFeedback(){std::lock_
 void EngineController::remotePlayController(const remoteplay::ControllerState& state){std::lock_guard lock(mutex_);if(activeRemote_)activeRemote_->controller(state);}
 void EngineController::remotePlayLoginPin(std::string pin){std::lock_guard lock(mutex_);if(activeRemote_)activeRemote_->loginPin(std::move(pin));}
 #endif
-void EngineController::stop(){std::lock_guard lock(mutex_);stop_=true;pending_={};pendingImage_.reset();pendingImagePath_.clear();snapshot_.transport=busy_?TransportState::Stopping:TransportState::Empty;}
+void EngineController::stop(){std::lock_guard lock(mutex_);if(imageBatch_.active){imageBatch_.active=false;imageBatch_.cancelled=true;}stop_=true;prerenderCancel_=true;pending_={};pendingImage_.reset();pendingImagePath_.clear();snapshot_.transport=busy_?TransportState::Stopping:TransportState::Empty;}
 void EngineController::pause(bool p){paused_=p;std::lock_guard lock(mutex_);if(snapshot_.running)snapshot_.transport=p?TransportState::Paused:TransportState::Playing;}
 void EngineController::setVolume(float gain,bool mute){if(!std::isfinite(gain))return;volume_=std::clamp(gain,0.0f,1.0f);muted_=mute;}
 bool EngineController::requestSettings(EnhancementSettings s){
     if(!s.validate().empty()){veyra::log::warn("settings","invalid whole settings transaction rejected");status(L"整套设置无效，未应用任何字段",false);return false;}
-    std::lock_guard lock(mutex_);if(snapshot_.image)s.multiplier=1;
+    std::lock_guard lock(mutex_);if(snapshot_.image){s.multiplier=1;prerenderCancel_=true;}
     // Revision partitions GPU history and measurements. Audio-only edits must
     // not invalidate in-flight video, and identical notifications are no-ops.
     s.revision=desired_.revision;if(s==desired_)return true;
@@ -109,7 +125,7 @@ void EngineController::startExport(const std::wstring& input,const std::wstring&
     const auto frozen=opts.snapshot();post([this,input,output,frozen,hevc]{CoInitializeEx(nullptr,COINIT_MULTITHREADED);bool ok=exportVideo(input,output,PlayerOptions::from(frozen),hevc,stop_,[this](double p,const std::wstring& s){std::lock_guard lock(mutex_);snapshot_.status=s;snapshot_.position=p;snapshot_.duration=1;snapshot_.running=true;});{std::lock_guard lock(mutex_);snapshot_.running=false;snapshot_.failed=!ok&&!stop_;}CoUninitialize();});
 }
 PlayerSnapshot EngineController::snapshot()const{
-    std::lock_guard lock(mutex_);auto copy=snapshot_;copy.volume=volume_;copy.muted=muted_;
+    std::lock_guard lock(mutex_);auto copy=snapshot_;copy.volume=volume_;copy.muted=muted_;copy.playbackRate=playbackRate_;
     const bool playing=copy.running&&!copy.image&&copy.transport==TransportState::Playing;
     if(activeFlow_)copy.metrics.flow=activeFlow_->snapshot(monotonic100ns());
     copy.fgBudgetLimited=playing&&copy.metrics.flow.lastFgRejected100ns>0&&monotonic100ns()-copy.metrics.flow.lastFgRejected100ns<10000000;
@@ -128,10 +144,16 @@ PlayerSnapshot EngineController::snapshot()const{
     return copy;
 }
 void EngineController::status(const std::wstring& s,bool failed){std::lock_guard lock(mutex_);snapshot_.status=s;snapshot_.failed=failed;if(failed)snapshot_.transport=TransportState::Failed;}
-void EngineController::run(HWND window,std::wstring path,PlayerOptions options,std::shared_ptr<source::RemotePlayConnectDesc> remoteRequest){
+void EngineController::run(HWND window,std::wstring path,PlayerOptions options,std::shared_ptr<source::RemotePlayConnectDesc> remoteRequest,std::shared_ptr<const sink::RgbaImage> pinnedImage,std::shared_ptr<const sink::RgbaImage> pinnedRendered){
     CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     status(L"正在初始化GPU与本地运行时…");
-    gfx::D3D12DeviceContext ctx;gfx::CommandSlotRing ring;source::MediaFileSource source;
+    auto extension=std::filesystem::path(path).extension().wstring();for(auto& c:extension)c=towlower(c);
+    const bool retainDevice=(keepImageDevice_||prerenderImages_)&&(extension==L".png"||extension==L".jpg"||extension==L".jpeg");
+    std::unique_ptr<ImageDeviceState> temporaryDevice;
+    if(retainDevice){if(!imageDevice_)imageDevice_=std::make_unique<ImageDeviceState>();}
+    else {imageDevice_.reset();temporaryDevice=std::make_unique<ImageDeviceState>();}
+    auto& deviceState=retainDevice?*imageDevice_:*temporaryDevice;
+    auto& ctx=deviceState.context;auto& ring=deviceState.ring;source::MediaFileSource source;
     sink::AudioPipeline audioPipe;sink::AudioRenderer audio;VideoPresenter presenter;
     pipeline::EnhanceGraph graph(ctx,ring);AVFrame* imageFrame=nullptr;AVFrame* cachedFrame=nullptr;pipeline::FramePacket cachedPacket;
     source::CaptureCardSource captureSource;const bool physicalCapture=path.rfind(L"capture:",0)==0;
@@ -153,18 +175,40 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
     try {
         do {
             Status st=Status::Ok;gfx::DeviceContextDesc dd;dd.commandSlotCount=6;
-            if(!ctx.initialize(dd,st)||!ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),6,st)){status(L"D3D12初始化失败，请查看诊断",true);break;}
+            if(ctx.device()){const auto removed=ctx.device()->GetDeviceRemovedReason();if(FAILED(removed)){veyra::log::warn("image-device",std::format("discarding removed device HRESULT=0x{:08X}",uint32_t(removed)));ring.shutdown();ctx.shutdown();}}
+            if(!ctx.device()){
+                if(!ctx.initialize(dd,st)||!ring.initialize(ctx.device(),ctx.directQueue(),ctx.fence(),ctx.fenceEvent(),6,st)){ring.shutdown();ctx.shutdown();status(L"D3D12初始化失败，请查看诊断",true);break;}
+            }else veyra::log::info("image-device","reused retained device and command queue for new image session");
             auto ext=std::filesystem::path(path).extension().wstring();for(auto& c:ext)c=towlower(c);
             const bool isImage=ext==L".png"||ext==L".jpg"||ext==L".jpeg";
             sink::RgbaImage decodedImage;
-            auto cachedImage=isImage?imageCache_->get(path):nullptr;
+            auto cachedImage=isImage?(pinnedImage?pinnedImage:imageCache_->get(path)):nullptr;
             const auto& image=cachedImage?*cachedImage:decodedImage;
+            std::string diskSourceKey;std::filesystem::path diskSavedEntry;uint64_t diskSavedRevision=0;
             uint32_t width=0,height=0;double duration=0;
             if(isImage){
+                {std::lock_guard lock(mutex_);snapshot_.imageLoading=true;}
                 if(!cachedImage&&!sink::loadImage(path,decodedImage)){status(L"无法解码PNG/JPEG",true);break;}
                 veyra::log::info("image-cache",std::format("hit={} bytes={} retainedBytes={}",bool(cachedImage),image.pixels.size(),imageCache_->bytes()));
+                if(cacheRenderedImages_)diskSourceKey=ImageRenderCache::sourceKey(path,image);
+                while(cacheRenderedImages_){
+                    sink::RgbaImage rendered;bool hit=false;
+                    if(pinnedRendered){rendered=*pinnedRendered;pinnedRendered.reset();hit=true;veyra::log::info("image-prerender","foreground memory hit; skipping enhancement");}
+                    else hit=ImageRenderCache::load(ImageRenderCache::entry(path,diskSourceKey,options.snapshot()),rendered);
+                    if(!hit&&prerenderImages_){
+                        status(L"正在增强当前图片，完成后预渲染后续图片…");
+                        if(!renderStillImage(ctx,ring,image,rendered,options.snapshot(),stop_)){if(!stop_)status(L"当前图片增强失败，请检查运行组件；未计为预渲染完成",true);break;}
+                        if(!ImageRenderCache::save(ImageRenderCache::entry(path,diskSourceKey,options.snapshot()),rendered))status(L"当前图片缓存写入失败，仍可预览",false);
+                        hit=true;
+                    }
+                    if(!hit)break;
+                    runLargeImage(window,image,options,ctx,ring,path,diskSourceKey,&rendered);
+                    if(stop_||snapshot().failed)break;
+                    options=PlayerOptions::from(snapshot().desired);
+                }
+                if(stop_||snapshot().failed)break;
                 if(!pipeline::Extent{image.width,image.height}.valid()||uint64_t(image.width)*image.height>16777216){
-                    runLargeImage(window,image,options,ctx,ring);break;
+                    runLargeImage(window,image,options,ctx,ring,path,diskSourceKey);break;
                 }
                 imageFrame=av_frame_alloc();imageFrame->format=AV_PIX_FMT_RGBA;imageFrame->width=image.width;imageFrame->height=image.height;imageFrame->pts=0;imageFrame->color_range=AVCOL_RANGE_JPEG;imageFrame->colorspace=AVCOL_SPC_RGB;imageFrame->color_trc=AVCOL_TRC_IEC61966_2_1;
                 if(av_frame_get_buffer(imageFrame,32)<0){status(L"图片资源分配失败",true);break;}
@@ -234,6 +278,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
             pipeline::EnhanceGraph::FrameOutputs out;bool reset=true,hasOutput=false,audioRebuffering=false,seekPreviewPending=false;
             bool initialRemoteFramePending=isRemote;
             uint64_t activeSeekId=0;
+            double activePlaybackRate=playbackRate_.load();audioPipe.setPlaybackRate(activePlaybackRate);
             bool fileAwaitingVideo=true,fileAudioAlignPending=true,fileInputEnded=false;double lastFilePresentedMs=0,lastFilePresentLateness=0;std::deque<double> latenessSamples;
             if(!isImage&&!isCapture&&audioPipe.open(path)){
                 audioPipe.holdForVideo();audioPipe.startThread(&audio,true);audioStarted=true;
@@ -376,18 +421,18 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
             // while an endpoint recovers. Steady-state video scheduling reads
             // this clock; it never waits on audio coverage.
             auto nowMs=[&](){
-                if(!audioStarted)return anchorMs+std::chrono::duration<double,std::milli>(Clock::now()-anchor).count();
+                if(!audioStarted)return anchorMs+std::chrono::duration<double,std::milli>(Clock::now()-anchor).count()*activePlaybackRate;
                 publishAudioStatus();const double a=audio.mediaTimeMs();
                 if(std::isfinite(a)){lastAudioClockMs=a;audioClockExhausted=false;return a;}
                 // A disconnected endpoint freezes the shared media clock. Only a
                 // fully exhausted audio stream may hand its tail to the wall clock.
                 if(audioPipe.clockExhausted()){
                     if(!audioClockExhausted){audioClockExhausted=true;audioTailAnchor=Clock::now();}
-                    return lastAudioClockMs+std::chrono::duration<double,std::milli>(Clock::now()-audioTailAnchor).count();
+                    return lastAudioClockMs+std::chrono::duration<double,std::milli>(Clock::now()-audioTailAnchor).count()*activePlaybackRate;
                 }
                 return lastAudioClockMs;
             };
-            uint64_t hdrDisplayCheck=0,imageSequence=1;std::optional<Clock::time_point> imageSwitchStart;
+            uint64_t hdrDisplayCheck=0,imageSequence=1;std::optional<Clock::time_point> imageSwitchStart;bool imageGraphRebuilt=false;
             while(!stop_){
                 if(gd.hdrInput&&GetTickCount64()-hdrDisplayCheck>2000){
                     hdrDisplayCheck=GetTickCount64();
@@ -413,7 +458,23 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                     drainLivePresentation();
                     if(graph.hdrOutput()){auto hdrPath=std::filesystem::path(save);hdrPath.replace_extension(L".jxr");if(sink::saveHdrScreenshot(hdrPath.wstring(),ctx,ring,graph.videoFrameResource(out.videoSlot)))status(L"HDR截图已保存："+hdrPath.wstring());else status(L"HDR截图保存失败，请查看日志",false);}else if(!sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),result)||!sink::saveImage(save,result,e==L".jpg"||e==L".jpeg"))status(L"保存失败（目标文件可能已存在），播放已保留",false);else{status(L"图片已保存："+save);veyra::log::info("image-save",std::format("saved extent={}x{} revision={}",gd.workWidth,gd.workHeight,options.settings.revision));}}
                     catch(const std::exception& e){veyra::log::warn("image-save",std::format("save exception; retaining session: {}",e.what()));status(L"保存异常，播放已保留；可再次保存",false);}}
+                if(isImage&&hasOutput&&cacheRenderedImages_&&(diskSavedEntry.empty()||diskSavedRevision!=options.settings.revision)){
+                    if(diskSourceKey.empty())diskSourceKey=ImageRenderCache::sourceKey(path,image);
+                    diskSavedRevision=options.settings.revision;
+                    const auto entry=ImageRenderCache::entry(path,diskSourceKey,options.snapshot());
+                    if(entry!=diskSavedEntry){
+                        diskSavedEntry=entry;
+                        sink::RgbaImage rendered;
+                        const bool supported=(!options.nr||graph.nrEnabled())&&(!options.sr||!resolution.srApplied||graph.srEnabled());
+                        if(supported&&sink::readRgba8(ctx,ring,graph.videoFrameResource(out.videoSlot),rendered)){
+                            if(!ImageRenderCache::save(entry,rendered))status(L"缓存保存失败，请检查目录写入权限；图片仍可查看",false);
+                        }
+                    }
+                }
                 if(isImage)requested.multiplier=1;
+                if(isImage&&hasOutput&&cacheRenderedImages_&&!requested.sameVideoConfiguration(options.snapshot())){
+                    open(window,path,PlayerOptions::from(requested));break;
+                }
                 if(requested.revision==options.settings.revision&&requested!=options.settings){
                     options.settings.audioSync=requested.audioSync;options.settings.audioOffsetMs=requested.audioOffsetMs;
                     captureSource.setAudioSync(unsigned(requested.audioSync),requested.audioOffsetMs);
@@ -473,6 +534,13 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                 }
                 if(stop_)break;
                 double seek;{std::lock_guard lock(mutex_);seek=seekSeconds_.exchange(-1);if(seek>=0)activeSeekId=snapshot_.seekRequested;}
+                if(!isImage&&!isCapture&&activePlaybackRate!=playbackRate_.load()){
+                    const double requestedRate=playbackRate_.load();
+                    if(seek<0)seek=std::clamp(lastFilePresentedMs/1000.0,0.0,duration);
+                    activePlaybackRate=requestedRate;audioPipe.setPlaybackRate(requestedRate);
+                    playbackSpeedLastWall={};
+                    veyra::log::info("playback-rate",std::format("rate={:.3f} position={:.3f} paused={} reset=Seek",activePlaybackRate,seek,paused_.load()));
+                }
                 if(seek>=0&&!isImage&&!isCapture){
                     holdFileAudio();fileAudioAlignPending=true;
                     drainLivePresentation();
@@ -484,10 +552,37 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                     {std::lock_guard lock(mutex_);nextImage=std::move(pendingImage_);nextPath=std::move(pendingImagePath_);}
                     if(nextImage){
                         imageSwitchStart=Clock::now();
+                        imageGraphRebuilt=width!=nextImage->width||height!=nextImage->height;
+                        if(imageGraphRebuilt){
+                            finishReset(diagnostics::ResetOutcome::Cancelled);
+                            resetStart=resetStageStart=*imageSwitchStart;resetRecord=diagnostics::FrameFlowMetrics::ResetRecord{};
+                            resetRecord->sessionId=runSessionId;resetRecord->settingsRevision=options.settings.revision;
+                            resetRecord->reason=static_cast<uint8_t>(pipeline::ResetReason::SourceSwitch);resetRecord->rebuilt=true;
+                        }
                         // One source-switch drain, never per frame/pass. The existing reset coordinator clears all histories.
-                        if(!ring.drainQueue()||av_frame_make_writable(imageFrame)<0){status(L"图片切换资源准备失败",true);break;}
+                        if(!ring.drainQueue()){status(L"图片切换队列排空失败",true);break;}
+                        if(imageGraphRebuilt){
+                            markResetStage(diagnostics::ResetStage::Drain);
+                            // Source dimensions are exact; never resize/pad the user's image to force a cache hit.
+                            // Recreate dimension-dependent resources on the existing device and queue.
+                            out={};hasOutput=false;av_frame_free(&cachedFrame);cachedPacket={};
+                            presenter.close();graph.shutdown();markResetStage(diagnostics::ResetStage::Destroy);
+                            width=nextImage->width;height=nextImage->height;
+                            auto nextDesc=gd;nextDesc.sourceWidth=width;nextDesc.sourceHeight=height;
+                            const auto plan=pipeline::ResolutionPlan::make({width,height},options.sr,options.settings.nrPolicy,true,options.settings.revision,options.settings.srTarget,false);
+                            nextDesc.workWidth=plan.base.width;nextDesc.workHeight=plan.base.height;nextDesc.nrWidth=plan.nr.width;nextDesc.nrHeight=plan.nr.height;nextDesc.flowWidth=plan.flow.width;nextDesc.flowHeight=plan.flow.height;
+                            nextDesc.enableSr=plan.srApplied&&nvidiaAdapter;
+                            av_frame_free(&imageFrame);imageFrame=av_frame_alloc();
+                            if(!imageFrame){status(L"图片帧分配失败",true);break;}
+                            imageFrame->format=AV_PIX_FMT_RGBA;imageFrame->width=width;imageFrame->height=height;imageFrame->pts=0;imageFrame->color_range=AVCOL_RANGE_JPEG;imageFrame->colorspace=AVCOL_SPC_RGB;imageFrame->color_trc=AVCOL_TRC_IEC61966_2_1;
+                            const auto allocated=av_frame_get_buffer(imageFrame,32);
+                            veyra::log::info("image-switch",std::format("resize source={}x{} frameAllocation={} retainedDevice=true",width,height,allocated));
+                            if(allocated<0||!graph.initialize(nextDesc)||!presenter.open(ctx,window,graph,options.settings.captureCompatible)||!graph.createViews()){status(L"图片尺寸切换初始化失败",true);break;}
+                            markResetStage(diagnostics::ResetStage::Create);
+                            gd=nextDesc;
+                        }else if(av_frame_make_writable(imageFrame)<0){status(L"图片切换资源准备失败",true);break;}
                         for(unsigned y=0;y<height;++y)memcpy(imageFrame->data[0]+size_t(y)*imageFrame->linesize[0],nextImage->pixels.data()+size_t(y)*width*4,size_t(width)*4);
-                        av_frame_free(&cachedFrame);cachedPacket={};out={};hasOutput=false;path=std::move(nextPath);++imageSequence;
+                        av_frame_free(&cachedFrame);cachedPacket={};out={};hasOutput=false;path=std::move(nextPath);diskSourceKey=ImageRenderCache::sourceKey(path,*nextImage);diskSavedEntry.clear();++imageSequence;
                         reset=true;pendingResetCause=pipeline::ResetReason::SourceSwitch;wasPaused=false;
                         {std::lock_guard lock(mutex_);snapshot_.status=L"正在增强下一张图片…";}
                     }
@@ -512,7 +607,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                     const auto leaseWaitStart=Clock::now();
                     while((liveScheduler->occupancy()>=2||!graph.nextFrameSlotAvailable())&&!stop_&&(!paused_||seekPreviewPending)&&!liveScheduler->failed()){
                         advanceLive();if(seekSeconds_>=0)break;
-                        if(liveScheduler->occupancy()==0&&!graph.nextFrameSlotAvailable()&&elapsedMs(leaseWaitStart)>2000){status(L"等待输出纹理释放超时",true);stop_=true;break;}
+                        if(liveScheduler->occupancy()==0&&!graph.nextFrameSlotAvailable()&&elapsedMs(leaseWaitStart)>2000){status(L"等待输出纹理释放超时",true);stop_=true;prerenderCancel_=true;break;}
                         if(liveScheduler->occupancy()>=2||!graph.nextFrameSlotAvailable())waitLive();
                         std::lock_guard lock(mutex_);if(desired_.revision!=options.settings.revision)break;
                     }
@@ -665,7 +760,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                         const auto a=(historyReset||batch.b100ns<=batch.a100ns||batch.b100ns-batch.a100ns>10000000)?batch.b100ns-interval:batch.a100ns;
                         const auto lastGenerated=pipeline::FrameBatch::interpolate(a,batch.b100ns,options.fgMultiplier-1,options.fgMultiplier);
                         const auto now=host100ns();
-                        return fgBudget.admit(now,now+lastGenerated-int64_t(nowMs()*10000.0),elapsedMs(processStart),livePresent.p95());
+                        return fgBudget.admit(now,now+int64_t((lastGenerated-nowMs()*10000.0)/activePlaybackRate),elapsedMs(processStart),livePresent.p95());
                     };
                 }
                 uint64_t processWaitBase=0,processSubmitBase=0;double processWaitMsBase=0,processSlotWaitMs=0;
@@ -800,7 +895,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                             if(isCapture){if(host100ns()<timeline.deadline(item.pts100ns))return {State::Pending,timeline.deadline(item.pts100ns)};}
                             else if(!fileAwaitingVideo){
                                 if(audioStarted)audioPipe.videoReady(itemPtsMs);
-                                if(nowMs()+.25<itemPtsMs)return {State::Pending,now+std::min<int64_t>(10000,int64_t((itemPtsMs-nowMs())*10000))};
+                                if(nowMs()+.25<itemPtsMs)return {State::Pending,now+std::min<int64_t>(10000,int64_t((itemPtsMs-nowMs())*10000/activePlaybackRate))};
                             }
                             const auto waited=elapsedMs(*s.deadlineStart);s.deadlineStart.reset();s.waitMs+=waited;flow->cpu(diagnostics::CpuStage::DeadlineWait,waited,host100ns());
                             const auto begin=Clock::now();const auto before=presenter.submittedCount();
@@ -821,7 +916,10 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                                 for(unsigned next=s.next+1;next<batch.batch.count;++next){const auto& candidate=batch.batch.frames[next];if(candidate.kind!=pipeline::FrameKind::Generated||(candidate.validity==pipeline::GenerationValidity::Valid&&comparisonMode_==0)){nextPts=double(candidate.pts100ns)/10000;break;}}
                                 if(audioStarted){audioPipe.videoPresented(nextPts);audioPipe.setPaused(paused_);}
                                 if(fileAwaitingVideo)veyra::log::info("audio-sync",std::format("file lookahead anchor ptsMs={:.3f} queued={} (continuous audio after bounded prefill)",itemPtsMs,liveScheduler->occupancy()));
-                                fileAwaitingVideo=false;anchor=Clock::now();anchorMs=itemPtsMs;seekPreviewPending=false;
+                                // Keep one wall-clock anchor through steady playback. Reanchoring
+                                // on every Present accumulates scheduling overhead (especially at 3x).
+                                if(fileAwaitingVideo){anchor=Clock::now();anchorMs=itemPtsMs;}
+                                fileAwaitingVideo=false;seekPreviewPending=false;
                                 if(graph.xessEnabled()&&presenter.xessActive()&&xessGenerationGate.observe(nowMs()-itemPtsMs,sourceIntervalMs)){
                                     presenter.setXessGenerationSuppressed(xessGenerationGate.suppressed());
                                     veyra::log::info("xess-fg-gate",std::format("event={} revision={} lateMs={:.3f}",xessGenerationGate.suppressed()?"suppress":"resume",item.identity.settingsRevision,nowMs()-itemPtsMs));
@@ -869,7 +967,7 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                     // Images have no media clock, audio or temporal batches.
                     const auto readyStart=Clock::now();
                     while(!stop_&&!graph.resolveGeneration(out)){
-                        if(elapsedMs(readyStart)>2000){status(L"图片 GPU 就绪超时",true);stop_=true;break;}
+                        if(elapsedMs(readyStart)>2000){status(L"图片 GPU 就绪超时",true);stop_=true;prerenderCancel_=true;break;}
                         deadlineWait.slice(.2);
                     }
                     if(stop_)break;
@@ -916,8 +1014,8 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                 measured.flow=frameFlow->snapshot(host100ns());
                 measured.sourceFrames=measured.flow.counters.sourceAccepted;measured.validGenerated=measured.flow.counters.fgReadyValid;measured.submitted=measured.flow.counters.realPresented+measured.flow.counters.generatedPresented;measured.expired=measured.flow.counters.generatedExpiredAfterEval;
                 const double ageP95=liveScheduler?completed.ageP95:captureAges.p95(),waitP95=liveScheduler?completed.waitP95:scheduleWaits.p95(),presentP95=liveScheduler?completed.presentP95:presentTimes.p95();
-                if(imageSwitchStart){veyra::log::info("image-switch",std::format("presented source={} elapsedMs={:.2f} reusedGraph=true reset=SourceSwitch",imageSequence,std::chrono::duration<double,std::milli>(Clock::now()-*imageSwitchStart).count()));imageSwitchStart.reset();status(L"图片已更新，可保存PNG/JPEG");}
-                ++frames;{std::lock_guard lock(mutex_);snapshot_.metrics=measured;snapshot_.colorStatus=gd.hdrOutput?(graph.hdr10Output()?L"HDR → HDR10 / PQ":L"HDR → scRGB / 浮点"):gd.hdrInput?L"HDR → SDR色调映射":L"SDR → SDR";snapshot_.position=(isCapture||isImage?pts:lastFilePresentedMs)/1000;snapshot_.frames=sourceFrames;snapshot_.generated=graphStats.fgGeneratedFrames;snapshot_.lateMs=lateness;snapshot_.lateP95Ms=sorted.empty()?0:sorted[size_t((sorted.size()-1)*0.95)];
+                if(imageSwitchStart){veyra::log::info("image-switch",std::format("presented source={} elapsedMs={:.2f} reusedDevice=true reusedGraph={} reset=SourceSwitch",imageSequence,std::chrono::duration<double,std::milli>(Clock::now()-*imageSwitchStart).count(),!imageGraphRebuilt));imageSwitchStart.reset();status(L"图片已更新，可保存PNG/JPEG");}
+                ++frames;{std::lock_guard lock(mutex_);if(isImage&&!pendingImage_)snapshot_.imageLoading=false;snapshot_.metrics=measured;snapshot_.colorStatus=gd.hdrOutput?(graph.hdr10Output()?L"HDR → HDR10 / PQ":L"HDR → scRGB / 浮点"):gd.hdrInput?L"HDR → SDR色调映射":L"SDR → SDR";snapshot_.position=(isCapture||isImage?pts:lastFilePresentedMs)/1000;snapshot_.frames=sourceFrames;snapshot_.generated=graphStats.fgGeneratedFrames;snapshot_.lateMs=lateness;snapshot_.lateP95Ms=sorted.empty()?0:sorted[size_t((sorted.size()-1)*0.95)];
                     // Measured playback speed: media-PTS advance per wall time
                     // over ~1s windows (1.0 = normal speed), resampled on seek.
                     const auto speedNow=Clock::now();
@@ -963,7 +1061,11 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
     {std::lock_guard lock(mutex_);activeRemote_.reset();}
     if(remote)remote->close();
 #endif
-    audioPipe.stopThread();audio.shutdown();ring.drainQueue();presenter.close();graph.shutdown();captureSource.close();source.close();av_frame_free(&cachedFrame);av_frame_free(&imageFrame);ring.shutdown();ctx.shutdown();
+    audioPipe.stopThread();audio.shutdown();ring.drainQueue();presenter.close();graph.shutdown();captureSource.close();source.close();av_frame_free(&cachedFrame);av_frame_free(&imageFrame);
+    const auto deviceResult=ctx.device()?ctx.device()->GetDeviceRemovedReason():S_OK;
+    if(FAILED(deviceResult))veyra::log::warn("image-device",std::format("releasing failed device HRESULT=0x{:08X}",uint32_t(deviceResult)));
+    if(!retainDevice||(!keepImageDevice_&&!prerenderImages_)||!ctx.device()||FAILED(deviceResult)){ring.shutdown();ctx.shutdown();}
+    else {veyra::log::info("image-device","retained device/queue; image graph, presenter and image buffers released");Logger::instance().flush();}
     {std::lock_guard lock(mutex_);snapshot_.running=false;snapshot_.audioEndpointRecovering=false;snapshot_.audioRebuffering=false;}
     CoUninitialize();
 }

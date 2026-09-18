@@ -481,6 +481,10 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_compile_features(veyra_nr_runtime_switch_tests PRIVATE cxx_std_20)
   target_link_libraries(veyra_nr_runtime_switch_tests PRIVATE veyra_engine)
   add_executable(veyra_audio_timeline_tests tests/integration/AudioTimelineTests.cpp)
+  add_executable(veyra_playback_rate_tests tests/integration/PlaybackRateTests.cpp)
+  target_compile_features(veyra_playback_rate_tests PRIVATE cxx_std_20)
+  target_compile_definitions(veyra_playback_rate_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_link_libraries(veyra_playback_rate_tests PRIVATE veyra_engine)
   target_compile_features(veyra_audio_timeline_tests PRIVATE cxx_std_20)
   target_link_libraries(veyra_audio_timeline_tests PRIVATE veyra_sinks)
   add_executable(veyra_capture_audio_tests tests/integration/CaptureAudioTests.cpp)
@@ -552,7 +556,7 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_link_libraries(veyra_repair_fg_tests PRIVATE veyra_pipeline veyra_sinks veyra_nvof)
 
   # Headless quality-core runner (Playbook R3.3): the phase5 gate's quality
-  add_library(veyra_engine STATIC src/engine/EngineController.cpp src/engine/EngineControllerImage.cpp src/engine/TiledImageProcessor.cpp src/engine/PresetStore.cpp src/engine/VideoPresenter.cpp src/engine/VideoExportJob.cpp src/engine/ExportJobManager.cpp src/engine/Subtitles.cpp)
+  add_library(veyra_engine STATIC src/engine/EngineController.cpp src/engine/EngineControllerImage.cpp src/engine/ImageRenderCache.cpp src/engine/StillImageRenderer.cpp src/engine/EngineControllerImageBatch.cpp src/engine/TiledImageProcessor.cpp src/engine/PresetStore.cpp src/engine/VideoPresenter.cpp src/engine/VideoExportJob.cpp src/engine/ExportJobManager.cpp src/engine/Subtitles.cpp)
   target_sources(veyra_pipeline PRIVATE src/guidance/AmdOpticalFlow.cpp
     src/guidance/GpuDisOpticalFlow.cpp third_party/gpu-dis/src/gpu/native_strict_dis_provider.cpp)
   target_include_directories(veyra_pipeline PRIVATE third_party/gpu-dis/src/gpu)
@@ -605,6 +609,8 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_compile_features(veyra_source_fidelity_tests PRIVATE cxx_std_20)
   target_compile_definitions(veyra_source_fidelity_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
   target_link_libraries(veyra_source_fidelity_tests PRIVATE veyra_engine)
+  add_executable(veyra_image_render_cache_tests tests/integration/ImageRenderCacheTests.cpp)
+  target_link_libraries(veyra_image_render_cache_tests PRIVATE veyra_engine)
   add_executable(veyra_hw_import_image_tests tests/integration/HardwareImportImageTests.cpp)
   target_compile_features(veyra_hw_import_image_tests PRIVATE cxx_std_20)
   target_compile_definitions(veyra_hw_import_image_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -612,7 +618,7 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
   target_compile_features(veyra_hdr_color_tests PRIVATE cxx_std_20)
   target_compile_definitions(veyra_hdr_color_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
   target_link_libraries(veyra_hdr_color_tests PRIVATE veyra_engine)
-  add_executable(veyra WIN32 apps/veyra/main.cpp apps/veyra/ui/AppShell.cpp apps/veyra/ui/PlaylistWindow.cpp apps/veyra/ui/CapturePanel.cpp apps/veyra/ui/SubtitleOverlay.cpp apps/veyra/SettingsWindow.cpp apps/veyra/TelemetryWindow.cpp)
+  add_executable(veyra WIN32 apps/veyra/main.cpp apps/veyra/ui/AppShell.cpp apps/veyra/ui/ImageBrowser.cpp apps/veyra/ui/ImageBatchWindow.cpp apps/veyra/ui/PlaylistWindow.cpp apps/veyra/ui/CapturePanel.cpp apps/veyra/ui/SubtitleOverlay.cpp apps/veyra/SettingsWindow.cpp apps/veyra/TelemetryWindow.cpp)
   if(VEYRA_ENABLE_REMOTEPLAY)
     add_executable(veyra_ps5_hw_image_tests tests/integration/Ps5HardwareImageTests.cpp)
     add_executable(veyra_ps5_quality_tests tests/integration/Ps5SourceQualityTests.cpp)

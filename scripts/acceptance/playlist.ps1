@@ -23,6 +23,10 @@ $flags = '/nologo /std:c++20 /EHsc /utf-8 /DUNICODE /D_UNICODE /DNOMINMAX /DWIN3
     'if errorlevel 1 exit /b 1'
     'out\playlist\PlaylistWindowTests.exe'
     'if errorlevel 1 exit /b 1'
+    "cl $flags tests\integration\ImageBrowserTests.cpp apps\veyra\ui\ImageBrowser.cpp src\base\Log.cpp /Foout\playlist\ /Feout\playlist\ImageBrowserTests.exe /link user32.lib gdi32.lib comctl32.lib comdlg32.lib shell32.lib ole32.lib oleaut32.lib"
+    'if errorlevel 1 exit /b 1'
+    'out\playlist\ImageBrowserTests.exe'
+    'if errorlevel 1 exit /b 1'
     "cl $flags tests\unit\UiContractTests.cpp src\engine\PresetStore.cpp /Foout\playlist\ /Feout\playlist\UiContractTests.exe"
     'if errorlevel 1 exit /b 1'
     "out\playlist\UiContractTests.exe out\playlist\ui-preferences-$runId"

@@ -17,6 +17,7 @@ CMakeUserPresets.json
 __pycache__/
 
 # Diagnostics and captures
+_cache/
 /captures/
 /logs/
 *.pdb

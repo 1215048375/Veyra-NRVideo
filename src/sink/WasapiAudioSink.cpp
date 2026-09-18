@@ -75,7 +75,7 @@ double AudioPipeline::tailPtsMs() const
     std::lock_guard<std::mutex> lock(mutex_);
     if (segments_.empty()) return -1.0;
     const Segment& t = segments_.back();
-    return t.startPtsMs + 1000.0 * static_cast<double>(t.frames) / kAudioRate;
+    return t.startPtsMs + 1000.0 * static_cast<double>(t.frames) / conversionRate_;
 }
 
 uint64_t AudioPipeline::underruns() const { return underruns_.load(); }
@@ -100,7 +100,7 @@ size_t AudioPipeline::pull(float* dst, size_t maxFrames, double* firstPtsMs)
         }
         copied += n;
         seg.frames -= n;
-        seg.startPtsMs += 1000.0 * static_cast<double>(n) / kAudioRate;
+        seg.startPtsMs += 1000.0 * static_cast<double>(n) / conversionRate_;
         if (seg.frames == 0) segments_.pop_front();
     }
     ringFrames_ -= take;
@@ -149,7 +149,7 @@ void AudioPipeline::pushDecoded(const AVFrame* frame)
             ? frame->ch_layout : outLayout;
         swrInputRate_=frame->sample_rate;swrInputFormat_=frame->format;
         const int result = swr_alloc_set_opts2(&swr_,
-            &outLayout, AV_SAMPLE_FMT_FLT, kAudioRate,
+            &outLayout, AV_SAMPLE_FMT_FLT, conversionRate_,
             &inLayout, static_cast<AVSampleFormat>(frame->format), frame->sample_rate,
             0, nullptr);
         if (result < 0 || swr_ == nullptr || swr_init(swr_) < 0) {
@@ -208,9 +208,9 @@ void AudioPipeline::pushConverted(int frames)
     size_t skip = 0;
     if (discardUntilPtsMs_ >= 0 && nextPtsMs_ < discardUntilPtsMs_) {
         skip = std::min(static_cast<size_t>(frames), static_cast<size_t>(
-            std::ceil((discardUntilPtsMs_ - nextPtsMs_) * kAudioRate / 1000.0 - 1e-7)));
+            std::ceil((discardUntilPtsMs_ - nextPtsMs_) * conversionRate_ / 1000.0 - 1e-7)));
     }
-    nextPtsMs_ += 1000.0 * skip / kAudioRate;
+    nextPtsMs_ += 1000.0 * skip / conversionRate_;
     const size_t addFrames = static_cast<size_t>(frames) - skip;
     if (!addFrames) return;
 
@@ -226,7 +226,7 @@ void AudioPipeline::pushConverted(int frames)
     ringFrames_ += addFrames;
     if (!segments_.empty()) {
         Segment& last = segments_.back();
-        const double lastEnd = last.startPtsMs + 1000.0 * static_cast<double>(last.frames) / kAudioRate;
+        const double lastEnd = last.startPtsMs + 1000.0 * static_cast<double>(last.frames) / conversionRate_;
         if (std::fabs(lastEnd - nextPtsMs_) < 1.0) {
             last.frames += addFrames;      // contiguous: extend
         } else {
@@ -235,7 +235,7 @@ void AudioPipeline::pushConverted(int frames)
     } else {
         segments_.push_back({ nextPtsMs_, addFrames });
     }
-    nextPtsMs_ += 1000.0 * static_cast<double>(addFrames) / kAudioRate;
+    nextPtsMs_ += 1000.0 * static_cast<double>(addFrames) / conversionRate_;
 }
 
 void AudioPipeline::decodeBlock()
@@ -380,7 +380,7 @@ bool AudioRenderer::startAnchored(AudioPcmSource& pipeline, bool paused)
     UINT64 pos = 0, qpc = 0;
     if (!checked(clock_->GetPosition(&pos, &qpc),"Anchor GetPosition") || !clockFrequency_) return false;
     anchorPos_ = pos;
-    anchorPtsMs_.store(firstBufferPtsMs);
+    anchorPtsMs_.store(firstBufferPtsMs);anchorRate_=pipeline.playbackRate();
     if (!paused && !checked(client_->Start(),"Start")) return false;
     pausedEndpoint_=paused;
     started_ = true;
@@ -466,7 +466,7 @@ double AudioRenderer::mediaTimeMs() const
         if(frame>=timelineWriteFrame_)return std::numeric_limits<double>::quiet_NaN();
         return outputTimeline_.at(frame).value_or(std::numeric_limits<double>::quiet_NaN());
     }}
-    return anchorPtsMs_.load() + consumedMs;
+    return anchorPtsMs_.load() + consumedMs*anchorRate_;
 }
 
 void AudioRenderer::stopAndReset()
@@ -546,6 +546,8 @@ void AudioRenderer::setPaused(bool value)
 void AudioPipeline::runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint)
 {
     const auto t0 = std::chrono::steady_clock::now();
+    conversionRate_=uint32_t(std::lround(kAudioRate/requestedRate_.load()));
+    log::info("audio-rate",std::format("rate={:.6f} resampleRate={} pitchPreserved=false",playbackRate(),conversionRate_));
     bool endpointReady = renderer && (!ownEndpoint || renderer->start(pcmFormat_));
     double lastClockMs = 0, recoveryTargetMs = 0;
     auto retryAt = t0;
@@ -573,6 +575,8 @@ void AudioPipeline::runOnAudioThread(AudioRenderer* renderer, bool ownEndpoint)
             if(havePacket_){av_packet_unref(packet_);havePacket_=false;}
             avcodec_flush_buffers(codecCtx_);
             if(swr_)swr_free(&swr_);
+            conversionRate_=uint32_t(std::lround(kAudioRate/requestedRate_.load()));
+            log::info("audio-rate",std::format("rate={:.6f} resampleRate={} pitchPreserved=false",playbackRate(),conversionRate_));
             const int64_t tbTarget=static_cast<int64_t>(target*stream_->time_base.den/1000/stream_->time_base.num);
             const int result=avformat_seek_file(fmt_,streamIndex_,INT64_MIN,tbTarget,INT64_MAX,0);
             if(result<0){log::error("audio",std::format("seek failed code={}",result));clockExhausted_=false;return false;}

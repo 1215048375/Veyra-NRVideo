@@ -59,37 +59,5 @@ if ($LASTEXITCODE -ne 0) { throw 'Full CMake configuration failed.' }
 & cmake --build out/ci-full --target veyra --parallel 4
 if ($LASTEXITCODE -ne 0) { throw 'Full application build failed.' }
 
-# Explicit allowlist: never upload out/ci-full, dependencies, SDKs or runtime DLLs.
-$artifact = Join-Path $workspace 'out/ci-artifact'
-if (Test-Path -LiteralPath $artifact) { throw 'Artifact directory must be new.' }
-New-Item -ItemType Directory -Path $artifact | Out-Null
-Copy-Item -LiteralPath 'out/ci-full/veyra.exe' -Destination $artifact
-$shaderRoot = (Resolve-Path -LiteralPath 'out/ci-full/shaders').Path
-$shaders = @(Get-ChildItem -LiteralPath $shaderRoot -Recurse -File -Filter '*.dxil')
-if (-not $shaders.Count) { throw 'Compiled shaders are missing.' }
-foreach ($shader in $shaders) {
-    $relative = [IO.Path]::GetRelativePath($shaderRoot, $shader.FullName)
-    $target = Join-Path $artifact "shaders/$relative"
-    New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
-    Copy-Item -LiteralPath $shader.FullName -Destination $target
-}
-Copy-Item -LiteralPath 'LICENSE', 'THIRD_PARTY_NOTICES.md' -Destination $artifact
-Copy-Item -LiteralPath 'licenses' -Destination $artifact -Recurse
-@{
-    commit = (& git rev-parse HEAD)
-    sourceDirty = [bool]((& git status --porcelain) -join '')
-    dependencyLockSha256 = (Get-FileHash -LiteralPath scripts/ci/dependencies.lock.json).Hash
-    remotePlay = $true
-    gpuTestsExecuted = $false
-    portableRuntimePack = $false
-    executableSha256 = (Get-FileHash -LiteralPath (Join-Path $artifact 'veyra.exe')).Hash
-} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $artifact 'build-info.json') -Encoding utf8
-'Application build only. Requires the matching approved runtime pack; this is not a standalone portable release. GPU playback has not been tested. Source commit is recorded in build-info.json.' | Set-Content -LiteralPath (Join-Path $artifact 'BUILD-README.txt') -Encoding utf8
-foreach ($file in Get-ChildItem -LiteralPath $artifact -Recurse -File) {
-    $relative = [IO.Path]::GetRelativePath($artifact, $file.FullName).Replace('\', '/')
-    $allowed = $relative -in @('veyra.exe', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'build-info.json', 'BUILD-README.txt')
-    $allowed = $allowed -or ($relative.StartsWith('shaders/') -and $file.Extension -eq '.dxil')
-    $allowed = $allowed -or ($relative.StartsWith('licenses/') -and $file.Extension -in @('', '.txt', '.json'))
-    if (-not $allowed) { throw "Unexpected CI artifact file: $relative" }
-}
-Write-Host 'Application artifact verified. GPU/runtime tests were not executed.'
+# Share the clean application-only packager with local builds.
+& "$PSScriptRoot/../package-build.ps1" -BuildDirectory (Join-Path $workspace 'out/ci-full') -OutputDirectory (Join-Path $workspace 'out/ci-artifact') -ApplicationOnly

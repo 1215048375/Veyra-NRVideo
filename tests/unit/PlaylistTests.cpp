@@ -1,4 +1,5 @@
 #include "veyra/engine/Playlist.h"
+#include "veyra/engine/ImagePrerenderQueue.h"
 #include <iostream>
 #include "../../apps/veyra/ui/ImageFolder.h"
 #include <fstream>
@@ -21,12 +22,25 @@ int main() {
         std::error_code ec;require(images.load(folder,ec)&&images.files.size()==3,"folder includes only supported images and excludes subfolders");
         require(std::filesystem::path(images.files[0]).filename()==L"A.PNG","case-insensitive filename order");
         require(!images.wheel(-30,1000)&&!images.wheel(-30,1001)&&!images.wheel(-30,1002),"high-resolution wheel accumulates a notch");
-        require(images.wheel(-30,1003)==1,"one notch advances one image");images.opened(images.files[1]);
+        require(images.wheel(-30,1003)==1,"one notch advances one image");images.opened(images.files[1]);require(images.prefetchWindow()==std::vector<std::wstring>{images.files[2]},"prefetch counts only upcoming images, excluding current and already viewed");
         require(!images.wheel(-1200,1100),"wheel burst discarded during cooldown");
         require(images.wheel(-1200,1500)==2,"large wheel delta advances at most one image");images.opened(images.files[2]);
-        require(!images.wheel(-120,2000),"last image does not wrap");
+        require(!images.wheel(-120,2000),"last image does not wrap");require(images.prefetchWindow().empty(),"last image has no upcoming decode targets");
         require(images.wheel(120,2500)==1,"wheel up goes back");
         require(!images.load(folder/"nested"/"missing",ec)&&images.files.size()==3,"failed folder load preserves current gallery");
+        {
+            ImagePrerenderQueue queue;auto paths=images.files;queue.paths(paths);
+            require(queue.progress()==std::pair<size_t,size_t>{0,3},"prerender counts no decoded-only images");
+            require(queue.next("settings-a")==paths[0],"prerender follows browse order");
+            auto rendered=std::make_shared<veyra::sink::RgbaImage>();rendered->width=rendered->height=1;rendered->pixels.resize(4);
+            queue.finish(paths[0],"settings-a",rendered,true);require(queue.progress().first==1&&queue.get(paths[0],"settings-a"),"completed full render retained");
+            require(queue.next("settings-a")==paths[1],"second render queued");queue.retry(paths[1]);require(queue.next("settings-a")==paths[1],"cancelled work can retry");
+            queue.paths({paths[1],paths[2]});queue.finish(paths[1],"settings-a",rendered,true);
+            require(queue.progress()==std::pair<size_t,size_t>{1,2},"moving window retains still-wanted completion");
+            require(queue.next("settings-b")==paths[1]&&queue.progress().first==0&&!queue.get(paths[1],"settings-a"),"new effects invalidate ready results");
+            queue.finish(paths[1],"settings-b",{},false);require(queue.progress().first==0&&queue.failures()==1,"failed enhancement never increments ready");
+            queue.paths({});require(queue.progress()==std::pair<size_t,size_t>{0,0},"end of list zero target");
+        }
         images.opened(L"unrelated.mp4");require(images.files.empty(),"opening unrelated media leaves folder browser");
         {
             std::atomic<int> decoded=0;
@@ -52,6 +66,16 @@ int main() {
             cache.prefetch({next});deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
             while(!cache.get(next)&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(std::chrono::milliseconds(5));
             require(!cache.get(old)&&cache.get(next),"obsolete in-flight decode discarded after new window");
+        }
+        {
+            std::atomic<bool> started=false;std::atomic<int> calls=0;
+            auto same=(folder/"A.PNG").wstring(),next=(folder/"b.jpg").wstring();
+            ImageDecodeCache cache([&](const std::wstring& path,veyra::sink::RgbaImage& image,size_t){if(path==same){++calls;started=true;std::this_thread::sleep_for(std::chrono::milliseconds(80));}image.width=image.height=1;image.pixels.resize(4);return true;});
+            cache.prefetch({same});auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
+            while(!started&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            cache.prefetch({same,next});deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
+            while(!cache.get(next)&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            require(cache.get(same)&&cache.get(next)&&calls==1,"still-wanted in-flight result survives queue update without duplicate decode");
         }
         Playlist p;
         require(!p.adjacent(1) && !p.ended(1), "empty queue");

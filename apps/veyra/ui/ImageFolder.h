@@ -25,6 +25,10 @@ struct ImageFolder {
         std::sort(found.begin(),found.end(),[](const auto& a,const auto& b){auto x=lower(a),y=lower(b);return x==y?a<b:x<y;});
         files=std::move(found);index=0;wheelDelta=0;wheeled=false;return true;
     }
+    std::vector<std::wstring> prefetchWindow()const{
+        std::vector<std::wstring> result;if(files.empty()||index>=files.size())return result;
+        for(size_t i=index+1;i<files.size()&&result.size()<20;++i)result.push_back(files[i]);return result;
+    }
     bool active(const std::wstring& path)const{return !files.empty()&&index<files.size()&&files[index]==path;}
     void opened(const std::wstring& path){auto it=std::find(files.begin(),files.end(),path);if(it==files.end()){files.clear();index=0;}else index=size_t(it-files.begin());}
     std::optional<size_t> adjacent(int direction)const{if(files.empty())return {};if(direction<0&&index>0)return index-1;if(direction>0&&index+1<files.size())return index+1;return {};}

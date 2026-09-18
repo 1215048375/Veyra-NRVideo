@@ -1,8 +1,10 @@
+#include "ImageBatchWindow.h"
 #include "BrandIcon.h"
 #include "../resource.h"
 #include "TransportLayout.h"
 #include "PlaylistWindow.h"
 #include "ImageFolder.h"
+#include "ImageBrowser.h"
 #include <shobjidl.h>
 #include <wrl/client.h>
 #include <windows.h>
@@ -43,12 +45,14 @@
 #include "veyra/engine/Subtitles.h"
 namespace {
 constexpr DWORD ShellStyle=WS_POPUP|WS_THICKFRAME|WS_MINIMIZEBOX|WS_MAXIMIZEBOX|WS_SYSMENU|WS_CLIPCHILDREN;
-enum {Open=101,Play,Stop,Save,Nr,Sr,Fg,Seek,Info,Capture,Export,Realtime,Recent,Multiplier,Settings,OriginalHold,CompareToggle,Split,Reference,Fullscreen,ModeSwitch=220,Master,DailyPreset,Volume,Mute,Subtitle,SubtitleLoad,SubtitleSize,ImageOpen,InspectorDrawer,TabEnhance,TabFg,TabPresets,TabExport,JobProgress,Details,Brand,MediaTitle,TimeLabel,EmptyTitle,EmptyHint,ProRailVideo,ProRailCapture,WindowMin,WindowMax,WindowClose,FpsLabel,RemotePlay,TabAudio,PlaylistButton=300,PlaylistPrevious,PlaylistNext,PlaylistRestart,PlaylistOrder,PlaylistLoop,ImageFolderOpen,ModeMenu,ModeDaily,ModeProfessional,ModeMini,ImageProgress,VideoSurface=1000};
+enum {Open=101,Play,Stop,Save,Nr,Sr,Fg,Seek,Info,Capture,Export,Realtime,Recent,Multiplier,Settings,OriginalHold,CompareToggle,Split,Reference,Fullscreen,ModeSwitch=220,Master,DailyPreset,Volume,Mute,Subtitle,SubtitleLoad,SubtitleSize,ImageOpen,InspectorDrawer,TabEnhance,TabFg,TabPresets,TabExport,JobProgress,Details,Brand,MediaTitle,TimeLabel,EmptyTitle,EmptyHint,ProRailVideo,ProRailCapture,WindowMin,WindowMax,WindowClose,FpsLabel,RemotePlay,TabAudio,PlaylistButton=300,PlaylistPrevious,PlaylistNext,PlaylistRestart,PlaylistOrder,PlaylistLoop,ImageFolderOpen,ModeMenu,ModeDaily,ModeProfessional,ModeMini,ImageProgress,ImageBrowserBack,ImageKeepDevice,ImageDiskCache,ImageFolderBatch,PlaybackRate,VideoSurface=1000};
 veyra::engine::EngineController engine;
 veyra::engine::Playlist playlist;
 veyra::ui::ImageFolder imageFolder;
 void browseImage(size_t);
-void openImageDirectory(const std::filesystem::path&);
+void openImageDirectory(const std::filesystem::path&,bool browser=true);
+HWND imageBrowser=nullptr;bool imageBrowserMode=false,browserVisible=false,commandLinePrefetch=false;
+void returnToImageBrowser();
 void playPlaylistEntry(size_t);
 #ifdef VEYRA_ENABLE_REMOTEPLAY
 veyra::remoteplay::ControllerInput remoteController;
@@ -95,7 +99,7 @@ void layout();
 HWND comparisonLine=nullptr;
 void refreshComparisonLine(){
     if(!video)return;auto state=engine.snapshot();
-    if(compareMode!=2||holdOriginal||!uiPreferences.comparisonLine||!state.frames||state.failed){if(comparisonLine)ShowWindow(comparisonLine,SW_HIDE);return;}
+    if(browserVisible||compareMode!=2||holdOriginal||!uiPreferences.comparisonLine||!state.frames||state.failed){if(comparisonLine)ShowWindow(comparisonLine,SW_HIDE);return;}
     if(!comparisonLine){comparisonLine=veyra::ui::createSubtitleOverlay(video);SetWindowTextW(comparisonLine,L"对比分割线");}
     RECT r{};GetClientRect(video,&r);auto extent=state.metrics.resolution.output;
     auto box=veyra::ui::comparisonLineRect(r.right,r.bottom,extent.width,extent.height,engine.previewView(),compareSplit,veyra::ui::dip(video,5));
@@ -115,6 +119,7 @@ LRESULT CALLBACK interaction(HWND h,UINT m,WPARAM w,LPARAM l,UINT_PTR id,DWORD_P
         int choice=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_NONOTIFY,point.x,point.y,0,mainWindow,nullptr);DestroyMenu(menu);
         if(choice==1)uiPreferences.comparisonLine=!uiPreferences.comparisonLine;else if(choice>=2&&choice<=4){uiPreferences.comparisonLineColor=choice-2;uiPreferences.comparisonLine=true;}refreshComparisonLine();return 0;
     }
+    if(id==VideoSurface&&m==WM_LBUTTONDBLCLK&&!imageFolder.files.empty()){returnToImageBrowser();return 0;}
     static POINT panPoint{},clickPoint{};static bool panning=false,videoClick=false;
     if(id==VideoSurface&&m==WM_CAPTURECHANGED)videoClick=false;
     if(id==VideoSurface&&protectionArmed){
@@ -168,16 +173,20 @@ std::wstring fileDialog(bool save){std::vector<wchar_t> name(32768);OPENFILENAME
 ofn.lpstrFilter=save?L"PNG图片\0*.png\0JPEG图片\0*.jpg\0":L"视频 / 图片\0*.mp4;*.mkv;*.mov;*.avi;*.ts;*.png;*.jpg;*.jpeg\0所有文件\0*.*\0";
 ofn.Flags=OFN_EXPLORER|OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|(save?OFN_OVERWRITEPROMPT:OFN_FILEMUSTEXIST);ofn.lpstrDefExt=save?L"png":nullptr;
 return (save?GetSaveFileNameW(&ofn):GetOpenFileNameW(&ofn))?name.data():L"";}
-void openFile(const std::wstring& file){if(file.empty())return;std::error_code folderError;if(std::filesystem::is_directory(file,folderError)){openImageDirectory(file);return;}imageFolder.opened(file);if(!imageFolder.active(file))engine.prefetchImages({});playlist.detach();cancelProtection();auto openOptions=options();if(file!=currentFile){openOptions.settings.protection={};uiState.configured.protection={};}auto ext=std::filesystem::path(file).extension().wstring();for(auto& c:ext)c=towlower(c);engine.previewView({});currentFile=file;subtitles=veyra::engine::loadSrt(std::filesystem::path(file).replace_extension(L".srt").wstring());paused=false;SetWindowTextW(GetDlgItem(mainWindow,Play),L"暂停");engine.open(video,file,openOptions);if(auto index=playlist.add(file))playlist.bind(*index,engine.snapshot().sessionId);veyra::ui::refreshPlaylistWindow();SetWindowTextW(mainWindow,(L"Veyra — "+std::filesystem::path(file).filename().wstring()).c_str());if(smokeSeconds<=0)WritePrivateProfileStringW(L"Player",L"最近打开",file.c_str(),(veyra::runtime::localDataDirectory()/"veyra.ini").wstring().c_str());}
-void browseImage(size_t index){if(index>=imageFolder.files.size()||closing)return;auto path=imageFolder.files[index];const bool alreadyImage=engine.snapshot().image;openFile(path);if(!alreadyImage)layout();
-    std::vector<std::wstring> upcoming{path};
-    for(size_t step=1;upcoming.size()<20&&step<imageFolder.files.size();++step){
-        if(index+step<imageFolder.files.size())upcoming.push_back(imageFolder.files[index+step]);
-        if(index>=step&&upcoming.size()<20)upcoming.push_back(imageFolder.files[index-step]);
+void openFile(const std::wstring& input){if(input.empty())return;auto file=input;if(veyra::ui::ImageFolder::supported(file)){std::error_code ec;auto absolute=std::filesystem::absolute(file,ec);if(!ec)file=absolute.lexically_normal().wstring();}std::error_code folderError;if(std::filesystem::is_directory(file,folderError)){openImageDirectory(file,!commandLinePrefetch);return;}browserVisible=false;
+    if(veyra::ui::ImageFolder::supported(file)&&std::find(imageFolder.files.begin(),imageFolder.files.end(),file)==imageFolder.files.end()){
+        std::error_code ec;auto folder=std::filesystem::absolute(std::filesystem::path(file),ec).parent_path();
+        if(!ec&&imageFolder.load(folder,ec)){imageBrowserMode=true;engine.prerenderImages(false);engine.prefetchImages({});
+            if(!imageBrowser)imageBrowser=veyra::ui::createImageBrowser(mainWindow);
+            veyra::ui::loadImageBrowser(imageBrowser,imageFolder.files);
+        }
     }
-    engine.prefetchImages(std::move(upcoming));
+    imageFolder.opened(file);if(!imageFolder.active(file)){engine.prerenderImages(false);engine.prefetchImages({});imageBrowserMode=false;browserVisible=false;}playlist.detach();cancelProtection();auto openOptions=options();if(file!=currentFile){openOptions.settings.protection={};uiState.configured.protection={};}auto ext=std::filesystem::path(file).extension().wstring();for(auto& c:ext)c=towlower(c);engine.previewView({});currentFile=file;subtitles=veyra::engine::loadSrt(std::filesystem::path(file).replace_extension(L".srt").wstring());paused=false;SetWindowTextW(GetDlgItem(mainWindow,Play),L"暂停");engine.open(video,file,openOptions);if(auto index=playlist.add(file))playlist.bind(*index,engine.snapshot().sessionId);veyra::ui::refreshPlaylistWindow();SetWindowTextW(mainWindow,(L"Veyra — "+std::filesystem::path(file).filename().wstring()).c_str());if(smokeSeconds<=0)WritePrivateProfileStringW(L"Player",L"最近打开",file.c_str(),(veyra::runtime::localDataDirectory()/"veyra.ini").wstring().c_str());layout();}
+void returnToImageBrowser(){if(imageFolder.files.empty())return;if(!imageBrowserMode||!imageBrowser){if(!imageBrowser)imageBrowser=veyra::ui::createImageBrowser(mainWindow);veyra::ui::loadImageBrowser(imageBrowser,imageFolder.files);}imageBrowserMode=true;engine.prerenderImages(false);cancelProtection();engine.stop();engine.prefetchImages({});browserVisible=true;veyra::ui::selectImageBrowser(imageBrowser,imageFolder.index);layout();SetFocus(imageBrowser);}
+void browseImage(size_t index){if(index>=imageFolder.files.size()||closing)return;const bool fromBrowser=browserVisible;browserVisible=false;auto path=imageFolder.files[index];const bool alreadyImage=engine.snapshot().image;engine.prerenderImages(!imageBrowserMode);if(!imageBrowserMode)uiPreferences.cacheRenderedImages=true;openFile(path);if(!alreadyImage||fromBrowser)layout();
+    engine.prefetchImages(imageBrowserMode?std::vector<std::wstring>{}:imageFolder.prefetchWindow());
 }
-void openImageFolder(){
+void openImageFolder(bool browser=true){
     Microsoft::WRL::ComPtr<IFileOpenDialog> dialog;
     HRESULT hr=CoCreateInstance(CLSID_FileOpenDialog,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&dialog));
     if(SUCCEEDED(hr))hr=dialog->SetOptions(FOS_PICKFOLDERS|FOS_FORCEFILESYSTEM|FOS_PATHMUSTEXIST|FOS_NOCHANGEDIR);
@@ -187,12 +196,14 @@ void openImageFolder(){
     Microsoft::WRL::ComPtr<IShellItem> item;if(SUCCEEDED(hr))hr=dialog->GetResult(&item);
     PWSTR raw=nullptr;if(SUCCEEDED(hr))hr=item->GetDisplayName(SIGDN_FILESYSPATH,&raw);
     if(FAILED(hr)){veyra::log::info("image-folder",std::format("picker failed HRESULT=0x{:08X}",uint32_t(hr)));MessageBoxW(mainWindow,L"无法打开文件夹选择器。",L"图片文件夹",MB_OK|MB_ICONERROR);return;}
-    std::filesystem::path folder(raw);CoTaskMemFree(raw);openImageDirectory(folder);
+    std::filesystem::path folder(raw);CoTaskMemFree(raw);openImageDirectory(folder,browser);
 }
-void openImageDirectory(const std::filesystem::path& folder){
+void openImageDirectory(const std::filesystem::path& folder,bool browser){
     std::error_code ec;
     if(!imageFolder.load(folder,ec)){MessageBoxW(mainWindow,ec?L"无法读取该文件夹。":L"该文件夹没有 PNG / JPG / JPEG 图片（不搜索子文件夹）。",L"图片文件夹",MB_OK|MB_ICONINFORMATION);return;}
-    browseImage(0);
+    imageBrowserMode=browser;engine.prefetchImages({});
+    if(browser){if(!imageBrowser)imageBrowser=veyra::ui::createImageBrowser(mainWindow);veyra::ui::loadImageBrowser(imageBrowser,imageFolder.files);returnToImageBrowser();}
+    else{browserVisible=false;browseImage(0);layout();}
 }
 
 void playPlaylistEntry(size_t index){
@@ -239,7 +250,7 @@ void layout(){
         Placement next{c,dip(mainWindow,x),dip(mainWindow,y),dip(mainWindow,std::max(1,width)),dip(mainWindow,std::max(1,height)),flags};auto existing=std::find_if(placements.begin(),placements.end(),[&](const auto& p){return p.child==c;});if(existing==placements.end())placements.push_back(next);else *existing=next;};
     auto put=[&](int id,int x,int y,int width,int height=36,bool show=true){pos(GetDlgItem(mainWindow,id),x,y,width,height,show);};
     for(auto entry:toolbar){int id=GetDlgCtrlID(entry.hwnd);if(id!=Open&&id!=Capture&&id!=Recent&&id!=Play&&id!=Stop&&id!=Fullscreen&&id!=OriginalHold&&id!=Split&&id!=CompareToggle&&id!=Reference&&id!=Info)pos(entry.hwnd,0,0,1,1,false);}
-    const bool rightVisible=(pro||transition.running)&&g.panelWidth>0&&!full;settingsVisibility(rightVisible&&pro);
+    const bool rightVisible=!browserVisible&&(pro||transition.running)&&g.panelWidth>0&&!full;settingsVisibility(rightVisible&&pro);
     pos(video,full?0:g.left,full?0:g.top,full?w:g.viewWidth,full?h:g.viewHeight,!(pro&&showDiagnostics&&!full));
     SetWindowRgn(video,full||!pro?nullptr:CreateRoundRectRgn(0,0,dip(mainWindow,g.viewWidth),dip(mainWindow,g.viewHeight),dip(mainWindow,30),dip(mainWindow,30)),FALSE);
     put(Brand,8,12,52,32,!full);surface(GetDlgItem(mainWindow,Brand),RGB(16,17,18));
@@ -249,7 +260,7 @@ void layout(){
     put(InspectorDrawer,w-384,14,76,32,!full&&pro&&w<960);
     put(Master,g.left+(w<960?120:190),14,116,32,!full&&pro);put(DailyPreset,g.left+318,14,172,200,!full&&pro&&w>=1080);
     put(Save,g.left+(w>=1080?502:w>=960?318:244),14,76,32,!full&&pro);
-    put(ProRailVideo,12,mini?60:92,44,44,!full);put(ProRailCapture,12,mini?108:148,44,44,!full);put(ImageOpen,12,mini?156:204,44,44,!full);put(ModeMenu,12,h-122,44,40,!full);
+    put(ProRailVideo,12,mini?60:92,44,44,!full);put(ProRailCapture,12,mini?108:148,44,44,!full);put(ImageOpen,12,mini?156:204,44,44,!full);put(ModeMenu,12,h-(mini?86:122),44,mini?28:40,!full);
     for(int id:{ProRailVideo,ProRailCapture,ImageOpen})surface(GetDlgItem(mainWindow,id),RGB(16,17,18));
     const int tabs[]={TabEnhance,TabFg,TabAudio,TabPresets,TabExport};for(int i=0;i<5;++i)put(tabs[i],g.right+12+i*((g.panelWidth-24)/5),g.top+12,(g.panelWidth-24)/5,32,rightVisible);
     pos(inspector,g.right+12,g.top+56,g.panelWidth-24,g.statusTop-g.top-68,rightVisible);
@@ -282,25 +293,30 @@ void layout(){
     for(int id:{Open,Capture,Recent,PlaylistButton,PlaylistPrevious,PlaylistNext,PlaylistRestart,PlaylistOrder,PlaylistLoop,OriginalHold,Split,Master,Save,Sr,Play,Stop,Mute,Volume,Subtitle,Fullscreen,TimeLabel,MediaTitle,FpsLabel,ModeSwitch})surface(GetDlgItem(mainWindow,id),pro&&!full?panel:cinemaPanel);
     put(OriginalHold,daily?tx+tw-194:tx,barTop+(daily?24:208),96,32,!full&&(pro||daily));put(Split,daily?tx+tw-92:tx+102,barTop+(daily?24:208),92,32,!full&&(pro||daily));put(CompareToggle,tx+200,barTop+208,96,32,!full&&pro&&tw>=600);
     put(Reference,tx+(tw>=600?302:200),barTop+208,std::min(172,tw-(tw>=600?302:200)-88),180,!full&&pro&&tw>=500);
-    put(Details,tx+tw-76,barTop+208,76,32,!full&&pro);put(Info,12,h-66,44,44,!full);pos(metricLabel,tx,barTop+260,tw,120,!full&&pro&&uiState.diagnostics);
+    put(Details,tx+tw-76,barTop+208,76,32,!full&&pro);put(Info,12,h-(mini?54:66),44,mini?32:44,!full);pos(metricLabel,tx,barTop+260,tw,120,!full&&pro&&uiState.diagnostics);
     pos(statusBar,0,0,1,1,false);pos(diagnosticPanel,g.left,g.top,g.viewWidth,h-g.top-20,!full&&pro&&showDiagnostics);
     const bool empty=currentFile.empty();put(EmptyTitle,0,0,1,1,false);put(EmptyHint,0,0,1,1,false);
     for(int id:{EmptyTitle,EmptyHint})surface(GetDlgItem(mainWindow,id),background);
     pos(subtitleLabel,full?20:g.left+20,full?h-(fullControls?250:118):g.top+g.viewHeight-118,full?w-40:g.viewWidth-40,108,uiState.subtitles&&GetWindowTextLengthW(subtitleLabel)>0);
     put(JobProgress,tx,barTop+58,std::min(300,tw),24,exportJob.poll().state!=veyra::engine::ExportState::Idle&&!full);
-    put(ImageProgress,8,298,52,18,mini&&imageFolder.active(currentFile));
+    put(PlaybackRate,full?tx+tw-70:6,full?barTop+26:mini?318:372,full?70:56,32,!full||fullControls);
+    put(ImageProgress,8,298,52,18,mini&&!imageBrowserMode&&imageFolder.active(currentFile));
+    put(ImageBrowserBack,6,mini?298:52,56,mini?18:28,!full&&!browserVisible&&!imageFolder.files.empty());
+    if(imageBrowser)pos(imageBrowser,full?0:g.left,0,full?w:w-g.left,h,browserVisible);
     if(mini){
         put(Brand,0,0,1,1,false);put(WindowMin,6,12,26,32);put(WindowClose,36,12,26,32);
         for(int id:{WindowMin,WindowClose,ImageProgress})surface(GetDlgItem(mainWindow,id),RGB(16,17,18));
-        for(auto& p:placements){const int id=GetDlgCtrlID(p.child);const bool keep=p.child==video||p.child==seekBar||p.child==subtitleLabel||id==Brand||id==ProRailVideo||id==ProRailCapture||id==ImageOpen||id==PlaylistButton||id==RemotePlay||id==ModeMenu||id==Info||id==WindowMin||id==WindowClose||id==ImageProgress;
+        for(auto& p:placements){const int id=GetDlgCtrlID(p.child);const bool keep=p.child==video||p.child==seekBar||p.child==subtitleLabel||id==Brand||id==ProRailVideo||id==ProRailCapture||id==ImageOpen||id==PlaylistButton||id==RemotePlay||id==ModeMenu||id==Info||id==WindowMin||id==WindowClose||id==ImageProgress||id==ImageBrowserBack||id==PlaybackRate||p.child==imageBrowser;
             if(!keep){p.flags&=~SWP_SHOWWINDOW;p.flags|=SWP_HIDEWINDOW;}}
     }
+    if(browserVisible)for(auto& p:placements){int id=GetDlgCtrlID(p.child);const bool keep=p.child==imageBrowser||id==Brand||id==ProRailVideo||id==ProRailCapture||id==ImageOpen||id==PlaylistButton||id==RemotePlay||id==ModeMenu||id==Info||id==WindowMin||id==WindowClose||id==ModeSwitch||id==PlaybackRate;
+        if(!keep){p.flags&=~SWP_SHOWWINDOW;p.flags|=SWP_HIDEWINDOW;}}
     // Each HWND enters the batch once. Mixing HIDE/SHOW entries for a child
     // causes DeferWindowPos to preserve the earlier hide flag on Windows.
     auto batch=BeginDeferWindowPos(int(placements.size()));for(const auto& p:placements){if(!batch)break;batch=DeferWindowPos(batch,p.child,nullptr,p.x,p.y,p.width,p.height,p.flags);}
     if(batch)EndDeferWindowPos(batch);else for(const auto& p:placements)SetWindowPos(p.child,nullptr,p.x,p.y,p.width,p.height,p.flags);
     auto front=[&](HWND child){if(child&&IsWindowVisible(child))SetWindowPos(child,HWND_TOP,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_NOREDRAW);};
-    front(playbackBar);front(seekBar);front(GetDlgItem(mainWindow,RemotePlay));for(int id:{Open,Capture,Recent,PlaylistButton,PlaylistPrevious,PlaylistNext,PlaylistRestart,PlaylistOrder,PlaylistLoop,OriginalHold,Split,Master,Save,Sr,Play,Stop,Mute,Volume,Subtitle,Fullscreen,WindowMin,WindowClose,TimeLabel,MediaTitle,FpsLabel,ModeSwitch,JobProgress,EmptyTitle,EmptyHint})front(GetDlgItem(mainWindow,id));front(inspector);front(subtitleLabel);if(showDiagnostics&&pro&&!full)front(diagnosticPanel);
+    front(playbackBar);front(seekBar);front(GetDlgItem(mainWindow,PlaybackRate));front(GetDlgItem(mainWindow,RemotePlay));for(int id:{Open,Capture,Recent,PlaylistButton,PlaylistPrevious,PlaylistNext,PlaylistRestart,PlaylistOrder,PlaylistLoop,OriginalHold,Split,Master,Save,Sr,Play,Stop,Mute,Volume,Subtitle,Fullscreen,WindowMin,WindowClose,TimeLabel,MediaTitle,FpsLabel,ModeSwitch,JobProgress,EmptyTitle,EmptyHint})front(GetDlgItem(mainWindow,id));front(inspector);front(subtitleLabel);if(showDiagnostics&&pro&&!full)front(diagnosticPanel);
     if(auto focused=GetFocus();focused&&IsChild(mainWindow,focused)&&!IsWindowVisible(focused))SetFocus(mainWindow);
     refreshComparisonLine();RedrawWindow(mainWindow,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN);
     if(smokeDual)veyra::log::info("ui-layout-timing",std::format("frameMs={:.3f} animation={}",std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-layoutBegin).count(),transition.running));
@@ -358,14 +374,15 @@ control(L"BUTTON",L"专业模式",ModeSwitch,BS_PUSHBUTTON,0,0,164,36);
 control(L"BUTTON",L"增强已开启",Master,BS_PUSHBUTTON,0,0,126,36);
 control(L"COMBOBOX",L"",DailyPreset,CBS_DROPDOWNLIST,0,0,180,200);
 control(L"BUTTON",L"视频",ProRailVideo,BS_PUSHBUTTON,0,0,64,44);control(L"BUTTON",L"采集",ProRailCapture,BS_PUSHBUTTON,0,0,64,44);control(L"BUTTON",L"图片",ImageOpen,BS_PUSHBUTTON,0,0,64,44);control(L"BUTTON",L"参数",InspectorDrawer,BS_PUSHBUTTON,0,0,84,36);
-control(L"BUTTON",L"播放列表",PlaylistButton,BS_PUSHBUTTON,0,0,32,32);control(L"BUTTON",L"模式",ModeMenu,BS_PUSHBUTTON,0,0,44,40);SetPropW(GetDlgItem(hwnd,ModeMenu),L"veyra.tip",HANDLE(L"切换日常 / 专业 / MINI 模式"));
+control(L"BUTTON",L"返回",ImageBrowserBack,BS_PUSHBUTTON,0,0,56,28);SetPropW(GetDlgItem(hwnd,ImageBrowserBack),L"veyra.tip",HANDLE(L"返回原图缩略图列表 · 双击图片也可返回"));control(L"BUTTON",L"播放列表",PlaylistButton,BS_PUSHBUTTON,0,0,32,32);control(L"BUTTON",L"模式",ModeMenu,BS_PUSHBUTTON,0,0,44,40);SetPropW(GetDlgItem(hwnd,ModeMenu),L"veyra.tip",HANDLE(L"切换日常 / 专业 / MINI 模式"));
 for(auto [id,label]:{std::pair{PlaylistPrevious,L"上一个"},{PlaylistNext,L"下一个"},{PlaylistRestart,L"从头播放"},{PlaylistOrder,L"顺序播放"},{PlaylistLoop,L"列表循环"}}){control(L"BUTTON",label,id,BS_PUSHBUTTON,0,0,80,28);SetPropW(GetDlgItem(hwnd,id),L"veyra.tip",HANDLE(label));}
 SetPropW(GetDlgItem(hwnd,PlaylistOrder),L"veyra.tip",HANDLE(L"点击切换：顺序播放 / 随机播放 / 单曲循环")); SetPropW(GetDlgItem(hwnd,PlaylistLoop),L"veyra.tip",HANDLE(L"开启后，播完列表回到开头继续播放"));
+control(L"BUTTON",L"1.0×",PlaybackRate,BS_PUSHBUTTON,0,0,56,32);SetPropW(GetDlgItem(hwnd,PlaybackRate),L"veyra.tip",HANDLE(L"视频倍速 0.2×–3.0× · 音频随速度变调 · 1.0×恢复正常"));
 control(L"BUTTON",L"音频",TabAudio,BS_PUSHBUTTON,0,0,60,36);
 const wchar_t* tabs[]={L"增强",L"运动",L"预设",L"导出"};for(int i=0;i<4;++i)control(L"BUTTON",tabs[i],TabEnhance+i,BS_PUSHBUTTON,0,0,76,36);
 control(L"BUTTON",L"音量",Mute,BS_PUSHBUTTON,0,0,54,36);auto vol=control(TRACKBAR_CLASSW,L"音量",Volume,TBS_HORZ|TBS_NOTICKS,0,0,80,26);SendMessageW(vol,TBM_SETRANGE,TRUE,MAKELPARAM(0,100));SendMessageW(vol,TBM_SETPOS,TRUE,100);
 control(L"BUTTON",L"字幕",Subtitle,BS_PUSHBUTTON,0,0,62,36);control(L"STATIC",L"尚未打开媒体",MediaTitle,SS_LEFT|SS_ENDELLIPSIS,0,0,250,26);control(L"STATIC",L"00:00 / 00:00",TimeLabel,SS_LEFT,0,0,200,20);
-control(L"STATIC",L"处理 0.0 fps",FpsLabel,SS_RIGHT,0,0,154,20);control(L"STATIC",L"0/0",ImageProgress,SS_CENTER,8,298,52,18);SetPropW(GetDlgItem(hwnd,ImageProgress),L"veyra.tip",HANDLE(L"预解码缓存：已就绪 / 本轮目标；内存不足或解码失败的图片不计为就绪"));
+control(L"STATIC",L"处理 0.0 fps",FpsLabel,SS_RIGHT,0,0,154,20);control(L"STATIC",L"0/0",ImageProgress,SS_CENTER,8,298,52,18);SetPropW(GetDlgItem(hwnd,ImageProgress),L"veyra.tip",HANDLE(L"后续原图解码缓存：已就绪 / 后续目标（最多20张），不代表增强渲染完成；翻图时补充，目录末尾归零"));
 control(L"STATIC",L"开始观看",EmptyTitle,SS_CENTER,0,0,500,48);emptyFont=veyra::ui::makeFont(hwnd,26,FW_NORMAL);SendDlgItemMessageW(hwnd,EmptyTitle,WM_SETFONT,WPARAM(emptyFont),TRUE);control(L"STATIC",L"打开本地视频，或连接采集卡\n精细调整与原生导出在专业模式中",EmptyHint,SS_CENTER,0,0,500,68);
 control(L"BUTTON",L"性能  ▾",Details,BS_PUSHBUTTON,0,0,112,32);control(L"BUTTON",L"",JobProgress,BS_PUSHBUTTON,0,0,280,32);metricLabel=control(L"STATIC",L"",0,SS_LEFT,0,0,500,132);
 control(L"BUTTON",L"最小化",WindowMin,BS_PUSHBUTTON,0,0,32,32);control(L"BUTTON",L"最大化",WindowMax,BS_PUSHBUTTON,0,0,32,32);control(L"BUTTON",L"关闭窗口",WindowClose,BS_PUSHBUTTON,0,0,32,32);
@@ -414,11 +431,17 @@ case WM_APP+43:showDiagnostics=false;layout();return 0;
 case WM_APP+42:refreshDailyPresets();return 0;
 case WM_APP+41:switch(wp){case 501:startVideoExport(lp!=0);break;case 502:{auto path=fileDialog(true);if(!path.empty())engine.saveFrame(path);break;}case 503:jobPaused=!jobPaused;exportJob.pause(jobPaused);break;case 504:exportJob.cancel();break;case 505:preferWatching=lp==BST_CHECKED;break;}return 0;
 case WM_SIZE:cancelProtection();if(wp!=SIZE_MINIMIZED){endTransition();layout();}return 0;
+case veyra::ui::ImageBrowserPick:if(browserVisible&&imageBrowserMode&&wp<imageFolder.files.size())browseImage(size_t(wp));return 0;
 case WM_DROPFILES:openDroppedFiles(veyra::ui::droppedPlaylistFiles(wp));return 0;
-case WM_COMMAND:switch(LOWORD(wp)){
+case WM_COMMAND:if(LOWORD(wp)>=702&&LOWORD(wp)<=730){auto s=engine.snapshot();if(!s.image&&!s.capture&&!s.remotePlay)engine.setPlaybackRate((LOWORD(wp)-700)/10.0);return 0;}switch(LOWORD(wp)){
 case Open:case ProRailVideo:openDroppedFiles(veyra::ui::choosePlaylistFiles(hwnd,true));break;
-case ImageOpen:{auto menu=CreatePopupMenu();AppendMenuW(menu,MF_STRING,1,L"打开单张图片…");AppendMenuW(menu,MF_STRING,2,L"打开图片文件夹…（滚轮翻图）");RECT r{};GetWindowRect(GetDlgItem(hwnd,ImageOpen),&r);int choice=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_NONOTIFY,r.right,r.top,0,hwnd,nullptr);DestroyMenu(menu);if(choice==1){openFile(fileDialog(false));layout();}else if(choice==2)openImageFolder();break;}
+case ImageOpen:{auto menu=CreatePopupMenu();AppendMenuW(menu,MF_STRING,1,L"打开图片…（同时浏览所在文件夹）");AppendMenuW(menu,MF_STRING,2,L"打开图片浏览器…（原图缩略图）");AppendMenuW(menu,MF_STRING,3,L"连续浏览文件夹…（预渲染后20张）");AppendMenuW(menu,MF_SEPARATOR,0,nullptr);AppendMenuW(menu,MF_STRING|(uiPreferences.keepImageDevice?MF_CHECKED:0),4,L"保留图片 GPU 设备（减少重开等待）");AppendMenuW(menu,MF_STRING|(uiPreferences.cacheRenderedImages?MF_CHECKED:0),5,L"保存并复用渲染缓存（原图目录 _cache）");AppendMenuW(menu,MF_STRING,6,L"预渲染整个文件夹 / 补齐新增图片…");RECT r{};GetWindowRect(GetDlgItem(hwnd,ImageOpen),&r);int choice=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_NONOTIFY,r.right,r.top,0,hwnd,nullptr);DestroyMenu(menu);if(choice==1){openFile(fileDialog(false));layout();}else if(choice==2)openImageFolder(true);else if(choice==3)openImageFolder(false);else if(choice==4)SendMessageW(hwnd,WM_COMMAND,ImageKeepDevice,0);else if(choice==5)SendMessageW(hwnd,WM_COMMAND,ImageDiskCache,0);else if(choice==6)SendMessageW(hwnd,WM_COMMAND,ImageFolderBatch,0);break;}
 case ImageFolderOpen:openImageFolder();break;
+case ImageBrowserBack:returnToImageBrowser();break;
+case ImageFolderBatch:{std::filesystem::path folder;if(!imageFolder.files.empty()){folder=std::filesystem::path(imageFolder.files.front()).parent_path();returnToImageBrowser();}uiPreferences.cacheRenderedImages=true;engine.cacheRenderedImages(true);veyra::ui::showImageBatchWindow(hwnd,engine,folder,[]{return options().snapshot();});break;}
+case ImageDiskCache:uiPreferences.cacheRenderedImages=!uiPreferences.cacheRenderedImages;engine.cacheRenderedImages(uiPreferences.cacheRenderedImages);
+    if(!uiPreferences.cacheRenderedImages&&!imageBrowserMode&&!imageFolder.files.empty()){imageBrowserMode=true;engine.prefetchImages({});if(!imageBrowser)imageBrowser=veyra::ui::createImageBrowser(mainWindow);veyra::ui::loadImageBrowser(imageBrowser,imageFolder.files);}break;
+case ImageKeepDevice:uiPreferences.keepImageDevice=!uiPreferences.keepImageDevice;engine.keepImageDevice(uiPreferences.keepImageDevice);break;
 
 case PlaylistButton:veyra::ui::showPlaylistWindow(hwnd,playlist,playPlaylistEntry,[]{SendMessageW(mainWindow,WM_COMMAND,Recent,0);});break;
 case PlaylistPrevious:if(imageFolder.active(currentFile)){if(auto index=imageFolder.adjacent(-1))browseImage(*index);}else if(auto index=playlist.adjacent(-1))playPlaylistEntry(*index);break;
@@ -426,6 +449,12 @@ case PlaylistNext:if(imageFolder.active(currentFile)){if(auto index=imageFolder.
 case PlaylistRestart:{auto s=engine.snapshot();if(s.transport==veyra::engine::TransportState::Opening||s.transport==veyra::engine::TransportState::Stopping)break;if(!s.capture&&!s.image&&!currentFile.empty()){if(s.running&&s.transport!=veyra::engine::TransportState::Ended){engine.seek(0);engine.pause(false);paused=false;}else openFile(currentFile);}break;}
 case PlaylistOrder:playlist.mode=veyra::engine::PlaylistMode((int(playlist.mode)+1)%3);veyra::ui::refreshPlaylistWindow();break;
 case PlaylistLoop:playlist.repeatAll=!playlist.repeatAll;veyra::ui::refreshPlaylistWindow();break;
+case PlaybackRate:{
+    auto state=engine.snapshot();if(state.capture||state.image||state.remotePlay)break;
+    auto menu=CreatePopupMenu();AppendMenuW(menu,MF_STRING|MF_GRAYED,0,L"播放倍速（音频随速度变调）");
+    for(int step=2;step<=30;++step){auto label=std::format(L"{:.1f}×{}",step/10.0,step==10?L" 正常速度":L"");AppendMenuW(menu,MF_STRING|(step==12||step==22?MF_MENUBARBREAK:0)|(std::abs(state.playbackRate-step/10.0)<.001?MF_CHECKED:0),700+step,label.c_str());}
+    RECT r{};GetWindowRect(GetDlgItem(hwnd,PlaybackRate),&r);menuOpen=true;const int choice=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_NONOTIFY,r.left,r.bottom,0,hwnd,nullptr);menuOpen=false;DestroyMenu(menu);
+    if(choice>=702&&choice<=730)SendMessageW(hwnd,WM_COMMAND,choice,0);break;}
 case ModeMenu:{auto menu=CreatePopupMenu();for(auto [id,label]:{std::pair{ModeDaily,L"日常模式"},{ModeProfessional,L"专业模式"},{ModeMini,L"MINI 模式"}})AppendMenuW(menu,MF_STRING|(int(uiState.mode)==id-ModeDaily?MF_CHECKED:0),id,label);AppendMenuW(menu,MF_SEPARATOR,0,nullptr);AppendMenuW(menu,MF_STRING,WindowMin,L"最小化");AppendMenuW(menu,MF_STRING,WindowClose,L"关闭窗口");RECT r{};GetWindowRect(GetDlgItem(hwnd,ModeMenu),&r);int choice=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_NONOTIFY,r.right,r.top,0,hwnd,nullptr);DestroyMenu(menu);if(choice)SendMessageW(hwnd,WM_COMMAND,choice,0);break;}
 case ModeDaily:changeMode(veyra::ui::Mode::Daily);break;
 case ModeProfessional:changeMode(veyra::ui::Mode::Professional);break;
@@ -463,7 +492,7 @@ case Split:compareMode=compareMode==2?0:2;updateComparison();break;
 case Reference:referenceBase=SendDlgItemMessageW(hwnd,Reference,CB_GETCURSEL,0,0)==1;updateComparison();break;
 case Settings:if(uiState.mode==veyra::ui::Mode::Daily)switchMode();selectInspector(0);break;
 #ifdef VEYRA_ENABLE_REMOTEPLAY
-case RemotePlay:veyra::ui::showRemotePlayPanel(hwnd,[](veyra::source::RemotePlayConnectDesc desc){cancelProtection();remoteViewOnly=desc.request.viewOnly;if(!desc.request.viewOnly){if(!remoteController.start())veyra::log::warn("remoteplay-input","SDL gamepad initialization failed");startShellTimer(mainWindow,ControllerTimer,8);}else{KillTimer(mainWindow,ControllerTimer);remoteController.stop();}playlist.detach();veyra::ui::refreshPlaylistWindow();currentFile=L"remoteplay:";imageFolder.opened(currentFile);engine.prefetchImages({});subtitles.clear();paused=false;engine.previewView({});engine.openRemotePlay(video,std::move(desc),options());SetWindowTextW(mainWindow,L"Veyra — PS5 Remote Play");layout();},[](std::string pin){engine.remotePlayLoginPin(std::move(pin));},[]{auto s=engine.snapshot();veyra::ui::RemotePlayPanelStatus result;
+case RemotePlay:veyra::ui::showRemotePlayPanel(hwnd,[](veyra::source::RemotePlayConnectDesc desc){cancelProtection();remoteViewOnly=desc.request.viewOnly;if(!desc.request.viewOnly){if(!remoteController.start())veyra::log::warn("remoteplay-input","SDL gamepad initialization failed");startShellTimer(mainWindow,ControllerTimer,8);}else{KillTimer(mainWindow,ControllerTimer);remoteController.stop();}playlist.detach();veyra::ui::refreshPlaylistWindow();currentFile=L"remoteplay:";imageBrowserMode=false;browserVisible=false;imageFolder.opened(currentFile);engine.prefetchImages({});subtitles.clear();paused=false;engine.previewView({});engine.openRemotePlay(video,std::move(desc),options());SetWindowTextW(mainWindow,L"Veyra — PS5 Remote Play");layout();},[](std::string pin){engine.remotePlayLoginPin(std::move(pin));},[]{auto s=engine.snapshot();veyra::ui::RemotePlayPanelStatus result;
     result.active=s.remotePlay&&(s.running||s.transport==veyra::engine::TransportState::Opening||s.transport==veyra::engine::TransportState::Stopping);
     result.message=s.failed?s.status:s.remoteRecovering?s.remoteRecoveryMessage:s.remotePlay&&s.running?L"PS5 画面已进入播放；关闭此面板不停止串流。":result.active?s.status:L"PS5 串流已停止，可以重新连接。";
     if(s.remotePlay&&s.running){
@@ -551,16 +580,17 @@ EnableWindow(GetDlgItem(hwnd,Save),s.running&&s.frames>0&&!s.failed&&!s.applying
 setText(GetDlgItem(hwnd,Master),masterPendingRevision?L"正在应用…":uiState.enhanced?L"增强已开启":L"增强已关闭");selected(GetDlgItem(hwnd,Master),uiState.enhanced);
 CheckDlgButton(hwnd,Sr,(uiState.enhanced&&s.desired.sr)?BST_CHECKED:BST_UNCHECKED);EnableWindow(GetDlgItem(hwnd,Sr),!masterPendingRevision);EnableWindow(GetDlgItem(hwnd,Master),!masterPendingRevision);
 veyra::ui::icon(GetDlgItem(hwnd,Play),s.transport==veyra::engine::TransportState::Playing?veyra::ui::Icon::Pause:veyra::ui::Icon::Play);veyra::ui::icon(GetDlgItem(hwnd,Mute),s.muted?veyra::ui::Icon::Muted:veyra::ui::Icon::Volume);
+setText(GetDlgItem(hwnd,PlaybackRate),std::format(L"{:.1f}×",s.playbackRate));EnableWindow(GetDlgItem(hwnd,PlaybackRate),!s.capture&&!s.image&&!s.remotePlay);
 setText(GetDlgItem(hwnd,Play),s.transport==veyra::engine::TransportState::Playing?L"暂停":L"播放");
 setText(GetDlgItem(hwnd,Mute),!s.audioAvailable?L"无音轨":s.muted?L"静音":L"音量");EnableWindow(GetDlgItem(hwnd,Volume),s.audioAvailable);EnableWindow(GetDlgItem(hwnd,Mute),s.audioAvailable);
 EnableWindow(GetDlgItem(hwnd,PlaylistPrevious),(imageFolder.active(currentFile)?imageFolder.adjacent(-1):playlist.adjacent(-1)).has_value());EnableWindow(GetDlgItem(hwnd,PlaylistNext),(imageFolder.active(currentFile)?imageFolder.adjacent(1):playlist.adjacent(1)).has_value());
 EnableWindow(GetDlgItem(hwnd,PlaylistRestart),!currentFile.empty()&&!s.capture&&!s.image);setText(GetDlgItem(hwnd,PlaylistOrder),playlist.mode==veyra::engine::PlaylistMode::Shuffle?L"随机播放":playlist.mode==veyra::engine::PlaylistMode::RepeatOne?L"单曲循环":L"顺序播放");setText(GetDlgItem(hwnd,PlaylistLoop),playlist.repeatAll?L"列表循环 ✓":L"列表循环");veyra::ui::marked(GetDlgItem(hwnd,PlaylistLoop),playlist.repeatAll);
-EnableWindow(seekBar,s.running&&!s.capture&&!s.image&&s.duration>0);ShowWindow(seekBar,(!full||fullControls)&&!s.capture&&!s.image&&!(showDiagnostics&&uiState.mode==veyra::ui::Mode::Professional&&!full)?SW_SHOW:SW_HIDE);EnableWindow(GetDlgItem(hwnd,Play),!currentFile.empty()&&!s.capture&&!s.image);EnableWindow(GetDlgItem(hwnd,Stop),s.running);
-if(imageFolder.active(currentFile)){auto [ready,total]=engine.imagePrefetchProgress();setText(GetDlgItem(hwnd,FpsLabel),std::format(L"预解码 {}/{}",ready,total));setText(GetDlgItem(hwnd,ImageProgress),std::format(L"{}/{}",ready,total));}
-ShowWindow(GetDlgItem(hwnd,ImageProgress),uiState.mode==veyra::ui::Mode::Mini&&!full&&imageFolder.active(currentFile)?SW_SHOW:SW_HIDE);
+EnableWindow(seekBar,s.running&&!s.capture&&!s.image&&s.duration>0);ShowWindow(seekBar,!browserVisible&&(!full||fullControls)&&!s.capture&&!s.image&&!(showDiagnostics&&uiState.mode==veyra::ui::Mode::Professional&&!full)?SW_SHOW:SW_HIDE);EnableWindow(GetDlgItem(hwnd,Play),!currentFile.empty()&&!s.capture&&!s.image);EnableWindow(GetDlgItem(hwnd,Stop),s.running);
+if(imageFolder.active(currentFile)){auto [ready,total]=engine.imagePrefetchProgress();setText(GetDlgItem(hwnd,FpsLabel),!imageBrowserMode?std::format(L"预渲染 {}/{}{}",ready,total,engine.imagePrerenderFailures()?std::format(L" · 失败 {}",engine.imagePrerenderFailures()):L""):s.imageDiskCached?std::wstring(L"已读取渲染缓存"):std::wstring(L"按需渲染"));setText(GetDlgItem(hwnd,ImageProgress),std::format(L"{}/{}",ready,total));}
+ShowWindow(GetDlgItem(hwnd,ImageProgress),uiState.mode==veyra::ui::Mode::Mini&&!full&&!imageBrowserMode&&imageFolder.active(currentFile)?SW_SHOW:SW_HIDE);
 refreshComparisonLine();setText(GetDlgItem(hwnd,MediaTitle),currentFile.empty()?L"尚未打开媒体":s.remotePlay?L"PS5 · LIVE":s.capture?L"采集卡 · LIVE":(imageFolder.active(currentFile)?std::format(L"[{} / {}] ",imageFolder.index+1,imageFolder.files.size()):L"")+std::filesystem::path(currentFile).filename().wstring());
 auto stamp=[](double v){int seconds=std::max(0,int(v));return std::format(L"{:02}:{:02}:{:02}",seconds/3600,seconds/60%60,seconds%60);};
-setText(GetDlgItem(hwnd,TimeLabel),s.remotePlay?(s.remoteRatesReady?std::format(L"接收 {:.1f} · 解码 {:.1f} fps",s.remoteReceivedFps,s.remoteDecodedFps):std::wstring(L"PS5 帧率采样中")):s.capture?std::format(L"输入 {:.1f} fps{}",s.captureFps,s.captureHalfRate?L" · 60→30":s.applied.content==veyra::engine::ContentRate::Capture60To30?L" · 不适用":L""):s.image?L"静态图片":stamp(s.seekPresented<s.seekRequested&&!s.failed?s.seekTarget:s.position)+L"  /  "+stamp(s.duration)+(s.seekPresented<s.seekRequested&&!s.failed?L"  ·  跳转中…":L"")+(s.transport==veyra::engine::TransportState::Opening?L"  ·  正在打开…":s.failed?L"  ·  发生错误，详见专业诊断":L""));
+setText(GetDlgItem(hwnd,TimeLabel),s.remotePlay?(s.remoteRatesReady?std::format(L"接收 {:.1f} · 解码 {:.1f} fps",s.remoteReceivedFps,s.remoteDecodedFps):std::wstring(L"PS5 帧率采样中")):s.capture?std::format(L"输入 {:.1f} fps{}",s.captureFps,s.captureHalfRate?L" · 60→30":s.applied.content==veyra::engine::ContentRate::Capture60To30?L" · 不适用":L""):(s.image||imageFolder.active(currentFile))?(s.failed?L"图片处理失败":s.imageLoading||s.applying||!s.frames?L"当前图片处理中…":L"当前图片已呈现"):stamp(s.seekPresented<s.seekRequested&&!s.failed?s.seekTarget:s.position)+L"  /  "+stamp(s.duration)+(s.seekPresented<s.seekRequested&&!s.failed?L"  ·  跳转中…":L"")+(s.transport==veyra::engine::TransportState::Opening?L"  ·  正在打开…":s.failed?L"  ·  发生错误，详见专业诊断":L""));
 std::wstring metric=std::format(L"源帧处理 {:.1f} fps   ·   显示提交 {:.1f} fps   ·   有效生成 {}\n提交迟到 p95 {:.1f} ms   ·   GPU / CPU 时间分别统计\n{}\n实际扫描率与光子延迟：未测",s.fps,submittedFps,s.generated,s.lateP95Ms,s.status);setText(metricLabel,metric);
 if(uiState.mode==Mode::Professional&&!full&&!transition.running&&GetTickCount64()-dashboardTick>=250){dashboardTick=GetTickCount64();RECT client{};GetClientRect(hwnd,&client);RECT dashboard{0,client.bottom-dip(hwnd,232),client.right,client.bottom};InvalidateRect(hwnd,&dashboard,FALSE);}
 exportJob.watching(preferWatching&&s.running&&s.transport==veyra::engine::TransportState::Playing);auto job=exportJob.poll();exportPanelStatus(job,!currentFile.empty()&&!s.capture&&!s.image&&s.frames>0&&!s.applying,s.running&&s.frames>0);setText(GetDlgItem(hwnd,JobProgress),job.message+std::format(L"  {}%  · 查看",int(job.progress*100)));ShowWindow(GetDlgItem(hwnd,JobProgress),job.state==veyra::engine::ExportState::Idle||full?SW_HIDE:SW_SHOW);
@@ -626,10 +656,10 @@ SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);INITCO
 CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
 initialOptions=veyra::engine::PlayerOptions::from(veyra::ui::defaultSettings());
 
-int argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);for(int i=1;i<argc;++i){const std::wstring arg=argv[i];if(arg==L"--export-worker"&&i+1<argc)workerMapping=reinterpret_cast<HANDLE>(_wcstoui64(argv[++i],nullptr,10));else if(arg==L"--smoke-view"&&i+1<argc)smokeView=argv[++i];else if(arg==L"--smoke-repair-ui")smokeRepair=true;else if(arg==L"--smoke-repair-ui-reject")smokeRepair=smokeRepairReject=true;else if(arg==L"--smoke-hover")smokeZoom=smokeHover=true;else if(arg==L"--smoke-protection")smokeProtection=true;else if(arg==L"--smoke-zoom")smokeZoom=true;else if(arg==L"--smoke-empty")smokeEmpty=true;else if(arg==L"--smoke-dual")smokeDual=true;else if(arg==L"--smoke-dual-pause"){smokeDual=smokeDualPause=true;}else if(arg==L"--smoke-master-reject")smokeMaster=smokeMasterReject=true;else if(arg==L"--smoke-master")smokeMaster=true;else if(arg==L"--smoke-audio")smokeAudio=true;else if(arg==L"--smoke-job-cancel")smokeJobCancel=true;else if(arg==L"--smoke-job-exit")smokeJobExit=true;else if(arg==L"--smoke-job")smokeJob=true;else if(arg==L"--smoke-dual-export"&&i+1<argc)smokeDualOutput=argv[++i];else if(arg==L"--smoke-seconds"&&i+1<argc)smokeSeconds=std::clamp(_wtoi(argv[++i]),1,240);else if(arg==L"--export-out"&&i+1<argc)exportOutput=argv[++i];else if(arg==L"--max-frames"&&i+1<argc)exportFrames=std::max(1,_wtoi(argv[++i]));else if(arg==L"--cancel-after-ms"&&i+1<argc)cancelAfterMs=std::clamp(_wtoi(argv[++i]),1,240000);else if(arg==L"--hevc")exportHevc=true;else if(arg==L"--smoke-rollback-flow"){smokeRollback=true;smokeRollbackFlow=true;}else if(arg==L"--smoke-rollback")smokeRollback=true;else if(arg==L"--smoke-ui")smokeUi=true;else if(arg==L"--no-fg")initialOptions.fg=false;else if(arg==L"--smoke-settings")smokeSettings=true;else if(arg==L"--smoke-screenshot")smokeScreenshot=true;else if(arg==L"--smoke-controls")smokeControls=true;else if(arg==L"--smoke-save"&&i+1<argc)smokeSave=argv[++i];else if(arg==L"--native")initialOptions.realtime=false;else if(arg==L"--realtime")initialOptions.realtime=true;else if(arg==L"--fg")initialOptions.fg=true;else if(arg==L"--fg-multiplier"&&i+1<argc){initialOptions.fgMultiplier=std::clamp(_wtoi(argv[++i]),2,4);initialOptions.fg=true;}else if(arg==L"--video-sr"&&i+1<argc){initialOptions.settings.videoSrQuality=std::clamp(_wtoi(argv[++i]),1,4);initialOptions.sr=true;}else if(arg==L"--nr-ampere")initialOptions.settings.nrRuntime=veyra::engine::NrRuntime::Ampere;else if(arg==L"--nr-community")initialOptions.settings.nrRuntime=veyra::engine::NrRuntime::Community;else if(arg==L"--nr-original")initialOptions.settings.nrRuntime=veyra::engine::NrRuntime::Original;else if(arg==L"--sr")initialOptions.sr=true;else if(arg==L"--no-nr")initialOptions.nr=false;else if(arg==L"--nr")initialOptions.nr=true;else if(arg==L"--no-sr")initialOptions.sr=false;else autoInput=arg;}LocalFree(argv);
+int argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);for(int i=1;i<argc;++i){const std::wstring arg=argv[i];if(arg==L"--export-worker"&&i+1<argc)workerMapping=reinterpret_cast<HANDLE>(_wcstoui64(argv[++i],nullptr,10));else if(arg==L"--smoke-view"&&i+1<argc)smokeView=argv[++i];else if(arg==L"--smoke-repair-ui")smokeRepair=true;else if(arg==L"--smoke-repair-ui-reject")smokeRepair=smokeRepairReject=true;else if(arg==L"--smoke-hover")smokeZoom=smokeHover=true;else if(arg==L"--smoke-protection")smokeProtection=true;else if(arg==L"--smoke-zoom")smokeZoom=true;else if((arg==L"--image-folder-prefetch"||arg==L"--image-folder-prerender"))commandLinePrefetch=true;else if(arg==L"--smoke-empty")smokeEmpty=true;else if(arg==L"--smoke-dual")smokeDual=true;else if(arg==L"--smoke-dual-pause"){smokeDual=smokeDualPause=true;}else if(arg==L"--smoke-master-reject")smokeMaster=smokeMasterReject=true;else if(arg==L"--smoke-master")smokeMaster=true;else if(arg==L"--smoke-audio")smokeAudio=true;else if(arg==L"--smoke-job-cancel")smokeJobCancel=true;else if(arg==L"--smoke-job-exit")smokeJobExit=true;else if(arg==L"--smoke-job")smokeJob=true;else if(arg==L"--smoke-dual-export"&&i+1<argc)smokeDualOutput=argv[++i];else if(arg==L"--smoke-seconds"&&i+1<argc)smokeSeconds=std::clamp(_wtoi(argv[++i]),1,240);else if(arg==L"--export-out"&&i+1<argc)exportOutput=argv[++i];else if(arg==L"--max-frames"&&i+1<argc)exportFrames=std::max(1,_wtoi(argv[++i]));else if(arg==L"--cancel-after-ms"&&i+1<argc)cancelAfterMs=std::clamp(_wtoi(argv[++i]),1,240000);else if(arg==L"--hevc")exportHevc=true;else if(arg==L"--smoke-rollback-flow"){smokeRollback=true;smokeRollbackFlow=true;}else if(arg==L"--smoke-rollback")smokeRollback=true;else if(arg==L"--smoke-ui")smokeUi=true;else if(arg==L"--no-fg")initialOptions.fg=false;else if(arg==L"--smoke-settings")smokeSettings=true;else if(arg==L"--smoke-screenshot")smokeScreenshot=true;else if(arg==L"--smoke-controls")smokeControls=true;else if(arg==L"--smoke-save"&&i+1<argc)smokeSave=argv[++i];else if(arg==L"--native")initialOptions.realtime=false;else if(arg==L"--realtime")initialOptions.realtime=true;else if(arg==L"--fg")initialOptions.fg=true;else if(arg==L"--fg-multiplier"&&i+1<argc){initialOptions.fgMultiplier=std::clamp(_wtoi(argv[++i]),2,4);initialOptions.fg=true;}else if(arg==L"--video-sr"&&i+1<argc){initialOptions.settings.videoSrQuality=std::clamp(_wtoi(argv[++i]),1,4);initialOptions.sr=true;}else if(arg==L"--nr-ampere")initialOptions.settings.nrRuntime=veyra::engine::NrRuntime::Ampere;else if(arg==L"--nr-community")initialOptions.settings.nrRuntime=veyra::engine::NrRuntime::Community;else if(arg==L"--nr-original")initialOptions.settings.nrRuntime=veyra::engine::NrRuntime::Original;else if(arg==L"--sr")initialOptions.sr=true;else if(arg==L"--no-nr")initialOptions.nr=false;else if(arg==L"--nr")initialOptions.nr=true;else if(arg==L"--no-sr")initialOptions.sr=false;else autoInput=arg;}LocalFree(argv);
 if(workerMapping){const int code=veyra::engine::runExportWorker(workerMapping);CoUninitialize();return code;}
 if(smokeSeconds<=0&&exportOutput.empty()){uiPreferences=preferences.load();initialOptions=veyra::engine::PlayerOptions::from(preferences.startup(initialOptions.snapshot()));engine.setVolume(uiPreferences.volume,uiPreferences.muted);uiState.subtitles=uiPreferences.subtitles;subtitlePixels=uiPreferences.subtitleSize;}
-engine.requestSettings(initialOptions.snapshot());
+engine.cacheRenderedImages(uiPreferences.cacheRenderedImages);engine.keepImageDevice(uiPreferences.keepImageDevice);engine.requestSettings(initialOptions.snapshot());
 if(!exportOutput.empty()){std::atomic<bool> cancel{false},finished{false};std::thread cancelTimer;if(cancelAfterMs)cancelTimer=std::thread([&]{const auto start=GetTickCount64();while(!finished&&GetTickCount64()-start<cancelAfterMs)std::this_thread::sleep_for(std::chrono::milliseconds(5));if(!finished)cancel=true;});bool ok=veyra::engine::exportVideo(autoInput,exportOutput,initialOptions,exportHevc,cancel,[](double,const std::wstring& s){OutputDebugStringW(s.c_str());},exportFrames);finished=true;if(cancelTimer.joinable())cancelTimer.join();veyra::log::info("app",std::format("export result={}",ok));CoUninitialize();return ok?0:cancel?3:1;}
 WNDCLASSEXW wc{sizeof(wc)};wc.hInstance=instance;wc.lpfnWndProc=proc;wc.lpszClassName=L"VeyraApp";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=veyra::ui::bgBrush();
 wc.hIcon=static_cast<HICON>(LoadImageW(instance,MAKEINTRESOURCEW(IDI_VEYRA),IMAGE_ICON,GetSystemMetrics(SM_CXICON),GetSystemMetrics(SM_CYICON),LR_SHARED));
@@ -640,9 +670,10 @@ wchar_t focusedClass[32]{};GetClassNameW(GetFocus(),focusedClass,32);const bool 
 if(!editing&&msg.message==WM_KEYDOWN&&(GetKeyState(VK_CONTROL)&0x8000)&&(msg.wParam=='L'||msg.wParam==VK_PRIOR||msg.wParam==VK_NEXT)){SendMessageW(hwnd,WM_COMMAND,msg.wParam=='L'?PlaylistButton:msg.wParam==VK_PRIOR?PlaylistPrevious:PlaylistNext,0);continue;}
 if(!editing&&msg.message==WM_KEYDOWN&&(GetKeyState(VK_CONTROL)&0x8000)&&msg.wParam=='O'){SendMessageW(hwnd,WM_COMMAND,(GetKeyState(VK_SHIFT)&0x8000)?ImageFolderOpen:Open,0);continue;}
 if(!editing&&msg.message==WM_KEYDOWN&&(GetKeyState(VK_CONTROL)&0x8000)&&msg.wParam=='E'){if(uiState.mode!=veyra::ui::Mode::Professional)switchMode();selectInspector(3);continue;}
-const bool seekKey=(msg.wParam==VK_LEFT||msg.wParam==VK_RIGHT)&&_wcsicmp(focusedClass,TRACKBAR_CLASSW)!=0&&_wcsicmp(focusedClass,L"ListBox")!=0&&!(GetKeyState(VK_CONTROL)&0x8000)&&!(GetKeyState(VK_MENU)&0x8000)&&!(GetKeyState(VK_SHIFT)&0x8000);
+const bool seekKey=msg.hwnd!=imageBrowser&&(msg.wParam==VK_LEFT||msg.wParam==VK_RIGHT)&&_wcsicmp(focusedClass,TRACKBAR_CLASSW)!=0&&_wcsicmp(focusedClass,L"ListBox")!=0&&!(GetKeyState(VK_CONTROL)&0x8000)&&!(GetKeyState(VK_MENU)&0x8000)&&!(GetKeyState(VK_SHIFT)&0x8000);
 const bool key=(!editing)&&(seekKey||msg.wParam==VK_F11||msg.wParam==VK_ESCAPE||(msg.wParam==VK_SPACE&&(GetFocus()==hwnd||GetFocus()==video))||msg.wParam=='V'||(msg.wParam==VK_RETURN&&msg.message==WM_SYSKEYDOWN));if(key){SendMessageW(hwnd,msg.message,msg.wParam,msg.lParam);continue;}}
 if(msg.message==WM_MOUSEWHEEL&&(uiState.mode==veyra::ui::Mode::Professional||imageFolder.active(currentFile))&&GetAncestor(msg.hwnd,GA_ROOT)==hwnd){POINT p{GET_X_LPARAM(msg.lParam),GET_Y_LPARAM(msg.lParam)};if(WindowFromPoint(p)==video){SendMessageW(video,msg.message,msg.wParam,msg.lParam);continue;}}
 if(veyra::ui::playlistWindowMessage(msg))continue;
+if(msg.hwnd==imageBrowser){TranslateMessage(&msg);DispatchMessageW(&msg);continue;}
 if(IsDialogMessageW(hwnd,&msg))continue;TranslateMessage(&msg);DispatchMessageW(&msg);}CoUninitialize();return int(msg.wParam);
 }

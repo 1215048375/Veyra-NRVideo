@@ -33,6 +33,10 @@ class PaintBuffer {
 public:
     RECT rect{};HDC dc;
     explicit PaintBuffer(HWND window,HDC supplied=nullptr):window_(window),external_(supplied!=nullptr){target_=supplied?supplied:BeginPaint(window_,&ps_);GetClientRect(window_,&rect);if(external_)ps_.rcPaint=rect;dc=raster_.create(target_,rect.right,rect.bottom)?raster_.dc:target_;}
+    // GDI fills/text/StretchDIBits may clear alpha. An opaque content surface
+    // on a DWM glass window must explicitly restore it after all GDI drawing.
+    // Keep RGB untouched; this is coverage, not exposure or color correction.
+    void makeOpaque(){if(dc==raster_.dc&&raster_.pixels){GdiFlush();for(size_t i=0;i<size_t(raster_.width)*raster_.height;++i)raster_.pixels[i]|=0xff000000u;}}
     ~PaintBuffer(){if(dc==raster_.dc){GdiFlush();const auto& r=ps_.rcPaint;BitBlt(target_,r.left,r.top,r.right-r.left,r.bottom-r.top,dc,r.left,r.top,SRCCOPY);}if(!external_)EndPaint(window_,&ps_);}
 };
 // Native controls can draw synchronously from state setters, bypassing
